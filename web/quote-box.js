@@ -15,6 +15,10 @@ export const QUOTE_STYLES = [
     ["separate", "Separate"],
 ];
 
+/** The look `prefs` choose for the quotes: one of `QUOTE_STYLES`, Fade for none or one this version does not know. */
+export const quoteStyleOf = (prefs) =>
+    QUOTE_STYLES.some(([value]) => value === prefs.quoteStyle) ? prefs.quoteStyle : "fade";
+
 /**
  * What the drawing copies from the box, so that each word lands under its own place: anything that changes how wide
  * a letter is or where a line wraps. A theme may set any of them on the box.
@@ -42,6 +46,9 @@ const COPIED = [
     "paddingBottom",
     "paddingLeft",
     "direction",
+    "whiteSpace",
+    "overflowWrap",
+    "wordBreak",
 ];
 
 /** One line of the box as the drawing shows it; an empty one still takes a line's height, as in the box. */
@@ -62,7 +69,9 @@ function Lines({ text, blocks, marked }) {
             }
         }
 
-        parts.push(html`<span class=${`quote-block ${block.start === marked ? "marked" : ""}`}
+        parts.push(html`<span
+            class=${`quote-block ${block.start === marked ? "marked" : ""}`}
+            data-part="quote-block"
             >${block.text.split("\n").map((line) => {
                 const space = line.startsWith("> ") ? " " : "";
 

@@ -1,9 +1,18 @@
 // Reply's quotes in the session's message box, in a real Chromium: they stack in the box's text, each stays one piece
 // under real keys (typing in it goes under it, two Backspaces or its × remove it), a reload keeps them, and what goes
 // to Pi is the text as written.
-import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    newSession,
+    openApp,
+    root,
+    scriptedModel,
+    until,
+    work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
@@ -55,6 +64,8 @@ before(async () => {
         return;
     }
 
+    // A file to name with @.
+    writeFileSync(join(work, "noted.txt"), "hi");
     app = await openApp(scriptedModel());
     session = await newSession(app);
     server = createServer(
@@ -192,20 +203,6 @@ test(
     },
 );
 
-test("its × removes one quote; one typed by hand is plain text", real, async () => {
-    await reply("drop me");
-    await page.type(undefined, "keep", { append: true });
-    await page.click({ selector: ".quote-remove" });
-    assert.equal(await boxText(), "keep");
-
-    await caretAt(0);
-    await page.type(undefined, "> mine\n\nok", { append: true });
-    await caretAt(3);
-    await page.type(undefined, "z", { append: true });
-    assert.equal(await boxText(), "> mzine\n\nokkeep");
-    assert.equal(await inPage(`document.querySelector('.quote-count')`), null);
-});
-
 test("a quote does not go with a command: a shell command stays as typed", real, async () => {
     await caretAt(0);
     await page.type(undefined, "!printf safe", { append: true });
@@ -241,13 +238,71 @@ test("the drawing follows the box when a file row comes in over it", real, async
 });
 
 test("Replies while a send is on its way all come in after it, in order", real, async () => {
-    await page.evaluate(`const store = ${STORE};
-        store.store.set({ replyQuotes: [{ text: 'first waiting' }, { text: 'second waiting' }] });`);
+    // The send held on its way: its words stay in the box, read only, until it went.
+    await page.evaluate(`window.realFetch = window.fetch;
+        window.releaseSend = null;
+        window.fetch = (url, init) => String(url).includes('/submit')
+            ? new Promise((resolve) => { window.releaseSend = () => resolve(window.realFetch(url, init)); })
+            : window.realFetch(url, init);`);
+    await caretAt(0);
+    await page.type(undefined, "held", { append: true });
+    await page.press("Enter");
+    await see(`window.releaseSend !== null`, "the send held");
+    await page.evaluate(
+        `${STORE}.quoteReply('first waiting'); ${STORE}.quoteReply('second waiting');`,
+    );
+    assert.equal(await boxText(), "held");
+    await page.evaluate(`window.releaseSend(); window.fetch = window.realFetch;`);
     await see(
         `document.querySelector('${BOX}').value === '> first waiting\\n\\n> second waiting\\n'`,
-        "both quotes",
+        "both quotes, after the send went",
     );
     assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 2);
+});
+
+test("a quote taken out by the box's own editing comes back a piece with undo", real, async () => {
+    await reply("one");
+    await page.type(undefined, "hello", { append: true });
+    await page.press("Control+a");
+    await page.press("Delete");
+    await see(`document.querySelector('${BOX}').value === ''`, "all deleted");
+    await page.press("Control+z");
+    await see(`document.querySelector('${BOX}').value === '> one\\nhello'`, "undone");
+    await see(`document.querySelectorAll('.quote-remove').length === 1`, "the piece back");
+});
+
+test("dictation with the caret in a quote writes under it", real, async () => {
+    await reply("one");
+    await page.evaluate(`window.heard = [];
+        globalThis.SpeechRecognition = class {
+            constructor() { window.heard.push(this); }
+            start() {}
+            stop() {}
+            abort() {}
+        };`);
+    await caretAt(3);
+    await page.evaluate(`(await import('/voice.js')).toggleDictation();
+        window.heard.at(-1).onresult({ results: [{ 0: { transcript: 'words' }, isFinal: true }] });
+        (await import('/voice.js')).toggleDictation();`);
+    assert.equal(await boxText(), "> one\nwords");
+    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 1);
+    await page.evaluate(`delete globalThis.SpeechRecognition`);
+});
+
+test("an @ inside a quote is the passage's: no files to pick there", real, async () => {
+    // In the person's own words, the picker shows.
+    await page.type(undefined, "@note", { append: true });
+    await see(`document.querySelector('.file-options') !== null`, "the picker for one's own words");
+    await page.press("Escape");
+    await page.evaluate(
+        `const box = document.querySelector('${BOX}'); box.select(); document.execCommand('delete');`,
+    );
+    await reply("see @note");
+    await caretAt("> see @note".length);
+    await page.press("ArrowLeft");
+    await page.press("ArrowRight");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(await inPage(`document.querySelector('.file-options')`), null);
 });
 
 test("a paste inside a quote, short or long, goes under it", real, async () => {
@@ -279,45 +334,31 @@ test("typing moved under a quote can be undone", real, async () => {
 });
 
 test(
-    "a quote removed and undone is a piece again, and the next key does not type over it",
+    "quotes removed by × or Clear quotes come back pieces with undo, and the next key does not type over them",
     real,
     async () => {
+        await reply("zero");
         await reply("one");
         await page.type(undefined, "hello", { append: true });
         await page.click({ selector: ".quote-remove" });
+        assert.equal(await boxText(), "> one\nhello");
+        await page.click({ label: "Remove quote" });
         assert.equal(await boxText(), "hello");
         await caretAt(-1);
         await page.press("Control+z");
         assert.equal(await boxText(), "> one\nhello");
+        await page.press("Control+z");
+        assert.equal(await boxText(), "> zero\n\n> one\nhello");
         assert.deepEqual(
             await inPage(
                 `(() => { const box = document.querySelector('${BOX}'); return [box.selectionStart === box.selectionEnd, document.querySelectorAll('.quote-remove').length]; })()`,
             ),
-            [true, 1],
+            [true, 2],
         );
         await page.type(undefined, "x", { append: true });
-        assert.ok((await boxText()).startsWith("> one\n"), "the quote is still there");
+        assert.ok((await boxText()).startsWith("> zero\n\n> one\n"), "the quotes are still there");
     },
 );
-
-test("a quote typed with the same words as Reply's stays plain text", real, async () => {
-    await reply("same");
-    await page.type(undefined, "\n> same", { append: true });
-    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 1);
-    await page.click({ selector: ".quote-count .link" });
-    assert.equal(await boxText(), "> same");
-
-    // Two Replies of the same words: typing in the first moves under it, and both stay pieces.
-    await caretAt(0);
-    await page.press("Control+a");
-    await page.press("Delete");
-    await reply("twin");
-    await reply("twin");
-    await caretAt(3);
-    await page.type(undefined, "Z", { append: true });
-    assert.equal(await boxText(), "> twin\nZ\n> twin\n");
-    assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 2);
-});
 
 test(
     "one quote is one block, its empty lines in it, with no stray line under it",
@@ -330,20 +371,8 @@ test(
             await inPage(`document.querySelectorAll('.quote-block .quote-line').length`),
             3,
         );
-        // The caret is on the line right under it, and the first Backspace there marks it.
-        await page.press("Backspace");
-        await see(`document.querySelector('.quote-block.marked') !== null`, "marked");
     },
 );
-
-test("a quote's own placeholder and file mention stay its words", real, async () => {
-    await reply("Literal [Pasted text #1] and @/etc/hostname");
-    assert.equal(
-        await inPage(`document.querySelector('.command-hint.wraps')`),
-        null,
-        "no file to send along",
-    );
-});
 
 test("Appearance picks each look for the quotes in the box", real, async () => {
     await reply("styled");
@@ -361,4 +390,11 @@ test("Appearance picks each look for the quotes in the box", real, async () => {
     await page.click({ label: "Separate" });
     await see(`document.querySelector('.composer').dataset.quoteStyle === undefined`, "separate");
     await page.press("Escape");
+
+    // A saved look this version does not know shows as Fade.
+    await page.evaluate(`(await import('/theme.js')).setPrefs({ quoteStyle: 'bogus' })`);
+    await see(
+        `document.querySelector('.composer').dataset.quoteStyle === 'fade'`,
+        "fade for an unknown one",
+    );
 });

@@ -11,14 +11,14 @@ import {
     planAvailable,
     suggestCommands,
 } from "./commands.js";
-import { QuoteLayer } from "./quote-box.js";
+import { QuoteLayer, quoteStyleOf } from "./quote-box.js";
 import {
     changedRange,
     insertQuote,
     isPiece,
     lineUnder,
     messageText,
-    movePieces,
+    movedPieces,
     outsideQuotes,
     piecesIn,
     quoteStep,
@@ -688,10 +688,14 @@ export function Composer() {
         };
     });
     // Dictation writes into the box as typing does, so the draft keeps what was heard.
-    const dictation = useDictation(box, (value, at) => {
-        setBrowsing(null);
-        edit(value, at);
-    });
+    const dictation = useDictation(
+        box,
+        (value, at) => {
+            setBrowsing(null);
+            edit(value, at);
+        },
+        { place: (value, start, end) => writeAt(value, start, end, " ") },
+    );
     // What is above the message box, and how it shares the room with the conversation (`dock.js`).
     const dock = useRef(null);
     const picker = useRef(null);
@@ -702,7 +706,7 @@ export function Composer() {
     const going = onTheWay.get(conversationId);
     const sending = going !== undefined;
     // How Reply's quotes show (Appearance): in the box's text, drawn as Fade, Tint, or Ghost; or in strips over it.
-    const quoteStyle = prefs().quoteStyle ?? "fade";
+    const quoteStyle = quoteStyleOf(prefs());
 
     // An Interrupt is for the run it was chosen in: when Pi stops working, an unused one goes back to Steer, so it does
     // not stop the next run. Steer and Queue stay as the person chose.
@@ -928,9 +932,13 @@ export function Composer() {
     const update = (value, at = value.length) => {
         const before = drafts.get(conversationId);
 
-        // Each piece moves with the edit, by where it was; one the edit changed is plain text from now on.
+        // Each piece moves with the edit, by where it was; one the edit changed is plain text from now on, and kept as it
+        // was (`removed`), so that undo, which puts its words back there, makes it a piece again.
         if (piecesNow.current.length > 0) {
-            keepPieces(movePieces(before, value, at, piecesNow.current), conversationId, value);
+            const { kept, lost } = movedPieces(before, value, at, piecesNow.current);
+
+            removed.current = [...removed.current, ...lost].slice(-20);
+            keepPieces(kept, conversationId, value);
         }
 
         setText(value);
@@ -987,7 +995,13 @@ export function Composer() {
 
     PASTED.lastIndex = 0;
     // The @path being typed at the caret, and the files that match it. Slash command names come first.
-    const typed = suggestions.length === 0 && !searching && !shell ? mentionAt(text, caret) : null;
+    // The quotes of the box that are pieces: drawn under its text, and each kept whole. An @ in one is the passage's.
+    const quoted = piecesIn(text, pieces);
+    const inQuote = quoted.some((block) => caret > block.start && caret <= block.end);
+    const typed =
+        suggestions.length === 0 && !searching && !shell && !inQuote
+            ? mentionAt(text, caret)
+            : null;
     const mention = typed && typed.start !== hiddenMention ? typed : null;
     const found = mention ? suggestFiles(mention.query) : null;
     const matches = found?.items ?? [];
@@ -1532,9 +1546,6 @@ export function Composer() {
         );
     };
 
-    // The quotes of the box that are pieces: drawn under its text, and each kept whole.
-    const quoted = piecesIn(text, pieces);
-
     /**
      * Change the box's text to `value`, the caret at `at`, as an edit of its own: through the browser's editing while the
      * box has the focus, so that undo takes it back like typing; set directly otherwise. Our own edit skips `quoteStep`.
@@ -1570,12 +1581,21 @@ export function Composer() {
         recall(value, at);
     };
 
-    /** Take quote `block` out of the box, with its line; undo puts it back, a piece again. */
-    const removeQuote = (block) => {
-        const without = withoutQuote(text, block);
+    /** Take quotes `blocks` out of the box, each with its line; undo puts them back, pieces again (`update`). */
+    const removeQuotes = (blocks) => {
+        let words = text;
+        let at = text.length;
 
-        removed.current = [...removed.current.slice(-19), block];
-        rewrite(without.text, without.at);
+        for (const block of [...blocks].sort((a, b) => b.start - a.start)) {
+            ({ text: words, at } = withoutQuote(words, block));
+        }
+
+        // Through the box's own editing, so that undo has it: with the focus, unless that brings up a phone's keyboard.
+        if (!coarse) {
+            box.current?.focus();
+        }
+
+        rewrite(words, blocks.length === 1 ? at : words.length);
     };
 
     /**
@@ -1583,11 +1603,16 @@ export function Composer() {
      * again, and the caret goes to the end of what came back rather than selecting it (a key would type over it).
      */
     const afterHistory = (element) => {
-        const back = removed.current.filter(
-            (piece) =>
+        const back = [];
+
+        for (const piece of removed.current) {
+            if (
                 isPiece(element.value, piece) &&
-                !piecesNow.current.some((each) => each.start === piece.start),
-        );
+                ![...piecesNow.current, ...back].some((each) => each.start === piece.start)
+            ) {
+                back.push(piece);
+            }
+        }
 
         if (back.length > 0) {
             keepPieces([...piecesNow.current, ...back], conversationId, element.value);
@@ -1653,7 +1678,7 @@ export function Composer() {
         if (step.mark !== undefined) {
             setMarked(step.mark);
         } else if (step.remove) {
-            removeQuote(step.remove);
+            removeQuotes([step.remove]);
         } else if (step.open !== undefined) {
             rewrite(`${value.slice(0, step.open)}\n${value.slice(step.open)}`, step.open);
         } else if (step.under) {
@@ -2103,16 +2128,8 @@ export function Composer() {
                                 type="button"
                                 class="link"
                                 disabled=${sending}
-                                onClick=${() => {
-                                    let words = text;
-
-                                    for (const block of [...quoted].reverse()) {
-                                        words = withoutQuote(words, block).text;
-                                    }
-
-                                    recall(words, words.length);
-                                    keepPieces([], conversationId, words);
-                                }}
+                                onPointerDown=${(event) => event.preventDefault()}
+                                onClick=${() => removeQuotes(quoted)}
                             >
                                 ${quoted.length === 1 ? "Remove quote" : "Clear quotes"}
                             </button>
@@ -2126,13 +2143,7 @@ export function Composer() {
                             blocks=${quoted}
                             marked=${marked}
                             locked=${sending}
-                            onRemove=${(block) => {
-                                removeQuote(block);
-
-                                if (!coarse) {
-                                    box.current?.focus();
-                                }
-                            }}
+                            onRemove=${(block) => removeQuotes([block])}
                         />`
                     }
                     <textarea

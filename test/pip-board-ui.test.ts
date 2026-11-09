@@ -304,10 +304,7 @@ test("Board: the session under it stays marked open, and is where it closes to",
     await see(`document.querySelector('${BOX}') !== null`, "its box");
     await type(BOX, "");
     await page.evaluate(`${STORE}.quoteReply('under the board')`);
-    await see(
-        `document.querySelector('${BOX}')?.value === '> under the board\\n'`,
-        "in its box",
-    );
+    await see(`document.querySelector('${BOX}')?.value === '> under the board\\n'`, "in its box");
     await page.evaluate(`${PIP}.openPip()`);
     await boarded("PiP over a Reply quote");
     assert.equal(

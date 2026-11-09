@@ -353,23 +353,36 @@ export function quoteStep(text, blocks, start, end, type, data, marked) {
  * if it still stands on lines of its own there (`isPiece`). One the edit changed is a piece no longer: plain text.
  */
 export function movePieces(before, after, caret, pieces) {
+    return movedPieces(before, after, caret, pieces).kept;
+}
+
+/** `movePieces`, and the pieces the edit ended (`lost`), as they were in `before`. */
+export function movedPieces(before, after, caret, pieces) {
     if (pieces.length === 0 || before === after) {
-        return piecesIn(after, pieces);
+        return { kept: piecesIn(after, pieces), lost: [] };
     }
 
     const change = changedRange(before, after, caret);
     const delta = after.length - before.length;
+    const kept = [];
+    const lost = [];
 
-    return piecesIn(
-        after,
-        pieces.flatMap((piece) =>
+    for (const piece of pieces) {
+        const moved =
             piece.end <= change.from
-                ? [piece]
+                ? piece
                 : piece.start >= change.to
-                  ? [shift(piece, delta)]
-                  : [],
-        ),
-    );
+                  ? shift(piece, delta)
+                  : null;
+
+        if (moved && isPiece(after, moved)) {
+            kept.push(moved);
+        } else if (isPiece(before, piece)) {
+            lost.push(piece);
+        }
+    }
+
+    return { kept: kept.sort((a, b) => a.start - b.start), lost };
 }
 
 /**

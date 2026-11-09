@@ -151,7 +151,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `presented-more`                                | The button beside that line that opens its message sheet (since 0.28.0)                                       |
 | `presented-choice`                              | In its message sheet: Show, Fold, and Hide for every input of its kind (since 0.28.0)                         |
 | `reply`                                         | Pi's answer                                                                                                   |
-| `reply-quote`                                   | The passage a reply quotes, at the top of a message (since 0.27.0)                                            |
+| `reply-quote`                                   | A passage a message quotes, where it was written in it (since 0.27.0)                                         |
 | `reply-actions`                                 | The row under an answer: react, discuss, pin, copy                                                            |
 | `activity`, `activity-head`, `activity-chevron` | A group of what Pi did, its head (what it did, how long), and the chevron that opens it                       |
 | `timeline`                                      | The open group's steps, on a rule                                                                             |
@@ -175,6 +175,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `message-box`                             | The box you type in, with its buttons                                                                                   |
 | `quote-strip`                             | Above a box: a passage quoted (Ask PiP's, or Reply's in Separate), with a button to remove it (since 0.27.0)            |
 | `quote-count`                             | Above the session's box: how many quotes Reply put in it, with Clear quotes (since 0.29.0)                              |
+| `quote-block`                             | In the session's box: one quote Reply put in it, as drawn under the text. Colours and fills only (since 0.29.0)         |
 | `composer-tools`                          | The row of buttons in it                                                                                                |
 | `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop, and an extension's button (since 0.19.0) |
 | `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                                                          |
