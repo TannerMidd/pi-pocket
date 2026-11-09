@@ -39,8 +39,25 @@ import {
     repoArgs,
     requirePush,
     sameRepo,
+    type RepoInfo,
 } from "./github.ts";
+import {
+    gitlabName,
+    gitlabReady,
+    type GlIssue,
+    type GlMerge,
+    type GlNote,
+    type GlPipeline,
+    type GlRelease,
+    type GlTarget,
+    memberMayPush,
+    parsePages,
+    projectApi,
+    projectInfo,
+    projectOf,
+} from "./gitlab.ts";
 import { snippet } from "./projection.ts";
+import { providerOfRepo } from "./remote.ts";
 import { clientKey, requestFor } from "./requests.ts";
 import { TRIGGERS_EXTENSION } from "./watches.ts";
 
@@ -324,7 +341,13 @@ export class RepoWatches {
         }
 
         // Only where gh's account can push: someone else's repository could hand Pi work as if it were this person's.
-        const info = await requirePush(this.#gh, named);
+        // Only where the account can push: someone else's repository could hand Pi work as if it were this person's.
+        // Which service holds it comes from the name: a GitLab host needs a checkout here, because glab resolves the
+        // project from the remote of its working directory.
+        const info =
+            providerOfRepo(named) === "gitlab"
+                ? await this.#gitlabPush(named)
+                : await requirePush(this.#gh, named);
         const now = app.now();
 
         const watch = await app.harness.commit(async (tx) => {
@@ -394,6 +417,46 @@ export class RepoWatches {
         return this.view(watch);
     }
 
+    /**
+     * A GitLab project this environment may act on: one its token can push to, with a checkout here for `glab` to
+     * resolve. Throws an HttpError a person can act on for any other.
+     */
+    async #gitlabPush(repo: string): Promise<RepoInfo> {
+        const ready = gitlabReady();
+
+        if (!ready.ready) {
+            throw new HttpError(403, ready.why ?? "GitLab is not configured here.");
+        }
+
+        const cwd = await this.#app.watches.folderOf(repo);
+
+        if (cwd === undefined) {
+            throw new HttpError(
+                404,
+                `${repo} has no checkout on this machine: start a session in it first, or ask for it with session_start repo ${repo}, then watch it.`,
+            );
+        }
+
+        const project = await projectInfo(this.#app.watches.glab, {
+            project: projectOf(repo),
+            cwd,
+        });
+
+        if (!project.push) {
+            throw new HttpError(
+                403,
+                `This environment's GITLAB_TOKEN cannot push to ${repo}: Pi and PiP work only in projects it can push to.`,
+            );
+        }
+
+        return {
+            repo,
+            defaultBranch: project.defaultBranch,
+            push: true,
+            private: false,
+        };
+    }
+
     /** Remove a watch: it looks no more. Its person or the owner may. Returns it. */
     async remove(user: User, id: string): Promise<RepoWatchView> {
         const watch = (await this.#all()).find((each) => each.id === id.trim());
@@ -461,8 +524,32 @@ export class RepoWatches {
         ) as T;
     }
 
+    /** Who the GitLab token belongs to, asked at most hourly: what `assigned` compares against. */
+    async #whoIsGlab(cwd: string): Promise<string> {
+        const now = this.#app.now();
+        const key = `gitlab ${gitlabName()}`;
+        let viewer = this.#viewers.get(key);
+
+        if (viewer === undefined || now - viewer.at > 3_600_000) {
+            viewer = {
+                login: (await this.#app.watches.glab(["api", "user"], cwd)).trim(),
+                at: now,
+            };
+            this.#viewers.set(key, viewer);
+        }
+
+        return viewer.login;
+    }
+
     /** What is new on the repository since the watch began and not told yet, oldest first. */
     async #fetch(watch: RepoWatch): Promise<Item[]> {
+        return providerOfRepo(watch.repo) === "gitlab"
+            ? this.#fetchGitlab(watch)
+            : this.#fetchGithub(watch);
+    }
+
+    /** What is new on a GitHub repository, as the watch set it up. Unchanged since before GitLab. */
+    async #fetchGithub(watch: RepoWatch): Promise<Item[]> {
         const since = time(watch.since);
         const told = new Set(watch.seen);
         const wants = new Set(watch.events);
@@ -628,6 +715,188 @@ export class RepoWatches {
                         body,
                     });
                 }
+            }
+        }
+
+        return items.sort((a, b) => a.at - b.at);
+    }
+
+    /**
+     * What is new on a GitLab project. Every call runs in the project's folder and names
+     * `projects/:fullpath`, so `glab` resolves the host and the project from the remote there.
+     */
+    async #fetchGitlab(watch: RepoWatch): Promise<Item[]> {
+        const glab = this.#app.watches.glab;
+        const cwd = await this.#app.watches.folderOf(watch.repo);
+
+        if (cwd === undefined) {
+            throw new Error(
+                `${watch.repo} has no checkout here, so glab has no project to ask: start a session in it first.`,
+            );
+        }
+
+        const target: GlTarget = { project: projectOf(watch.repo), cwd };
+        const since = time(watch.since);
+        const told = new Set(watch.seen);
+        const wants = new Set(watch.events);
+        const items: Item[] = [];
+        // Asked only when a filter needs it: the token's own account.
+        const viewer = watch.assigned === true ? await this.#whoIsGlab(cwd) : undefined;
+
+        const add = (item: Item) => {
+            if (
+                !told.has(item.id) &&
+                item.at >= since &&
+                !items.some((each) => each.id === item.id)
+            ) {
+                items.push(item);
+            }
+        };
+
+        const fresh = (id: string, at: string | undefined) => !told.has(id) && time(at) >= since;
+        const who = (user: { username?: string } | null | undefined) =>
+            `@${loginOf(user?.username)}`;
+        const labels = (labels: string[] | undefined) =>
+            labels !== undefined && labels.length > 0
+                ? ` · labels: ${snippet(labels.join(", "), 200)}`
+                : "";
+
+        // Issues and merge requests a watch's filters let through: its label, assigned to the
+        // token's own account, from someone who may push to the project.
+        const passes = async (it: {
+            labels?: string[];
+            assignees?: ({ username?: string } | null)[] | null;
+            author?: { username?: string } | null;
+        }) =>
+            (watch.label === undefined ||
+                (it.labels ?? []).some(
+                    (name) => name.toLowerCase() === watch.label!.toLowerCase(),
+                )) &&
+            (watch.assigned !== true ||
+                (it.assignees ?? []).some((user) => user?.username === viewer)) &&
+            (watch.anyone === true ||
+                (await memberMayPush(glab, target, it.author?.username ?? "")) === true);
+
+        if (wants.has("pulls")) {
+            const merges = parsePages<GlMerge>(
+                await glab(
+                    projectApi(
+                        "merge_requests?state=opened&order_by=created_at&sort=desc&per_page=30",
+                    ),
+                    cwd,
+                ),
+            );
+
+            for (const merge of merges) {
+                if (!fresh(`p${merge.iid}`, merge.created_at) || !(await passes(merge))) {
+                    continue;
+                }
+
+                add({
+                    id: `p${merge.iid}`,
+                    at: time(merge.created_at),
+                    line: `New merge request !${merge.iid} ${quoted(merge.title ?? "")} by ${who(merge.author)}${merge.draft === true ? " (draft)" : ""} · ${snippet(merge.source_branch ?? "?", 200)} → ${snippet(merge.target_branch ?? "?", 200)}${labels(merge.labels)} · ${merge.web_url ?? ""}`,
+                    ...(merge.description ? { body: merge.description } : {}),
+                });
+            }
+        }
+
+        if (wants.has("issues")) {
+            const issues = parsePages<GlIssue>(
+                await glab(
+                    projectApi("issues?state=opened&order_by=created_at&sort=desc&per_page=50"),
+                    cwd,
+                ),
+            );
+
+            for (const issue of issues) {
+                if (!fresh(`i${issue.iid}`, issue.created_at) || !(await passes(issue))) {
+                    continue;
+                }
+
+                add({
+                    id: `i${issue.iid}`,
+                    at: time(issue.created_at),
+                    line: `New issue #${issue.iid} ${quoted(issue.title ?? "")} by ${who(issue.author)}${labels(issue.labels)} · ${issue.web_url ?? ""}`,
+                    ...(issue.description ? { body: issue.description } : {}),
+                });
+            }
+        }
+
+        if (wants.has("ci")) {
+            // Only the branch's own pipelines: a merge request's runs on a fork are someone else's.
+            const pipelines = parsePages<GlPipeline>(
+                await glab(
+                    projectApi(`pipelines?ref=${encodeURIComponent(watch.branch)}&per_page=20`),
+                    cwd,
+                ),
+            );
+
+            for (const pipeline of pipelines) {
+                if (pipeline.status === "failed") {
+                    add({
+                        id: `r${pipeline.id}`,
+                        at: time(pipeline.updated_at ?? pipeline.created_at),
+                        line: `CI failed on ${watch.branch}: pipeline ${pipeline.id}${pipeline.source === undefined ? "" : ` (${pipeline.source})`} at ${(pipeline.sha ?? "").slice(0, 7)} (its log: glab ci trace ${pipeline.id}) · ${pipeline.web_url ?? ""}`,
+                    });
+                }
+            }
+        }
+
+        if (wants.has("releases")) {
+            const releases = parsePages<GlRelease>(
+                await glab(projectApi("releases?per_page=10"), cwd),
+            );
+
+            for (const release of releases) {
+                if (release.upcoming_release === true) {
+                    continue;
+                }
+
+                add({
+                    id: `v${snippet(release.tag_name ?? "", 100)}`,
+                    at: time(release.released_at ?? release.created_at),
+                    line: `New release ${snippet(release.tag_name ?? "", 100)}${release.name ? ` ${quoted(release.name, 80)}` : ""} · ${release._links?.self ?? ""}`,
+                    ...(release.description ? { body: release.description } : {}),
+                });
+            }
+        }
+
+        if (wants.has("mentions")) {
+            // GitLab has no project-wide notes endpoint: notes belong to one issue or merge request, so
+            // `search` is the way to find @pi across the project, and it returns each note with the
+            // issue or merge request it is on.
+            const notes = parsePages<GlNote>(
+                await glab(
+                    projectApi(
+                        `search?scope=notes&search=${encodeURIComponent("@pi")}&per_page=100`,
+                    ),
+                    cwd,
+                ),
+            );
+
+            for (const note of notes) {
+                const body = (note.body ?? "").trim();
+                const merge = note.noteable_type === "MergeRequest";
+                const id = `${merge ? "l" : "c"}${note.id}`;
+
+                if (
+                    note.system === true ||
+                    !fresh(id, note.created_at) ||
+                    !mentionsPi(body) ||
+                    !(await memberMayPush(glab, target, note.author?.username ?? ""))
+                ) {
+                    continue;
+                }
+
+                const iid = note.noteable_iid ?? "?";
+
+                add({
+                    id,
+                    at: time(note.created_at),
+                    line: `${who(note.author)} mentioned @pi on ${merge ? `merge request !${iid}` : `#${iid}`} · ${watch.repo}/${merge ? "-/merge_requests" : "-/issues"}/${iid}`,
+                    body,
+                });
             }
         }
 

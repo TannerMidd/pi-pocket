@@ -50,7 +50,7 @@ function lanAddresses(): string[] {
 
 /** The `/api` routes. Each HTTP handler makes its own, and its event streams live as long as it does. */
 export function createApi(options: HttpOptions, auth: Auth) {
-    const { app } = options;
+    const { app, inviteBase } = options;
     const { events, poll } = createEventStreams(app);
 
     const requireUser = (request: IncomingMessage): User => {
@@ -961,7 +961,9 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     : [];
             // A tunnel the launcher started is the way in for other devices.
             const tunnel = loopback ? app.access?.url : undefined;
-            const base = tunnel ?? lan[0] ?? here;
+            // The invite link's base: the tunnel, then the address asked for, then the first LAN address, then the
+            // request's own host.
+            const base = tunnel ?? (inviteBase || lan[0] || here);
             const link = `${base}/join/${invite.code}`;
             // An invite whose QR code could not be made is never shown: it ends rather than stay live, unseen.
             const svg = await QRCode.toString(link, {
@@ -979,9 +981,10 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 grant,
                 url: link,
                 svg,
-                alternatives: (tunnel === undefined ? lan.slice(1) : lan).map(
-                    (address) => `${address}/join/${invite.code}`,
-                ),
+                alternatives:
+                    (tunnel === undefined && !inviteBase)
+                        ? lan.slice(1).map((address) => `${address}/join/${invite.code}`)
+                        : [],
                 // Only this device can open a loopback link.
                 local: loopback && lan.length === 0 && tunnel === undefined,
                 ...(app.access === undefined ? {} : { access: app.access }),

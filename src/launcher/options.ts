@@ -25,13 +25,14 @@ Usage: pi-pocket [options]
       --rotate-token  Replace the owner sign-in link, signing out the devices that used it
   -h, --help          Show this help
 
-Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_DIR, PI_POCKET_HOST, PI_POCKET_GUARD=off`;
+Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_DIR, PI_POCKET_HOST, PI_POCKET_GUARD=off, PI_POCKET_INVITE_BASE=http://localhost:8787`;
 
 export interface Options {
     access: AccessMode | undefined;
     yes: boolean;
     host: string | undefined;
     port: number;
+    inviteBase?: string | undefined;
     cwd: string;
     data: string;
     rotateToken: boolean;
@@ -44,6 +45,7 @@ export function parseArgs(argv: string[]): Options {
         yes: false,
         host: process.env.PI_POCKET_HOST || undefined,
         port: Number(process.env.PI_POCKET_PORT ?? 8787),
+        inviteBase: process.env.PI_POCKET_INVITE_BASE ?? undefined,
         cwd: process.cwd(),
         data: resolve(process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket")),
         rotateToken: false,

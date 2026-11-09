@@ -1,8 +1,9 @@
 /**
- * PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and messages them, stops
- * and archives them, schedules messages, follows runs until they end, watches the owner's GitHub repositories and pull
- * requests and acts on what happens there, and can deny (never allow) calls waiting for approval. Only PiP's own
- * conversation selects this extension; while it is off, PiP is hidden and its follows wait.
+ * PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and
+ * messages them, stops and archives them, schedules messages, follows runs until they end, watches
+ * the owner's GitHub or GitLab repositories and pull requests and acts on what happens there, and
+ * can deny (never allow) calls waiting for approval. Only PiP's own conversation selects this
+ * extension; while it is off, PiP is hidden and its follows wait.
  */
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -572,11 +573,16 @@ export default function createPip(host: PocketHost) {
     const repoWatch = defineTool({
         name: "repo_watch",
         description:
-            "Watch one of your person's GitHub repositories (gh must be able to push to it) and get a message, with the instructions you give, when something happens there: new issues, new pull requests, CI failing on a branch, releases, or @pi in a comment. Looks every few minutes. Actions: add (repo, events, instructions; optional label, assigned, branch, to), list, remove (id).",
+            "Watch one of your person's repositories, on GitHub or GitLab, and get a message, with the instructions you give, when something happens there: new issues, new pull requests, CI failing on a branch, releases, or @pi in a comment. The account must be able to push to it: gh for GitHub, GITLAB_TOKEN for GitLab. A GitLab project needs a checkout on this machine, because glab reads the project from the folder's remote. Looks every few minutes. Actions: add (repo, events, instructions; optional label, assigned, branch, to), list, remove (id).",
         parameters: obj(
             {
                 action: union([literal("add"), literal("list"), literal("remove")]),
-                repo: opt(str({ description: "add: owner/name, or the repository's address" })),
+                repo: opt(
+                    str({
+                        description:
+                            "add: owner/name for github.com, host/owner/name for GitLab, or the repository's address",
+                    }),
+                ),
                 events: opt(
                     arr(union(EVENTS.map((event) => literal(event))), {
                         description:
@@ -598,7 +604,7 @@ export default function createPip(host: PocketHost) {
                 assigned: opt(
                     bool({
                         description:
-                            "add: only issues and pull requests assigned to your person's GitHub account (mentions of @pi still come from any of them)",
+                            "add: only issues and pull requests assigned to your person's account, on GitHub or GitLab (mentions of @pi still come from any of them)",
                     }),
                 ),
                 branch: opt(

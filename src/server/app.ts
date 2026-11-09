@@ -84,6 +84,7 @@ import { ExtensionWebs, mayUse } from "./extension-web.ts";
 import { defang, quoted } from "./fence.ts";
 import { FolderFavorites } from "./folder-favorites.ts";
 import { Gallery } from "./gallery.ts";
+import { setGlabConfigDir } from "./gitlab.ts";
 import { Goals } from "./goals.ts";
 import {
     type ApprovalRequest,
@@ -284,6 +285,8 @@ const BOARD_FINISHED = 24;
 
 /** How long a read of Pi's settings serves skills and trust before it is read again. */
 const SETTINGS_STALE_MS = 30_000;
+/** How long the start waits for the models of the providers that extensions registered, at most. */
+const EXTENSION_MODELS_MS = 20_000;
 
 /** A session's subagents as the board gets them: all but its oldest finished ones past `BOARD_FINISHED`. */
 function forBoard(entries: readonly SubagentEntry[]): SubagentEntry[] {
@@ -512,6 +515,8 @@ export class PocketApp {
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
+        // glab writes a config folder before it reads GITLAB_TOKEN: keep it where the server can write.
+        setGlabConfigDir(join(options.dataDir, "glab"));
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
         this.updates = new Updates({
@@ -722,6 +727,41 @@ export class PocketApp {
         }
 
         this.#modelProviderChanged(provider);
+    }
+
+    /**
+     * An extension registers its provider after Pi made its runtime, so a start restores only what Pi kept for it, and
+     * reads nothing from the provider itself. Read each provider that extensions registered once, in the background: its
+     * models work without the owner running "Refresh models" first, and Pi keeps them for the next start. A provider that
+     * cannot be reached keeps the models it had: Pi records the error, and it shows in the Providers sheet.
+     */
+    #readExtensionModels(): void {
+        const providers = [...this.#modelProviders.keys()];
+
+        if (providers.length === 0 || this.#closing !== undefined) {
+            return;
+        }
+
+        void this.models
+            .refresh({
+                providers,
+                allowNetwork: process.env.PI_OFFLINE === undefined,
+                force: true,
+                signal: AbortSignal.timeout(EXTENSION_MODELS_MS),
+            })
+            .then((result) => {
+                for (const [provider, error] of result.errors) {
+                    this.#log(`Model provider ${provider} was not read: ${describe(error)}`);
+                }
+            })
+            .catch((error: unknown) => {
+                this.#log(`The extensions' models were not read: ${describe(error)}`);
+            })
+            .finally(() => {
+                if (this.#closing === undefined) {
+                    this.providers.modelsChanged();
+                }
+            });
     }
 
     /** Pi refreshes a provider locally once it changes: tabs get the models it has then, and sessions their state. */
@@ -978,6 +1018,8 @@ export class PocketApp {
         });
         await this.#themeDefaultStillHere();
         await this.loader.loadAll();
+        // Their providers exist only now: read them once, without holding up the start.
+        this.#readExtensionModels();
 
         const storage = await openNodeSqliteStorage(join(this.dataDir, "pocket.sqlite"));
 

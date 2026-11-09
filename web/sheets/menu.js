@@ -561,7 +561,7 @@ export function MenuSheet({ places = true }) {
             ${item("Running now", openRunning, "everything Pi is doing")}
             ${view.conversation && item("Background", () => openSheet({ type: "background" }), "what commands print as they run")}
             ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
+            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub or GitLab, other services")}
             ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}
             ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}

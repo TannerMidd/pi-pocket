@@ -225,10 +225,11 @@ export async function repoInfo(gh: Gh, repo: string): Promise<RepoInfo> {
     } catch (error) {
         const said = describe(error);
 
+        // The host comes from the name, so the sentence says which service answered, not that GitHub did.
         throw new HttpError(
             /not found|404/i.test(said) ? 404 : 502,
             /not found|404/i.test(said)
-                ? `GitHub has no repository ${repo} that this machine's gh account can see.`
+                ? `${repo} is not tracked on ${host ?? "github.com"}, or this machine's gh account cannot see it.`
                 : `GitHub could not be asked about ${repo}: ${said}`,
         );
     }

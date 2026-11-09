@@ -1,0 +1,30 @@
+_commit: 0192510
+_src_path: https://gitlab.com/pony_m/opencode-templates
+agents: []
+commands:
+- skill-from-repo
+context_file: CONTEXT.md
+context_sources: []
+custom_default_model: ''
+docs_folder: docs-dev
+model_provider: Opencode
+oc_major_version: 2
+opencode_config: false
+parent_folder: .agents
+repo_profiles: []
+skill_bundles:
+- engineering-workflow
+skills:
+- skill-writer
+- bash
+- caveman
+- grill-me
+- feature-start
+- feature-plan
+- feature-implement
+- feature-close
+- session-handoff
+- domain-modeling
+- code-review
+- commit-how-to
+- unslop

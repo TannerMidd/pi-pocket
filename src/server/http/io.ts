@@ -16,6 +16,8 @@ export interface HttpOptions {
     app: PocketApp;
     /** Where the server listens, to offer reachable invite links when the browser uses a loopback address. */
     listen: { host: string; port: number };
+    /** The base URL used for invite links (overrides the LAN-derived host). */
+    inviteBase?: string | undefined;
     /** Restart the process (exit code 75 under the launcher). */
     restart(): void;
 }

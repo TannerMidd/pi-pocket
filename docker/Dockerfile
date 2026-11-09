@@ -7,6 +7,8 @@
 # Build from the repository root:
 #   podman build -f docker/Dockerfile -t pi-pocket .
 #   docker build -f docker/Dockerfile -t pi-pocket .
+#   docker build -f docker/tools.dockerfile -t pi-pocket:tools .
+# docker-compose.override.yml builds both of them.
 
 FROM node:24-bookworm-slim AS deps
 
@@ -16,7 +18,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts=false \
     && npm cache clean --force
 
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim AS app
 
 ARG CLOUDFLARED_VERSION=latest
 

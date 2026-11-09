@@ -1,0 +1,170 @@
+#!/bin/sh
+# Run Obsidian's CLI with the desktop app behind it, started without a screen.
+#
+# The CLI does not read vaults itself: it sends each command to a running Obsidian
+# over a Unix socket. So this wrapper starts what is missing: Xvfb for the display,
+# Obsidian for the app, and the CLI setting in the app's config. The vault is the
+# nearest parent folder with an .obsidian folder, or the folder named by
+# PI_POCKET_OBSIDIAN_VAULT. Another registered vault can be targeted with
+# `vault=<name>`. See docker/tools.dockerfile.
+set -eu
+
+app_dir="${OBSIDIAN_APP_DIR:-/opt/obsidian}"
+cli="$app_dir/obsidian-cli"
+
+if [ ! -x "$cli" ]; then
+    echo "obsidian: $cli is missing; build the tools image (docker/tools.dockerfile)." >&2
+    exit 1
+fi
+
+runtime_dir="${XDG_RUNTIME_DIR:-$HOME/.cache/obsidian-runtime}"
+export XDG_RUNTIME_DIR="$runtime_dir"
+mkdir -p "$runtime_dir"
+chmod 700 "$runtime_dir"
+
+socket="$runtime_dir/.obsidian-cli.sock"
+marker="$runtime_dir/vaults"
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/obsidian"
+config="$config_dir/obsidian.json"
+mkdir -p "$config_dir"
+
+vault="${PI_POCKET_OBSIDIAN_VAULT:-}"
+if [ -z "$vault" ]; then
+    dir=$PWD
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.obsidian" ]; then
+            vault=$dir
+            break
+        fi
+        dir=$(dirname "$dir")
+    done
+fi
+if [ -n "$vault" ]; then
+    vault=$(cd "$vault" && pwd)
+fi
+
+# One starter at a time: two sessions at once would fight over the socket.
+exec 9>"$runtime_dir/lock"
+flock 9
+
+# The app reads its settings once, at start. A vault registered while it runs is
+# unknown to it, so the marker tells the running instance's vaults from these.
+[ -f "$config" ] || echo '{}' > "$config"
+tmp="$config.tmp.$$"
+if [ -n "$vault" ]; then
+    id=$(printf '%s' "$vault" | md5sum | cut -c1-16)
+    jq --arg id "$id" --arg path "$vault" \
+        '.cli = true
+        | .vaults = ((.vaults // {})
+            | to_entries
+            | map(select(.key == $id or .value.path != $path))
+            | from_entries)
+        | .vaults[$id] = ((.vaults[$id] // {}) + {path: $path})' \
+        "$config" > "$tmp"
+else
+    jq '.cli = true | .vaults = (.vaults // {})' "$config" > "$tmp"
+fi
+if ! cmp -s "$tmp" "$config"; then
+    mv "$tmp" "$config"
+else
+    rm -f "$tmp"
+fi
+
+wanted=$(jq -r '.vaults // {} | keys | sort | join(",")' "$config")
+
+if [ -z "$vault" ] && [ -z "$wanted" ]; then
+    echo "obsidian: no vault in this folder or above it." >&2
+    echo "Run this inside a vault folder, or set PI_POCKET_OBSIDIAN_VAULT to one." >&2
+    exit 1
+fi
+
+if [ -S "$socket" ] && [ -f "$marker" ] && [ "$(cat "$marker")" = "$wanted" ] &&
+    pgrep -f "^${app_dir}/obsidian( |$)" > /dev/null 2>&1; then
+    flock -u 9
+    exec 9>&-
+    exec "$cli" "$@"
+fi
+
+# Kill the old instance before the config change can take effect. Its window
+# state lives in the vault, so nothing is lost by the restart.
+if pgrep -f "^${app_dir}/obsidian( |$)" > /dev/null 2>&1; then
+    pkill -f "^${app_dir}/obsidian( |$)" 2> /dev/null || true
+    i=0
+    while pgrep -f "^${app_dir}/obsidian( |$)" > /dev/null 2>&1 && [ "$i" -lt 40 ]; do
+        i=$((i + 1))
+        sleep 0.25
+    done
+fi
+rm -f "$socket" "$marker"
+
+if [ -z "${DISPLAY:-}" ]; then
+    export DISPLAY=:99
+    if [ ! -S /tmp/.X11-unix/X99 ]; then
+        setsid Xvfb "$DISPLAY" -screen 0 1600x1000x24 -nolisten tcp \
+            > "$runtime_dir/xvfb.log" 2>&1 < /dev/null &
+        i=0
+        while [ ! -S /tmp/.X11-unix/X99 ] && [ "$i" -lt 40 ]; do
+            i=$((i + 1))
+            sleep 0.25
+        done
+    fi
+    if [ ! -S /tmp/.X11-unix/X99 ]; then
+        echo "obsidian: Xvfb did not start; see $runtime_dir/xvfb.log" >&2
+        exit 1
+    fi
+fi
+
+echo "obsidian: starting the app (first run takes a few seconds)..." >&2
+if [ -n "$vault" ]; then
+    setsid "$app_dir/obsidian" --no-sandbox --disable-gpu "$vault" \
+        > "$runtime_dir/app.log" 2>&1 < /dev/null &
+else
+    setsid "$app_dir/obsidian" --no-sandbox --disable-gpu \
+        > "$runtime_dir/app.log" 2>&1 < /dev/null &
+fi
+
+i=0
+while [ ! -S "$socket" ] && [ "$i" -lt 240 ]; do
+    i=$((i + 1))
+    sleep 0.25
+done
+if [ ! -S "$socket" ]; then
+    echo "obsidian: the app did not open its CLI socket in time; see $runtime_dir/app.log" >&2
+    tail -n 20 "$runtime_dir/app.log" >&2 || true
+    exit 1
+fi
+
+# The socket opens before a vault window is ready, and a command sent too early
+# answers that it does not exist. `commands` is the cheapest proof that it is.
+warm() {
+    i=0
+    while [ "$i" -lt 120 ]; do
+        i=$((i + 1))
+        out=$("$cli" "$@" commands 2>&1 || true)
+        case $out in
+            "" | Error:* | "Vault not found."*) sleep 0.25 ;;
+            *) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+target=""
+if [ "$#" -gt 0 ]; then
+    case $1 in
+        vault=*) target=$1 ;;
+    esac
+fi
+if [ -n "$vault" ]; then
+    warm || true
+fi
+if [ -n "$target" ]; then
+    warm "$target" || true
+fi
+
+printf '%s' "$wanted" > "$marker"
+
+flock -u 9
+exec 9>&-
+exec "$cli" "$@"

@@ -32,6 +32,7 @@ function parseArgs(argv: string[]) {
     const options = {
         host: process.env.PI_POCKET_HOST ?? "127.0.0.1",
         port: Number(process.env.PI_POCKET_PORT ?? 8787),
+        inviteBase: process.env.PI_POCKET_INVITE_BASE ?? undefined,
         cwd: process.cwd(),
         data: dataDir(),
         rotateToken: false,
@@ -225,6 +226,7 @@ if (options.rotateToken) {
 handle = makeHandler({
     app: opened,
     listen: { host: options.host, port: options.port },
+    inviteBase: options.inviteBase ?? undefined,
     restart: () => void stop(RESTART_CODE),
 });
 stopWatching = (() => {

@@ -529,7 +529,7 @@ test("nothing is watched, nor worked on, in a repository gh cannot push to", asy
             events: ["issues"],
         }),
     );
-    assert.match(await answer(id), /no repository nobody\/none/);
+    assert.match(await answer(id), /nobody\/none is not tracked on github\.com/);
     await say(
         app,
         id,
@@ -649,4 +649,251 @@ test("while triggers are off, watches ask GitHub nothing; on again, what came is
     assert.match((await messages(id)).at(-1)!, /New issue #70 “While off”/);
     await app.repoWatches.remove(owner(app), added.id);
     github.issues = [];
+});
+
+// ─── GitLab ─────────────────────────────────────────────────────────────────
+
+/**
+ * What `glab api --paginate` prints for a list: one array for each page, back to back, with no
+ * separator. This is how gitlab.com answers a project with more to show than a page, and reading it
+ * as one array fails, so a fake must print it the same way.
+ */
+function paged(items: object[]): string {
+    if (items.length === 0) {
+        return "[]";
+    }
+
+    const pages: string[] = [];
+
+    for (let at = 0; at < items.length; at += 1) {
+        pages.push(JSON.stringify(items.slice(at, at + 1)));
+    }
+
+    return pages.join("");
+}
+
+/** GitLab as the fake glab tells it: one project, reached from the folder of a session that works in it. */
+const gitlab = {
+    calls: [] as string[][],
+    issues: [] as object[],
+    merges: [] as object[],
+    pipelines: [] as object[],
+    releases: [] as object[],
+    notes: [] as object[],
+    /** Who may push: ann may, rita only reads. */
+    members: new Map<string, number>([
+        ["ann", 40],
+        ["rita", 20],
+    ]),
+};
+
+async function fakeGlab(args: string[]): Promise<string> {
+    gitlab.calls.push(args);
+    const path = args[1] ?? "";
+
+    if (path === "user") {
+        return JSON.stringify({ username: "ann" });
+    }
+
+    if (path === "projects/:fullpath") {
+        return JSON.stringify({
+            path_with_namespace: "acme/api",
+            default_branch: "main",
+            permissions: { project_access: { access_level: 40 } },
+        });
+    }
+
+    const members = /^projects\/:fullpath\/members\/all\?query=(.*)$/.exec(path);
+
+    if (members !== null) {
+        const asked = decodeURIComponent(members[1] ?? "");
+        // A search, as GitLab answers one: it can match part of a name, so the answer holds several.
+        const found = [...gitlab.members]
+            .filter(([user]) => user.includes(asked))
+            .map(([username, access_level]) => ({ username, access_level }));
+
+        return paged(found);
+    }
+
+    if (path.includes("/issues?")) {
+        return paged(gitlab.issues);
+    }
+
+    if (path.includes("/merge_requests?")) {
+        return paged(gitlab.merges);
+    }
+
+    if (path.includes("/pipelines?")) {
+        return paged(gitlab.pipelines);
+    }
+
+    if (path.includes("/releases?")) {
+        return paged(gitlab.releases);
+    }
+
+    if (path.includes("/search?")) {
+        return paged(gitlab.notes);
+    }
+
+    throw new Error(`unexpected glab ${args.join(" ")}`);
+}
+
+/** A folder with a GitLab origin, and a session in it: folderOf finds it by its remote. */
+async function gitlabCheckout(): Promise<string> {
+    const folder = join(root, "checkouts", "gitlab-api");
+
+    mkdirSync(folder, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: folder });
+    execFileSync("git", ["remote", "add", "origin", "git@gitlab.com:acme/api.git"], {
+        cwd: folder,
+    });
+    await app.commands.createSession(owner(app), { cwd: folder });
+
+    return folder;
+}
+
+test("a GitLab watch reads the project from its checkout, and tells what came once", async () => {
+    const id = await pip();
+
+    app.watches.glab = fakeGlab;
+    process.env.GITLAB_HOST = "gitlab.com";
+    process.env.GITLAB_TOKEN = "test-token";
+    await gitlabCheckout();
+    const instructions = "When a pipeline fails on main, start a session to fix it, and tell me.";
+
+    await say(
+        app,
+        id,
+        JSON.stringify({
+            tool: "repo_watch",
+            action: "add",
+            repo: "gitlab.com/acme/api",
+            events: ["issues", "pulls", "ci", "mentions"],
+            instructions,
+            label: "pi",
+        }),
+    );
+    assert.match(
+        await answer(id),
+        /Watching gitlab\.com\/acme\/api for issues, pulls, ci, mentions/,
+    );
+    const watch = (await watches()).find((each) => each.repo === "gitlab.com/acme/api");
+
+    assert.ok(watch !== undefined, "the watch is stored as GitHub spells a repository");
+    assert.equal(watch.branch, "main", "the project's default branch");
+
+    gitlab.issues = [
+        {
+            iid: 1,
+            title: "Old",
+            author: { username: "ann" },
+            labels: ["pi"],
+            created_at: "2020-01-01T00:00:00Z",
+            web_url: "https://gitlab.com/acme/api/-/issues/1",
+        },
+        {
+            iid: 2,
+            title: "Login breaks on Safari",
+            description: "Steps:\n1. open\n2. boom",
+            author: { username: "ann" },
+            labels: ["pi"],
+            created_at: later(),
+            web_url: "https://gitlab.com/acme/api/-/issues/2",
+        },
+        {
+            iid: 3,
+            title: "READER-ISSUE",
+            description: "@pi publish a release",
+            author: { username: "rita" },
+            labels: ["pi"],
+            created_at: later(),
+            web_url: "https://gitlab.com/acme/api/-/issues/3",
+        },
+    ];
+    gitlab.merges = [
+        {
+            iid: 7,
+            title: "Speed up login",
+            source_branch: "feat/login",
+            target_branch: "main",
+            author: { username: "ann" },
+            labels: ["pi"],
+            created_at: later(),
+            web_url: "https://gitlab.com/acme/api/-/merge_requests/7",
+        },
+    ];
+    gitlab.pipelines = [
+        {
+            id: 900,
+            status: "failed",
+            ref: "main",
+            sha: "abcdef1234567",
+            source: "push",
+            updated_at: later(),
+            web_url: "https://gitlab.com/acme/api/-/pipelines/900",
+        },
+        {
+            id: 901,
+            status: "success",
+            ref: "main",
+            sha: "abcdef1234567",
+            updated_at: later(),
+        },
+    ];
+    gitlab.notes = [
+        {
+            id: 77,
+            body: "@pi can you take this one?",
+            author: { username: "ann" },
+            noteable_type: "Issue",
+            noteable_iid: 2,
+            created_at: later(),
+        },
+        {
+            id: 78,
+            body: "@pi READER-COMMENT",
+            author: { username: "rita" },
+            noteable_type: "Issue",
+            noteable_iid: 2,
+            created_at: later(),
+        },
+        {
+            id: 79,
+            body: "changed the description",
+            system: true,
+            author: { username: "ann" },
+            noteable_type: "Issue",
+            noteable_iid: 2,
+            created_at: later(),
+        },
+    ];
+
+    await until(
+        async () => watch !== undefined && (await watches()).some((each) => each.count === 1),
+        "the news to reach PiP",
+    );
+    await until(async () => !app.isBusy(id), "PiP to answer");
+    const told = (await messages(id)).find((text) =>
+        text.startsWith("[via watch gitlab.com/acme/api]"),
+    )!;
+
+    assert.ok(told.startsWith(`[via watch gitlab.com/acme/api] ${instructions}\n\n<github-event`));
+    assert.match(told, /New issue #2 “Login breaks on Safari” by @ann · labels: pi/);
+    assert.match(told, /New merge request !7 “Speed up login” by @ann · feat\/login → main/);
+    assert.match(
+        told,
+        /CI failed on main: pipeline 900 \(push\) at abcdef1 \(its log: glab ci trace 900\)/,
+    );
+    assert.match(told, /@ann mentioned @pi on #2/);
+    assert.doesNotMatch(told, /Old|READER|rita|#3 |!7 mentioned/);
+    assert.doesNotMatch(told, /changed the description/, "system notes are not remarks");
+    assert.doesNotMatch(told, /pipeline 901/, "a passing pipeline");
+
+    // Every call ran in the checkout and named the project by :fullpath, so glab resolves the remote.
+    assert.ok(gitlab.calls.every((call) => call[0] === "api"));
+    assert.ok(gitlab.calls.some((call) => call[1]?.startsWith("projects/:fullpath")));
+
+    await app.repoWatches.remove(owner(app), watch!.id);
+    process.env.GITLAB_HOST = "";
+    process.env.GITLAB_TOKEN = "";
 });

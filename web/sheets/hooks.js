@@ -316,6 +316,9 @@ export function HooksSheet() {
 
     return html`<${Sheet} title="Webhooks and watches" onClose=${closeSheet} wide=${true}>
         <p class="muted small">
+            A watch looks at a repository on GitHub or GitLab every few minutes: new issues, pull requests, CI failing, releases, or @pi in a comment.
+        </p>
+        <p class="muted small">
             Other services (GitHub, a deploy, a monitor) post to a webhook's address, and each post becomes a message to Pi in a session, or to PiP: your instructions, then what came.
         </p>
         ${
@@ -376,7 +379,7 @@ export function HooksSheet() {
                         From anyone: issues, PRs, and comments by people outside the repository too
                     </label>
                     <div class="muted small">
-                        ${anyone ? "Strangers' words reach Pi too, fenced as data." : "Off: posts about issues, PRs, and comments by people who cannot write to the repository are dropped (a 202 says so), and their words in other posts are left out. GitHub is asked who can write: gh must be able to push there."}
+                        ${anyone ? "Strangers' words reach Pi too, fenced as data." : "Off: posts about issues, PRs, and comments by people who cannot write to the repository are dropped (a 202 says so), and their words in other posts are left out. The service is asked who can write, and must be able to push there: gh for GitHub, GITLAB_TOKEN for GitLab."}
                     </div>`
                 }
                 ${
@@ -395,7 +398,7 @@ export function HooksSheet() {
                             )}
                         </div>
                         <div class="muted small">
-                            ${target === "pip" ? "PiP decides what to do: start a session, message one, or tell you." : `Pi in “${here?.title}” gets each post.`}
+                            ${target === "pip" ? "PiP decides what to do: start a session, message one, or tell you." : "Each post becomes a message to Pi in this session, your instructions first."}
                         </div>
                     </div>`
                 }
@@ -447,7 +450,7 @@ export function HooksSheet() {
         ${
             list &&
             html`<p class="muted small">
-                Ask PiP to watch a repository, such as “watch acme/api: when CI fails on main, fix it”. It needs no address.
+                Ask PiP to watch a repository, such as “watch acme/api: when CI fails on main, fix it”, or “watch gitlab.com/group/project: when a pipeline fails, fix it”. It needs no address. A GitLab project needs a checkout on this machine first.
             </p>
             <p class="muted small">
                 ${list.base ? "" : `Services post to ${location.origin}, so they must be able to reach it: a tunnel's address works for GitHub. `}For GitHub: the repository's Settings → Webhooks → Add webhook; paste the address as the Payload URL and the secret as the Secret, choose application/json, and pick the events.

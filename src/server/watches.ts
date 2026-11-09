@@ -11,6 +11,8 @@
  * looks, or when someone stops it. The triggers extension (`extensions/triggers.ts`) installs the task and Pi's tool.
  */
 import type { Context } from "@earendil-works/chord";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     type ConversationId,
@@ -39,8 +41,10 @@ import {
     repoInfo,
     sameRepo,
 } from "./github.ts";
+import { type Glab, runGlab } from "./gitlab.ts";
 
 export { type Gh, runGh } from "./github.ts";
+export { type Glab, runGlab } from "./gitlab.ts";
 import { snippet } from "./projection.ts";
 import { clientKey, requestFor } from "./requests.ts";
 
@@ -244,6 +248,8 @@ export class Watches {
     readonly #app: PocketApp;
     /** How the watch reaches GitHub, and how long it waits between looks; tests put a fake and short waits here. */
     gh: Gh = runGh;
+    /** How a GitLab watch reaches GitLab: the fake tests put here, `glab` on this machine otherwise. */
+    glab: Glab = runGlab;
     timing = { soon: LOOK_SOON_MS, quiet: LOOK_MS, retry: RETRY_MS };
     /** Who `gh` is signed in as on each host, and when that was asked. */
     readonly #viewers = new Map<string, { login: string; at: number }>();
@@ -551,6 +557,30 @@ export class Watches {
     }
 
     // ─── Looking ────────────────────────────────────────────────────────────
+
+    /**
+     * A checkout of `repo` on this machine: the clone PiP made, then any session's folder whose origin is it. The
+     * GitLab side needs one, because there the command resolves the project from the folder's remote.
+     */
+    async folderOf(repo: string): Promise<string | undefined> {
+        const app = this.#app;
+        const clone = join(app.dataDir, "repos", ...repo.split("/"));
+        const folders = new Set<string>([clone]);
+
+        for (const meta of Object.values(app.sessionCatalogue())) {
+            folders.add(meta.worktree?.source ?? meta.cwd);
+        }
+
+        folders.add(app.defaultCwd);
+
+        for (const folder of folders) {
+            if (existsSync(folder) && sameRepo(await originRepo(folder), repo)) {
+                return folder;
+            }
+        }
+
+        return undefined;
+    }
 
     /** Who `gh` is signed in as on a host (github.com when none), asked at most hourly. */
     async #login(host: string | undefined): Promise<string> {

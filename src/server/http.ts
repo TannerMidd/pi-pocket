@@ -34,7 +34,7 @@ const BRIDGE_VERSION = 1;
 export function createHandler(options: HttpOptions) {
     const { app } = options;
     const auth = new Auth(app.config);
-    const api = createApi(options, auth);
+    const api = createApi({ ...options, inviteBase: options.inviteBase }, auth);
 
     return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
         const url = new URL(request.url ?? "/", "http://pocket.local");
