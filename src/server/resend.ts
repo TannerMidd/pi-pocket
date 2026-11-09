@@ -198,7 +198,12 @@ export const interruptTask = (stopRun: StopRun) =>
                     }
                 }
 
-                await runtime.commit(() => finished, context);
+                // A message that was not sent leaves no receipt: a retry of its request makes a new handoff.
+                await runtime.commit(async (tx) => {
+                    delete (await tx.doc(InterruptsDoc, id)).pending[requestId];
+
+                    return finished;
+                }, context);
             },
         },
         abort: (_task, runtime, context) =>

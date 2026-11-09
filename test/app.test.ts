@@ -1869,6 +1869,34 @@ test("concurrent composer Interrupt retries share the handoff and keep the queue
     }
 });
 
+test("a composer Interrupt that could not be sent leaves no receipt, so its retry is sent", async () => {
+    const id = await newSession();
+    const harness = app.harness;
+    const abortTask = harness.abortTask;
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "cn-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        const request = {
+            text: "stream a long answer again",
+            mode: "interrupt" as const,
+            requestId: "cn-now",
+        };
+
+        harness.abortTask = () => Promise.reject(new Error("the stop failed"));
+        await assert.rejects(app.commands.submit(id, owner(), request), /could not be sent/);
+        harness.abortTask = abortTask;
+        assert.deepEqual((await harness.snapshot(InterruptsDoc, id, context))!.pending, {});
+
+        const retry = await app.commands.submit(id, owner(), request);
+
+        assert.ok((await harness.submission(retry.submissionId, context)) !== undefined);
+    } finally {
+        harness.abortTask = abortTask;
+        await app.commands.abort(id, owner());
+    }
+});
+
 test("a restart between an Interrupt's stop and send keeps the handoff and every queued message", async () => {
     const dataDir = join(root, "composer-interrupt-restart");
     let again = await openApp(faux, dataDir);
