@@ -26,7 +26,11 @@
  */
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
-import { tailscalePeer, type TailscaleAnswer } from "../runner/transport.ts";
+import {
+    loopback as runnerLoopback,
+    tailscalePeer,
+    type TailscaleAnswer,
+} from "../runner/transport.ts";
 import { HttpError } from "./errors.ts";
 
 export const ADDRESS_WRONG = 5;
@@ -76,12 +80,8 @@ function bare(address: string): string {
     return address.replace(/^::ffff:/i, "").toLowerCase();
 }
 
-/** Whether `address` is this machine's loopback address. */
-export function loopback(address: string): boolean {
-    const plain = bare(address);
-
-    return plain === "::1" || (isIP(plain) === 4 && plain.startsWith("127."));
-}
+/** Whether `address` is this machine's loopback address: the runner's own check (`transport.ts`), one for both. */
+export const loopback = runnerLoopback;
 
 /** One header's single value, or undefined when it is missing or given more than once. */
 function single(header: string | string[] | undefined): string | undefined {

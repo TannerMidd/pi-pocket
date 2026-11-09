@@ -568,6 +568,9 @@ export async function conversationRoutes(
         }
 
         if (app.runnerOf(id) !== undefined) {
+            // Whom the file viewer lets read it there (`Workspace.remoteFile`): the folder, never the computer's secrets.
+            await app.workspace.remoteFile(user, id, requested);
+
             // Design's exports are rendered here, copied back, and downloaded from the bounded mirror. The copy uses
             // this session's existing runner permission; the requested path can never leave its folder.
             return withDesignMirror(

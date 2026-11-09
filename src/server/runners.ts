@@ -176,6 +176,8 @@ type Pending = {
     resolve: (reply: Reply) => void;
     reject: (error: Error) => void;
     onEvent?: (json: Record<string, unknown>, payload: Uint8Array) => void;
+    /** The session field the request carried: its cancel carries it too, as the runner checks (`request-gate.ts`). */
+    from?: unknown;
 };
 
 /** One daemon session on the computer: its streams, its requests, and what its daemon said in `hello`. */
@@ -391,8 +393,22 @@ export class RunnerLink {
         const current = this.#session;
 
         if (current?.number === session && current.live) {
-            this.#write(current, frame(FRAME.cancel, id, { mode: "kill" }));
+            this.#write(
+                current,
+                frame(FRAME.cancel, id, this.#cancel(current, id, { mode: "kill" })),
+            );
         }
+    }
+
+    /** A cancel's JSON, with the session field of the request it cancels. */
+    #cancel(
+        session: LinkSession,
+        id: number,
+        json: Record<string, unknown>,
+    ): Record<string, unknown> {
+        const from = session.pending.get(id)?.from;
+
+        return from === undefined ? json : { ...json, [SESSION_FIELD]: from };
     }
 
     /** The computer was removed: what runs there stops, and its runner is told to go for good. */
@@ -450,7 +466,8 @@ export class RunnerLink {
         }
 
         return new Promise<Reply>((resolve, reject) => {
-            const onAbort = () => this.#write(session, frame(FRAME.cancel, id, {}));
+            const onAbort = () =>
+                this.#write(session, frame(FRAME.cancel, id, this.#cancel(session, id, {})));
             const done = () => options.signal?.removeEventListener("abort", onAbort);
 
             session.pending.set(id, {
@@ -463,6 +480,7 @@ export class RunnerLink {
                     reject(error);
                 },
                 ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+                ...(json[SESSION_FIELD] === undefined ? {} : { from: json[SESSION_FIELD] }),
             });
             options.signal?.addEventListener("abort", onAbort, { once: true });
             options.onStart?.(id, session.number);
@@ -621,10 +639,18 @@ export class RunnerLink {
             } else {
                 const message = parseControl(toBuffer(data).toString("utf8"));
 
-                if (message?.type.startsWith("net-") === true) {
-                    network.message(message as Parameters<LinkNetwork["message"]>[0]);
-                } else {
-                    this.#onControl(session, message);
+                // One computer's message can end its own link, never the server.
+                try {
+                    if (message?.type.startsWith("net-") === true) {
+                        network.message(message as Parameters<LinkNetwork["message"]>[0]);
+                    } else {
+                        this.#onControl(session, message);
+                    }
+                } catch (error) {
+                    this.#runners.log(
+                        `${this.name} sent a message this server could not handle: ${(error as Error).message}`,
+                    );
+                    this.#drop(1002, "A message the server could not handle");
                 }
             }
         });
@@ -815,8 +841,12 @@ export class RunnerLink {
         let timer: NodeJS.Timeout | undefined;
         let cancelled: (() => void) | undefined;
         const answer = await new Promise<Confirmed | undefined>((resolve, reject) => {
+            // The server stops waiting: the question goes on the computer too, so a late Allow saves nothing.
             timer = setTimeout(
-                () => resolve(undefined),
+                () => {
+                    this.#control({ type: "withdraw", id });
+                    resolve(undefined);
+                },
                 (this.state?.totp ? 300_000 : CONFIRM_MS) + 10_000,
             );
 

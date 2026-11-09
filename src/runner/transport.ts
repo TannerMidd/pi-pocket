@@ -12,12 +12,18 @@
 import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { existsSync } from "node:fs";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 import { join } from "node:path";
 
 /** What the runner checked, for its log and its refusal. */
 export type Transport =
-    | { ok: true; why: "https" | "loopback" | "tailscale" | "allowed"; address?: string }
+    | {
+          ok: true;
+          why: "https" | "loopback" | "tailscale" | "allowed";
+          address?: string;
+          /** For loopback and Tailscale: the addresses checked, the only ones to connect to (`pinnedLookup`). */
+          addresses?: string[];
+      }
     | { ok: false; address: string; tailscale: TailscaleAnswer };
 
 /** What `tailscale whois` said about an address. */
@@ -152,7 +158,7 @@ export async function checkTransport(server: string, allowHttp: boolean): Promis
     }
 
     if (addresses.length > 0 && addresses.every(loopback)) {
-        return { ok: true, why: "loopback", address: addresses[0]! };
+        return { ok: true, why: "loopback", address: addresses[0]!, addresses };
     }
 
     // Every address the name has must be a tailnet device: the connection could go to any of them.
@@ -168,7 +174,7 @@ export async function checkTransport(server: string, allowHttp: boolean): Promis
     }
 
     if (answer === "peer") {
-        return { ok: true, why: "tailscale", address: addresses[0]! };
+        return { ok: true, why: "tailscale", address: addresses[0]!, addresses };
     }
 
     if (allowHttp) {
@@ -176,6 +182,33 @@ export async function checkTransport(server: string, allowHttp: boolean): Promis
     }
 
     return { ok: false, address: addresses[0] ?? host, tailscale: answer };
+}
+
+/**
+ * A DNS lookup that answers only `addresses`, for a connection after `checkTransport`: a name that resolves anew could
+ * lead elsewhere over plain HTTP. Undefined when nothing was pinned (https, or plain HTTP allowed by its setting).
+ */
+export function pinnedLookup(transport: Transport): LookupFunction | undefined {
+    const addresses = transport.ok ? transport.addresses : undefined;
+
+    if (addresses === undefined || addresses.length === 0) {
+        return undefined;
+    }
+
+    return ((_host: string, options: { all?: boolean } | number, done: unknown) => {
+        const callback = (typeof options === "function" ? options : done) as (
+            error: Error | null,
+            address: string | { address: string; family: number }[],
+            family?: number,
+        ) => void;
+        const all = addresses.map((address) => ({ address, family: isIP(address) }));
+
+        if (typeof options === "object" && options?.all === true) {
+            callback(null, all);
+        } else {
+            callback(null, all[0]!.address, all[0]!.family);
+        }
+    }) as LookupFunction;
 }
 
 /** Why plain HTTP to `server` is not safe, in 2 lines: the risk, and what Tailscale said. */

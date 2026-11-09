@@ -266,6 +266,47 @@ function piSession(value: unknown): value is RunnerPiSession {
 }
 
 /** Parse a text message; undefined for anything that is not a control message. */
+/** A runner's approvals state as the server reads it: a computer that sends another shape is not trusted with it. */
+function approvalState(value: unknown): value is ApprovalState {
+    const state = value as Record<string, unknown> | null;
+    const settings = state?.settings as Record<string, unknown> | null | undefined;
+    const text = (each: unknown) => typeof each === "string";
+    const time = (each: unknown) => each === null || typeof each === "number";
+
+    return (
+        typeof state === "object" &&
+        state !== null &&
+        typeof state.totp === "boolean" &&
+        typeof settings === "object" &&
+        settings !== null &&
+        typeof settings.stopAsking === "boolean" &&
+        time(settings.totpDays) &&
+        typeof settings.allowHttp === "boolean" &&
+        typeof settings.network === "boolean" &&
+        (settings.downloads === null || text(settings.downloads)) &&
+        Array.isArray(state.folders) &&
+        state.folders.every(text) &&
+        Array.isArray(state.sessions) &&
+        state.sessions.every((each: unknown) => {
+            const session = each as Record<string, unknown> | null;
+
+            return (
+                typeof session === "object" &&
+                session !== null &&
+                text(session.id) &&
+                text(session.folder) &&
+                text(session.person) &&
+                text(session.approvedBy) &&
+                typeof session.approvedAt === "number" &&
+                typeof session.idleAt === "number" &&
+                time(session.ttlMs) &&
+                typeof session.inUse === "boolean" &&
+                time(session.expiresAt)
+            );
+        })
+    );
+}
+
 export function parseControl(text: string): ControlMessage | undefined {
     let value: unknown;
 
@@ -347,9 +388,7 @@ export function parseControl(text: string): ControlMessage | undefined {
                 ? (message as CodeResult)
                 : undefined;
         case "runner-state":
-            return typeof message.state === "object" && message.state !== null
-                ? (message as StateMessage)
-                : undefined;
+            return approvalState(message.state) ? (message as StateMessage) : undefined;
 
         case "runner-action": {
             const request = message.request as Record<string, unknown> | undefined;
@@ -429,7 +468,9 @@ export function parseControl(text: string): ControlMessage | undefined {
                 ? (message as TaskResult)
                 : undefined;
         case "runner-result":
-            return typeof message.id === "string" && typeof message.ok === "boolean"
+            return typeof message.id === "string" &&
+                typeof message.ok === "boolean" &&
+                (message.state === undefined || approvalState(message.state))
                 ? (message as ActionResult)
                 : undefined;
         case "net-open":

@@ -12,6 +12,7 @@
  */
 import { BACKGROUND_CONTEXT as BACKGROUND } from "@earendil-works/chord/context";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { randomUUID } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { chmod, copyFile, link, lstat, mkdir, rm, stat, unlink } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
@@ -195,13 +196,41 @@ export async function copyToComputer(
     file: string,
     name: string,
 ): Promise<string> {
-    const { env, separator } = computer;
+    const { separator } = computer;
     const folder = [
         ...(computer.folder === undefined
             ? [computer.tmpdir.replace(/[\\/]+$/, ""), "pi-pocket-downloads"]
             : [computer.folder.replace(/(?<=.)[\\/]+$/, "")]),
         computer.session,
     ].join(separator);
+    // One copy at a time into a folder: a free name is picked and taken before the next one looks.
+    const previous = copying.get(folder) ?? Promise.resolve();
+    const copy = previous.catch(() => {}).then(() => copyInto(computer, folder, file, name));
+    const settled = copy.then(
+        () => {},
+        () => {},
+    );
+
+    copying.set(folder, settled);
+    void settled.then(() => {
+        if (copying.get(folder) === settled) {
+            copying.delete(folder);
+        }
+    });
+
+    return copy;
+}
+
+/** Copies to each computer folder, in turn (`copyToComputer`). */
+const copying = new Map<string, Promise<void>>();
+
+async function copyInto(
+    computer: Computer,
+    folder: string,
+    file: string,
+    name: string,
+): Promise<string> {
+    const { env, separator } = computer;
 
     const check = <T>(result: { ok: true; value: T } | { ok: false; error: Error }): T => {
         if (!result.ok) {
@@ -223,7 +252,7 @@ export async function copyToComputer(
         }
     }
 
-    const part = `${folder}${separator}.${numbered(name, 1)}.${Date.now().toString(36)}.part`;
+    const part = `${folder}${separator}.${numbered(name, 1)}.${randomUUID()}.part`;
 
     try {
         let first = true;
@@ -296,8 +325,13 @@ export class Downloads {
 
         list.push(download);
 
+        // Past the limit, the oldest one already reported as ended goes: never one still going or not yet reported.
         if (list.length > KEEP) {
-            list.splice(0, list.findIndex((each) => each.reported === "ended") + 1 || 1);
+            const old = list.findIndex((each) => each.reported === "ended");
+
+            if (old !== -1) {
+                list.splice(old, 1);
+            }
         }
 
         this.#lists.set(conversationId, list);

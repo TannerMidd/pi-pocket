@@ -251,8 +251,12 @@ export class RequestGate {
 
         if (type === FRAME.cancel) {
             const request = this.#requests.get(id);
+            // The session that sent the request cancels it; pi-env's client sends its own session with each frame.
+            const from = sessionScope(json[SESSION_FIELD]);
 
-            if (request !== undefined) {
+            delete json[SESSION_FIELD];
+
+            if (request !== undefined && from?.id === request.scope?.id) {
                 request.stop.abort();
 
                 if (request.sent) {

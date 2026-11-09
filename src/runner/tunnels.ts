@@ -231,6 +231,13 @@ export class StreamLink {
         this.#options.closed?.(id, message ?? "reset");
     }
 
+    /** End every stream here, and tell the other side, while the link stays up (network sharing turned off). */
+    resetAll(message: string): void {
+        for (const id of [...this.#streams.keys()]) {
+            this.reset(id, message);
+        }
+    }
+
     /** The link went down: every stream ends now, without a word to the other side, which does the same. */
     dropAll(): void {
         const streams = [...this.#streams.values()];

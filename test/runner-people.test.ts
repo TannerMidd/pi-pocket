@@ -20,6 +20,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { Runner, type RunnerSettings, type SessionQuestion } from "../src/runner/runner.ts";
 import { base32, STEP_MS, totp } from "../src/runner/totp.ts";
 import { ConfigStore, type User } from "../src/server/config.ts";
+import { SubagentsDoc } from "../src/server/docs.ts";
 import { HttpError } from "../src/server/errors.ts";
 import { createHandler } from "../src/server/http.ts";
 import type { RunnerView } from "../src/server/runners.ts";
@@ -590,6 +591,97 @@ describe("people granted a computer", () => {
             process.off("uncaughtException", record);
             // It ended itself when the server removed it: stopping it again says so.
             await spare.stop().catch(() => {});
+        }
+    });
+});
+
+describe("review drill fixes for people on a computer", () => {
+    // Earlier tests removed the guest: a fresh one, with no grant.
+    const visitor = () => app.config.users.find((user) => user.name === "Visitor")!;
+
+    before(() => {
+        person("Visitor", "guest");
+    });
+
+    it("keeps a private session's subagents off another person's board", async () => {
+        const { id: hidden } = await app.commands.createSession(owner(app), {
+            runner: runnerId,
+            cwd: there,
+        });
+
+        // A subagent record, as the subagent tool writes it: the board reads it from the session.
+        await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(SubagentsDoc, hidden);
+
+            doc.agents.secret = {
+                conversationId: 999_001 as unknown as ConversationId,
+                reported: [],
+                asked: "the private task text",
+                askedAt: Date.now(),
+            };
+        }, context);
+        await until(
+            () => app.subagents(owner(app)).some((entry) => entry.id === Number(hidden)),
+            "the owner's board",
+        );
+
+        app.config.sharedRunnerSessions = false;
+
+        assert.equal(app.canSee(visitor(), hidden), false);
+        assert.equal(
+            app.subagents(visitor()).some((entry) => entry.id === Number(hidden)),
+            false,
+            "another person's board",
+        );
+
+        const board = await request<{ id: number }[]>(visitor(), "subagents");
+
+        assert.equal(board.status, 200);
+        assert.equal(
+            board.body.some((entry) => entry.id === Number(hidden)),
+            false,
+            "GET /api/subagents",
+        );
+    });
+
+    it("never lets another person download the computer's runner link or Pi's sign-ins", async () => {
+        const home = join(there, "home");
+
+        mkdirSync(join(home, ".pi-pocket"), { recursive: true });
+        mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+        writeFileSync(join(home, ".pi-pocket", "runner.json"), '{"key":"FAKE_KEY"}');
+        writeFileSync(join(home, ".pi", "agent", "auth.json"), '{"token":"FAKE"}');
+        writeFileSync(join(home, "notes.txt"), "Shared notes.\n");
+
+        const { id: shared } = await app.commands.createSession(owner(app), {
+            runner: runnerId,
+            cwd: home,
+        });
+
+        app.config.sharedRunnerSessions = true;
+        // The computer's home is this test's folder: the secrets are where the runner keeps them.
+        const link = app.runners.link(runnerId);
+        const info = await link.infoNow();
+        const original = info.home;
+
+        info.home = home;
+
+        try {
+            const download = async (path: string) =>
+                (
+                    await fetch(
+                        `${address}/api/c/${shared}/download?path=${encodeURIComponent(path)}`,
+                        { headers: { authorization: `Bearer ${tokens.get(visitor().id)}` } },
+                    )
+                ).status;
+
+            assert.equal(await download("notes.txt"), 200, "a file of the folder");
+            assert.equal(await download(".pi-pocket/runner.json"), 404, "the runner link");
+            assert.equal(await download(".pi/agent/auth.json"), 404, "Pi's sign-ins");
+            assert.equal(await download(".PI-POCKET/runner.json"), 404, "in another case");
+        } finally {
+            info.home = original;
+            app.config.sharedRunnerSessions = false;
         }
     });
 });

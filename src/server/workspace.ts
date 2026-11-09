@@ -27,7 +27,13 @@ import { type Changes, changesIn, diffOf, editFacts, revertFile } from "./change
 import type { User } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
-import { type FolderAccess, localAccess, remoteAccess, Unreachable } from "./folder-access.ts";
+import {
+    type FolderAccess,
+    localAccess,
+    type PathKit,
+    remoteAccess,
+    Unreachable,
+} from "./folder-access.ts";
 import { GitError } from "./git.ts";
 import { displayPath, expandFolder, expandHome } from "./paths.ts";
 import { reveal, revealOn } from "./reveal.ts";
@@ -48,6 +54,22 @@ function unreachable(error: unknown): never {
 }
 
 /** A path on another computer as people read it in a session: relative to its folder there, else `~/x` or whole. */
+/**
+ * A linked computer's own secrets, which only the owner and the session's own person read there: the runner's link
+ * file (its key and authenticator) in `~/.pi-pocket`, and Pi's sign-ins in `~/.pi/agent`. `target` is real.
+ */
+export function runnerSecret(paths: PathKit, target: string, home: string): boolean {
+    // Any case, as macOS and Windows match names: on Linux it may refuse a look-alike folder too, which is harmless.
+    const fold = (value: string) => value.toLowerCase();
+    const file = fold(target);
+
+    return [paths.join(home, ".pi-pocket"), paths.join(home, ".pi", "agent")].some((secret) => {
+        const base = fold(secret);
+
+        return file === base || file.startsWith(base.endsWith(paths.sep) ? base : base + paths.sep);
+    });
+}
+
 function remoteDisplay(path: string, cwd: string, home: string, access: FolderAccess): string {
     const { sep, relative } = access.path;
 
@@ -610,7 +632,9 @@ export class Workspace {
             target === base ||
             target.startsWith(base.endsWith(paths.sep) ? base : base + paths.sep);
 
-        if (!inside(root)) {
+        // Nor the computer's own secrets, even in a session in its home folder: its runner link (its key and
+        // authenticator) and Pi's sign-ins.
+        if (!inside(root) || runnerSecret(paths, target, home)) {
             throw new HttpError(404, "Not found");
         }
 

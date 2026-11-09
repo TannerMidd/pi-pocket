@@ -18,12 +18,12 @@ import {
     readPiTail,
     titleOf,
 } from "../server/pi-session-files.ts";
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp, type LookupFunction, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { localDaemon } from "@earendil-works/pi-env";
 import WebSocket from "ws";
-import { checkTransport, refusal, type Transport } from "./transport.ts";
+import { checkTransport, pinnedLookup, refusal, type Transport } from "./transport.ts";
 import { checkTools } from "./tools.ts";
 import { broadFolder, coveredFolder, folderContains, realFolder } from "./folders.ts";
 import {
@@ -649,7 +649,7 @@ export class Runner {
                     );
                 }
 
-                void this.#tools().then((tools) => this.#open(tools));
+                void this.#tools().then((tools) => this.#open(tools, pinnedLookup(transport)));
             },
             (error: unknown) => this.#fail(`Could not check the server address: ${String(error)}`),
         );
@@ -669,16 +669,18 @@ export class Runner {
         return this.#toolsChecked.tools;
     }
 
-    #open(tools: RunnerTools): void {
+    #open(tools: RunnerTools, lookup: LookupFunction | undefined): void {
         if (this.#stopping) {
             return;
         }
 
         const link = this.#options.link;
+        // Over plain HTTP to this computer or a tailnet device: only to the addresses checked (`pinnedLookup`).
         const ws = new WebSocket(this.#url, LINK_SUBPROTOCOL, {
             headers: { authorization: `Bearer ${link.key}` },
             maxPayload: MAX_MESSAGE,
             handshakeTimeout: 15_000,
+            ...(lookup === undefined ? {} : { lookup }),
         });
 
         this.#socket = ws;
@@ -978,6 +980,18 @@ export class Runner {
 
     /** Public state never contains the authenticator secret, failures, or accepted counter. */
     async #state(): Promise<void> {
+        // Network sharing turned off (from Pi Pocket or on this computer): what is open or opening closes now.
+        if (this.#settings().network === false) {
+            const message = `${this.#options.link.name} does not share its network`;
+
+            this.#streams?.resetAll(message);
+
+            // Its error handler takes it out and tells the server the connection failed.
+            for (const socket of this.#connecting.values()) {
+                socket.destroy(new Error(message));
+            }
+        }
+
         if (!this.connected) {
             return;
         }
@@ -1150,7 +1164,11 @@ export class Runner {
             ask: (question: SessionQuestion) => Promise<Approval>,
         ) => Promise<Approval>,
     ): Promise<Approval> {
-        const existing = [...this.#pending.values()].find((each) => each.scope.id === scope.id);
+        // The same question only: the same session in the same folder. A move to another folder, or a request named
+        // after another kind of question, asks for itself.
+        const existing = [...this.#pending.values()].find(
+            (each) => each.scope.id === scope.id && each.scope.folder === scope.folder,
+        );
 
         if (existing !== undefined) {
             existing.hold(signal);
@@ -1487,11 +1505,13 @@ export class Runner {
         this.#questions.set(`net-${open.id}`, stop);
 
         try {
+            // A saved session permission, then or after its question: an answer alone (a preview's) opens nothing.
             const allowed =
                 scope !== undefined &&
                 ((await this.#approvals.valid(scope)) !== undefined ||
-                    (await this.#approve(`resume-${scope.id}`, scope, "new", true, stop.signal))
-                        .allow);
+                    ((await this.#approve(`resume-${scope.id}`, scope, "new", true, stop.signal))
+                        .allow &&
+                        (await this.#approvals.valid(scope)) !== undefined));
 
             if (allowed && ws.readyState === WebSocket.OPEN && !stop.signal.aborted) {
                 this.#openStream(ws, open, this.#approvals.begin(scope.id));
