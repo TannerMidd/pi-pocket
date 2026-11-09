@@ -138,36 +138,10 @@ export class HiddenValues {
      * value it would fall inside, until none.
      */
     safe(text: string, conversationId: ConversationId | number): number {
-        const values = this.for(conversationId).map((each) => each.value);
-        let cut = text.length;
-
-        for (const value of values) {
-            for (let length = Math.min(value.length - 1, text.length); length > 0; length--) {
-                if (text.endsWith(value.slice(0, length))) {
-                    cut = Math.min(cut, text.length - length);
-                    break;
-                }
-            }
-        }
-
-        for (let moved = true; moved;) {
-            moved = false;
-
-            for (const value of values) {
-                for (
-                    let at = text.indexOf(value);
-                    at !== -1 && at < cut;
-                    at = text.indexOf(value, at + 1)
-                ) {
-                    if (at + value.length > cut) {
-                        cut = at;
-                        moved = true;
-                    }
-                }
-            }
-        }
-
-        return cut;
+        return safeCut(
+            text,
+            this.for(conversationId).map((each) => each.value),
+        );
     }
 
     /**
@@ -184,15 +158,15 @@ export class HiddenValues {
     }
 
     /**
-     * An output callback that hides values as they stream. It holds back the end of each stream that could still be the
-     * start of a value, and `flush` sends it once the command ends.
+     * An output callback that hides values as they stream. It holds back only the end of each stream that could still
+     * be the start of a value, so output that starts none shows at once, and `flush` sends it once the command ends.
      */
     stream(
         conversationId: ConversationId | number,
         onOutput: NonNullable<ShellExecOptions["onOutput"]>,
     ): { onOutput: NonNullable<ShellExecOptions["onOutput"]>; flush: () => void } {
         const values = this.for(conversationId);
-        const hold = Math.max(0, ...values.map((each) => each.value.length)) - 1;
+        const texts = values.map((each) => each.value);
         const pending = new Map<
             string,
             { text: string; context: Context; info: ShellOutputInfo }
@@ -227,7 +201,7 @@ export class HiddenValues {
 
                 const before = pending.get(info.stream)?.text ?? "";
                 const joined = replaceAll(before + text, values);
-                const cut = Math.max(0, joined.length - hold);
+                const cut = safeCut(joined, texts);
 
                 pending.set(info.stream, { text: joined.slice(cut), context, info });
                 emit(joined.slice(0, cut), context, info);
@@ -238,6 +212,39 @@ export class HiddenValues {
             },
         };
     }
+}
+
+/** How much of `text` can be shown before more comes: `HiddenValues.safe`, for these values. */
+function safeCut(text: string, values: readonly string[]): number {
+    let cut = text.length;
+
+    for (const value of values) {
+        for (let length = Math.min(value.length - 1, text.length); length > 0; length--) {
+            if (text.endsWith(value.slice(0, length))) {
+                cut = Math.min(cut, text.length - length);
+                break;
+            }
+        }
+    }
+
+    for (let moved = true; moved;) {
+        moved = false;
+
+        for (const value of values) {
+            for (
+                let at = text.indexOf(value);
+                at !== -1 && at < cut;
+                at = text.indexOf(value, at + 1)
+            ) {
+                if (at + value.length > cut) {
+                    cut = at;
+                    moved = true;
+                }
+            }
+        }
+    }
+
+    return cut;
 }
 
 function replaceAll(text: string, values: readonly Hidden[]): string {

@@ -4,6 +4,7 @@
 import {
     type App,
     cleanUp,
+    context,
     lastText,
     newSession,
     openApp,
@@ -21,6 +22,7 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { HiddenValues } from "../src/server/hidden.ts";
 import { isEnvFile } from "../src/server/secrets.ts";
 
 /** A made-up secret, unlike anything else in the test's output. */
@@ -445,4 +447,26 @@ test("a value that is too short to hide safely is not hidden, and the list never
     assert.equal(app.hidden.replace("short words", 1), "short words");
     // The earlier value of the module that is off stays hidden.
     assert.equal(app.hidden.replace(S.offModule, 1), "[setting dormant.key]");
+});
+
+test("output that starts no secret streams at once; only a possible start of one waits for the next chunk", () => {
+    const hidden = new HiddenValues();
+    const secret = fake("streamed");
+
+    hidden.add({ value: secret, label: "secret S" });
+
+    const out: string[] = [];
+    const stream = hidden.stream(1, (text) => out.push(text));
+    const info = { stream: "stdout" } as const;
+
+    // An owner token is always hidden, so every command's output goes through this: a short line must not wait.
+    stream.onOutput("tick 1\n", context, info);
+    assert.deepEqual(out, ["tick 1\n"]);
+
+    // The start of the value waits, and the rest of it hides it whole.
+    stream.onOutput(`next ${secret.slice(0, 12)}`, context, info);
+    assert.equal(out.join(""), "tick 1\nnext ");
+    stream.onOutput(`${secret.slice(12)} done\n`, context, info);
+    stream.flush();
+    assert.equal(out.join(""), "tick 1\nnext [secret S] done\n");
 });
