@@ -105,6 +105,7 @@ const emptyView = () => ({
     watch: null,
     branch: null,
     subagentsHeld: null,
+    held: [],
 });
 
 // ─── Each session's panel ──────────────────────────────────────────────────────────
@@ -1682,6 +1683,8 @@ function mergeView(current, data) {
         decisions: data.decisions ?? base.decisions,
         plan: data.plan ?? base.plan,
         schedules: data.schedules ?? base.schedules,
+        // What a Stop held out of the queue: it waits until someone sends it.
+        held: data.held ?? base.held,
         // No goal is null, which the server sends too: only a missing field keeps the last value.
         goal: data.goal === undefined ? base.goal : data.goal,
         // The session's PR watch, or null: the same.
@@ -2707,6 +2710,10 @@ export const actions = {
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
     move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
     editQueued: (submissionId, id = current()) => api(`c/${id}/edit-queued`, { submissionId }),
+    /** What a Stop held: send them all, or drop one or take it back into the box, by its key. */
+    sendHeld: () => api(`c/${current()}/held`, { action: "send" }),
+    dropHeld: (key) => api(`c/${current()}/held`, { action: "drop", key }),
+    editHeld: (key, id = current()) => api(`c/${id}/held`, { action: "edit", key }),
     configure: (change) => api(`c/${current()}/configure`, change),
     /** The owner's model and thinking level for new sessions, `{ provider, modelId, thinkingLevel }`; null clears it. */
     setDefaultModel: (choice) => api("settings", { defaultModel: choice }),

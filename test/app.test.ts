@@ -38,7 +38,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, InboxDoc, LiveDoc, type Storage } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
-import { InterruptsDoc, TurnsDoc } from "../src/server/docs.ts";
+import { HeldDoc, InterruptsDoc, TurnsDoc } from "../src/server/docs.ts";
 import type { Interrupt } from "../src/server/resend.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
@@ -1991,22 +1991,23 @@ test("a restart between an Interrupt's stop and send keeps the handoff and every
     }
 });
 
-test("Stop still withdraws queued follow-ups and steers without delivering them", async () => {
+test("Stop holds queued follow-ups and steers, and sends nothing until someone sends them", async () => {
     const id = await newSession();
 
     await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "sc-1" });
     await until(() => app.isBusy(id), "the run to start");
     const followUp = await app.commands.submit(id, owner(), {
-        text: "stopped follow-up",
+        text: "held follow-up",
         requestId: "sc-2",
     });
     const steer = await app.commands.submit(id, owner(), {
-        text: "stopped steer",
+        text: "held steer",
         mode: "steer",
         requestId: "sc-3",
     });
 
     await app.commands.abort(id, owner());
+    await until(() => !app.isBusy(id), "the run to stop");
     assert.equal((await app.harness.snapshot(InboxDoc, id, context))!.items.length, 0);
 
     for (const { submissionId } of [followUp, steer]) {
@@ -2016,7 +2017,81 @@ test("Stop still withdraws queued follow-ups and steers without delivering them"
         assert.equal("reason" in record ? record.reason : undefined, "aborted");
     }
 
-    assert.doesNotMatch((await modelTexts(app, id)).join("\n"), /stopped follow-up|stopped steer/);
+    const held = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+
+    assert.deepEqual(
+        held.map((item) => [item.mode, item.by]),
+        [
+            ["followUp", owner().id],
+            ["steer", owner().id],
+        ],
+    );
+    assert.doesNotMatch((await modelTexts(app, id)).join("\n"), /held follow-up|held steer/);
+
+    assert.equal(await app.commands.sendHeld(id, owner()), 2);
+    await until(
+        async () => /held steer/.test((await modelTexts(app, id)).join("\n")),
+        "the held ones",
+    );
+    await until(() => !app.isBusy(id), "their answers");
+    const texts = (await modelTexts(app, id)).join("\n");
+
+    assert.ok(texts.indexOf("held follow-up") < texts.indexOf("held steer"), "in their order");
+    assert.equal(texts.match(/held follow-up/g)?.length, 2, "sent once, and echoed once");
+    assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
+    assert.equal(await app.commands.sendHeld(id, owner()), 0, "nothing left to send");
+});
+
+test("a held message is withdrawn by its sender or the driver, and edited by its sender only", async () => {
+    const id = await newSession();
+    const guest = app.config.addUser("Held guest", "guest").user;
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hd-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await app.commands.submit(id, owner(), { text: "owner's held", requestId: "hd-2" });
+        await app.commands.submit(id, guest, { text: "guest's held", requestId: "hd-3" });
+        await app.commands.abort(id, guest);
+        await until(() => !app.isBusy(id), "the run to stop");
+        const [mine, theirs] = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+
+        assert.equal(theirs!.by, guest.id);
+        await assert.rejects(app.commands.editHeld(id, owner(), theirs!.key), /Only its sender/);
+        await assert.rejects(app.commands.editHeld(id, guest, mine!.key), /Only its sender/);
+
+        const back = await app.commands.editHeld(id, guest, theirs!.key);
+
+        assert.equal(back.text, "guest's held");
+        await assert.rejects(app.commands.editHeld(id, guest, theirs!.key), /no longer held/);
+        // The owner drives: they withdraw anyone's.
+        await app.commands.dropHeld(id, owner(), mine!.key);
+        assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
+        assert.doesNotMatch((await modelTexts(app, id)).join("\n"), /owner's held|guest's held/);
+    } finally {
+        app.config.removeUser(guest.id);
+    }
+});
+
+test("the held messages show in the room, with who wrote them", async () => {
+    const id = await newSession();
+    const tab = fakeTab(id, owner(), 6);
+    const held = () => (tab.field("held") ?? []) as { text: string; by?: string }[];
+
+    await app.attach(tab.client);
+
+    try {
+        await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hr-1" });
+        await until(() => app.isBusy(id), "the run to start");
+        await app.commands.submit(id, owner(), { text: "shown while held", requestId: "hr-2" });
+        await app.commands.abort(id, owner());
+        await until(() => held().length === 1, "the held message in a view");
+        assert.match(held()[0]!.text, /shown while held/);
+        assert.equal(held()[0]!.by, owner().id);
+        await app.commands.sendHeld(id, owner());
+        await until(() => held().length === 0, "an empty held list");
+    } finally {
+        app.detach(tab.client);
+    }
 });
 
 test("a queued message moves between Queue and Steer, by its sender only", async () => {

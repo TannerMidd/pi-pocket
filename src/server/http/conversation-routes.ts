@@ -196,6 +196,28 @@ export async function conversationRoutes(
         );
     }
 
+    // What a Stop held: `send` them all, or `drop` or `edit` one, by its `key`.
+    if (third === "held" && method === "POST") {
+        const body = await readJson<{ action?: unknown; key?: unknown }>(request);
+        const key = String(body.key ?? "");
+
+        if (body.action === "send") {
+            return json(response, 200, { sent: await app.commands.sendHeld(id, user) });
+        }
+
+        if (body.action === "drop") {
+            await app.commands.dropHeld(id, user, key);
+
+            return json(response, 200, { ok: true });
+        }
+
+        if (body.action === "edit") {
+            return json(response, 200, await app.commands.editHeld(id, user, key));
+        }
+
+        throw new HttpError(400, "Say send, drop, or edit.");
+    }
+
     if (third === "move" && method === "POST") {
         const body = await readJson<{ submissionId?: number; mode?: string }>(request);
 

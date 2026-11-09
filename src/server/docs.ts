@@ -70,6 +70,33 @@ export const InterruptsDoc = defineDoc<{ pending: Record<string, number> }>({
     initial: () => ({ pending: {} }),
 });
 
+/** A message that Stop took out of the queue: it waits, and goes to Pi only when someone sends it. */
+export type HeldMessage = {
+    /** The id of the queued message it was. */
+    key: string;
+    /** Pi Durable's `UserInput`, as it was queued. */
+    content: JsonValue;
+    mode: "steer" | "followUp";
+    /** The request id it goes out with: its sender's, so it stays theirs, and a retry never sends it twice. */
+    requestId: string;
+    /** Pi Durable's `InputEntry`, when it had one. */
+    entry?: JsonValue;
+    /** Who wrote it, when a person did. */
+    by?: string;
+    heldAt: number;
+};
+
+/** The messages a Stop kept from the queue, in their order (`Commands.abort`, `Commands.sendHeld`). */
+export const HeldDoc = defineDoc<{ items: HeldMessage[] }>({
+    kind: "pocket.held",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ items: [] }),
+});
+
 /** Favorite working folders in shortcut order, private to each person and shared by their devices. */
 export const FolderFavoritesDoc = defineDoc<{ users: Record<string, string[]> }>({
     kind: "pocket.folder-favorites",
