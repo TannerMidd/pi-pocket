@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 
-/** About 4,000 tokens. Raise it only on purpose, in the pull request that needs more. */
-const LIMIT = 16_000;
+/**
+ * About 5,000 tokens: tool schemas and this plain prose run at about 2.75 characters a token (Anthropic's count, Claude
+ * Opus 5.5), not 4. A guard against a prompt that grows by accident, not a squeeze: a rule that makes the work better
+ * is worth its tokens, and the pull request that needs more raises it.
+ */
+const LIMIT = 14_000;
 /** Pi's own tools, and the owner's AGENTS.md and skills: not Pi Pocket's to count. */
 const NOT_OURS = new Set(["read", "bash", "edit", "write", "project_context", "skills"]);
 
@@ -38,7 +42,7 @@ test("a new session's sections and tool schemas fit the prompt budget", async ()
     const names = ours.map(([name]) => name);
 
     // A change in the request's shape must fail here, not pass with nothing counted.
-    for (const name of ["preamble", "guidelines", "artifacts", "artifact", "subagent"]) {
+    for (const name of ["preamble", "guidelines", "artifacts", "artifact", "deferred_tools"]) {
         assert.ok(names.includes(name), `the first request has ${name}`);
     }
 
@@ -46,6 +50,6 @@ test("a new session's sections and tool schemas fit the prompt budget", async ()
 
     assert.ok(
         total <= LIMIT,
-        `Pi Pocket's prompt is ${total} characters, over the budget of ${LIMIT}. Biggest: ${biggest.join(", ")}. Make it smaller, or defer a tool (tool-search.ts); raise the limit only on purpose.`,
+        `Pi Pocket's prompt is ${total} characters, over the budget of ${LIMIT}. Biggest: ${biggest.join(", ")}. Make it smaller, defer a tool (tool-search.ts), or raise the limit in the change that needs it.`,
     );
 });

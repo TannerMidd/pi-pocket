@@ -1,9 +1,13 @@
-/** Native drop-in imports retain the pre-1.4 document checkpoint default without changing Pi Durable itself. */
+/**
+ * Native drop-in imports retain the pre-1.4 document checkpoint default without changing Pi Durable itself, and get
+ * TypeBox's `Type` from `@earendil-works/pi-ai` as before Pi 1.5.
+ */
 import { registerHooks } from "node:module";
 import { sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const compatUrl = new URL("./extension-document-compat.ts", import.meta.url).href;
+const piAiUrl = new URL("./extension-pi-ai-compat.ts", import.meta.url).href;
 
 type Scope = { directory: string; report: (message: string) => void; warned: Set<string> };
 type Owner = { scope: Scope; module: string; root: string };
@@ -49,6 +53,10 @@ export function documentImports(directory: string, report: (message: string) => 
                     target.searchParams.set("module", parent.module);
 
                     return { url: target.href, shortCircuit: true };
+                }
+
+                if (specifier === "@earendil-works/pi-ai" && parent !== undefined) {
+                    return { url: piAiUrl, shortCircuit: true };
                 }
 
                 const resolved = nextResolve(specifier, context);

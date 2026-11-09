@@ -209,6 +209,51 @@ test("a session has the skills Pi's CLI has in the same folder, the same one of 
     );
 });
 
+test("the skills setting's exclusions, inclusions, and relative paths work as in Pi's CLI", async () => {
+    const { base, home: own, agentDir, cwd, sources } = fixture();
+    const [theirs, mine, plus] = ["theirs", "mine", "plus"].map((name) => join(base, name)) as [
+        string,
+        string,
+        string,
+    ];
+    const found = (skills: { name: string; filePath: string }[]) =>
+        skills
+            .map(({ name, filePath }) => ({ name, filePath }))
+            .filter((each) => each.name !== "pi-project")
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+    skill(theirs, "teach", "Theirs, taken out by -path.");
+    skill(mine, "teach", "Mine.");
+    skill(plus, "off");
+    skill(plus, "back");
+    skill(join(agentDir, "relative"), "from-agent-dir");
+    skill(join(agentDir, "skills"), "auto-off");
+
+    const settingsPaths = [
+        theirs,
+        mine,
+        plus,
+        "relative",
+        `-${join(theirs, "teach")}`,
+        "!**/plus/**",
+        `+${join(plus, "back")}`,
+        "!**/skills/auto-off/**",
+        `-${join(own, ".agents", "skills", "everywhere", "SKILL.md")}`,
+    ];
+
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ skills: settingsPaths }));
+
+    const ours = found(loadSessionSkills(cwd, { ...sources, settingsPaths }));
+
+    assert.deepEqual(ours, found(await cliSkills(cwd, own, agentDir, false)));
+    assert.deepEqual(
+        ours
+            .map((each) => each.name)
+            .filter((name) => !["pi-user", "from-settings"].includes(name)),
+        ["back", "from-agent-dir", "teach"],
+    );
+});
+
 test("a session lists them as /skill: commands and in its system prompt", async () => {
     const project = realpathSync(mkdtempSync(join(root, "skills-project-")));
 

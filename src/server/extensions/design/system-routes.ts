@@ -7,7 +7,7 @@ import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { readBundle } from "../../design/bundle.ts";
-import { writeExport } from "../../design/files.ts";
+import { localFolder, REMOTE_DESIGN, writeExport } from "../../design/files.ts";
 import { applyExactFixes } from "../../design/fix.ts";
 import { VIEWPORTS } from "../../design/render.ts";
 import { derived } from "../../design/tokens-cache.ts";
@@ -581,6 +581,10 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
             throw web.error(400, "This session has no folder.");
         }
 
+        if (localFolder(cwd) === undefined) {
+            throw web.error(400, REMOTE_DESIGN);
+        }
+
         return cwd;
     };
 
@@ -702,7 +706,10 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
             throw web.error(400, "Choose mobile, tablet, or desktop.");
         }
 
-        const system = await load(folderOf(request));
+        // A remote session's designs are checked as design_preview checks them there: with no system.
+        const remote =
+            request.conversation.cwd && localFolder(request.conversation.cwd) === undefined;
+        const system = remote ? undefined : await load(folderOf(request));
 
         if (mode !== undefined && system !== undefined && !system.modes.includes(mode)) {
             throw web.error(

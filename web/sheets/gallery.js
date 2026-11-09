@@ -692,7 +692,6 @@ export function GallerySheet({
     selected = null,
     tab = "discover",
     origin = "extensions",
-    show = null,
     Management,
 }) {
     const listing = useListing();
@@ -937,7 +936,6 @@ export function GallerySheet({
                         query=${query}
                         onChanged=${load}
                         hub=${true}
-                        show=${show}
                         before=${extensionMatches.length > 0 && html`<div class="ext-list">${extensionMatches.map(row)}</div>`}
                         beforeCount=${extensionMatches.length}
                         between=${installedThemes}

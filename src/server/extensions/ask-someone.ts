@@ -3,7 +3,7 @@
  * link opens a page with no sign-in, where they answer once; the answer comes back to the session for you to give Pi.
  */
 import { createHash } from "node:crypto";
-import { Type } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { defineDoc, defineExtension, defineTool } from "@earendil-works/pi-durable";
 // Types only: at run time this module uses nothing of Pi Pocket's but the host and web, as a drop-in would.
 import type {
@@ -500,15 +500,18 @@ export default function createAskSomeone(host: PocketHost, web?: ExtensionWeb) {
     const askSomeone = defineTool({
         name: "ask_someone",
         description: DESCRIPTION,
-        parameters: Type.Object({
-            title: Type.String({
-                description: "The question in a short line, up to 120 characters",
-            }),
-            question: Type.String({
-                description:
-                    "The whole question for the reader, in Markdown: background, the question, options, and your recommendation",
-            }),
-        }),
+        parameters: obj(
+            {
+                title: str({
+                    description: "The question in a short line, up to 120 characters",
+                }),
+                question: str({
+                    description:
+                        "The whole question for the reader, in Markdown: background, the question, options, and your recommendation",
+                }),
+            },
+            { open: true },
+        ),
         // The draft's id comes from the call: a replay finds the draft it saved.
         replay: "safe",
         execute: async (args, api, context) => {

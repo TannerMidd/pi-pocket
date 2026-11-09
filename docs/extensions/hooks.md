@@ -36,6 +36,10 @@ There are two kinds of hooks:
 
 The calls of codemode scripts also go through `beforeTool`.
 
+## Read a result
+
+`afterTool(call, result, api, context)` gets each result before it is stored, and can return a changed one. Since Pi 1.5 (Pi Pocket 0.28.0), it also gets the error results that Pi Durable writes itself: for a tool that is not there, invalid arguments, a block, an interruption, and an abort. Their `result.diagnostics` say which, with a `code` such as `invalid_arguments` or `blocked`. A hook that reads `call.arguments` or `structuredOutput` checks `result.diagnostics` first. In the calls of codemode scripts, `api.entry` and `api.entries` reject.
+
 ## Send Pi on
 
 `onYield(answer, api, context)` runs after Pi's last answer. To send Pi on with another message, return `{ continue: "the message" }`. Done when does this ([goals.ts](../../src/server/extensions/goals.ts)).

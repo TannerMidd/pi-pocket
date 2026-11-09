@@ -10,6 +10,8 @@ import {
     readSync,
 } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
+import { quoted } from "../fence.ts";
+import { figHeaderReason } from "./scan-fig-container.ts";
 
 const SKIP = new Set(
     `node_modules .git dist build out coverage .next .nuxt .svelte-kit .cache .turbo
@@ -30,6 +32,10 @@ export interface Skipped {
 
 const DOT_STYLE_FOLDERS = new Set([".storybook", ".vitepress", ".vuepress", ".docusaurus"]);
 
+const HEADER_BYTES = 8;
+
+const FIG = /\.fig$/i;
+
 const STYLE =
     /\.(?:css|scss|less|pcss|postcss|html?|vue|svelte|astro|mdx|tsx|jsx|ts|js|mjs|cjs|mts|cts)$/i;
 const TOKEN_JSON =
@@ -45,11 +51,15 @@ export const LIMITS = {
     jsonBytes: 1_500_000,
     totalBytes: 8_000_000,
     valueChars: 200,
+    /** Figma files: each one is decoded, so only a few. */
+    figs: 4,
 } as const;
 
 const EXTENSION_SCORE: [RegExp, number][] = [
     [/^\.(?:css|scss|less|pcss|postcss)$/, 40],
     [/^\.json$/, 45],
+    // A Figma file is the design itself, before any stylesheet written from it.
+    [/^\.fig$/, 50],
     [/^\.(?:[cm]?[jt]s)$/, 20],
     [/^\.(?:html?|vue|svelte|astro|mdx)$/, 25],
 ];
@@ -91,7 +101,8 @@ export function priority(rel: string): number {
 }
 
 const wanted = (rel: string, name: string) =>
-    STYLE.test(name) ? !name.endsWith(".d.ts") : TOKEN_JSON.test(rel) && name.endsWith(".json");
+    /\.fig$/i.test(name) ||
+    (STYLE.test(name) ? !name.endsWith(".d.ts") : TOKEN_JSON.test(rel) && name.endsWith(".json"));
 
 function sortedEntries(dir: string): Dirent[] {
     try {
@@ -160,6 +171,7 @@ export function collectFiles(root: string): {
 } {
     const found: string[] = [];
     const skipped: Skipped[] = [];
+    let notFigma = { count: 0, first: "", reason: "" };
     let partial = false;
     let seen = 0;
 
@@ -167,6 +179,27 @@ export function collectFiles(root: string): {
         if (skipped.length < 40) {
             skipped.push({ path, why });
         }
+    };
+
+    const isFigma = (path: string, rel: string): boolean => {
+        let reason: string | undefined;
+
+        try {
+            reason = figHeaderReason(readBytes(path, HEADER_BYTES));
+        } catch (error) {
+            note(rel, `could not be read: ${(error as Error).message}`);
+
+            return false;
+        }
+
+        if (reason !== undefined) {
+            notFigma =
+                notFigma.count === 0
+                    ? { count: 1, first: rel, reason }
+                    : { ...notFigma, count: notFigma.count + 1 };
+        }
+
+        return reason === undefined;
     };
 
     const walk = (dir: string, depth: number) => {
@@ -198,12 +231,27 @@ export function collectFiles(root: string): {
             } else if (entry.isSymbolicLink() && !hidden) {
                 note(rel, "a link, not followed");
             } else if (entry.isFile() && wanted(rel, entry.name)) {
+                if (FIG.test(entry.name) && !isFigma(path, rel)) {
+                    continue;
+                }
+
                 found.push(rel);
             }
         }
     };
 
     walk(root, 0);
+
+    // One note for all the `.fig` files that are no Figma files, and first: 450 notes filled the list,
+    // and the Figma file that could not be read went unnamed.
+    if (notFigma.count > 0) {
+        const one = notFigma.count === 1;
+
+        skipped.unshift({
+            path: one ? notFigma.first : `${notFigma.count} files named .fig`,
+            why: `${notFigma.reason}${one ? "" : ` (the first is ${quoted(notFigma.first, 60)})`}`,
+        });
+    }
 
     for (const dir of new Set(
         found
@@ -239,6 +287,10 @@ export function collectFiles(root: string): {
 
 /** Reads no more than `limit` bytes and never follows a link. */
 export function readHead(path: string, limit: number = LIMITS.fileBytes): string {
+    return readBytes(path, limit).toString("utf8");
+}
+
+function readBytes(path: string, limit: number): Buffer {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
 
     try {
@@ -256,7 +308,7 @@ export function readHead(path: string, limit: number = LIMITS.fileBytes): string
             size += read;
         }
 
-        return buffer.subarray(0, size).toString("utf8");
+        return buffer.subarray(0, size);
     } finally {
         closeSync(fd);
     }

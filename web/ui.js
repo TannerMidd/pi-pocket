@@ -7,9 +7,17 @@ import { Component, createContext, h } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useDragToClose } from "./gestures.js";
 import { highlight, langOf } from "./highlight.js";
+import { blockMath, inlineMath } from "./math.js";
+import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
 
-export const html = htm.bind(h);
+// `this[0] = 3` stops htm from keeping the elements a template makes: a kept element keeps the app's tree it was first
+// drawn in, and through the rows of the session list, every tree after it. Templates stay parsed once.
+export const html = htm.bind(function () {
+    this[0] = 3;
+
+    return h.apply(null, arguments);
+});
 
 // ─── Images ──────────────────────────────────────────────────────────────────────
 
@@ -22,6 +30,54 @@ export const fileUrl = (path, conversationId = currentConversation()) =>
 /** The `index`th image stored in a message: a pasted image or one a tool returned. */
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
+
+/** Attached types that go to a model that takes images, up to this size (`model-images.ts`). */
+const MODEL_IMAGE_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+]);
+const MAX_MODEL_IMAGE = 5 * 1024 * 1024;
+/** Photos a browser cannot show: the server sends them to the model as JPEG. */
+const HEIC_TYPES = new Set(["image/heic", "image/heif", "image/heic-sequence"]);
+
+/**
+ * A file named with `@` that can go to the model as an image, before the attached ones. It is not in the entry's `files`,
+ * which lists only the text files sent along.
+ */
+const MENTIONED_IMAGE = /(?:^|[\s([{])@(?:"[^"\n]*|[^\s"]*)\.(?:png|jpe?g|gif|webp|heic|heif)\b/i;
+
+/**
+ * Where a sent attachment's thumbnail loads from, or null when it shows as a file chip. `files` are the message's
+ * attachment lines (`{ path, mime, size, noted }`); `entry` the message, with its text and how many images it stores
+ * (`images`). A HEIC or HEIF photo shows the JPEG the model got, the stored image in its place among the attached ones.
+ * Only when that place is sure: its line says it was converted, no file sent by name can be an image, and every
+ * attached image is stored, so a failed one cannot shift another into its place.
+ */
+export function attachedPictureSrc(file, files, entry, conversationId) {
+    if (!file.path || !file.mime.startsWith("image/")) {
+        return null;
+    }
+
+    if (!HEIC_TYPES.has(file.mime)) {
+        return fileUrl(file.path, conversationId);
+    }
+
+    const sent = files.filter(
+        (each) => MODEL_IMAGE_TYPES.has(each.mime) && each.size <= MAX_MODEL_IMAGE,
+    );
+    const mentioned = MENTIONED_IMAGE.test(entry.text ?? "");
+
+    if (!file.noted || mentioned || (entry.images ?? 0) !== sent.length) {
+        return null;
+    }
+
+    return entryImageUrl(entry.id, sent.indexOf(file), conversationId);
+}
 
 /** Where the browser loads `![alt](src)` from. Web and data URLs stay; paths and file:// URLs point at the server. */
 function imageSource(src, conversationId) {
@@ -93,7 +149,47 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => ESCAPES[
 /** A fence's language as it may be kept: a short name of safe characters, or nothing. */
 const FENCE_NAME = /^[\w+#.-]{1,24}$/;
 
+// Markers are unpredictable and exist only for one parse, so reply HTML cannot impersonate math.
+let mathMarkers = null;
+
+function mathMarker(text, display) {
+    const marker = `pocket-math-${[...crypto.getRandomValues(new Uint32Array(4))].join("-")}`;
+
+    mathMarkers?.set(marker, { text, display });
+
+    return `<code>${marker}</code>`;
+}
+
 marked.use({
+    extensions: [
+        {
+            name: "pocketBlockMath",
+            level: "block",
+            // Only `$$` at the start of a line: marked cuts the paragraph there, and joins its parts with a line break.
+            start: (src) => {
+                const found = mathOn() ? /\n {0,3}\$\$/.exec(src) : null;
+
+                return found === null ? undefined : found.index + 1;
+            },
+            tokenizer(src) {
+                const found = mathOn() && blockMath(src);
+
+                return found ? { type: "pocketBlockMath", ...found } : undefined;
+            },
+            renderer: (token) => `<p>${mathMarker(token.text, true)}</p>`,
+        },
+        {
+            name: "pocketInlineMath",
+            level: "inline",
+            start: (src) => (mathOn() ? src.indexOf("$") : undefined),
+            tokenizer(src) {
+                const found = mathOn() && inlineMath(src);
+
+                return found ? { type: "pocketInlineMath", ...found } : undefined;
+            },
+            renderer: (token) => mathMarker(token.text, token.display),
+        },
+    ],
     renderer: {
         // Task list boxes as characters: the sanitizer drops form controls.
         checkbox: ({ checked }) => (checked ? "☑ " : "☐ "),
@@ -159,6 +255,8 @@ const localImage = (src) =>
     /^\/a\/\d+\//.test(src) ||
     /^data:image\//i.test(src);
 
+/** Model lists past this many get a box to find a model by. */
+export const MODEL_SEARCH_AT = 8;
 /** Code blocks past this size show without colors: coloring them would hold up the conversation. */
 export const COLOR_LIMIT = 200_000;
 /** Code blocks longer than this many lines fold to their first lines, once they are written whole. */
@@ -204,7 +302,7 @@ function codeBlock(pre, fold) {
     const code = pre.querySelector("code") ?? pre;
     const wrap = document.createElement("div");
     const copy = document.createElement("button");
-    const kind = richKind(name, source);
+    const kind = fenceFor(name) ? "extension" : richKind(name, source);
 
     // The highlighter's output is the source, escaped, in spans of its own: nothing from the reply becomes markup.
     if (lang && source.length <= COLOR_LIMIT) {
@@ -258,6 +356,15 @@ function sanitize(html, fold) {
 
     // `src/app.ts` in a reply opens the file: inline code that is a path, not code blocks.
     for (const code of fragment.querySelectorAll("code")) {
+        const math = mathMarkers?.get(code.textContent ?? "");
+
+        if (math !== undefined && !code.closest("pre")) {
+            code.textContent = math.text;
+            code.dataset.part = "inline-math";
+            code.dataset.lang = math.display ? "math-display" : "math-inline";
+            continue;
+        }
+
         // Code in a line of words, for themes; a code block is `code-block`.
         if (!code.closest("pre")) {
             code.dataset.part = "inline-code";
@@ -431,7 +538,13 @@ function markdownParts(
     base = null,
     breaks = true,
 ) {
-    const key = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks ? "br" : ""}\u0000${text}`;
+    const key = [
+        markdownRevision(),
+        conversationId ?? "",
+        base ?? "",
+        breaks ? "br" : "",
+        text,
+    ].join("\u0000");
     let out = markdownCache.get(key);
 
     if (out !== undefined) {
@@ -459,9 +572,12 @@ function renderParts(text, conversationId, base, breaks, fold) {
     rendering = conversationId ?? null;
     linkBase = base;
 
+    mathMarkers = new Map();
+
     try {
         return partsOf(sanitize(marked.parse(text, { async: false, breaks }), fold));
     } finally {
+        mathMarkers = null;
         rendering = null;
         linkBase = null;
     }
@@ -521,10 +637,15 @@ export function Markdown({
     conversationId = currentConversation(),
 }) {
     const live = useRef(null);
+    const root = useRef(null);
+
+    useEffect(() => mountMath(root.current));
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = `${conversationId ?? ""}\u0000${base ?? ""}\u0000${breaks}`;
+        const settings = [markdownRevision(), conversationId ?? "", base ?? "", breaks].join(
+            "\u0000",
+        );
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -532,7 +653,11 @@ export function Markdown({
 
         const blocks = liveBlocks(text, conversationId, base, breaks, live.current.kept);
 
-        return html`<div class=${`md ${className}`}>
+        return html`<div
+            key=${markdownRevision()}
+            ref=${root}
+            class=${`md ${className}`}
+        >
             ${blocks.flatMap(({ key, parts }) =>
                 parts
                     .filter((part) => part.kind !== undefined || part.html.trim() !== "")
@@ -546,25 +671,43 @@ export function Markdown({
 
     if (parts.length === 1 && parts[0].kind === undefined) {
         return html`<div
+            key=${markdownRevision()}
+            ref=${root}
             class=${`md ${className}`}
             dangerouslySetInnerHTML=${{ __html: parts[0].html }}
         ></div>`;
     }
 
-    return html`<div class=${`md ${className}`}>
+    return html`<div
+        key=${markdownRevision()}
+        ref=${root}
+        class=${`md ${className}`}
+    >
         ${parts.map((part, index) => drawPart(part, index, !cache))}
     </div>`;
 }
 
 /** One part of rendered markdown (`partsOf`): a run of HTML, or a code block that shows more than code. */
-const drawPart = (part, key, streaming) =>
-    part.kind === undefined || RichBlock === null
+const drawPart = (part, key, streaming) => {
+    const extension = part.kind === "extension" ? fenceFor(part.lang) : undefined;
+
+    if (extension !== undefined) {
+        return html`<${extension.component}
+            key=${key}
+            source=${part.source}
+            lang=${part.lang}
+            streaming=${streaming}
+        />`;
+    }
+
+    return part.kind === undefined || part.kind === "extension" || RichBlock === null
         ? html`<div
               key=${key}
               class="md-part"
               dangerouslySetInnerHTML=${{ __html: part.html }}
           ></div>`
         : html`<${RichBlock} key=${key} ...${part} streaming=${streaming} />`;
+};
 
 /** File types common enough that `name.ext` alone is surely a file, not code like `store.state`. */
 const FILE_TYPES = new Set(
@@ -1498,6 +1641,71 @@ export function useSide(ref, of = (element) => element) {
     return side;
 }
 
+/** How far the pointer goes before a press on an edge is a drag: a double click on it stays a double click. */
+const DRAG_SLOP = 3;
+
+/**
+ * Drag an edge to resize a window (the sidebar, the Files tile, the Browser panel), from the edge's `pointerdown`. As the
+ * pointer moves, `widthAt(event)` gives the width, set as the window's own `property` (`width`, `flex-basis`) and nothing
+ * else: a variable on the page's root restyled every element at each move, the session list's hundreds of rows too. A
+ * layer over the page shows the cursor and keeps what is under the pointer from hovering or selecting. Once the pointer
+ * lets go, `done(width)` keeps the width, and the window's own value goes.
+ */
+export function dragWidth(event, { element, property, widthAt, done }) {
+    const { clientX: x, clientY: y, pointerId } = event;
+    let veil = null;
+    let width = null;
+
+    const move = (each) => {
+        if (each.pointerId !== pointerId) {
+            return;
+        }
+
+        // Let go where the page did not hear it (another window, outside the page): the drag ends.
+        if (each.buttons === 0) {
+            stop();
+
+            return;
+        }
+
+        if (veil === null) {
+            if (Math.hypot(each.clientX - x, each.clientY - y) < DRAG_SLOP) {
+                return;
+            }
+
+            veil = document.createElement("div");
+            veil.className = "resize-veil";
+            document.body.append(veil);
+            element.classList.add("resizing");
+            getSelection()?.removeAllRanges();
+        }
+
+        width = widthAt(each);
+        element.style.setProperty(property, `${width}px`);
+    };
+
+    const stop = () => {
+        removeEventListener("pointermove", move);
+        removeEventListener("pointerup", stop);
+        removeEventListener("pointercancel", stop);
+        removeEventListener("blur", stop);
+
+        if (veil === null) {
+            return;
+        }
+
+        veil.remove();
+        element.classList.remove("resizing");
+        done(width);
+        element.style.removeProperty(property);
+    };
+
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", stop);
+    addEventListener("pointercancel", stop);
+    addEventListener("blur", stop);
+}
+
 /**
  * A rail button's state for themes (`data-state`): `open` while what it opens shows, `busy` while it counts work that
  * goes on; both, or neither (undefined).
@@ -1602,36 +1810,41 @@ export function drawnFor(keys, component) {
     return Wrapped;
 }
 
-class Memo extends Component {
-    shouldComponentUpdate(next) {
-        const { ignored } = next;
-        const before = this.props.props;
-        const after = next.props;
-        const keys = Object.keys(after).filter((key) => !ignored.includes(key));
-
-        return (
-            next.component !== this.props.component ||
-            Object.keys(before).length !== Object.keys(after).length ||
-            keys.some((key) => !Object.is(before[key], after[key]))
-        );
-    }
-
-    render({ component, props }) {
-        return h(component, props);
-    }
-}
-
 /**
  * `component`, drawn again only when its props change (each compared with `Object.is`) or its own state does. It must
  * read nothing else as it draws, such as `store.state`: what it needs comes as props. `ignored` names props it reads
- * only as it mounts, whose change alone does not draw it again.
+ * only as it mounts, whose change alone does not draw it again. One component around it, not two: the session list
+ * makes one for each of its hundreds of rows.
  */
 export function memo(component, ignored = []) {
-    const Wrapped = (props) => h(Memo, { component, props, ignored });
+    class Memo extends Component {
+        // Without making arrays: the session list asks this of each of its rows at every draw.
+        shouldComponentUpdate(next) {
+            let count = 0;
 
-    Wrapped.displayName = component.name;
+            for (const key in next) {
+                count++;
 
-    return Wrapped;
+                if (!Object.is(this.props[key], next[key]) && !ignored.includes(key)) {
+                    return true;
+                }
+            }
+
+            for (const key in this.props) {
+                count--;
+            }
+
+            return count !== 0;
+        }
+
+        render(props) {
+            return h(component, props);
+        }
+    }
+
+    Memo.displayName = component.name;
+
+    return Memo;
 }
 
 /** Phones: sheets from the bottom edge, which drag back down to close, and menus that a swipe closes. */
@@ -1856,6 +2069,14 @@ export function modelLabel(agent) {
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
 }
+
+/** A model's name as the composer's chip says it: "opus 5.5" for "Anthropic: Claude Opus 5.5". */
+export const shortModelName = (name) =>
+    name
+        // A provider's own prefix ("Anthropic: Claude Opus 4.5"), then the family's name.
+        .replace(/^[^:]{1,24}:\s*/, "")
+        .replace(/^(?:anthropic\s+)?claude\s+/i, "")
+        .toLowerCase();
 
 /** An on and off switch, named for screen readers by `label`. */
 export function Switch({ on, disabled, label, onChange }) {

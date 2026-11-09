@@ -1,4 +1,4 @@
-// The artifact_inline tool (#87): HTML published into the artifact store as a card in the reply. Each result records the
+// The artifact tool's `inline: true` (#87, one tool since #223): HTML published into the artifact store as a card in the reply. Each result records the
 // version its call made, so an earlier card keeps its version after an update; the store is the artifact tool's, so
 // versions, edits, limits, replays, forks, and who may read a page all work as they do for it.
 import {
@@ -19,9 +19,20 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import {
+    AssistantEntry,
+    type ConversationId,
+    SystemEntry,
+    ToolResultEntry,
+    UserEntry,
+} from "@earendil-works/pi-durable";
 import { readFileSync } from "node:fs";
-import createArtifacts, { BRIDGE_GUIDE, slugify } from "../src/server/extensions/artifacts.ts";
+import createArtifacts, {
+    BRIDGE_GUIDE,
+    legacyInline,
+    slugify,
+    withoutInline,
+} from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
 import { createHandler } from "../src/server/http.ts";
 import { withBridge } from "../src/server/http/artifacts.ts";
@@ -43,11 +54,12 @@ const route: Parameters<typeof scriptedModel>[0] = (context) => {
     }
 
     if (text.includes("show a calculator")) {
-        return call("artifact_inline", { id: "Loan Calc", title: "Loan", content: PAGE });
+        return call("artifact", { inline: true, id: "Loan Calc", title: "Loan", content: PAGE });
     }
 
     if (text.includes("add a years field")) {
-        return call("artifact_inline", {
+        return call("artifact", {
+            inline: true,
             id: "loan-calc",
             title: "Loan with years",
             edits: [{ oldText: "</body>", newText: '<input id="years" value="30"></body>' }],
@@ -55,7 +67,38 @@ const route: Parameters<typeof scriptedModel>[0] = (context) => {
     }
 
     if (text.includes("show notes inline")) {
-        return call("artifact_inline", { id: "notes", title: "Notes", content: "<p>no</p>" });
+        return call("artifact", {
+            inline: true,
+            id: "notes",
+            title: "Notes",
+            content: "<p>no</p>",
+        });
+    }
+
+    if (text.includes("after the old card")) {
+        // The tools a request offers are the ones its system messages add and have not removed.
+        const offered = new Set<string>();
+
+        for (const message of context.messages as unknown as {
+            role: string;
+            toolsAdded?: { name: string }[];
+            toolsRemoved?: { name: string }[];
+        }[]) {
+            for (const tool of message.role === "system" ? (message.toolsRemoved ?? []) : []) {
+                offered.delete(tool.name);
+            }
+
+            for (const tool of message.role === "system" ? (message.toolsAdded ?? []) : []) {
+                offered.add(tool.name);
+            }
+        }
+
+        seen.tools = [...offered];
+        seen.messages = JSON.stringify(
+            context.messages.filter((message) => message.role !== "system"),
+        );
+
+        return fauxAssistantMessage([fauxText("seen")]);
     }
 
     if (text.includes("publish notes")) {
@@ -86,12 +129,14 @@ after(async () => {
     cleanUp();
 });
 
-/** What each artifact_inline result in the session recorded, oldest first. */
-async function results(id: ConversationId) {
+/** What each inline artifact result in the session recorded, oldest first. */
+async function results(id: ConversationId, onlyInline = true) {
     const entries = await app.transcripts.allEntries(id, false);
 
     return entries.flatMap((entry) =>
-        entry.kind === "toolResult" && (entry as { name?: string }).name === "artifact_inline"
+        entry.kind === "toolResult" &&
+        (entry as { name?: string }).name === "artifact" &&
+        (!onlyInline || (entry as { details?: { inline?: boolean } }).details?.inline === true)
             ? [entry as unknown as { isError?: boolean; details?: Record<string, unknown> }]
             : [],
     );
@@ -109,15 +154,13 @@ async function page(token: string | undefined, id: ConversationId, path: string)
     return { status: response.status, text: await response.text() };
 }
 
-/** A direct call of the second tool, as Pi Durable makes it, with a fixed identity so it can be replayed. */
+/** A direct inline call of the artifact tool, as Pi Durable makes it, with a fixed identity so it can be replayed. */
 function inlineCall(id: ConversationId, taskId: number, callId: string) {
-    const tool = createArtifacts({} as PocketHost).tools!.find(
-        (each) => each.name === "artifact_inline",
-    )!;
+    const tool = createArtifacts({} as PocketHost).tools!.find((each) => each.name === "artifact")!;
 
     return (args: Record<string, unknown>) =>
         tool.execute(
-            { id: "loan-calc", title: "Loan", ...args } as never,
+            { id: "loan-calc", title: "Loan", inline: true, ...args } as never,
             {
                 conversationId: id,
                 taskId,
@@ -130,33 +173,188 @@ function inlineCall(id: ConversationId, taskId: number, callId: string) {
         );
 }
 
-test("the module has both tools, and the guide says when to use each", async () => {
+test("the module has one tool, with inline in its schema once, and the guide says when to use it", async () => {
     const extension = createArtifacts({} as PocketHost);
     const section = extension.sections![0]!;
 
     assert.deepEqual(
         extension.tools!.map((tool) => tool.name),
-        ["artifact", "artifact_inline"],
+        ["artifact"],
     );
-    const render = (names: string[]) =>
-        (section.render as (input: unknown) => Promise<string>)({
-            agent: { tools: names.map((name) => ({ name })) },
-        });
+    const artifact = extension.tools![0]!;
+    const withInline = [{ name: "artifact", parameters: artifact.parameters }];
+    const render = (tools: unknown[]) =>
+        (section.render as (input: unknown) => Promise<string>)({ agent: { tools } });
 
-    const withBoth = await render(["artifact", "artifact_inline"]);
+    const guide = await render(withInline);
 
-    assert.match(withBoth, /artifact_inline shows the page as a card in your reply/);
-    assert.match(withBoth, /only a call you make directly shows a card/i);
-    assert.ok(withBoth.includes(BRIDGE_GUIDE), "the section names the bridge guide");
+    assert.match(guide, /inline: true shows the page as a card in your reply/);
+    assert.match(guide, /only a call you make directly shows a card/i);
+    assert.doesNotMatch(guide, /artifact_inline/);
+    assert.ok(guide.includes(BRIDGE_GUIDE), "the section names the bridge guide");
     const bridge = readFileSync(BRIDGE_GUIDE, "utf8");
 
     assert.match(bridge, /schema, optional, is a string such as "v1"/);
     assert.match(bridge, /focus alone does not count/);
-    // A session without the tool (PiP's) is not told about it.
-    const without = await render(["artifact"]);
+    // A session whose tool has no inline (PiP's) is not told about it.
+    const tool = withoutInline(artifact);
+    const without = await render([{ name: "artifact", parameters: tool.parameters }]);
 
-    assert.doesNotMatch(without, /artifact_inline/);
+    assert.doesNotMatch(without, /inline/);
     assert.match(without, /Use the artifact tool/);
+    // Nor does its description offer a card it cannot draw.
+    assert.doesNotMatch(tool.description, /inline|card/);
+});
+
+test("the tool list sends the schema once: no second tool, and about 1,400 characters fewer", () => {
+    const tools = createArtifacts({} as PocketHost).tools!;
+    const sent = JSON.stringify(
+        tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+        })),
+    );
+
+    assert.equal(tools.length, 1);
+    assert.doesNotMatch(sent, /artifact_inline/);
+    // 49a29eef sent 3,549 characters for the two tools.
+    assert.ok(sent.length < 2_300, `${sent.length} characters`);
+});
+
+test("an artifact call with inline: true makes a card; the same call without it does not", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "show a calculator");
+    await say(app, id, "publish notes");
+
+    const entries = await app.transcripts.allEntries(id, false);
+    const published = entries.flatMap((entry) =>
+        entry.kind === "toolResult" && (entry as { name?: string }).name === "artifact"
+            ? [(entry as unknown as { details: Record<string, unknown> }).details]
+            : [],
+    );
+
+    assert.deepEqual(published[0], { id: "loan-calc", title: "Loan", version: 1, inline: true });
+    assert.equal(published[1]!.inline, undefined, "a plain call records no card");
+});
+
+test("an old artifact_inline call is shown to the model as artifact with inline, and nothing stored changes", () => {
+    const old = {
+        role: "assistant",
+        content: [
+            { type: "text", text: "Here:" },
+            { type: "toolCall", id: "c1", name: "artifact_inline", arguments: { id: "a" } },
+            { type: "toolCall", id: "c2", name: "artifact", arguments: { id: "b" } },
+        ],
+    };
+    const result = { role: "toolResult", toolCallId: "c1", toolName: "artifact_inline" };
+    const shown = legacyInline([old, result] as never) as unknown as (typeof old)[];
+
+    assert.deepEqual(shown[0]!.content[1], {
+        type: "toolCall",
+        id: "c1",
+        name: "artifact",
+        arguments: { id: "a", inline: true },
+    });
+    assert.deepEqual(shown[0]!.content[2], old.content[2], "a plain call is as it was");
+    assert.equal((shown[1] as unknown as { toolName: string }).toolName, "artifact");
+    assert.equal(old.content[1]!.name, "artifact_inline", "the stored message is not touched");
+    assert.equal(
+        legacyInline([old.content[0], { role: "user", content: "x" }] as never),
+        undefined,
+    );
+});
+
+/** What the model saw in its newest request after "after the old card": the tools offered, and the messages. */
+const seen: { tools: string[]; messages: string } = { tools: [], messages: "" };
+
+/**
+ * A session from before 0.28, as it is stored: the system entry that offered `artifact_inline`, a call of it with its
+ * result (which names the version), and the version in the store.
+ */
+async function oldSession() {
+    const id = await newSession(app);
+    const text = (value: string) => [{ type: "text" as const, text: value }];
+    const details = { id: "old-card", title: "Old", version: 1, inline: true };
+
+    await inlineCall(
+        id,
+        870_000 + (calls += 1),
+        "old",
+    )({ id: "old-card", title: "Old", content: PAGE });
+    await app.harness.commit(async (tx) => {
+        await tx.appendEntry(SystemEntry, id, {
+            model: [
+                {
+                    role: "system",
+                    content: "",
+                    toolsAdded: [
+                        {
+                            name: "artifact_inline",
+                            description: "old",
+                            parameters: { type: "object" },
+                        },
+                    ],
+                    timestamp: Date.now(),
+                },
+            ],
+        });
+        await tx.appendEntry(UserEntry, id, {
+            model: [{ role: "user", content: "make a loan card", timestamp: Date.now() }],
+        });
+        await tx.appendEntry(AssistantEntry, id, {
+            model: [
+                fauxAssistantMessage(
+                    [
+                        fauxToolCall(
+                            "artifact_inline",
+                            { id: "old-card", title: "Old", content: PAGE },
+                            { id: "old_1" },
+                        ),
+                    ],
+                    { stopReason: "toolUse" },
+                ),
+            ],
+        });
+        await tx.appendEntry(ToolResultEntry, id, {
+            model: [
+                {
+                    role: "toolResult",
+                    toolCallId: "old_1",
+                    toolName: "artifact_inline",
+                    content: text('Published "Old" as artifact old-card, version 1.'),
+                    details,
+                    isError: false,
+                    timestamp: Date.now(),
+                },
+            ],
+            data: { diagnostics: [] },
+        });
+    }, context);
+
+    return { id, details };
+}
+
+test("an old session keeps its artifact_inline entries and its card, and the model is offered one tool", async () => {
+    const { id, details } = await oldSession();
+
+    await say(app, id, "after the old card");
+
+    const entries = await app.transcripts.allEntries(id, false);
+    const old = entries.filter((entry) => (entry as { name?: string }).name === "artifact_inline");
+
+    assert.equal(old.length, 1, "the stored result keeps its name");
+    assert.deepEqual((old[0] as unknown as { details: unknown }).details, details);
+    assert.equal((await app.artifactBody(id, "old-card", 1)).content, PAGE);
+    assert.ok(seen.tools.includes("artifact"));
+    assert.ok(!seen.tools.includes("artifact_inline"), seen.tools.join());
+    assert.doesNotMatch(
+        seen.messages,
+        /artifact_inline/,
+        "the model is shown the call as artifact",
+    );
+    assert.match(seen.messages, /"name":"artifact"[^}]*"arguments":\{[^}]*"inline":true/);
 });
 
 test("a call creates an artifact and says which version it made; an update leaves the earlier result alone", async () => {
@@ -192,10 +390,11 @@ test("it shares the artifact tool's store: the page is served, and a Markdown ar
     await say(app, id, "show a calculator");
     await say(app, id, "show notes inline");
 
-    const done = await results(id);
+    const done = await results(id, false);
 
     assert.equal(done[0]!.isError, false);
-    assert.equal(done[1]!.isError, true, "an inline call cannot turn a Markdown artifact to HTML");
+    assert.equal(done[1]!.isError, false);
+    assert.equal(done[2]!.isError, true, "an inline call cannot turn a Markdown artifact to HTML");
     assert.equal((await page(me, id, "loan-calc/1")).text, PAGE);
     assert.equal((await app.artifactBody(id, "notes", undefined)).content, "# Notes");
     assert.equal(slugify("Loan Calc"), "loan-calc");
@@ -276,7 +475,7 @@ test("a replayed call finds its version; another call of the same task makes the
     );
 });
 
-test("it takes content or nonempty edits, not both, not a path, and keeps the size limit", async () => {
+test("inline takes content or nonempty edits, not both, not a path, and keeps the size limit", async () => {
     const id = await newSession(app);
     const call = (args: Record<string, unknown>) =>
         inlineCall(id, 830_000 + (calls += 1), "x")(args);
@@ -296,9 +495,9 @@ test("it takes content or nonempty edits, not both, not a path, and keeps the si
         call({ edits: [{ oldText: "a", newText: "b" }] }),
         /no artifact loan-calc to edit/,
     );
-    // The model may send a path or a type anyway: they are the artifact tool's, and change nothing here.
-    await assert.rejects(call({ path: "page.md" }), /exactly one of/);
-    await assert.rejects(call({ type: "markdown" }), /exactly one of/);
+    // A path is for a page the user opens, and an inline page is HTML.
+    await assert.rejects(call({ path: "page.html" }), /path is for a page the user opens/);
+    await assert.rejects(call({ content: PAGE, type: "markdown" }), /inline page is HTML/);
     await assert.rejects(call({ content: "x".repeat(2_000_001) }), /limited to/);
     await call({ content: PAGE });
     await assert.rejects(call({ edits: [{ oldText: "absent", newText: "b" }] }), /not found/);
@@ -373,7 +572,11 @@ test("cards and versions survive closing and reopening the storage", async () =>
     try {
         const entries = await second.transcripts.allEntries(id, false);
         const versions = entries
-            .filter((entry) => (entry as { name?: string }).name === "artifact_inline")
+            .filter(
+                (entry) =>
+                    (entry as { name?: string }).name === "artifact" &&
+                    (entry as { details?: { inline?: boolean } }).details?.inline === true,
+            )
             .map((entry) => (entry as unknown as { details: { version: number } }).details.version);
 
         assert.deepEqual(versions, [1, 2]);

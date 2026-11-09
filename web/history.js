@@ -1,13 +1,10 @@
 // What this person sent from this browser in one session, oldest first: ↑ recalls it and Ctrl+R searches it.
-// Old unscoped strings in pocket.history stay untouched; their sessions cannot be known.
+import { HISTORY as KEY, HISTORY_MAX as MAX, personStorage } from "./person-storage.js";
 
-const KEY = "pocket.history.v2";
-const MAX = 200;
-
-/** All scoped records, bounded together across people and sessions. */
-function readHistory() {
+/** All of this person's scoped records, bounded together across sessions. */
+function readHistory(person) {
     try {
-        const list = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+        const list = JSON.parse(personStorage.get(KEY, person) ?? "[]");
 
         return Array.isArray(list)
             ? list.filter(
@@ -28,7 +25,7 @@ const inScope = (each, scope) =>
 
 /** This person's remembered text in this session, oldest first. */
 export function sentHistory(scope) {
-    return readHistory()
+    return readHistory(scope.person)
         .filter((each) => inScope(each, scope))
         .map((each) => each.text);
 }
@@ -41,15 +38,13 @@ export function remember(text, scope) {
         return;
     }
 
-    const list = readHistory().filter((each) => !inScope(each, scope) || each.text !== value);
+    const list = readHistory(scope.person).filter(
+        (each) => !inScope(each, scope) || each.text !== value,
+    );
 
     list.push({ person: scope.person, conversation: scope.conversation, text: value });
 
-    try {
-        localStorage.setItem(KEY, JSON.stringify(list.slice(-MAX)));
-    } catch {
-        // Storage is full: the history only stays as it was.
-    }
+    personStorage.set(KEY, JSON.stringify(list.slice(-MAX)), scope.person);
 }
 
 /** Scoped text with every word of `query` in it, newest first. */

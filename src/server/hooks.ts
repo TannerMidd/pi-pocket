@@ -445,6 +445,35 @@ export class Hooks {
         return this.view(hook);
     }
 
+    async update(user: User, id: string, instructions: unknown): Promise<HookView> {
+        this.#app.requireSteer(user);
+
+        if (typeof instructions !== "string") {
+            throw new HttpError(400, "instructions must be a string.");
+        }
+
+        const text = instructions.trim();
+
+        if (text.length > MAX_INSTRUCTIONS) {
+            throw new HttpError(413, `Instructions are limited to ${MAX_INSTRUCTIONS} characters.`);
+        }
+
+        const hook = await this.#app.harness.commit(async (tx) => {
+            const { items } = await tx.doc(HooksDoc);
+            const item = Object.hasOwn(items, id) ? items[id] : undefined;
+
+            if (item === undefined || (user.role !== "owner" && item.by !== user.id)) {
+                throw new HttpError(404, "No such webhook");
+            }
+
+            item.instructions = text;
+
+            return { ...item };
+        }, context);
+
+        return this.view(hook);
+    }
+
     /** A new secret for a hook whose address or secret got out: the old one lets nothing in from now on. */
     async rotate(user: User, id: string): Promise<HookView> {
         const hook = await this.#app.harness.commit(async (tx) => {

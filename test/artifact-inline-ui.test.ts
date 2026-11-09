@@ -1,4 +1,4 @@
-// The card of an artifact_inline call (#87), in a real Chromium: between the words around it, Preview and Code, Run and
+// The card of an inline artifact call (#87), in a real Chromium: between the words around it, Preview and Code, Run and
 // Stop, the viewer a tap away, the version its call made (an update adds a card and leaves the earlier one), the artifact
 // bridge once it runs (a follow-up after a tap; saved state), and the same for a viewer and for someone invited to
 // this session alone.
@@ -21,7 +21,12 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import {
+    AssistantEntry,
+    type ConversationId,
+    ToolResultEntry,
+    UserEntry,
+} from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
@@ -59,7 +64,12 @@ const route: Parameters<typeof scriptedModel>[0] = (context) => {
         return fauxAssistantMessage(
             [
                 fauxText("Here is a loan calculator:"),
-                fauxToolCall("artifact_inline", { id: "loan-calc", title: "Loan", content: PAGE }),
+                fauxToolCall("artifact", {
+                    inline: true,
+                    id: "loan-calc",
+                    title: "Loan",
+                    content: PAGE,
+                }),
             ],
             { stopReason: "toolUse" },
         );
@@ -69,7 +79,8 @@ const route: Parameters<typeof scriptedModel>[0] = (context) => {
         return fauxAssistantMessage(
             [
                 fauxText("Now with years:"),
-                fauxToolCall("artifact_inline", {
+                fauxToolCall("artifact", {
+                    inline: true,
                     id: "loan-calc",
                     title: "Loan",
                     edits: [
@@ -84,7 +95,8 @@ const route: Parameters<typeof scriptedModel>[0] = (context) => {
     if (text.includes("edit a missing page")) {
         return fauxAssistantMessage(
             [
-                fauxToolCall("artifact_inline", {
+                fauxToolCall("artifact", {
+                    inline: true,
                     id: "missing",
                     title: "Missing",
                     edits: [{ oldText: "a", newText: "b" }],
@@ -528,5 +540,56 @@ test(
             sizes.frame >= sizes.page,
             `the frame (${sizes.frame}) shows all its page (${sizes.page})`,
         );
+    },
+);
+
+test(
+    "an old session's artifact_inline call still draws a card, beside a new call's",
+    real,
+    async () => {
+        const old = await newSession(app);
+        const details = { id: "loan-calc", title: "Old", version: 1, inline: true };
+
+        await say(app, old, "show a calculator");
+        await app.harness.commit(async (tx) => {
+            await tx.appendEntry(UserEntry, old, {
+                model: [{ role: "user", content: "an old card", timestamp: Date.now() }],
+            });
+            await tx.appendEntry(AssistantEntry, old, {
+                model: [
+                    fauxAssistantMessage(
+                        [
+                            fauxToolCall(
+                                "artifact_inline",
+                                { id: "loan-calc", title: "Old", content: PAGE },
+                                { id: "old_1" },
+                            ),
+                        ],
+                        { stopReason: "toolUse" },
+                    ),
+                ],
+            });
+            await tx.appendEntry(ToolResultEntry, old, {
+                model: [
+                    {
+                        role: "toolResult",
+                        toolCallId: "old_1",
+                        toolName: "artifact_inline",
+                        content: [{ type: "text", text: "Published." }],
+                        details,
+                        isError: false,
+                        timestamp: Date.now(),
+                    },
+                ],
+                data: { diagnostics: [] },
+            });
+        }, context);
+        await page.navigate(`${base}/s/${old}`);
+        await until(async () => (await count(".inline-artifact")) === 2, "both cards", SLOW);
+        const titles = await inPage<string[]>(
+            `return JSON.stringify([...document.querySelectorAll(".inline-artifact .code-lang")].map((each) => each.textContent.trim()))`,
+        );
+
+        assert.deepEqual(titles, ["Loan · v1", "Old · v1"]);
     },
 );

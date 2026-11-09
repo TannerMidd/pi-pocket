@@ -51,10 +51,10 @@ async function inPage<T>(script: string): Promise<T> {
     return JSON.parse(await page.evaluate(script)) as T;
 }
 
-/** The ids of the rows the sidebar's list shows now. */
+/** The ids of the rows the sidebar's list shows now: not those of the list a search keeps out of sight. */
 const rows = () =>
     inPage<number[]>(
-        `return JSON.stringify([...document.querySelectorAll(".sidebar .session-row")].map((row) => Number(row.dataset.id)))`,
+        `return JSON.stringify([...document.querySelectorAll(".sidebar .session-group:not(.kept) .session-row")].map((row) => Number(row.dataset.id)))`,
     );
 
 const chipsOf = (id: ConversationId) =>
@@ -205,6 +205,40 @@ test("extension words are reused while typing and refreshed on update", real, as
         "the original words restored",
     );
     await search("");
+});
+
+test(
+    "a search keeps the list's own rows, and its end shows the same ones again",
+    real,
+    async () => {
+        const id = await inPage<string>(
+            `window.keptRow = document.querySelector(".sidebar .session-row"); return JSON.stringify(window.keptRow.dataset.id)`,
+        );
+
+        await search(`word${second}`);
+        await until(async () => (await rows()).join() === String(second), "the match");
+        await search("");
+        await until(async () => (await rows()).includes(Number(id)), "the list again");
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector('.sidebar .session-row[data-id="${id}"]') === window.keptRow)`,
+            ),
+            true,
+            "the same row, not one made again",
+        );
+    },
+);
+
+test("a browser without content-visibility does not show the kept groups", real, async () => {
+    // Chromium has it: the fallback is checked as the page's stylesheet has it.
+    const fallback = await inPage<string>(`
+        const all = (rules) => [...rules].flatMap((rule) => [rule, ...all(rule.cssRules ?? rule.styleSheet?.cssRules ?? [])]);
+        const rule = all([...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])).find(
+            (each) => each.conditionText === "not (content-visibility: hidden)");
+        return JSON.stringify(rule?.cssRules[0].cssText);
+    `);
+
+    assert.equal(fallback, ".session-group.kept { display: none; }");
 });
 
 test("the search and the launcher find a session by an extension's words", real, async () => {

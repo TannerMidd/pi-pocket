@@ -14,7 +14,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { createRegistry, UsageDoc } from "@earendil-works/pi-durable";
@@ -288,6 +288,27 @@ test("while paused for an update, an edited module loads nothing; after the paus
         loader.pause(false);
         writeFileSync(join(dropIn, "paused.ts"), gated("paused", 3));
         await until(() => installed().includes("t-paused@3"), "the edit after the pause loads");
+    } finally {
+        await loader.close();
+    }
+});
+
+test("an event that leaves a module's file as it was loads nothing: Windows reports a read too", async () => {
+    const { dropIn, loader, notices, installed } = setUp();
+    const file = join(dropIn, "still.ts");
+
+    writeFileSync(file, gated("still", 1));
+    await loader.reload("still.ts");
+    loader.watch();
+
+    try {
+        // New permissions: Linux reports them, as Windows reports a read.
+        chmodSync(file, 0o600);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        assert.ok(!notices.some((each) => /Reloaded still\.ts/.test(each.message)));
+
+        writeFileSync(file, gated("still", 2));
+        await until(() => installed().includes("t-still@2"), "the edit loads");
     } finally {
         await loader.close();
     }

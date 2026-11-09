@@ -37,6 +37,7 @@ import {
     sessionOrder,
     setUnread,
     signOut,
+    openId,
     store,
     workspaceOrder,
 } from "./store.js";
@@ -234,6 +235,12 @@ function actionItems() {
             icon: "artifact",
             run: () => openSheet({ type: "artifacts" }),
         },
+        {
+            label: "All artifacts",
+            detail: "every session, with its current version",
+            icon: "artifact",
+            run: () => openSheet({ type: "all-artifacts" }),
+        },
         conversation &&
             filesAvailable() && {
                 label:
@@ -425,13 +432,19 @@ function actionItems() {
             label: "Running now",
             detail: "everything Pi is doing",
             icon: "pulse",
-            run: () => openSheet({ type: "running" }),
+            run: () => toggleBoard("running"),
+        },
+        session && {
+            label: "Background",
+            detail: "what commands print as they run",
+            icon: "terminal",
+            run: () => openSheet({ type: "background" }),
         },
         {
-            label: store.state.board ? "Close the subagents board" : "Subagents",
+            label: store.state.board === "subagents" ? "Close the subagents board" : "Subagents",
             detail: "subagents in every session",
             icon: "fork",
-            run: toggleBoard,
+            run: () => toggleBoard("subagents"),
         },
         collab() && {
             label: "Notifications",
@@ -551,7 +564,7 @@ function sessionItems() {
             detail: shortPath(session.cwd, server?.home),
             status:
                 [
-                    session.id === store.state.conversationId ? "Current" : null,
+                    session.id === openId() ? "Current" : null,
                     session.waiting ? "Waiting" : session.busy ? "Working" : null,
                     session.archived ? "Archived" : null,
                 ]

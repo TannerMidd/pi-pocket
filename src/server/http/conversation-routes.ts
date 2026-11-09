@@ -6,9 +6,11 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
+import { outcome } from "../background.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
+import { prepareModelImage } from "../model-images.ts";
 import { reveal } from "../reveal.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
@@ -29,6 +31,23 @@ function safeName(name: string): string {
         .trim();
 
     return base === "" || base.startsWith(".") ? `upload${base}` : base.slice(0, 120);
+}
+
+/**
+ * An upload's type: what the browser said, or the one its name gives when the browser said nothing
+ * useful. A HEIC photo can arrive as `application/octet-stream` from a browser that does not know
+ * it.
+ */
+export function uploadMime(name: string, header: string | undefined): string {
+    const declared = String(header ?? "")
+        .split(";")[0]!
+        .trim();
+    const mime =
+        declared === "" || declared === "application/octet-stream"
+            ? TYPES[extname(name).toLowerCase()]
+            : declared;
+
+    return (mime ?? "application/octet-stream").split(";")[0]!.trim();
 }
 
 export async function conversationRoutes(
@@ -614,6 +633,62 @@ export async function conversationRoutes(
         return json(response, 200, { ok: true });
     }
 
+    // A session's background commands, newest first, and what one of them prints as it runs: anyone who may see the
+    // session watches them, also one who only watches. A look moves nothing: what Pi reads next stays as it is.
+    if (third === "background" && fourth === undefined && method === "GET") {
+        app.requireSee(user, id);
+
+        return json(response, 200, {
+            tasks: (await app.background.list(id)).map((item) => ({
+                id: item.id,
+                taskId: item.taskId,
+                command: app.hidden.replace(item.command, id),
+                cwd: item.cwd,
+                status: item.status,
+                outcome: outcome(item),
+                code: item.code ?? null,
+                notify: item.notify,
+                startedAt: item.startedAt,
+                endedAt: item.endedAt ?? null,
+            })),
+        });
+    }
+
+    // What a background task printed, from a byte on: `from` is where the last look ended, and `to` where this one did.
+    if (
+        third === "background" &&
+        fourth !== undefined &&
+        parts[4] === "output" &&
+        method === "GET"
+    ) {
+        app.requireSee(user, id);
+        const from = Number(url.searchParams.get("from"));
+        const chars = Number(url.searchParams.get("chars"));
+        const read = await app.background.output(id, fourth, {
+            ...(url.searchParams.has("from") && Number.isFinite(from) ? { from } : {}),
+            ...(Number.isFinite(chars) && chars > 0 ? { chars } : {}),
+        });
+
+        if (read === undefined) {
+            throw new HttpError(404, "No such background task here.");
+        }
+
+        return json(response, 200, {
+            text: read.text,
+            from: read.from,
+            to: read.to,
+            skipped: read.skipped,
+            item: {
+                id: read.item.id,
+                status: read.item.status,
+                outcome: outcome(read.item),
+                code: read.item.code ?? null,
+                startedAt: read.item.startedAt,
+                endedAt: read.item.endedAt ?? null,
+            },
+        });
+    }
+
     // Running now's Stop for a command Pi runs in the background: anyone who may steer the session.
     if (
         third === "background" &&
@@ -716,6 +791,8 @@ export async function conversationRoutes(
         }
 
         await app.conversation(id);
+        // A remote session's machine cannot read a file stored on this one.
+        app.workspace.requireLocal(id);
         const name = safeName(url.searchParams.get("name") ?? "upload");
         const directory = app.workspace.uploadDirectory(id);
         // Unique, and never written over: pasted images all arrive as image.png, often at once.
@@ -749,16 +826,15 @@ export async function conversationRoutes(
             throw new HttpError(400, "The upload stopped before it finished");
         }
 
-        const mime =
-            String(request.headers["content-type"] ?? "") ||
-            TYPES[extname(name).toLowerCase()] ||
-            "application/octet-stream";
         const attachment: Attachment = {
             path: file,
             name,
-            mime: mime.split(";")[0]!.trim(),
+            mime: uploadMime(name, request.headers["content-type"]),
             size,
         };
+
+        // Made ready for the model while the person still writes: their message then goes at once.
+        prepareModelImage(file, attachment.mime, size);
 
         return json(response, 200, attachment);
     }

@@ -298,8 +298,12 @@ export function summarize(steps, thinking) {
     return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
-/** The tool whose pages show as cards in the reply (`src/server/extensions/artifacts.ts`). */
-export const INLINE_TOOL = "artifact_inline";
+/**
+ * Whether a call shows its page as a card in the reply (`src/server/extensions/artifacts.ts`): `artifact` with
+ * `inline: true`, or `artifact_inline`, the tool of that name before 0.28, whose calls are still in old sessions.
+ */
+export const isInlineCall = (block) =>
+    block.name === "artifact_inline" || (block.name === "artifact" && block.args?.inline === true);
 
 /** Words worth showing: a model can send an empty or blank text block between its calls. */
 export const says = (block) => block.type === "text" && block.text.trim() !== "";
@@ -346,7 +350,7 @@ export function itemsOf(rows, partial, { prefix = "", from = null, talk = false 
             const growing = streaming && index === entry.blocks.length - 1;
 
             // A page shown in the reply sits between the words around it, not folded into a group of steps.
-            if (block.type === "toolCall" && block.name === INLINE_TOOL) {
+            if (block.type === "toolCall" && isInlineCall(block)) {
                 words = null;
                 close();
                 let key = `${prefix}i${block.id || `${anchor}:${inlines++}`}`;

@@ -10,7 +10,7 @@ Use `defineTool` from `@earendil-works/pi-durable`, and give the tool to your ex
 const wordCount = defineTool({
     name: "my_word_count",
     description: "Count the words in a text.",
-    parameters: Type.Object({ text: Type.String({ description: "The text to count" }) }),
+    parameters: obj({ text: str({ description: "The text to count" }) }),
     replay: "safe",
     execute: async (args) => ({
         output: [{ type: "text" as const, text: `${countWords(args.text)} words` }],
@@ -27,8 +27,8 @@ export default function createMyWords() {
 
 - `name` must be different from the name of each other tool ([Names](reference/names.md)). Use a prefix of your own.
 - `description` and `parameters` go to the model with each request. Keep them short and exact.
-- `deferred: true` keeps a tool out of the requests until Pi loads it with `tool_search`, which only the Tool search module offers: while it is off, Pi cannot load the tool. Use it for a tool that few conversations need, or for a large set of tools. `test/prompt-budget.test.ts` keeps Pi Pocket's own prompt and tools at 16,000 characters in a plain session.
-- `parameters` is a TypeBox schema (`Type` from `@earendil-works/pi-ai`). Pi Durable checks the arguments against it before `execute` runs.
+- `deferred: true` keeps a tool out of the requests until Pi loads it with `tool_search`, which only the Tool search module offers: while it is off, Pi cannot load the tool. Use it for a tool that few conversations need, or for a large set of tools. `test/prompt-budget.test.ts` keeps Pi Pocket's own prompt and tools under 14,000 characters (about 5,000 tokens) in a plain session, a guard against growth by accident: a rule that makes the work better is worth its tokens.
+- `parameters` is a JSON Schema object. Build it with the builders of `@earendil-works/pi-schema`: `obj`, `str`, `num`, `int`, `bool`, `arr`, `union`, and `opt` for a property that can be left out. `obj` makes a closed object (`additionalProperties: false`); `obj(properties, { open: true })` lets other properties through. Pi Durable checks the arguments against the schema before `execute` runs. Since Pi 1.5 (Pi Pocket 0.28.0), pi-schema does the check, and the model gets its messages, such as `- path: missing`. A drop-in written before can keep TypeBox's `Type` from `@earendil-works/pi-ai` ([API versions](reference/api-versions.md)).
 - `execute(args, api, context)` does the work.
 
 ## Return a result

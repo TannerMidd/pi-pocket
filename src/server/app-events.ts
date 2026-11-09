@@ -31,7 +31,17 @@ export interface AppEvents {
     };
     /** Pi started to work in a conversation: a session's or a subagent's (`session` is its session). */
     "run.started": { conversationId: number; session: number };
-    "run.ended": { conversationId: number; session: number };
+    /**
+     * Pi stopped working. `outcome` is `done` when the run finished, `failed` when it gave up (a model error, no model,
+     * or a broken run), or `aborted` when it was stopped. `failure` is why, the same short line the session list shows,
+     * and only when `outcome` is `failed`. A session's failure stands until a later run starts.
+     */
+    "run.ended": {
+        conversationId: number;
+        session: number;
+        outcome: "done" | "failed" | "aborted";
+        failure?: string;
+    };
 }
 
 export type AppEventName = keyof AppEvents;

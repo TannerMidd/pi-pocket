@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { PipCompactionDoc } from "./docs.ts";
+import { CONTEXT_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
 import { noWait } from "./limit-gate.ts";
 import { clip, defang } from "./fence.ts";
@@ -86,6 +87,7 @@ const OWN_TOOLS = new Set([
     "schedule",
     "memory",
     "artifact",
+    // Not a tool since 0.28.0: PiP's earlier notes still hold its results.
     "artifact_inline",
 ]);
 
@@ -106,10 +108,20 @@ export function leaveOutside(text: string): string {
     return text.replace(OUTSIDE, (_whole, tag: string) => LEFT_OUT[tag] ?? "[left out]");
 }
 
+/**
+ * A message's text for the summary. What Pi Pocket added for PiP alone (`CONTEXT_BLOCK`: where a quoted passage came
+ * from) stays out: a session's title in it is anyone's words.
+ */
 const textOf = (content: string | readonly { type: string; text?: string }[]): string =>
     typeof content === "string"
         ? content
         : content
+              .filter(
+                  (block, index) =>
+                      index === 0 ||
+                      block.type !== "text" ||
+                      !block.text?.startsWith(CONTEXT_BLOCK),
+              )
               .map((block) =>
                   block.type === "text"
                       ? (block.text ?? "")
@@ -179,7 +191,7 @@ ${source}
 Write the notes for the conversation above. If it starts with earlier notes, keep what still holds and fold the newer messages into them. Use these headings, with a few short lines under each, and "(none)" when there is nothing:
 
 ## ${name}'s preferences
-What ${name} told PiP to do or not to do, and how they like things done, in their words where short.
+What ${name} told PiP to do or not to do, and how they like things done, in their words where short, and the language they write to PiP in.
 
 ## Open threads
 Requests not done yet, questions waiting for an answer, and what PiP said it would do later.

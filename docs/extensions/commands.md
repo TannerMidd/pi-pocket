@@ -63,7 +63,7 @@ The handler runs with the owner's rights, as all of the module does. A conversat
 
 Each run is a durable task, kept by the person who ran it, the session, and the request's id.
 
-- When a reply gets lost, the same text sent again from the same tab finds the first run, and gets its result. The handler runs one time. Pi Pocket keeps the ids of a person's recent runs only ([limits](reference/limits.md#commands)).
+- When a reply gets lost, the same text sent again from the same browser, also after a reload, finds the first run, and gets its result. The handler runs one time. Pi Pocket keeps the ids of a person's recent runs only ([limits](reference/limits.md#commands)).
 - A restart of the server never runs a handler again. The person hears that it was stopped, because it can have done a part of its work.
 - Menu → **Running now** shows a command while it runs, and can stop it. People who steer stop conversation commands; the owner stops global commands.
 - To stop a run aborts `ctx.signal`. It does not undo what the handler did. A stop just after the handler wrote its card leaves the card, and the run says that it was stopped.

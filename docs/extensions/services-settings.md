@@ -12,14 +12,14 @@ if (typeof host.on !== "function" || typeof web.provide !== "function") {
 
 `host.on(event, listener)` calls `listener` each time something happens in the app ([reference](reference/host.md#on)):
 
-| Event              | When                                                                 |
-| ------------------ | -------------------------------------------------------------------- |
-| `session.created`  | A session is made: by a person, a fork, a linked start, or a resend. |
-| `session.renamed`  | A session gets a new title.                                          |
-| `session.archived` | A session is archived, or brought back.                              |
-| `message.sent`     | A person sends Pi a message, a steer or a queued one too.            |
-| `run.started`      | Pi starts to work in a session or a subagent.                        |
-| `run.ended`        | Pi stops.                                                            |
+| Event              | When                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `session.created`  | A session is made: by a person, a fork, a linked start, or a resend.                 |
+| `session.renamed`  | A session gets a new title.                                                          |
+| `session.archived` | A session is archived, or brought back.                                              |
+| `message.sent`     | A person sends Pi a message, a steer or a queued one too.                            |
+| `run.started`      | Pi starts to work in a session or a subagent.                                        |
+| `run.ended`        | Pi stops: the run finished (`done`), gave up (`failed`), or was stopped (`aborted`). |
 
 ```typescript
 web.onDispose(

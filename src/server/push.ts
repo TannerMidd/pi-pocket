@@ -49,6 +49,16 @@ export type PushMessage = {
     approval?: { id: string; allow: boolean };
 };
 export type Urgency = "very-low" | "low" | "normal" | "high";
+/**
+ * A notification as an embedder gets it over its live connection (`embedder-notify`,
+ * `PocketApp.notifyEmbedders`): the push message, its urgency, and for an approval the whole call
+ * and whether this person may allow it, so that the embedder decides how much of it to show and whether
+ * to offer Allow (docs/embedders.md).
+ */
+export type EmbedderMessage = PushMessage & {
+    urgency: Urgency;
+    approval?: { id: string; allow: boolean; may: boolean; call: string };
+};
 
 const DEFAULT_SUBJECT = "mailto:pi-pocket@example.com";
 const DEFAULT_RECORD_SIZE = 4096;
