@@ -108,8 +108,10 @@ Good tests check what a person hears and sees, not how the module is written:
   a second read replaces the first; new answers on reads the answers of a run when it ends, in
   order and one time each; a tab whose person is not Pi's in the session reads no new answer.
 - **Unit:** the Markdown-to-words function alone, on the shapes that answers take.
-- The test module lives in `test/voice-output/` (the 2 drop-in files) and `test/voice-output.test.ts`,
-  and the same 2 files are the ones that a person copies into `~/.pi-pocket/extensions/`.
+- The 2 drop-in files live in `test/voice-output/` (`voice-output.ts` and the folder `voice-output/`),
+  and they are the ones that a person copies into `~/.pi-pocket/extensions/`. The browser module
+  `voice-output/index.js` and the test `test/voice-output.test.ts` were removed on the branch
+  `pocket/upgrade-fork-to-newest-pi-pocket-pi-6c2a3e`, at the request of the owner.
 
 The checks before a share: `npm run check`, `npm run lint`, and `npm test` in Pi Pocket, with
 the module copied into `test/` for the run and removed after.
