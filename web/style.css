@@ -6003,7 +6003,7 @@ pre.diff .del {
  * A linked computer's session: the same states as the square, in an upward triangle. A triangle in the square's box
  * has half its area and looks a size smaller, so it is drawn larger (11 × 10 beside the 8px square, 12 × 11 beside a
  * peek tile's 9px one) with negative margins: its layout box stays the square's, and names line up from row to row.
- * Its weight sits low, so it is drawn half a pixel high. Masks cut transparent holes, so outlines keep the row's
+ * It sits on whole pixels, a pixel high, as its weight sits low. Masks cut transparent holes, so outlines keep the row's
  * normal, selected, or hovered background. Three small corner triangles, with one lit, replace the working square's
  * four quadrants. Every inner size follows --tw and --th.
  */
@@ -6019,8 +6019,8 @@ pre.diff .del {
     --ch: calc(var(--th) * 0.44);
     width: var(--tw);
     height: var(--th);
-    margin: calc((8px - var(--th)) / 2 - 0.5px) calc((8px - var(--tw)) / 2)
-        calc((8px - var(--th)) / 2 + 0.5px);
+    /* On whole pixels (8 − 11 and 8 − 10, split unevenly): half-pixel edges blur the cross inside to a blob. */
+    margin: -1px -2px -1px -1px;
     border-radius: 0;
     clip-path: polygon(50% 0, 100% 100%, 0 100%);
     box-shadow: none;
@@ -6033,8 +6033,7 @@ pre.diff .del {
     --inner-width: calc(var(--tw) - var(--line-w) * 3.37);
     width: var(--tw);
     height: var(--th);
-    margin: calc((9px - var(--th)) / 2 - 0.5px) calc((9px - var(--tw)) / 2)
-        calc((9px - var(--th)) / 2 + 0.5px);
+    margin: -1px -2px -1px -1px;
 }
 
 .state-mark.remote.seen:not(.failed) {
