@@ -416,6 +416,54 @@ test("open refuses an unapproved session and a session whose real folder does no
     );
 });
 
+test("open also allows the companion files Pocket names beside the Pi file, and no other", async () => {
+    const link = app.runners.link(runnerId);
+    const session = randomUUID();
+    const { path } = save("Companion history");
+    const beside = `${path}.acp.json`;
+    const other = `${path}.unregistered.json`;
+
+    writeFileSync(beside, '{"blocks":[]}');
+    writeFileSync(other, "not asked for");
+
+    await link.confirm({ kind: "new", session, folder: project, person: "Owner" });
+    const result = await link.piSessions({
+        op: "open",
+        path,
+        session,
+        person: "Owner",
+        companions: [".acp.json", ".missing.json"],
+    });
+    const env = app.runners.env(runnerId, project, {
+        id: session,
+        folder: project,
+        person: "Owner",
+    });
+
+    assert.deepEqual(result.companions, [`${result.path}.acp.json`], "only the one that exists");
+    assert.equal((await env.readTextFile(`${result.path}.acp.json`, context)).ok, true);
+    assert.equal(
+        (await env.readTextFile(other, context)).ok,
+        false,
+        "one nobody named stays closed",
+    );
+    assert.equal(
+        parseControl(
+            JSON.stringify({
+                type: "pi-sessions",
+                id: "x",
+                op: "open",
+                path,
+                session,
+                person: "Owner",
+                companions: ["/../../etc/passwd"],
+            }),
+        ),
+        undefined,
+        "a suffix that is a path is refused",
+    );
+});
+
 test("the extra readable file expires after 5 minutes while the session permission remains valid", async () => {
     const link = app.runners.link(runnerId);
     const session = randomUUID();

@@ -9,7 +9,7 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
     FOUND_FOR_MS,
@@ -47,6 +47,7 @@ import type {
 } from "./protocol.ts";
 import {
     CLOSE,
+    COMPANION_SUFFIX,
     type Confirm,
     type Confirmed,
     type ApprovalNeeded,
@@ -1424,9 +1425,32 @@ export class Runner {
                     }
 
                     const path = await realpath(info.path);
+                    const companions: string[] = [];
 
                     await this.#session.gate.allowRead(request.session, path);
-                    result = { type: "pi-sessions-result", id: request.id, ok: true, path };
+
+                    // What extensions keep beside Pi's file (Billion Context's `.acp.json`) comes along, read alike.
+                    for (const suffix of new Set(request.companions ?? [])) {
+                        if (!COMPANION_SUFFIX.test(suffix)) {
+                            continue;
+                        }
+
+                        const file = `${path}${suffix}`;
+                        const found = await lstat(file).catch(() => undefined);
+
+                        if (found?.isFile() === true) {
+                            await this.#session.gate.allowRead(request.session, file);
+                            companions.push(file);
+                        }
+                    }
+
+                    result = {
+                        type: "pi-sessions-result",
+                        id: request.id,
+                        ok: true,
+                        path,
+                        ...(companions.length === 0 ? {} : { companions }),
+                    };
                 } else {
                     const at = this.#piPreviews.get(previewKey(request.person, info.path));
 

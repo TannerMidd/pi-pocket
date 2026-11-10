@@ -95,9 +95,23 @@ export type RunnerPiSession = {
     modified: number;
     messages: number;
 };
+/** A companion file's suffix (`.acp.json`): a dot, then letters, digits, `.`, `_`, `-`; never a path. */
+export const COMPANION_SUFFIX = /^\.[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 export type PiSessionsRequest = { type: "pi-sessions"; id: string } & PiSessionsQuery;
 export type PiSessionsQuery = { person: string } & (
-    { op: "list" } | { op: "preview"; path: string } | { op: "open"; path: string; session: string }
+    | { op: "list" }
+    | { op: "preview"; path: string }
+    | {
+          op: "open";
+          path: string;
+          session: string;
+          /**
+           * Suffixes of files extensions keep beside Pi's file (`.acp.json`): each one there is also allowed to read,
+           * like the Pi file, and named in `companions`. Older runners ignore it.
+           */
+          companions?: string[];
+      }
 );
 export type PiSessionsResult = {
     type: "pi-sessions-result";
@@ -107,6 +121,8 @@ export type PiSessionsResult = {
     sessions?: RunnerPiSession[];
     preview?: { model: string | null; last: { role: "user" | "assistant"; text: string }[] };
     path?: string;
+    /** For `open`: the companion files beside `path` this session may read now. */
+    companions?: string[];
 };
 
 /** Runner-owned background tasks, independent of the pi-env daemon session. */
@@ -333,7 +349,14 @@ export function parseControl(text: string): ControlMessage | undefined {
                     (message.op === "preview" && bounded(message.path)) ||
                     (message.op === "open" &&
                         bounded(message.path) &&
-                        bounded(message.session, 256)))
+                        bounded(message.session, 256) &&
+                        (message.companions === undefined ||
+                            (Array.isArray(message.companions) &&
+                                message.companions.length <= 16 &&
+                                message.companions.every(
+                                    (suffix) =>
+                                        typeof suffix === "string" && COMPANION_SUFFIX.test(suffix),
+                                )))))
                 ? (message as PiSessionsRequest)
                 : undefined;
 
@@ -344,6 +367,10 @@ export function parseControl(text: string): ControlMessage | undefined {
                 typeof message.ok === "boolean" &&
                 (message.reason === undefined || bounded(message.reason, 4096)) &&
                 (message.path === undefined || bounded(message.path)) &&
+                (message.companions === undefined ||
+                    (Array.isArray(message.companions) &&
+                        message.companions.length <= 16 &&
+                        message.companions.every((path) => bounded(path)))) &&
                 (message.sessions === undefined ||
                     (Array.isArray(message.sessions) &&
                         message.sessions.length <= 300 &&
