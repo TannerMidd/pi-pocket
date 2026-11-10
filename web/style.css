@@ -2038,8 +2038,12 @@ kbd {
 }
 
 /* Light themes' magenta can be faint as text on their ground: toward the foreground, as a thought's mark is. */
-:root[data-mode="light"] :is(.linked-mark, .linked-tag) {
+:root[data-mode="light"] :is(.linked-mark, .linked-tag, .status-line .schedules-now) {
     color: color-mix(in oklab, var(--spark) 60%, var(--body));
+}
+
+:root[data-mode="light"] .sched-sheet {
+    --sched: color-mix(in oklab, var(--spark) 60%, var(--body));
 }
 
 .linked-name {
@@ -4727,6 +4731,72 @@ pre.diff .del {
     animation: pulse 1.4s infinite;
 }
 
+/* The session's scheduled messages: a pill on the left, across from the background one, in the theme's second color.
+ * It does not pulse: nothing runs yet. Hovered, it shows a countdown to the next one above it. */
+.status-line .schedules-now {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--spark) 14%, transparent);
+    color: var(--spark);
+    font: inherit;
+}
+
+.status-line .schedules-now.paused {
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    color: var(--muted);
+}
+
+.status-line .schedules-tip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 210px;
+    max-width: min(300px, calc(100vw - 24px));
+    padding: 8px 10px;
+    border-radius: var(--r-card);
+    background: var(--raised);
+    box-shadow: var(--pop);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text);
+    text-align: left;
+    white-space: normal;
+    pointer-events: none;
+}
+
+.status-line .schedules-tip .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+}
+
+.status-line .schedules-tip .countdown {
+    font: 600 15px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--spark);
+}
+
+.status-line .schedules-tip .what {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.status-line .schedules-tip .muted {
+    font-size: 11px;
+}
+
 /* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
 .status-line .speed {
     display: inline-flex;
@@ -4751,6 +4821,7 @@ pre.diff .del {
 .status-line[data-short~="here"] .here.alone,
 .status-line[data-short~="guard"] .guard .word,
 .status-line[data-short~="guard"] .background-now .word,
+.status-line[data-short~="guard"] .schedules-now .word,
 .status-line[data-short~="cache"] .cache,
 .status-line[data-short~="wait"] .speed .wait,
 .status-line[data-short~="wait"] .speed.wait-only {
@@ -10326,22 +10397,408 @@ textarea.notes {
     flex: 1 1 14rem;
 }
 
-/* A scheduled message in its sheet: what Pi gets, when, and who set it. */
-.schedule {
+/* The Schedules sheet: a summary with the next countdown, New schedule and quick add, then a card per schedule; a tap
+ * on one opens the editor in its place. Its color is the status line pill's: the theme's second one. */
+.sched-sheet {
+    --sched: var(--spark);
+    --sched-soft: color-mix(in srgb, var(--spark) 14%, transparent);
+    --sched-line: color-mix(in srgb, var(--spark) 45%, transparent);
+}
+
+.sched-sheet .sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sched-summary {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 11px 14px;
+    padding: 12px 14px;
+    border-radius: var(--r-card);
+    background: var(--sched-soft);
+    color: var(--text);
     font-size: 13.5px;
 }
 
-.schedule > .icon {
+.sched-summary b {
+    font: 600 15px var(--mono);
+}
+
+.sched-next {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.sched-big {
+    font: 600 20px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+}
+
+.sched-add {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.sched-add .button {
     flex: none;
-    box-sizing: content-box;
-    padding: 8px;
+}
+
+.sched-quick {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+}
+
+.sched-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 22px 12px;
+    color: var(--muted);
+    text-align: center;
+}
+
+.sched-empty > .icon {
+    color: var(--sched);
+    margin-bottom: 4px;
+}
+
+.sched-empty p {
+    margin: 0;
+    max-width: 34ch;
+}
+
+.sched-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* A schedule: its card, which a tap edits, and beside it a button to pause or resume it. */
+.sched-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.sched-item.paused .sched-card {
+    border-style: dashed;
+    background: transparent;
+}
+
+.sched-item.paused :is(.sched-text, .sched-mark) {
+    opacity: 0.6;
+}
+
+.sched-item.paused .sched-countdown {
+    color: var(--muted);
+}
+
+.sched-pause {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: none;
+    width: 56px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 11px;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-item.paused .sched-pause {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+@media (hover: hover) {
+    .sched-pause:hover {
+        border-color: var(--sched-line);
+        color: var(--text);
+    }
+}
+
+.sched-pause:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
+.sched-card {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--text);
+    text-align: left;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+.sched-card:disabled {
+    cursor: default;
+}
+
+@media (hover: hover) {
+    .sched-card:not(:disabled):hover {
+        border-color: var(--sched-line);
+        background: var(--card-2);
+    }
+
+    .sched-card:not(:disabled):hover .sched-edit {
+        opacity: 1;
+    }
+}
+
+.sched-card:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
+.sched-mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
     border-radius: var(--r-row);
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.sched-text {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 13.5px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.sched-meta {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.sched-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex: none;
+}
+
+.sched-countdown {
+    font: 12px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+    white-space: nowrap;
+}
+
+.sched-edit {
+    font-size: 11.5px;
+    color: var(--muted);
+    opacity: 0.7;
+}
+
+/* The editor, in a schedule's place or above the list for a new one. */
+.sched-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--sched-line);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.sched-editor textarea {
+    resize: vertical;
+    min-height: 140px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.sched-kinds {
+    align-self: stretch;
+}
+
+.sched-kinds button {
+    flex: 1;
+}
+
+.sched-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-row input[type="date"],
+.sched-row input[type="time"] {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    color-scheme: inherit;
+}
+
+.sched-row select {
+    width: auto;
+    flex: 1;
+}
+
+.sched-amount {
+    width: 5.5em;
+    flex: none;
+    font-family: var(--mono);
+}
+
+.sched-word {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.sched-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.sched-chips .chip {
+    color: var(--muted);
+}
+
+.sched-chips .chip.toggle.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-days {
+    display: flex;
+    gap: 6px;
+}
+
+.sched-day {
+    flex: 1;
+    max-width: 42px;
+    aspect-ratio: 1;
+    border: 1px solid var(--hair-2);
+    border-radius: 50%;
+    font: 600 12.5px var(--mono);
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-day.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--sched-soft);
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+.sched-preview > .icon {
+    color: var(--sched);
+    flex: none;
+}
+
+.sched-preview .sched-countdown {
+    margin-left: auto;
+}
+
+.sched-preview.wrong {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.sched-changed {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 12.5px;
+}
+
+.sched-changed > .icon {
+    flex: none;
+    margin-top: 2px;
+}
+
+.sched-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-actions .grow {
+    flex: 1;
+}
+
+.sched-actions .button.danger {
+    color: var(--err);
+}
+
+.sched-board {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .sched-board:hover {
+        color: var(--text);
+    }
 }
 
 /* A change to a lesson that waits for the owner, under the lesson it would change. */
@@ -11219,6 +11676,16 @@ textarea.notes {
 
 .rb-sched.held {
     background: var(--warn-soft);
+}
+
+.rb-sched.paused {
+    opacity: 0.6;
+}
+
+.rb-held.rb-paused {
+    border-color: var(--hair-2);
+    background: var(--card-2);
+    color: var(--muted);
 }
 
 .rb-sched-text {
@@ -16509,11 +16976,13 @@ textarea.notes {
     /* The guard and the review's branch keep their small pills; an invisible layer past each takes a thumb's tap. */
     .status-line .guard,
     .status-line .background-now,
+    .status-line .schedules-now,
     .dr-branch {
         position: relative;
     }
     .status-line .guard::after,
     .status-line .background-now::after,
+    .status-line .schedules-now::after,
     .dr-branch::after {
         content: "";
         position: absolute;
