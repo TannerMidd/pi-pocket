@@ -455,6 +455,10 @@ export interface PocketHost {
     readonly fetchPublic: FetchPublic;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /** The computer this conversation and its subagents run on; undefined for this server. Built-in modules only. */
+    runnerOf(conversationId: ConversationId): string | undefined;
+    /** The session-bound environment, with its existing runner permission. Built-in modules only. */
+    envFor(conversationId: ConversationId): ExecutionEnv;
     /**
      * The role of a person by id, as core decides it; undefined for an id that is not a person here.
      *
@@ -539,7 +543,7 @@ export interface PocketHost {
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
     /** The built-in browser: a page per conversation, which the people in it watch and use too. */
-    readonly browsers: Pick<Browsers, "open">;
+    readonly browsers: Pick<Browsers, "open" | "downloads" | "computerOf" | "networkProblem">;
     /** PiP, the owner's assistant: what its tools do, each as PiP's person (`pip.ts`). */
     readonly pip: Pick<
         Pip,
@@ -847,4 +851,9 @@ export type ExtensionModule = {
     ) => Extension | readonly Extension[] | void | Promise<Extension | readonly Extension[] | void>;
     /** The version of the extension API the module needs, when it says: a newer one than the app's is not loaded. */
     pocketApi?: unknown;
+    /**
+     * True: its extensions also load in sessions on another computer (`docs/runners.md`). The module reaches the
+     * session's files and commands only through the session (`api.env`), so they are that computer's.
+     */
+    remoteSessions?: unknown;
 };

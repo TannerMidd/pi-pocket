@@ -44,15 +44,19 @@ export function personColor(id) {
 /** Each folder's color, by path: the list asks for every row as it draws, and a few folders hold most sessions. */
 const folderColors = new Map();
 
-/** A steady color per folder, from its last part, for the mark on its sessions' rows. */
-export function folderColor(path) {
-    const key = String(path ?? "");
+/** A steady color per folder and computer, from its last part, for the mark on its sessions' rows. */
+export function folderColor(path, runner) {
+    const folder = String(path ?? "");
+    const key = `${runner ?? ""}\0${folder}`;
     let color = folderColors.get(key);
 
     if (color === undefined) {
-        const name = key.replace(/\/+$/, "").split("/").pop();
+        const name = folder
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/]/)
+            .pop();
 
-        color = FOLDER_COLORS[hashOf(name) % FOLDER_COLORS.length];
+        color = FOLDER_COLORS[hashOf(runner ? `${runner}:${name}` : name) % FOLDER_COLORS.length];
         folderColors.set(key, color);
     }
 

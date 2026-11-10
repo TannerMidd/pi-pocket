@@ -35,11 +35,12 @@ const WINDOWS_PATH = /^(\/|\\|[a-z]:[\\/]|~[\\/]|~$|\.\.?[\\/])/i;
  * An address as people and Pi type it, as a URL the browser may open. `localhost:5173` and other local addresses
  * become http, other bare host names https. With `trusted` (Pi, or the owner), paths to files on this machine become
  * file URLs, and file and data URLs are allowed. Undefined for anything else, such as `javascript:` or `chrome:` URLs.
- * `windows` reads paths as Windows does (the default on Windows).
+ * `windows` reads paths as Windows does (the default on Windows). `files: false` refuses paths and file URLs even when
+ * trusted: for a session on another computer, whose files are not this machine's.
  */
 export function normalizeUrl(
     input: string,
-    options: { trusted?: boolean; cwd?: string; windows?: boolean } = {},
+    options: { trusted?: boolean; cwd?: string; windows?: boolean; files?: boolean } = {},
 ): string | undefined {
     const text = input.trim();
 
@@ -54,7 +55,7 @@ export function normalizeUrl(
     const windows = options.windows ?? process.platform === "win32";
 
     if ((windows ? WINDOWS_PATH : POSIX_PATH).test(text)) {
-        if (options.trusted !== true) {
+        if (options.trusted !== true || options.files === false) {
             return undefined;
         }
 
@@ -101,7 +102,10 @@ export function normalizeUrl(
         candidate = `${localHost(bare) ? "http" : "https"}://${text}`;
     } else if (scheme === "http" || scheme === "https") {
         candidate = text;
-    } else if ((scheme === "file" || scheme === "data") && options.trusted === true) {
+    } else if (
+        (scheme === "data" || (scheme === "file" && options.files !== false)) &&
+        options.trusted === true
+    ) {
         candidate = text;
     } else {
         return undefined;

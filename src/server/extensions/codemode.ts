@@ -155,10 +155,11 @@ function formatError(
 type OutputItem =
     { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
-/** Keep the start and end of text over the budget; the whole text goes to a temporary file the agent can read. */
+/** Keep the start and end of text over the budget; save the whole text only where the agent can read it. */
 async function budget(
     items: OutputItem[],
     maxTokens: number,
+    remote: boolean,
 ): Promise<{ items: OutputItem[]; fullOutputPath?: string }> {
     const texts = items.flatMap((item) => (item.type === "text" ? [item.text] : []));
     const combined = texts.join("\n");
@@ -171,6 +172,16 @@ async function budget(
     const head = combined.slice(0, Math.floor(limit / 2));
     const tail = combined.slice(-(limit - head.length));
     let text = `Warning: output truncated (about ${Math.ceil(combined.length / CHARS_PER_TOKEN)} tokens, ${combined.split("\n").length} lines)\n\n${head}\n… ${Math.ceil((combined.length - limit) / CHARS_PER_TOKEN)} tokens not shown …\n${tail}`;
+
+    if (remote) {
+        text +=
+            "\n\n[Full output not saved: this session runs on another computer. Make the script return less, or write the output to a file there.]";
+
+        return {
+            items: [{ type: "text", text }, ...items.filter((item) => item.type === "image")],
+        };
+    }
+
     const path = join(tmpdir(), `pi-pocket-codemode-${randomBytes(8).toString("hex")}.txt`);
 
     try {
@@ -482,7 +493,11 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
             }
 
             items.push(...images);
-            const shown = await budget(items, options.maxOutputTokens ?? MAX_OUTPUT_TOKENS);
+            const shown = await budget(
+                items,
+                options.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
+                host.runnerOf(api.conversationId) !== undefined,
+            );
             const header = `${result.ok ? "Script completed" : "Script failed"}\nWall time ${((performance.now() - started) / 1000).toFixed(1)} seconds\nOutput:\n`;
 
             return {

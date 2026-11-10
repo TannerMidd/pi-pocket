@@ -10,6 +10,7 @@ import { actions, canSteer, closeSheet, insertIntoComposer, notify, store } from
 import {
     APPLE,
     copyText,
+    downloadFile,
     fileUrl,
     formatBytes,
     html,
@@ -19,6 +20,7 @@ import {
     Markdown,
     openFile,
     revealFile,
+    revealOffered,
     Sheet,
 } from "../ui.js";
 
@@ -243,7 +245,7 @@ function FileLines({ lines, colored, all, line }) {
 
 /**
  * The viewer's buttons: Preview or Source for Markdown and pages, Run for a previewed page (`running` is null where it
- * does not apply), Copy, and @ Mention.
+ * does not apply), Copy, Download for server files, and @ Mention.
  */
 function FileActions({ file, shown, previewable, preview, onPreview, running, onRun }) {
     return html`${
@@ -277,6 +279,18 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
     }
     ${
         file &&
+        file.kind !== "folder" &&
+        html`<button
+            class="icon-button"
+            title="Download"
+            aria-label="Download"
+            onClick=${() => downloadFile(file.path)}
+        >
+            <${Icon} name="download" size=${16} />
+        </button>`
+    }
+    ${
+        file &&
         canSteer() &&
         html`<button
             class="button small"
@@ -290,7 +304,7 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         // For the owner at the server's machine, with a mouse: show it in that machine's file manager.
         // Ctrl+click (⌘+click) on a path does the same.
         file &&
-        store.state.me?.role === "owner" &&
+        revealOffered() &&
         matchMedia("(pointer: fine)").matches &&
         html`<button
             class="icon-button"

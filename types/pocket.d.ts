@@ -92,6 +92,13 @@ export interface Module {
      * @since 0.14.0
      */
     pocketApi?: number;
+    /**
+     * True: the module's extensions also load in sessions on another computer (a linked runner). Its tools must reach
+     * the session's files and commands through the session (`api.env`): what the module does itself with Node runs
+     * on the server.
+     * @since 0.28.0
+     */
+    remoteSessions?: boolean;
 }
 
 // ─── The host ────────────────────────────────────────────────────────────────

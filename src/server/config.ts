@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { StoredLinkLimits } from "./link-limits.ts";
 
 /** The repository root: `web/` and `src/` live here, and `node_modules/` too, except in an npx or local install. */
 export const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -69,6 +70,38 @@ export interface StoredInvite {
     createdBy: string;
 }
 
+/**
+ * A computer whose runner (`pi-pocket runner`) may connect, so sessions can run their tools there (`runners.ts`). Kept by
+ * its key's sha256; the key itself is only on that computer.
+ */
+export interface StoredRunner {
+    id: string;
+    name: string;
+    keyHash: string;
+    createdAt: number;
+    /** Who linked it: the owner, who changes its settings and access. */
+    createdBy: string;
+    /** People the owner granted access to start sessions on this computer. */
+    users?: string[];
+    /** When it last connected. */
+    lastSeen?: number;
+    /**
+     * What it reported when it last connected: its OS, architecture, home folder, and runner version; and its temporary
+     * folder (absent before it was kept), where the files people attach go while it is offline (`remote-context.ts`).
+     */
+    platform?: { os: string; arch: string; home: string; version: string; tmpdir?: string };
+    /** Programs ready on this computer, as its runner last reported. */
+    tools?: { git: boolean; gh: boolean; github: boolean };
+}
+
+/** A one-time code that links a computer, not yet used: kept by its sha256, for a few minutes. */
+export interface StoredRunnerCode {
+    codeHash: string;
+    name: string;
+    createdBy: string;
+    expiresAt: number;
+}
+
 /** The theme (a theme folder's id, or "pocket") and the colors ("desktop", a palette's id, or a folder's) a browser
  * starts with until its person chooses. */
 export interface ThemeDefault {
@@ -113,6 +146,18 @@ interface PocketConfig {
      * setting with no value here has its default. Since 0.22.0; an older Pi Pocket ignores it.
      */
     extensionSettings?: Record<string, Record<string, string | number | boolean>>;
+    /** Computers whose runners may connect (`runners.ts`). Since 0.29.0; an older Pi Pocket ignores them. */
+    runners?: StoredRunner[];
+    /** One-time codes that link a computer, not yet used. */
+    runnerCodes?: StoredRunnerCode[];
+    /** Wrong link codes (`link-limits.ts`): each address's lockouts toward a ban, and the banned addresses. */
+    runnerLinkLimits?: StoredLinkLimits;
+    /**
+     * Sessions on a linked computer follow the usual sharing rules (others who can see a session can see and prompt
+     * it, so its tools run there for them too). Absent or false: each is its creator's alone. Starting one on a
+     * computer stays its linker's either way.
+     */
+    sharedRunnerSessions?: boolean;
 }
 
 /** The hours a run waits for a model's limit to clear, until the owner says otherwise. */
@@ -291,6 +336,21 @@ export class ConfigStore {
             delete this.#config.limitWaitHours;
         } else {
             this.#config.limitWaitHours = Math.min(Math.max(hours, 0), 24);
+        }
+
+        this.save();
+    }
+
+    /** Whether sessions on linked computers are shared like any other (`sharedRunnerSessions`). Default: no. */
+    get sharedRunnerSessions(): boolean {
+        return this.#config.sharedRunnerSessions === true;
+    }
+
+    set sharedRunnerSessions(shared: boolean) {
+        if (shared) {
+            this.#config.sharedRunnerSessions = true;
+        } else {
+            delete this.#config.sharedRunnerSessions;
         }
 
         this.save();
@@ -510,6 +570,124 @@ export class ConfigStore {
         this.save();
 
         return token;
+    }
+
+    get runners(): readonly StoredRunner[] {
+        return this.#config.runners ?? [];
+    }
+
+    /** The computer a runner key belongs to. */
+    runnerByKey(key: string): StoredRunner | undefined {
+        const hash = hashToken(key);
+
+        return this.#config.runners?.find((runner) => sameHash(runner.keyHash, hash));
+    }
+
+    runnerById(id: string): StoredRunner | undefined {
+        return this.#config.runners?.find((runner) => runner.id === id);
+    }
+
+    /** Add a computer; returns it and its key, which only its runner keeps. */
+    addRunner(name: string, createdBy: string): { runner: StoredRunner; key: string } {
+        const key = newToken();
+        const runner: StoredRunner = {
+            id: randomUUID(),
+            name,
+            keyHash: hashToken(key),
+            createdAt: Date.now(),
+            createdBy,
+        };
+
+        this.#config.runners = [...(this.#config.runners ?? []), runner];
+        this.save();
+
+        return { runner, key };
+    }
+
+    updateRunner(
+        id: string,
+        patch: Partial<Pick<StoredRunner, "name" | "lastSeen" | "platform" | "tools">>,
+    ): void {
+        const runner = this.runnerById(id);
+
+        if (runner !== undefined) {
+            Object.assign(runner, patch);
+            this.save();
+        }
+    }
+
+    /** Grant access to existing people with access to the whole server, never to owners. */
+    setRunnerUsers(id: string, users: string[]): void {
+        const runner = this.runnerById(id);
+
+        if (runner !== undefined) {
+            runner.users = [...new Set(users)].filter((id) => {
+                const user = this.userById(id);
+
+                return user !== undefined && user.role !== "owner" && user.sessions === undefined;
+            });
+            this.save();
+        }
+    }
+
+    /** Forget a computer: its key stops working. */
+    removeRunner(id: string): boolean {
+        const before = this.#config.runners ?? [];
+        const after = before.filter((runner) => runner.id !== id);
+
+        if (after.length === before.length) {
+            return false;
+        }
+
+        this.#config.runners = after;
+        this.save();
+
+        return true;
+    }
+
+    /** Keep a one-time code that links a computer named `name`, until `expiresAt`. */
+    addRunnerCode(code: string, name: string, createdBy: string, expiresAt: number): void {
+        const now = Date.now();
+
+        this.#config.runnerCodes = [
+            ...(this.#config.runnerCodes ?? []).filter((each) => each.expiresAt >= now),
+            { codeHash: hashToken(code), name, createdBy, expiresAt },
+        ];
+        this.save();
+    }
+
+    /** The saved part of the wrong link code limits (`link-limits.ts`). */
+    get runnerLinkLimits(): StoredLinkLimits | undefined {
+        return this.#config.runnerLinkLimits;
+    }
+
+    set runnerLinkLimits(value: StoredLinkLimits) {
+        this.#config.runnerLinkLimits = value;
+        this.save();
+    }
+
+    /** Forget every open link code (too many wrong codes reached the server: `link-limits.ts`). */
+    voidRunnerCodes(): void {
+        if ((this.#config.runnerCodes ?? []).length > 0) {
+            this.#config.runnerCodes = [];
+            this.save();
+        }
+    }
+
+    /** Use a one-time code: returns what it was for and forgets it; undefined when it is unknown or expired. */
+    takeRunnerCode(code: string): StoredRunnerCode | undefined {
+        const hash = hashToken(code);
+        const now = Date.now();
+        const codes = this.#config.runnerCodes ?? [];
+        const found = codes.find((each) => sameHash(each.codeHash, hash));
+        const left = codes.filter((each) => each !== found && each.expiresAt >= now);
+
+        if (found !== undefined || left.length !== codes.length) {
+            this.#config.runnerCodes = left;
+            this.save();
+        }
+
+        return found !== undefined && found.expiresAt >= now ? found : undefined;
     }
 
     save(): void {

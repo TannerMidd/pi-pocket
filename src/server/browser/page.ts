@@ -158,6 +158,7 @@ export class BrowserPage {
     readonly #baseAgent: string;
     readonly #changed: () => void;
     readonly #saved: (saved: Saved) => void;
+    readonly #download: ((params: Json) => void) | undefined;
     #frameId = "";
     #url = "about:blank";
     #title = "";
@@ -197,6 +198,8 @@ export class BrowserPage {
         viewport: Viewport;
         changed: () => void;
         saved: (saved: Saved) => void;
+        /** A download of this page began (`Page.downloadWillBegin`). */
+        download?: (params: Json) => void;
     }) {
         this.conversationId = options.conversationId;
         this.#connection = options.connection;
@@ -207,6 +210,7 @@ export class BrowserPage {
         this.#viewport = options.viewport;
         this.#changed = options.changed;
         this.#saved = options.saved;
+        this.#download = options.download;
         this.#connection.listen(this.#session, (method, params) => this.#event(method, params));
     }
 
@@ -441,6 +445,11 @@ export class BrowserPage {
 
                 return;
             }
+
+            case "Page.downloadWillBegin":
+                this.#download?.(params);
+
+                return;
 
             case "Inspector.targetCrashed":
                 this.#crashed = true;

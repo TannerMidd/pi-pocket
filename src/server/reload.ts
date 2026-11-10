@@ -344,6 +344,10 @@ export class ExtensionLoader {
     readonly #webs: ExtensionWebs;
     /** Extension names each file installed, to uninstall the ones a new version no longer provides. */
     readonly #installed = new Map<string, Extension[]>();
+    /** Files whose installed version says it works in sessions on another computer (`remoteSessions`). */
+    readonly #remote = new Set<string>();
+    /** Told after a module's extensions were installed or taken away. */
+    readonly #onChange: () => void;
     readonly #errors = new Map<string, string>();
     readonly #timers = new Map<string, NodeJS.Timeout>();
     /** Drop-ins already reported for having a built-in module's name, so each is reported once. */
@@ -381,6 +385,8 @@ export class ExtensionLoader {
             notify?: (level: "info" | "warning" | "error", message: string) => void;
             /** How long a load may take; tests make it short. */
             loadLimitMs?: number;
+            /** Told after a module's extensions were installed or taken away, which may change `remoteNames`. */
+            onChange?: () => void;
         } = {},
     ) {
         this.#registry = registry;
@@ -391,6 +397,7 @@ export class ExtensionLoader {
         this.#webs = options.webs ?? new ExtensionWebs();
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
+        this.#onChange = options.onChange ?? (() => {});
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -516,6 +523,15 @@ export class ExtensionLoader {
         this.#uninstall(file);
     }
 
+    /** Tell what follows the installed extensions; a listener that throws does not undo the change. */
+    #announce(): void {
+        try {
+            this.#onChange();
+        } catch (error) {
+            this.#notify("warning", `After an extension change: ${describe(error)}`);
+        }
+    }
+
     #uninstall(file: string): void {
         // A load still running for it installs nothing.
         this.#generation(file);
@@ -534,7 +550,12 @@ export class ExtensionLoader {
         }
 
         this.#webs.remove(file);
-        this.#installed.delete(file);
+        this.#remote.delete(file);
+
+        if (this.#installed.delete(file)) {
+            this.#announce();
+        }
+
         this.#errors.delete(file);
         this.#stamps.delete(file);
     }
@@ -606,6 +627,16 @@ export class ExtensionLoader {
 
     extensionNames(): string[] {
         return [...this.#installed.values()].flat().map((extension) => extension.name);
+    }
+
+    /**
+     * The extensions of modules that say they work in sessions on another computer (`export const remoteSessions =
+     * true`), in install order: those sessions load them next to the built-in list (`REMOTE_EXTENSIONS`).
+     */
+    remoteNames(): string[] {
+        return [...this.#installed]
+            .filter(([file]) => this.#remote.has(file))
+            .flatMap(([, extensions]) => extensions.map((extension) => extension.name));
     }
 
     async #load(file: string, cacheBust: boolean, until?: number): Promise<Extension[]> {
@@ -736,12 +767,20 @@ export class ExtensionLoader {
             this.#webs.check(part);
             this.#replace(installed, this.#installed.get(file) ?? []);
             this.#installed.set(file, installed);
+
+            if (loaded.remoteSessions === true) {
+                this.#remote.add(file);
+            } else {
+                this.#remote.delete(file);
+            }
+
             this.#errors.delete(file);
             this.#webs.commit(
                 part,
                 installed.flatMap((extension) => declared(extension).tools),
             );
             committed = true;
+            this.#announce();
 
             return installed;
         } finally {

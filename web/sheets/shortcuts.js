@@ -58,7 +58,10 @@ const SHORTCUTS = [
         [
             ["?", "This list"],
             ["Esc", "Close what is open"],
-            ["Mod Click", "On a file path: show it in the server machine's file manager (owner)"],
+            [
+                "Mod Click",
+                "On a file path: show it in the server machine's file manager (owner, in a browser there)",
+            ],
         ],
     ],
 ];

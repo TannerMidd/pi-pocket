@@ -1,7 +1,7 @@
 /** `/api/c/:id/browser`: the Browser panel. */
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { BrowserError } from "../browser/cdp.ts";
-import { localServers } from "../browser/local-servers.ts";
+import { computerServers, localServers } from "../browser/local-servers.ts";
 import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
 import { viewportFrom } from "../browser/viewport.ts";
 import { HttpError } from "../errors.ts";
@@ -107,6 +107,24 @@ export async function browserRoutes(
             return json(response, 200, { servers: [] });
         }
 
+        const runner = app.runnerOf(id);
+
+        // A session on another computer opens that computer's localhost: its ports, as far as it tells.
+        if (runner !== undefined) {
+            const link = app.runners.link(runner);
+            const info = link.online ? await link.info().catch(() => undefined) : undefined;
+
+            return json(response, 200, {
+                servers:
+                    info === undefined
+                        ? []
+                        : await computerServers(
+                              app.runners.env(runner, app.cwdOf(id), app.runnerScope(id)),
+                              info.os,
+                          ),
+            });
+        }
+
         return json(response, 200, { servers: await localServers([port]) });
     }
 
@@ -146,18 +164,21 @@ export async function browserRoutes(
     }
 
     const viewport = viewportFrom(body.viewport);
+    // A session on another computer: its files are not this server's, so none open.
+    const files = app.runnerOf(id) === undefined;
     const target =
         action === "navigate"
             ? normalizeUrl(String(body.url ?? ""), {
                   trusted: user.role === "owner",
                   cwd: app.cwdOf(id),
+                  files,
               })
             : undefined;
 
     if (action === "navigate" && target === undefined) {
         throw new HttpError(
             400,
-            user.role === "owner"
+            user.role === "owner" && files
                 ? "That is not an address: try localhost:5173, example.com, or a file path."
                 : "That is not a web address: try localhost:5173 or example.com.",
         );

@@ -9,7 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, resolve, posix, win32 } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
@@ -21,7 +21,9 @@ import { HttpError } from "./errors.ts";
 import { INVISIBLE_CLASS } from "./fence.ts";
 import { git } from "./git.ts";
 import { workspaceScheme } from "./paths.ts";
+import { sameRepo } from "./github.ts";
 import { snippet } from "./projection.ts";
+import { localRepo, remoteGit, remoteRepo } from "./repo.ts";
 
 const context: Context = BACKGROUND_CONTEXT;
 
@@ -37,7 +39,7 @@ export const MAX_PENDING = 20;
 /** How long a folder's project is kept before git is asked again (a folder can become a repository). */
 const PROJECT_FOR_MS = 60_000;
 
-export type Project = { key: string; name: string };
+export type Project = { key: string; name: string; repo?: string; runner?: string };
 export type LessonScope = "project" | "everywhere";
 
 /** Who writes: a person, or Pi working for one (`userId` undefined when nobody is known). */
@@ -70,6 +72,8 @@ export type MemoryView = {
     /** This session's project; null for PiP or the all-project pending queue. */
     project: { name: string } | null;
     lessons: LessonView[];
+    /** Approved lessons in other copies of this repository, offered for a person to add here. */
+    others?: { project: string; name: string; computer: string; lessons: LessonView[] }[];
     owner: boolean;
     canWrite: boolean;
     limits: { project: number; everywhere: number; text: number };
@@ -143,15 +147,96 @@ export class Memory {
 
         const folder = cwd ?? app.cwdOf(conversationId);
 
-        const now = this.#app.now();
-        let cached = this.#projects.get(folder);
+        const runner = app.runnerOf(conversationId);
+        const cacheKey = JSON.stringify([runner ?? null, folder]);
+        const now = app.now();
+        let cached = this.#projects.get(cacheKey);
+
+        // Pi's turns and tools reach this only with the computer online (they wait for it, `app.ts`). The Memory sheet
+        // does not wait: while the computer is offline it shows the project as last found, or the folder until then.
+        if (runner !== undefined && !app.runners.link(runner).online) {
+            return cached?.project ?? this.#resolveProject(folder, runner, conversationId);
+        }
 
         if (cached === undefined || now - cached.at > PROJECT_FOR_MS) {
-            cached = { at: now, project: projectOf(folder) };
-            this.#projects.set(folder, cached);
+            cached = { at: now, project: this.#resolveProject(folder, runner, conversationId) };
+            this.#projects.set(cacheKey, cached);
         }
 
         return cached.project;
+    }
+
+    /** Resolve only on the computer that owns the folder; a failed repository lookup never stops memory. */
+    async #resolveProject(
+        folder: string,
+        runner: string | undefined,
+        conversationId: ConversationId,
+    ): Promise<Project> {
+        const app = this.#app;
+        let project: Project;
+
+        if (runner === undefined) {
+            const [local, repo] = await Promise.all([projectOf(folder), localRepo(folder)]);
+
+            project = { ...local, ...(repo === undefined ? {} : { repo }) };
+        } else {
+            const env = app.runners.env(runner, folder, app.runnerScope(conversationId));
+            const [common, repo] = await Promise.all([
+                remoteGit(
+                    env,
+                    folder,
+                    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                    context,
+                ).then(
+                    (path) =>
+                        path || remoteGit(env, folder, ["rev-parse", "--git-common-dir"], context),
+                ),
+                remoteRepo(env, folder, context),
+            ]);
+            const paths = /^[A-Za-z]:|\\\\/.test(folder) ? win32 : posix;
+            const path = common
+                ? paths.isAbsolute(common)
+                    ? common
+                    : paths.resolve(folder, common)
+                : folder;
+            const parts = path.replace(/[\\/]+$/, "").split(/[\\/]/);
+            const last = parts.at(-1) ?? "";
+            const name = common
+                ? last === ".git"
+                    ? (parts.at(-2) ?? "")
+                    : last.replace(/\.git$/, "")
+                : last;
+
+            project = {
+                key: `runner:${runner}:${path}`,
+                name: named(name, path),
+                runner,
+                ...(repo === undefined ? {} : { repo }),
+            };
+        }
+
+        if (project.repo !== undefined) {
+            const noted = (await app.harness.snapshot(MemoryDoc, context))?.projects?.[project.key];
+
+            if (
+                noted?.name !== project.name ||
+                noted.repo !== project.repo ||
+                noted.runner !== project.runner
+            ) {
+                await app.harness.commit(async (tx) => {
+                    const doc = await tx.doc(MemoryDoc);
+
+                    doc.projects ??= {};
+                    doc.projects[project.key] = {
+                        name: project.name,
+                        repo: project.repo,
+                        ...(project.runner === undefined ? {} : { runner: project.runner }),
+                    };
+                }, context);
+            }
+        }
+
+        return project;
     }
 
     async #all(): Promise<Lesson[]> {
@@ -595,60 +680,97 @@ export class Memory {
                   ),
               )
             : await this.applying(project);
+
+        const show = (lesson: Lesson): LessonView => {
+            const from = lesson.from;
+            const source =
+                from === undefined ? undefined : (from.conversationId as unknown as ConversationId);
+            const seen = source !== undefined && app.sessionMeta(source) !== undefined;
+
+            return {
+                id: lesson.id,
+                text: lesson.text,
+                scope: lesson.project === undefined ? "everywhere" : "project",
+                ...(pendingOnly && lesson.projectName !== undefined
+                    ? { projectName: lesson.projectName }
+                    : {}),
+                byPi: lesson.byPi,
+                by: lesson.by,
+                byName: app.config.userById(lesson.by)?.name ?? "someone",
+                createdAt: lesson.createdAt,
+                ...(lesson.updatedAt === undefined ? {} : { updatedAt: lesson.updatedAt }),
+                pending: lesson.pending === true,
+                ...(seen && app.canSee(user, source)
+                    ? {
+                          from: {
+                              id: from!.conversationId,
+                              title: app.sessionMeta(source)?.title ?? from!.title,
+                          },
+                      }
+                    : {}),
+                mine: !pendingOnly && user.role !== "viewer" && this.#mayChange(lesson, user.id),
+                ...(lesson.proposal !== undefined && (owner || lesson.proposal.by === user.id)
+                    ? {
+                          proposal: {
+                              ...(lesson.proposal.text === undefined
+                                  ? {}
+                                  : { text: lesson.proposal.text }),
+                              ...(lesson.proposal.forget === true ? { forget: true } : {}),
+                              byPi: lesson.proposal.byPi,
+                              byName: app.config.userById(lesson.proposal.by)?.name ?? "someone",
+                              mine: !pendingOnly && lesson.proposal.by === user.id,
+                          },
+                      }
+                    : {}),
+            };
+        };
+
         const lessons = applying
             .filter((lesson) => lesson.pending !== true || owner || lesson.by === user.id)
-            .map((lesson): LessonView => {
-                const from = lesson.from;
-                const source =
-                    from === undefined
-                        ? undefined
-                        : (from.conversationId as unknown as ConversationId);
-                const seen = source !== undefined && app.sessionMeta(source) !== undefined;
+            .map(show);
+        const others: NonNullable<MemoryView["others"]> = [];
 
-                return {
-                    id: lesson.id,
-                    text: lesson.text,
-                    scope: lesson.project === undefined ? "everywhere" : "project",
-                    ...(pendingOnly && lesson.projectName !== undefined
-                        ? { projectName: lesson.projectName }
-                        : {}),
-                    byPi: lesson.byPi,
-                    by: lesson.by,
-                    byName: app.config.userById(lesson.by)?.name ?? "someone",
-                    createdAt: lesson.createdAt,
-                    ...(lesson.updatedAt === undefined ? {} : { updatedAt: lesson.updatedAt }),
-                    pending: lesson.pending === true,
-                    ...(seen && app.canSee(user, source)
-                        ? {
-                              from: {
-                                  id: from!.conversationId,
-                                  title: app.sessionMeta(source)?.title ?? from!.title,
-                              },
-                          }
-                        : {}),
-                    mine:
-                        !pendingOnly && user.role !== "viewer" && this.#mayChange(lesson, user.id),
-                    ...(lesson.proposal !== undefined && (owner || lesson.proposal.by === user.id)
-                        ? {
-                              proposal: {
-                                  ...(lesson.proposal.text === undefined
-                                      ? {}
-                                      : { text: lesson.proposal.text }),
-                                  ...(lesson.proposal.forget === true ? { forget: true } : {}),
-                                  byPi: lesson.proposal.byPi,
-                                  byName:
-                                      app.config.userById(lesson.proposal.by)?.name ?? "someone",
-                                  mine: !pendingOnly && lesson.proposal.by === user.id,
-                              },
-                          }
-                        : {}),
-                };
-            });
+        if (project?.repo !== undefined) {
+            const doc = await app.harness.snapshot(MemoryDoc, context);
+            const texts = new Set(
+                applying
+                    .filter((lesson) => lesson.project === project.key)
+                    .map((lesson) => lesson.text.trim()),
+            );
+
+            for (const [key, noted] of Object.entries(doc?.projects ?? {})) {
+                if (key === project.key || !sameRepo(noted.repo, project.repo)) {
+                    continue;
+                }
+
+                const different = ordered(
+                    Object.values(doc?.items ?? {}).filter(
+                        (lesson) =>
+                            lesson.project === key &&
+                            lesson.pending !== true &&
+                            !texts.has(lesson.text.trim()),
+                    ),
+                ).map(show);
+
+                if (different.length > 0) {
+                    others.push({
+                        project: key,
+                        name: noted.name,
+                        computer:
+                            noted.runner === undefined
+                                ? "this server"
+                                : app.runners.name(noted.runner),
+                        lessons: different,
+                    });
+                }
+            }
+        }
 
         return {
             ...(pendingOnly ? { pendingAll: true as const } : {}),
             project: project === undefined ? null : { name: project.name },
             lessons,
+            ...(others.length === 0 ? {} : { others }),
             owner,
             canWrite: !pendingOnly && user.role !== "viewer",
             limits: {
@@ -663,16 +785,33 @@ export class Memory {
     async remember(
         id: ConversationId,
         user: User,
-        request: { text?: unknown; scope?: unknown },
+        request: { text?: unknown; scope?: unknown; copy?: unknown },
     ): Promise<Lesson> {
         const app = this.#app;
 
         app.requireSee(user, id);
         app.requireSteer(user);
+        let text = request.text;
+
+        if (request.copy !== undefined) {
+            const view = await this.view(id, user);
+            const lesson = view.others
+                ?.flatMap((other) => other.lessons)
+                .find((item) => item.id === request.copy);
+
+            if (lesson === undefined) {
+                throw new HttpError(404, "That lesson is not in another copy of this repository.");
+            }
+
+            text = lesson.text;
+        }
 
         return this.add(id, app.cwdOf(id), this.#person(user), {
-            text: request.text,
-            scope: request.scope === "everywhere" ? "everywhere" : "project",
+            text,
+            scope:
+                request.copy === undefined && request.scope === "everywhere"
+                    ? "everywhere"
+                    : "project",
         });
     }
 

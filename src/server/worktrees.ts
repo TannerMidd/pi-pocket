@@ -1,15 +1,16 @@
 /**
  * A session can work in a git worktree of its own: a checkout of the same repository, on a branch of its own, in
- * Pi Pocket's data folder. Its changes stay apart from the folder it came from and from other sessions, and a fork in
- * a worktree tries another approach without touching the first. A worktree starts with the folder's files as they
- * are: the last commit, uncommitted changes, and new files. Ignored files, such as node_modules, are not copied.
+ * Pi Pocket's data folder here or on its computer. Its changes stay apart from the folder it came from and from
+ * other sessions. It starts with the last commit, uncommitted changes, and new files; ignored files are not copied.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { copyFile, lstat, mkdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { copyFile, mkdir } from "node:fs/promises";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
+import type { RemoteInfo } from "@earendil-works/pi-env";
 import { describe, HttpError } from "./errors.ts";
-import { git, GitError } from "./git.ts";
+import { type FolderAccess, localAccess, remoteAccess } from "./folder-access.ts";
+import { GitError } from "./git.ts";
 import { workspaceScheme } from "./paths.ts";
 
 export type Worktree = {
@@ -20,33 +21,87 @@ export type Worktree = {
     source: string;
 };
 
+/** The same worktree steps on either disk: git and path rules, with folders and copies on that disk only. */
+export type WorktreeAccess = FolderAccess & {
+    mkdir(path: string): Promise<void>;
+    copyFile(from: string, to: string): Promise<void>;
+};
+
+const localWorktrees: WorktreeAccess = {
+    ...localAccess,
+    async mkdir(path) {
+        await mkdir(path, { recursive: true });
+    },
+    copyFile,
+};
+
+/** No Node file operation reaches a session's computer: even the copied bytes use its approved environment. */
+export function remoteWorktrees(env: ExecutionEnv, info: Pick<RemoteInfo, "os">): WorktreeAccess {
+    const context = BACKGROUND_CONTEXT;
+
+    return {
+        ...remoteAccess(env, info),
+        async mkdir(path) {
+            getOrThrow(await env.createDir(path, { recursive: true }, context));
+        },
+        async copyFile(from, to) {
+            const reader = getOrThrow(
+                await env.openBinaryReader(from, { noFollow: true }, context),
+            );
+
+            try {
+                getOrThrow(await env.writeFile(to, new Uint8Array(), context));
+
+                // Stay below the runner's frame limit, including when one new file uses the whole 50 MiB budget.
+                for (let offset = 0; ;) {
+                    const bytes = getOrThrow(await reader.read(offset, 1024 * 1024, context));
+
+                    if (bytes.length === 0) {
+                        break;
+                    }
+
+                    getOrThrow(await env.appendFile(to, bytes, context));
+                    offset += bytes.length;
+                }
+            } finally {
+                await reader.close(context);
+            }
+        },
+    };
+}
+
 /** How many bytes of new files a new worktree gets, all together; any file that would go past it is left out. */
 const MAX_COPIED_BYTES = 50 * 1024 * 1024;
 
 /** The top folder of the repository `cwd` is in, or undefined when it is in none. */
-async function repositoryOf(cwd: string): Promise<string | undefined> {
-    return git(cwd, ["rev-parse", "--show-toplevel"]).then(
-        (root) => root.trim(),
-        () => undefined,
-    );
+async function repositoryOf(cwd: string, access: FolderAccess): Promise<string | undefined> {
+    try {
+        return (await access.git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+    } catch (error) {
+        if (error instanceof GitError) {
+            return undefined;
+        }
+
+        throw error;
+    }
 }
 
 /** Copy the repository's new (untracked, not ignored) files into the worktree. Returns the ones left out for size. */
-async function copyNewFiles(root: string, into: string): Promise<string[]> {
+async function copyNewFiles(root: string, into: string, access: WorktreeAccess): Promise<string[]> {
     const skipped: string[] = [];
     let copied = 0;
 
     for (const path of (
-        await git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
+        await access.git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
     ).split("\0")) {
         if (path === "") {
             continue;
         }
 
-        const from = join(root, path);
-        const stats = await lstat(from).catch(() => undefined);
+        const from = access.path.join(root, path);
+        const stats = await access.info(from).catch(() => undefined);
 
-        if (stats === undefined || !stats.isFile()) {
+        if (stats === undefined || stats.kind !== "file") {
             continue;
         }
 
@@ -55,8 +110,8 @@ async function copyNewFiles(root: string, into: string): Promise<string[]> {
             continue;
         }
 
-        await mkdir(dirname(join(into, path)), { recursive: true });
-        await copyFile(from, join(into, path));
+        await access.mkdir(access.path.dirname(access.path.join(into, path)));
+        await access.copyFile(from, access.path.join(into, path));
         copied += stats.size;
     }
 
@@ -71,12 +126,13 @@ export async function createWorktree(
     cwd: string,
     folder: string,
     label: string,
+    access: WorktreeAccess = localWorktrees,
 ): Promise<{ worktree: Worktree; cwd: string; skipped: string[] }> {
     if (workspaceScheme(cwd) !== undefined) {
         throw new HttpError(400, "Remote workspaces do not support worktrees.");
     }
 
-    const root = await repositoryOf(cwd);
+    const root = await repositoryOf(cwd, access);
 
     if (root === undefined) {
         throw new HttpError(
@@ -85,13 +141,27 @@ export async function createWorktree(
         );
     }
 
+    // The runner approves `cwd`, not its ancestors. Never widen that permission to reach a repository above it.
+    if (access.id !== "" && access.path.relative(await access.realpath(cwd), root) !== "") {
+        throw new HttpError(
+            400,
+            "The repository root is outside the session's approved folder. Start in the repository root to make a worktree.",
+        );
+    }
+
     // Where `cwd` is within the repository, as git sees it: `cwd` may be reached through a symbolic link, `root` not.
-    const within = (await git(cwd, ["rev-parse", "--show-prefix"])).trim();
+    const within = (await access.git(cwd, ["rev-parse", "--show-prefix"])).trim();
 
     if (
-        !(await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+        !(await access.git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
             () => true,
-            () => false,
+            (error: unknown) => {
+                if (error instanceof GitError) {
+                    return false;
+                }
+
+                throw error;
+            },
         ))
     ) {
         throw new HttpError(400, "The repository has no commits yet: commit once, then try again.");
@@ -104,67 +174,76 @@ export async function createWorktree(
             .replace(/^-+|-+$/g, "")
             .slice(0, 40) || "session";
     const name = `${slug}-${randomUUID().slice(0, 6)}`;
-    const worktree: Worktree = { path: join(folder, name), branch: `pocket/${name}`, source: cwd };
+    const worktree: Worktree = {
+        path: access.path.join(folder, name),
+        branch: `pocket/${name}`,
+        source: cwd,
+    };
 
-    mkdirSync(folder, { recursive: true });
-    await git(root, ["worktree", "add", "-b", worktree.branch, worktree.path, "HEAD"]);
+    await access.mkdir(folder);
+    await access.git(root, ["worktree", "add", "-b", worktree.branch, worktree.path, "HEAD"]);
 
     try {
         // Uncommitted changes to tracked files, as a commit object that changes nothing here; empty when there are none.
-        const changes = (await git(root, ["stash", "create"])).trim();
+        const changes = (await access.git(root, ["stash", "create"])).trim();
 
         if (changes !== "") {
-            await git(worktree.path, ["stash", "apply", changes]);
+            await access.git(worktree.path, ["stash", "apply", changes]);
         }
 
-        const skipped = await copyNewFiles(root, worktree.path);
+        const skipped = await copyNewFiles(root, worktree.path, access);
 
-        return { worktree, cwd: resolve(worktree.path, within), skipped };
+        return { worktree, cwd: access.path.resolve(worktree.path, within), skipped };
     } catch (error) {
-        await discardWorktree(worktree).catch(() => undefined);
+        await discardWorktree(worktree, access).catch(() => undefined);
 
         throw new HttpError(500, `The worktree could not be set up: ${describe(error)}`);
     }
 }
 
 /** Whether a folder is the worktree's or one inside it, also when reached through a symbolic link. */
-export function inWorktree(worktree: Worktree, cwd: string): boolean {
-    const real = (path: string) => {
-        try {
-            return realpathSync(path);
-        } catch {
-            return resolve(path);
-        }
-    };
+export async function inWorktree(
+    worktree: Worktree,
+    cwd: string,
+    access: FolderAccess = localAccess,
+): Promise<boolean> {
+    const real = (path: string) => access.realpath(path).catch(() => access.path.resolve(path));
+    const [base, folder] = await Promise.all([real(worktree.path), real(cwd)]);
+    const relative = access.path.relative(base, folder);
 
-    const base = real(worktree.path);
-    const folder = real(cwd);
-
-    return folder === base || folder.startsWith(base + sep);
+    return (
+        relative === "" ||
+        (!relative.startsWith(".." + access.path.sep) &&
+            relative !== ".." &&
+            !access.path.isAbsolute(relative))
+    );
 }
 
 /**
  * Where each folder of a worktree is in the folder it was made from: the same place in the repository, and the
  * session's folder as it was given. A folder that is only in the worktree maps to the session's folder.
  */
-export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) => string> {
-    const root = await repositoryOf(worktree.source);
-    let original: string | undefined;
+export async function sourceFolders(
+    worktree: Worktree,
+    access: FolderAccess = localAccess,
+): Promise<(cwd: string) => Promise<string>> {
+    const root = await repositoryOf(worktree.source, access);
+    const original = await access.realpath(worktree.source).catch(() => undefined);
 
-    try {
-        original = realpathSync(worktree.source);
-    } catch {
-        original = undefined;
-    }
-
-    return (cwd) => {
+    return async (cwd) => {
         if (root === undefined) {
             return worktree.source;
         }
 
-        const mapped = resolve(root, relative(worktree.path, cwd));
+        const mapped = access.path.resolve(root, access.path.relative(worktree.path, cwd));
 
-        return mapped === original || !existsSync(mapped) ? worktree.source : mapped;
+        return mapped === original ||
+            !(await access.info(mapped).then(
+                () => true,
+                () => false,
+            ))
+            ? worktree.source
+            : mapped;
     };
 }
 
@@ -172,19 +251,41 @@ export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) =
  * Remove a worktree's folder; its branch stays, with whatever was committed on it. One with uncommitted changes is
  * kept, unless `force`.
  */
-export async function removeWorktree(worktree: Worktree, force: boolean): Promise<void> {
-    if (!existsSync(worktree.path)) {
+export async function removeWorktree(
+    worktree: Worktree,
+    force: boolean,
+    access: FolderAccess = localAccess,
+): Promise<void> {
+    if (
+        !(await access.info(worktree.path).then(
+            () => true,
+            (error: unknown) => {
+                const code = (error as NodeJS.ErrnoException).code;
+
+                if (code === "ENOENT" || code === "ENOTDIR") {
+                    return false;
+                }
+
+                throw error;
+            },
+        ))
+    ) {
         return;
     }
 
-    const root = await repositoryOf(worktree.source);
+    const root = await repositoryOf(worktree.source, access);
 
     if (root === undefined) {
         throw new HttpError(409, `${worktree.source} is not in a git repository anymore.`);
     }
 
     try {
-        await git(root, ["worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
+        await access.git(root, [
+            "worktree",
+            "remove",
+            ...(force ? ["--force"] : []),
+            worktree.path,
+        ]);
     } catch (error) {
         const message = describe(error);
 
@@ -198,11 +299,14 @@ export async function removeWorktree(worktree: Worktree, force: boolean): Promis
 }
 
 /** Undo a worktree that a session never got: its folder and its branch. */
-export async function discardWorktree(worktree: Worktree): Promise<void> {
-    await removeWorktree(worktree, true);
-    const root = await repositoryOf(worktree.source);
+export async function discardWorktree(
+    worktree: Worktree,
+    access: FolderAccess = localAccess,
+): Promise<void> {
+    await removeWorktree(worktree, true, access);
+    const root = await repositoryOf(worktree.source, access);
 
     if (root !== undefined) {
-        await git(root, ["branch", "-D", worktree.branch]);
+        await access.git(root, ["branch", "-D", worktree.branch]);
     }
 }

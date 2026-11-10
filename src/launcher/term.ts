@@ -41,6 +41,8 @@ type KeyListener = (key: Key) => void;
 
 let listener: KeyListener | undefined;
 let raw = false;
+// Keys reach `listener` through one handler, however often raw mode is entered and left (the runner's menu does both).
+let attached = false;
 
 function parseKeys(data: string): Key[] {
     const keys: Key[] = [];
@@ -80,18 +82,35 @@ export function onKeys(next: KeyListener | undefined): KeyListener | undefined {
 
     listener = next;
 
-    if (!interactive || raw) {
+    if (!interactive) {
+        return previous;
+    }
+
+    if (raw) {
+        // A line question in between (readline) pauses the input when it closes: keys flow again.
+        process.stdin.resume();
+
         return previous;
     }
 
     raw = true;
     process.stdin.setRawMode(true);
     process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (data: string) => {
-        for (const key of parseKeys(data)) {
-            listener?.(key);
-        }
-    });
+
+    if (!attached) {
+        attached = true;
+        process.stdin.on("data", (data: string) => {
+            // Only keys typed in raw mode: a line someone else reads (readline) is not keys for a menu.
+            if (!raw) {
+                return;
+            }
+
+            for (const key of parseKeys(data)) {
+                listener?.(key);
+            }
+        });
+    }
+
     process.stdin.resume();
 
     return previous;
@@ -118,17 +137,22 @@ export interface Choice {
     disabled?: boolean;
 }
 
-/** A menu picked with the arrow keys (or number keys). Resolves to the chosen index, or undefined on Escape or q. */
+/**
+ * A menu picked with the arrow keys (or number keys). Resolves to the chosen index, or undefined on Escape, q, or
+ * `signal` aborting. `clear`: the menu leaves the screen when it is answered, and one line says what was picked.
+ */
 export function choose(
     title: string,
     choices: Choice[],
     initial: number,
+    { signal, clear = false }: { signal?: AbortSignal; clear?: boolean } = {},
 ): Promise<number | undefined> {
     return new Promise((resolve) => {
         const enabled = (index: number) =>
             choices[index] !== undefined && choices[index]!.disabled !== true;
         let index = enabled(initial) ? initial : choices.findIndex((_, each) => enabled(each));
         let drawn = 0;
+        let finished = false;
         const labelWidth = Math.max(...choices.map((choice) => choice.label.length));
 
         const draw = () => {
@@ -183,8 +207,29 @@ export function choose(
             draw();
         });
 
+        const aborted = () => finish(undefined);
+
+        signal?.addEventListener("abort", aborted, { once: true });
+
+        if (signal?.aborted) {
+            finish(undefined);
+        }
+
         function finish(result: number | undefined) {
+            if (finished) {
+                return;
+            }
+
+            finished = true;
+            signal?.removeEventListener("abort", aborted);
             onKeys(previous);
+
+            if (clear && drawn > 0) {
+                const picked = result === undefined ? dim("cancelled") : choices[result]!.label;
+
+                process.stdout.write(`\x1b[${drawn}A\x1b[0J  ${bold(title)} ${picked}\n`);
+            }
+
             process.stdout.write("\x1b[?25h");
             resolve(result);
         }
