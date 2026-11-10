@@ -502,6 +502,8 @@ export type Schedule = {
     taskId: TaskId;
     /** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */
     key?: string;
+    /** How many times it was edited: what an editor's save checks, so a save from an older copy is refused. */
+    revision?: number;
     /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
     paused?: { at: number; by: string };
 };

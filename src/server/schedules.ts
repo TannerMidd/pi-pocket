@@ -422,7 +422,7 @@ export class Schedules {
             next?: number;
             every?: Repeat;
             zone?: string;
-            /** The version the change was made from (its `taskId`): one changed since is refused. */
+            /** The version the change was made from (its `revision`): one edited since is refused. */
             version?: string;
             by: { id: string; name: string };
         },
@@ -458,7 +458,7 @@ export class Schedules {
                 throw new HttpError(404, "No such scheduled message");
             }
 
-            if (change.version !== undefined && change.version !== String(item.taskId)) {
+            if (change.version !== undefined && change.version !== String(item.revision ?? 0)) {
                 throw new HttpError(409, "Someone changed this schedule while you edited it.");
             }
 
@@ -477,6 +477,7 @@ export class Schedules {
                 { scheduleId },
                 { ownership: { kind: "conversation" }, background: true, conversationId },
             );
+            item.revision = (item.revision ?? 0) + 1;
             item.text = text;
             item.content = content;
             item.next = next;
@@ -524,15 +525,16 @@ export class Schedules {
     /**
      * Pause a schedule, or resume it. Paused, it sends nothing and keeps its place. Resumed, a repeat goes on from its
      * next time still to come; one that goes out once and whose time passed while paused goes out now. Either way a
-     * new task takes it over, as for an edit, so a sending under way when it was paused is the last. Throws a 404 for no
-     * such schedule.
+     * new task takes it over, as for an edit, so a sending under way when it was paused is the last. Returns it, and
+     * whether this call changed it: decided in the commit, so of two at once only the one that changed it says so.
+     * Throws a 404 for no such schedule.
      */
     async pause(
         conversationId: ConversationId,
         scheduleId: string,
         paused: boolean,
         by: { id: string },
-    ): Promise<Schedule> {
+    ): Promise<{ schedule: Schedule; changed: boolean }> {
         const app = this.#app;
 
         if (!this.running) {
@@ -541,7 +543,7 @@ export class Schedules {
 
         let replaced: Schedule["taskId"] | undefined;
 
-        const updated = await app.harness.commit(async (tx) => {
+        const schedule = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(ScheduleDoc, conversationId);
             const item = own(doc.items, scheduleId);
 
@@ -577,7 +579,7 @@ export class Schedules {
             await app.harness.abortTask(replaced, context).catch(() => undefined);
         }
 
-        return updated;
+        return { schedule, changed: replaced !== undefined };
     }
 
     /** Stop a schedule: it sends nothing more. Returns it; undefined when there is no such schedule. */

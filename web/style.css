@@ -10521,7 +10521,7 @@ textarea.notes {
         color var(--t-hover) var(--ease-out);
 }
 
-.sched-pause[aria-pressed="true"] {
+.sched-item.paused .sched-pause {
     border-color: var(--sched-line);
     background: var(--sched-soft);
     color: var(--sched);

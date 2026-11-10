@@ -318,3 +318,72 @@ test(
         );
     },
 );
+
+test("the editor's Pause keeps what was typed, and Save after it still works", real, async () => {
+    const id = await newSession(app);
+
+    await app.commands.schedule(id, owner(app), { when: "every 30m before", zone: "UTC" });
+    await page.setViewport(VIEWPORTS.mobile);
+    await page.navigate(`${base}/s/${id}`);
+    await until(
+        async () =>
+            await inPage<boolean>(`
+            const { store, openSheet } = await import("/store.js");
+            if ((store.state.view.schedules ?? []).length < 1) {
+                return JSON.stringify(false);
+            }
+
+            openSheet({ type: "schedules" });
+            return JSON.stringify(document.querySelector(".sched-card") !== null);
+        `),
+        "the sheet",
+        20_000,
+    );
+    await until(
+        async () =>
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".sheet").getAnimations().length === 0)`,
+            ),
+        "the sheet to settle",
+    );
+    await page.click({ selector: ".sched-card" });
+    await until(
+        async () =>
+            await inPage<boolean>(
+                `return JSON.stringify(document.querySelector(".sched-editor textarea") !== null)`,
+            ),
+        "the editor",
+    );
+    await inPage<string>(`
+        const box = document.querySelector(".sched-editor textarea");
+        box.value = "typed, not saved";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        return JSON.stringify("ok");
+    `);
+    await page.click({ selector: '[data-part="schedule-editor-pause"]' });
+    await until(async () => (await items(id))[0]?.paused !== undefined, "paused", 10_000);
+    await until(
+        async () =>
+            (await inPage<string>(
+                `return JSON.stringify(document.querySelector('[data-part="schedule-editor-pause"]')?.textContent.trim() ?? "")`,
+            )) === "Resume",
+        "the editor's button to read Resume",
+        10_000,
+    );
+    assert.equal(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".sched-editor textarea").value)`,
+        ),
+        "typed, not saved",
+    );
+    assert.equal(
+        await inPage<boolean>(
+            `return JSON.stringify(document.querySelector(".sched-changed") !== null)`,
+        ),
+        false,
+        "its own pause is no change by someone else",
+    );
+    await page.click({ selector: ".sched-editor .button.primary" });
+    await until(async () => (await items(id))[0]?.text === "typed, not saved", "the save", 10_000);
+    assert.ok((await items(id))[0]?.paused !== undefined, "still paused after the save");
+});

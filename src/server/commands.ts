@@ -2027,10 +2027,9 @@ export class Commands {
             app.spend.check(user, id);
         }
 
-        const before = (await app.schedules.list(id)).find((item) => item.id === scheduleId);
-        const schedule = await app.schedules.pause(id, scheduleId, paused, user);
+        const { schedule, changed } = await app.schedules.pause(id, scheduleId, paused, user);
 
-        if ((before?.paused !== undefined) !== paused) {
+        if (changed) {
             await app.collab.activity(
                 id,
                 user,

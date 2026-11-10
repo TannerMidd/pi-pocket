@@ -401,7 +401,8 @@ export function RunningBoard() {
                 (b.run?.approvals ?? 0) - (a.run?.approvals ?? 0) ||
                 Number(b.run?.busy ?? false) - Number(a.run?.busy ?? false) ||
                 (b.run?.tasks.length ?? 0) - (a.run?.tasks.length ?? 0) ||
-                (a.schedules[0]?.next ?? Infinity) - (b.schedules[0]?.next ?? Infinity),
+                (a.schedules.find((each) => each.paused === undefined)?.next ?? Infinity) -
+                    (b.schedules.find((each) => each.paused === undefined)?.next ?? Infinity),
         );
     }, [board, cwds]);
 

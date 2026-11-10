@@ -153,9 +153,10 @@ function problem(draft, next, now) {
 /** One schedule set up, or changed: its message, and when it goes out, once or on repeat. */
 function ScheduleEditor({ schedule, onDone }) {
     const [draft, setDraft] = useState(() => draftOf(schedule));
-    // The version the draft started from: one changed since (by someone else) is not overwritten.
+    // The version the draft started from: one edited since (by someone else) is not overwritten. A pause is no edit.
     const [version] = useState(schedule?.version);
     const [saving, setSaving] = useState(false);
+    const [pausing, setPausing] = useState(false);
     const changed = schedule !== undefined && version !== schedule.version;
     const now = useSecond(true);
     const set = (change) => setDraft((old) => ({ ...old, ...change }));
@@ -355,7 +356,7 @@ function ScheduleEditor({ schedule, onDone }) {
             changed &&
             html`<p class="sched-changed" role="alert">
                 <${Icon} name="reload" size=${13} />
-                <span>This schedule was changed while you edited it. Cancel and open it again to see it.</span>
+                <span>Someone else edited this schedule while you did. Cancel and open it again to see it.</span>
             </p>`
         }
         <div class="sched-actions">
@@ -364,10 +365,21 @@ function ScheduleEditor({ schedule, onDone }) {
                 html`<button class="button ghost danger" onClick=${remove}>Delete</button>
                     <button
                         class="button ghost"
+                        data-part="schedule-editor-pause"
+                        disabled=${pausing}
                         onClick=${() =>
                             attempt(async () => {
-                                await togglePause(schedule);
-                                onDone();
+                                setPausing(true);
+
+                                // It stays open, with what was typed: a pause changes nothing in the draft.
+                                try {
+                                    await actions.pauseSchedule(
+                                        schedule.id,
+                                        schedule.paused === undefined,
+                                    );
+                                } finally {
+                                    setPausing(false);
+                                }
                             })}
                     >
                         ${schedule.paused === undefined ? "Pause" : "Resume"}
@@ -386,9 +398,20 @@ function ScheduleEditor({ schedule, onDone }) {
     </div>`;
 }
 
-/** Pause a schedule, or resume it. */
-const togglePause = (schedule) =>
-    attempt(() => actions.pauseSchedule(schedule.id, schedule.paused === undefined));
+/** Pause a schedule, or resume it; a tap while one is on its way does nothing, so a double tap is one change. */
+const pausing = new Set();
+
+const togglePause = (schedule) => {
+    if (pausing.has(schedule.id)) {
+        return undefined;
+    }
+
+    pausing.add(schedule.id);
+
+    return attempt(() => actions.pauseSchedule(schedule.id, schedule.paused === undefined)).finally(
+        () => pausing.delete(schedule.id),
+    );
+};
 
 /**
  * One scheduled message in the list: its message, when it goes out, and a countdown; a tap edits it. Beside it, a
@@ -438,7 +461,6 @@ function ScheduleRow({ schedule, now, setBy, archived, steer, onEdit }) {
                 data-part="schedule-pause"
                 aria-label=${paused ? `Resume “${schedule.text}”` : `Pause “${schedule.text}”`}
                 title=${paused ? "Resume" : "Pause"}
-                aria-pressed=${paused}
                 onClick=${() => togglePause(schedule)}
             >
                 <${Icon} name=${paused ? "play" : "pause"} size=${15} />
