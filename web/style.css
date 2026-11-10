@@ -6011,9 +6011,11 @@ pre.diff .del {
     --triangle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2'%3E%3Cpath fill='white' d='M1 0 2 2H0Z'/%3E%3C/svg%3E");
     --tw: 11px;
     --th: 10px;
-    /* Inset the sloping sides by --line-w, perpendicular to each edge: for this 11 × 10 triangle. */
-    --inner-top: calc(var(--line-w) * 2.075);
-    --inner-width: calc(var(--tw) - var(--line-w) * 3.38);
+    /*
+     * The outline: the triangle minus one inset by 1.5px on every side, in one image, so the hole cannot round to a
+     * different pixel than the triangle around it.
+     */
+    --hollow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 10' preserveAspectRatio='none'%3E%3Cpath fill='white' fill-rule='evenodd' d='M5.5 0 11 10H0ZM5.5 3.112 8.463 8.5H2.537Z'/%3E%3C/svg%3E");
     /* A working corner: a little under half the triangle, and where the lit one moves. */
     --cw: calc(var(--tw) * 0.45);
     --ch: calc(var(--th) * 0.44);
@@ -6029,8 +6031,6 @@ pre.diff .del {
 .agent-tile .state-mark.remote {
     --tw: 12px;
     --th: 11px;
-    --inner-top: calc(var(--line-w) * 2.09);
-    --inner-width: calc(var(--tw) - var(--line-w) * 3.37);
     width: var(--tw);
     height: var(--th);
     margin: -1px -2px -1px -1px;
@@ -6040,23 +6040,15 @@ pre.diff .del {
     background: none;
 }
 
-/* A solid triangle minus an inset triangle: a true transparent outline, not a background-colored fill. */
+/* A true transparent outline, not a background-colored fill. */
 .state-mark.remote.seen::after,
 .state-mark.remote.limited::after {
     content: "";
     position: absolute;
     inset: 0;
     background: currentColor;
-    -webkit-mask:
-        linear-gradient(#000, #000),
-        var(--triangle) 50% var(--inner-top) / var(--inner-width)
-            calc(100% - var(--line-w) - var(--inner-top)) no-repeat;
-    -webkit-mask-composite: xor;
-    mask:
-        linear-gradient(#000, #000),
-        var(--triangle) 50% var(--inner-top) / var(--inner-width)
-            calc(100% - var(--line-w) - var(--inner-top)) no-repeat;
-    mask-composite: exclude;
+    -webkit-mask: var(--hollow) 0 0 / 100% 100% no-repeat;
+    mask: var(--hollow) 0 0 / 100% 100% no-repeat;
 }
 
 /* Working triangles: their corners are smaller than the square's quadrants, so the unlit ones are a little brighter. */
