@@ -6086,12 +6086,12 @@ pre.diff .del {
 }
 
 /*
- * Failed: a cross cut out of the solid triangle, as large as fits in its inscribed circle (center 5.5, 6.75 of the
- * 11 × 10 box), so it reads at the same weight as the square's. Once read, the same triangle dimmed, as read marks
- * are: an outline with a cross inside is too small to read at this size.
+ * Failed: a cross cut through the solid triangle, its two lines crossing at the triangle's center (5.5, 6.75 of the
+ * 11 × 10 box) and running out past its sides, as the square's cross runs corner to corner. A cross inside the
+ * triangle is too small to read at this size. Once read, the same triangle dimmed, as read marks are.
  */
 .state-mark.remote.failed {
-    --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 10' preserveAspectRatio='none'%3E%3Cpath d='M3.5 4.6 7.5 8.6M7.5 4.6 3.5 8.6' stroke='white' stroke-width='1.9'/%3E%3C/svg%3E");
+    --cross: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 11 10' preserveAspectRatio='none'%3E%3Cpath d='M-2.5 -1.25 13.5 14.75M-2.5 14.75 13.5 -1.25' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E");
     background: currentColor;
     box-shadow: none;
     -webkit-mask:
