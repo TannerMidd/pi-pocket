@@ -22,7 +22,7 @@ const ENTRYPOINT = "sdk-cli";
  * `claude-cli/<version>` user-agent, which Anthropic gates models on. Set the environment variable to raise it when
  * a model's floor is higher. It is read when the server starts.
  */
-const VERSION = process.env.PI_POCKET_ANTHROPIC_CC_VERSION ?? "2.1.280";
+const VERSION = process.env.PI_POCKET_ANTHROPIC_CC_VERSION ?? "2.1.322";
 
 /** A system block of an Anthropic request body. */
 type TextBlock = { type?: string; text?: string; [key: string]: unknown };
