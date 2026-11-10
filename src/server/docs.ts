@@ -13,6 +13,7 @@ import {
     type EntryId,
     type TaskId,
 } from "@earendil-works/pi-durable";
+import type { KeepWarmTime } from "./config.ts";
 import type { Repeat } from "./when.ts";
 import type { Worktree } from "./worktrees.ts";
 
@@ -39,6 +40,8 @@ export type SessionMeta = {
     linkedFrom?: { id: number };
     /** The most Pi may spend here, in dollars, subagents included. */
     budget?: number;
+    /** Keeping the prompt cache warm once a run ends: 0 never, "break-even", or hours (`KeepWarmTime`); absent: the owner's. */
+    keepWarm?: KeepWarmTime;
     /** The git worktree the session works in, when it has one of its own. */
     worktree?: Worktree;
     /** The session of Pi's in the terminal this one continues, and how many messages its file had then. */
