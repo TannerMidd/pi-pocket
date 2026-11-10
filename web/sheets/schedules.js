@@ -340,6 +340,12 @@ function ScheduleEditor({ schedule, onDone }) {
             }
         </div>
         ${
+            schedule?.paused !== undefined &&
+            html`<p class="muted small">
+                ${"Paused: it stays paused when you save, until someone resumes it."}
+            </p>`
+        }
+        ${
             otherZone &&
             html`<p class="muted small">
                 Set in ${schedule.zone}. Saving uses this device's time zone, ${deviceZone()}.
@@ -355,7 +361,17 @@ function ScheduleEditor({ schedule, onDone }) {
         <div class="sched-actions">
             ${
                 schedule !== undefined &&
-                html`<button class="button ghost danger" onClick=${remove}>Delete</button>`
+                html`<button class="button ghost danger" onClick=${remove}>Delete</button>
+                    <button
+                        class="button ghost"
+                        onClick=${() =>
+                            attempt(async () => {
+                                await togglePause(schedule);
+                                onDone();
+                            })}
+                    >
+                        ${schedule.paused === undefined ? "Pause" : "Resume"}
+                    </button>`
             }
             <span class="grow"></span>
             <button class="button ghost" onClick=${onDone}>Cancel</button>
@@ -370,37 +386,66 @@ function ScheduleEditor({ schedule, onDone }) {
     </div>`;
 }
 
-/** One scheduled message in the list: its message, when it goes out, and a countdown; a tap edits it. */
+/** Pause a schedule, or resume it. */
+const togglePause = (schedule) =>
+    attempt(() => actions.pauseSchedule(schedule.id, schedule.paused === undefined));
+
+/**
+ * One scheduled message in the list: its message, when it goes out, and a countdown; a tap edits it. Beside it, a
+ * button pauses it or resumes it, so stopping one takes a tap and asks Pi nothing.
+ */
 function ScheduleRow({ schedule, now, setBy, archived, steer, onEdit }) {
     const repeat = schedule.repeat !== undefined;
+    const paused = schedule.paused !== undefined;
     const due = schedule.next <= now;
 
-    return html`<button
-        class="sched-card"
-        data-part="schedule"
-        disabled=${!steer}
-        onClick=${onEdit}
-        aria-label=${`${schedule.text}, ${repeat ? schedule.repeat : formatWhen(schedule.next)}${steer ? ". Edit" : ""}`}
-    >
-        <span class=${`sched-mark ${repeat ? "repeat" : ""}`} aria-hidden="true">
-            <${Icon} name=${repeat ? "reload" : "clock"} size=${14} />
-        </span>
-        <span class="sched-main">
-            <span class="sched-text">${schedule.text}</span>
-            <span class="sched-meta">
-                ${repeat ? `${schedule.repeat} · next ${formatWhen(schedule.next)}` : formatWhen(schedule.next)}
-                ${` · set by ${setBy(schedule.by)}`}
-                ${repeat && schedule.runs > 0 ? ` · sent ${schedule.runs}×` : ""}
-                ${archived ? " · session archived" : ""}
+    return html`<div class=${`sched-item ${paused ? "paused" : ""}`} data-part="schedule">
+        <button
+            class="sched-card"
+            disabled=${!steer}
+            onClick=${onEdit}
+            aria-label=${`${schedule.text}, ${paused ? "paused" : repeat ? schedule.repeat : formatWhen(schedule.next)}${steer ? ". Edit" : ""}`}
+        >
+            <span class=${`sched-mark ${repeat ? "repeat" : ""}`} aria-hidden="true">
+                <${Icon} name=${paused ? "pause" : repeat ? "reload" : "clock"} size=${14} />
             </span>
-        </span>
-        <span class="sched-side">
-            <span class="sched-countdown">
-                ${due ? "due now" : `in ${countdown(schedule.next, now)}`}
+            <span class="sched-main">
+                <span class="sched-text">${schedule.text}</span>
+                <span class="sched-meta">
+                    ${
+                        paused
+                            ? `Paused by ${setBy(schedule.pausedBy)} · ${repeat ? schedule.repeat : formatWhen(schedule.next)}`
+                            : repeat
+                              ? `${schedule.repeat} · next ${formatWhen(schedule.next)}`
+                              : formatWhen(schedule.next)
+                    }
+                    ${` · set by ${setBy(schedule.by)}`}
+                    ${repeat && schedule.runs > 0 ? ` · sent ${schedule.runs}×` : ""}
+                    ${archived ? " · session archived" : ""}
+                </span>
             </span>
-            ${steer && html`<span class="sched-edit">Edit</span>`}
-        </span>
-    </button>`;
+            <span class="sched-side">
+                <span class="sched-countdown">
+                    ${paused ? "paused" : due ? "due now" : `in ${countdown(schedule.next, now)}`}
+                </span>
+                ${steer && html`<span class="sched-edit">Edit</span>`}
+            </span>
+        </button>
+        ${
+            steer &&
+            html`<button
+                class="sched-pause"
+                data-part="schedule-pause"
+                aria-label=${paused ? `Resume “${schedule.text}”` : `Pause “${schedule.text}”`}
+                title=${paused ? "Resume" : "Pause"}
+                aria-pressed=${paused}
+                onClick=${() => togglePause(schedule)}
+            >
+                <${Icon} name=${paused ? "play" : "pause"} size=${15} />
+                <span>${paused ? "Resume" : "Pause"}</span>
+            </button>`
+        }
+    </div>`;
 }
 
 /** Messages that go to Pi later or on repeat: what is coming, an editor to set one up or change one, and quick add. */
@@ -430,8 +475,10 @@ export function SchedulesSheet() {
             await actions.schedule(quickText);
             setQuickText("");
         });
-    const repeats = schedules.filter((each) => each.repeat !== undefined).length;
-    const next = schedules[0];
+    const active = schedules.filter((each) => each.paused === undefined);
+    const repeats = active.filter((each) => each.repeat !== undefined).length;
+    const pausedCount = schedules.length - active.length;
+    const next = active[0];
 
     // One that went away while open (sent, or cancelled elsewhere) closes the editor.
     useEffect(() => {
@@ -443,9 +490,10 @@ export function SchedulesSheet() {
     return html`<${Sheet} title="Schedules" onClose=${closeSheet} className="sched-sheet">
         <div class="sched-summary" data-part="schedules-summary">
             <div>
-                <b>${schedules.length}</b>
+                <b>${active.length}</b>
                 ${" scheduled"}
                 ${repeats > 0 ? html`<span class="muted"> · ${repeats} repeating</span>` : ""}
+                ${pausedCount > 0 ? html`<span class="muted"> · ${pausedCount} paused</span>` : ""}
             </div>
             ${
                 next !== undefined &&

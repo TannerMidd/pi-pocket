@@ -502,6 +502,8 @@ export type Schedule = {
     taskId: TaskId;
     /** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */
     key?: string;
+    /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
+    paused?: { at: number; by: string };
 };
 
 /** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */

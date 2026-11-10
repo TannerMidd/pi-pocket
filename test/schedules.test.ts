@@ -578,3 +578,78 @@ test("a schedule id is only ever one of the session's own", async () => {
     );
     assert.equal(({} as Record<string, unknown>).text, undefined);
 });
+
+test("a person pauses a schedule and resumes it: paused, nothing goes out; resumed, it goes on", async () => {
+    const id = await newSession(app);
+    const repeat = await app.commands.schedule(id, owner(app), {
+        when: "every 10m paused ping",
+        zone: "UTC",
+    });
+    const once = await app.commands.schedule(id, owner(app), {
+        when: "in 5m once while paused",
+        zone: "UTC",
+    });
+    const viewer = app.config.addUser("Vee", "viewer").user;
+
+    await assert.rejects(app.commands.pauseSchedule(id, viewer, repeat.id, true), { status: 403 });
+    await assert.rejects(app.commands.pauseSchedule(id, owner(app), "nope", true), { status: 404 });
+    await assert.rejects(app.commands.pauseSchedule(id, owner(app), repeat.id, "yes"), {
+        status: 400,
+    });
+
+    const paused = await app.commands.pauseSchedule(id, owner(app), repeat.id, true);
+
+    assert.equal(paused.paused?.by, owner(app).id);
+    assert.notEqual(String(paused.taskId), String(repeat.taskId), "a new task holds it");
+    await app.commands.pauseSchedule(id, owner(app), once.id, true);
+    // Pausing again changes nothing.
+    assert.equal(
+        String((await app.commands.pauseSchedule(id, owner(app), repeat.id, true)).taskId),
+        String(paused.taskId),
+    );
+    await until(
+        async () =>
+            (await app.harness.getTask(repeat.taskId, context))?.state.status === "terminal",
+        "the old task to end",
+    );
+
+    // Past both times: nothing goes out, and both are kept.
+    await restartLater(25);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal((await userTexts(id)).filter((text) => text.includes("[scheduled]")).length, 0);
+    assert.equal((await items(id)).length, 2);
+    // Edited while paused, it stays paused.
+    const edited = await app.commands.updateSchedule(id, owner(app), repeat.id, {
+        text: "paused ping 2",
+        every: { minutes: 10 },
+    });
+
+    assert.ok(edited.paused !== undefined, "an edit keeps it paused");
+    // Pi's tool lists it as paused.
+    const listed = await app.schedules.list(id);
+
+    assert.ok(listed.every((each) => each.paused !== undefined));
+
+    // Resumed: the one whose time passed goes out now; the repeat goes on from a time still to come.
+    await app.commands.pauseSchedule(id, owner(app), once.id, false);
+    const resumed = await app.commands.pauseSchedule(id, owner(app), repeat.id, false);
+
+    assert.equal(resumed.paused, undefined);
+    assert.ok(resumed.next > app.now(), "the next time is still to come");
+    await until(
+        async () =>
+            (await userTexts(id)).some((text) => text.includes("[scheduled] once while paused")),
+        "the missed one to go out on resume",
+    );
+    await restartLater(11);
+    await until(
+        async () =>
+            (await userTexts(id)).some((text) => text.includes("[scheduled] paused ping 2")),
+        "the repeat to go on",
+    );
+    assert.equal(
+        (await userTexts(id)).filter((text) => text.includes("[scheduled] paused ping")).length,
+        1,
+        "once, with the edited text",
+    );
+});

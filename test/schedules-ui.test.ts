@@ -33,6 +33,7 @@ let page: BrowserPage;
 let base = "";
 
 const inPage = async <T>(script: string): Promise<T> => JSON.parse(await page.evaluate(script));
+const items = async (id: Awaited<ReturnType<typeof newSession>>) => app.schedules.list(id);
 
 before(async () => {
     if (chromium === undefined) {
@@ -248,5 +249,72 @@ test(
         );
         await page.click({ label: "Delete" });
         await until(async () => (await app.schedules.list(id)).length === 1, "it to be deleted");
+    },
+);
+
+test(
+    "Pause on a schedule's card stops it with one tap, and Resume starts it again",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await app.commands.schedule(id, owner(app), { when: "every 30m pause me", zone: "UTC" });
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.navigate(`${base}/s/${id}`);
+        await until(
+            async () =>
+                await inPage<boolean>(`
+            const { store, openSheet } = await import("/store.js");
+            if ((store.state.view.schedules ?? []).length < 1) {
+                return JSON.stringify(false);
+            }
+
+            openSheet({ type: "schedules" });
+            return JSON.stringify(document.querySelector(".sched-pause") !== null);
+        `),
+            "the sheet with its pause button",
+            20_000,
+        );
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sheet").getAnimations().length === 0)`,
+                ),
+            "the sheet to settle",
+        );
+        await page.click({ selector: ".sched-pause" });
+        await until(
+            async () => (await items(id))[0]?.paused !== undefined,
+            "the server to have it paused",
+            10_000,
+        );
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sched-item.paused .sched-countdown")?.textContent.trim() === "paused")`,
+                ),
+            "the card to show it paused",
+            10_000,
+        );
+        // The status line says the session's schedules are all paused, with nothing to count down to.
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".status-line .schedules-now")?.textContent ?? "")`,
+            ),
+            "1 paused",
+        );
+        assert.match(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".sched-summary").textContent)`,
+            ),
+            /0\s*scheduled · 1 paused/,
+        );
+
+        await page.click({ selector: ".sched-pause" });
+        await until(
+            async () => (await items(id))[0]?.paused === undefined,
+            "the server to have it resumed",
+            10_000,
+        );
     },
 );

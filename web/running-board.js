@@ -297,6 +297,11 @@ const FILTERS = [
     { key: "scheduled", label: "Scheduled", keep: (row) => row.schedules.length > 0 },
     { key: "approval", label: "Needs approval", keep: (row) => (row.run?.approvals ?? 0) > 0 },
     { key: "held", label: "Held", keep: (row) => row.schedules.some((each) => each.held) },
+    {
+        key: "paused",
+        label: "Paused",
+        keep: (row) => row.schedules.some((each) => each.paused !== undefined),
+    },
 ];
 
 export function RunningBoard() {
@@ -452,6 +457,17 @@ export function RunningBoard() {
             await reload();
         });
 
+    const pause = (schedule) =>
+        attempt(async () => {
+            const paused = schedule.paused === undefined;
+
+            await api(`c/${schedule.session}/schedules/${encodeURIComponent(schedule.id)}/pause`, {
+                paused,
+            });
+            notify("info", paused ? "Schedule paused." : "Schedule resumed.");
+            await reload();
+        });
+
     const stopTask = (task) =>
         attempt(async () => {
             if (STOPPABLE[task.kind]) {
@@ -473,7 +489,7 @@ export function RunningBoard() {
         (sum, each) => sum + each.tasks.filter((task) => task.status === "running").length,
         0,
     );
-    const next = schedules.find((each) => !each.held);
+    const next = schedules.find((each) => !each.held && each.paused === undefined);
     const needs = [
         ...(board?.sessions ?? [])
             .filter((each) => each.approvals > 0)
@@ -514,7 +530,7 @@ export function RunningBoard() {
                                   ${" at work · "}
                                   <b>${active}</b>
                                   ${" running · "}
-                                  <b>${schedules.length}</b>
+                                  <b>${schedules.filter((each) => each.paused === undefined).length}</b>
                                   ${" scheduled"}
                                   ${next && html`${" · next "}<b>${span(next.next - now)}</b>`}
                               `
@@ -631,6 +647,7 @@ export function RunningBoard() {
                                               onClose=${() => setSelected(null)}
                                               onOpen=${open}
                                               onCancel=${cancel}
+                                              onPause=${pause}
                                           />
                                       </div>`
                                   }
@@ -675,6 +692,7 @@ export function RunningBoard() {
                     onClose=${() => setSelected(null)}
                     onOpen=${open}
                     onCancel=${cancel}
+                    onPause=${pause}
                 />
             </div>`
         }
@@ -1125,23 +1143,28 @@ function Row({
                     ? row.schedules.map(
                           (schedule) => html`<button
                               key=${schedule.id}
-                              class=${`rb-sched ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
+                              class=${`rb-sched ${schedule.held ? "held" : ""} ${schedule.paused !== undefined ? "paused" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
                               onClick=${() => onPick(schedule)}
                           >
                               <span class="rb-sched-text">${schedule.text}</span>
                               <span class="rb-sched-time" title=${schedule.zone}>
                                   ${
-                                      schedule.held
-                                          ? "Held"
-                                          : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
+                                      schedule.paused !== undefined
+                                          ? "Paused"
+                                          : schedule.held
+                                            ? "Held"
+                                            : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
                                   }
                               </span>
                               <span class="rb-sched-rule rb-ellipsis">
                                   ${schedule.repeat ? `↻ ${schedule.repeat}` : "once"}
                               </span>
                               <span class="rb-sched-rel">
-                                  ${relative(schedule.next, now)}
-                                  ${schedule.every ? ` · ${schedule.runs}×` : ""}
+                                  ${
+                                      schedule.paused === undefined
+                                          ? `${relative(schedule.next, now)}${schedule.every ? ` · ${schedule.runs}×` : ""}`
+                                          : ""
+                                  }
                               </span>
                           </button>`,
                       )
@@ -1151,7 +1174,7 @@ function Row({
     </div>`;
 }
 
-function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
+function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel, onPause }) {
     const zone = zoneName(schedule.zone, schedule.next);
 
     return html`<div class="rb-detail">
@@ -1165,6 +1188,12 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             </button>
         </div>
         ${
+            schedule.paused !== undefined &&
+            html`<div class="rb-held rb-paused">
+                ${`Paused at ${clock(schedule.paused, schedule.zone, now, { day: "always" })}. It sends nothing until someone resumes it.`}
+            </div>`
+        }
+        ${
             schedule.held &&
             html`<div class="rb-held">
                 Held: ${schedule.held}. At its time it is cancelled, unless that changes first.
@@ -1176,10 +1205,14 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             <dd>${schedule.repeat ?? "no, once"}</dd>
             <dt>Next</dt>
             <dd>
-                ${clock(schedule.next, schedule.zone, now, { day: "always" })}
-                ${zone && ` ${zone}`}
-                ${" · "}
-                ${relative(schedule.next, now)}
+                ${
+                    schedule.paused !== undefined
+                        ? "paused"
+                        : html`${clock(schedule.next, schedule.zone, now, { day: "always" })}
+                              ${zone && ` ${zone}`}
+                              ${" · "}
+                              ${relative(schedule.next, now)}`
+                }
             </dd>
             <dt>Zone</dt>
             <dd>${schedule.zone}</dd>
@@ -1212,9 +1245,12 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             <button class="button" onClick=${() => onOpen(schedule.session)}>Open session</button>
             ${
                 steer &&
-                html`<button class="button danger" onClick=${() => onCancel(schedule)}>
-                    Cancel
-                </button>`
+                html`<button class="button" onClick=${() => onPause(schedule)}>
+                        ${schedule.paused === undefined ? "Pause" : "Resume"}
+                    </button>
+                    <button class="button danger" onClick=${() => onCancel(schedule)}>
+                        Cancel
+                    </button>`
             }
         </div>
     </div>`;

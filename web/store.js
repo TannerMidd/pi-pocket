@@ -2749,6 +2749,8 @@ export const actions = {
             { method: "PUT" },
         ),
     cancelSchedule: (id) => api(`c/${current()}/schedules/${encodeURIComponent(id)}/cancel`, {}),
+    pauseSchedule: (id, paused) =>
+        api(`c/${current()}/schedules/${encodeURIComponent(id)}/pause`, { paused }),
     setGoal: (command) => api(`c/${current()}/goal`, { command }),
     removeWorktree: (force) => api(`c/${current()}/worktree`, { remove: true, force }),
     clearGoal: () => api(`c/${current()}/goal`, { clear: true }),

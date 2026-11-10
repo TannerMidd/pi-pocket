@@ -4745,6 +4745,11 @@ pre.diff .del {
     font: inherit;
 }
 
+.status-line .schedules-now.paused {
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    color: var(--muted);
+}
+
 .status-line .schedules-tip {
     position: absolute;
     bottom: calc(100% + 8px);
@@ -10477,8 +10482,67 @@ textarea.notes {
     gap: 8px;
 }
 
+/* A schedule: its card, which a tap edits, and beside it a button to pause or resume it. */
+.sched-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.sched-item.paused .sched-card {
+    border-style: dashed;
+    background: transparent;
+}
+
+.sched-item.paused :is(.sched-text, .sched-mark) {
+    opacity: 0.6;
+}
+
+.sched-item.paused .sched-countdown {
+    color: var(--muted);
+}
+
+.sched-pause {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: none;
+    width: 56px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 11px;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-pause[aria-pressed="true"] {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+@media (hover: hover) {
+    .sched-pause:hover {
+        border-color: var(--sched-line);
+        color: var(--text);
+    }
+}
+
+.sched-pause:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
 .sched-card {
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: flex-start;
     gap: 12px;
     width: 100%;
@@ -11612,6 +11676,16 @@ textarea.notes {
 
 .rb-sched.held {
     background: var(--warn-soft);
+}
+
+.rb-sched.paused {
+    opacity: 0.6;
+}
+
+.rb-held.rb-paused {
+    border-color: var(--hair-2);
+    background: var(--card-2);
+    color: var(--muted);
 }
 
 .rb-sched-text {

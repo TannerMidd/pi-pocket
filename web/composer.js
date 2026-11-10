@@ -2317,8 +2317,16 @@ function schedulesNow() {
     return schedulesAvailable() ? (store.state.view.schedules ?? []) : [];
 }
 
-const schedulesTitle = (schedules) =>
-    `${schedules.length} scheduled: the next goes out at ${formatWhen(schedules[0].next)}. Open the schedules`;
+/** What the pill says in words: the schedules that go out, the next one's time, and how many are paused. */
+function schedulesTitle(schedules) {
+    const active = schedules.filter((each) => each.paused === undefined);
+    const paused = schedules.length - active.length;
+    const pausedText = paused > 0 ? `${paused} paused` : "";
+
+    return active.length === 0
+        ? `${pausedText}. Open the schedules`
+        : `${active.length} scheduled: the next goes out at ${formatWhen(active[0].next)}${paused > 0 ? `, ${pausedText}` : ""}. Open the schedules`;
+}
 
 /**
  * The session's scheduled messages: a pill on the left of the status line, across from the background one. Hovered, it
@@ -2326,12 +2334,16 @@ const schedulesTitle = (schedules) =>
  */
 function SchedulesPill({ schedules }) {
     const [hover, setHover] = useState(false);
-    const now = useSecond(hover);
-    const next = schedules[0];
-    const repeats = schedules.filter((each) => each.repeat !== undefined).length;
+    const active = schedules.filter((each) => each.paused === undefined);
+    const paused = schedules.length - active.length;
+    // All paused: it says so, and has nothing to count down to.
+    const idle = active.length === 0;
+    const now = useSecond(hover && !idle);
+    const next = active[0];
+    const repeats = active.filter((each) => each.repeat !== undefined).length;
 
     return html`<button
-        class="schedules-now"
+        class=${`schedules-now ${idle ? "paused" : ""}`}
         data-part="schedules-now"
         aria-label=${schedulesTitle(schedules)}
         onPointerEnter=${(event) => event.pointerType === "mouse" && setHover(true)}
@@ -2343,11 +2355,12 @@ function SchedulesPill({ schedules }) {
             openSheet({ type: "schedules" });
         }}
     >
-        <${Icon} name="clock" size=${11} />
-        <span class="num">${schedules.length}</span>
-        <span class="word">${" "}scheduled</span>
+        <${Icon} name=${idle ? "pause" : "clock"} size=${11} />
+        <span class="num">${idle ? paused : active.length}</span>
+        <span class="word">${idle ? " paused" : " scheduled"}</span>
         ${
             hover &&
+            !idle &&
             html`<span class="schedules-tip" role="tooltip">
                 <span class="row">
                     <span>Next in</span>
@@ -2355,7 +2368,7 @@ function SchedulesPill({ schedules }) {
                 </span>
                 <span class="what">${next.text}</span>
                 <span class="muted">
-                    ${formatWhen(next.next)} · ${schedules.length} scheduled${repeats > 0 ? ` · ${repeats} repeating` : ""}
+                    ${formatWhen(next.next)} · ${active.length} scheduled${repeats > 0 ? ` · ${repeats} repeating` : ""}${paused > 0 ? ` · ${paused} paused` : ""}
                 </span>
             </span>`
         }

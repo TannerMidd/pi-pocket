@@ -765,7 +765,9 @@ export class Commands {
         // Archiving leaves its repeating schedules running: the person is told how many.
         const repeating =
             patch.archived === true
-                ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+                ? (await app.schedules.list(id)).filter(
+                      (item) => item.every !== undefined && item.paused === undefined,
+                  ).length
                 : 0;
 
         return { repeating };
@@ -2003,6 +2005,40 @@ export class Commands {
         } catch (error) {
             throw new HttpError(400, describe(error));
         }
+    }
+
+    /** Pause a scheduled message, or resume it: paused, it sends nothing until someone resumes it. */
+    async pauseSchedule(
+        id: ConversationId,
+        user: User,
+        scheduleId: string,
+        paused: unknown,
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        await app.requireDriver(id, user);
+
+        if (typeof paused !== "boolean") {
+            throw new HttpError(400, "paused must be true or false");
+        }
+
+        if (!paused) {
+            app.spend.check(user, id);
+        }
+
+        const before = (await app.schedules.list(id)).find((item) => item.id === scheduleId);
+        const schedule = await app.schedules.pause(id, scheduleId, paused, user);
+
+        if ((before?.paused !== undefined) !== paused) {
+            await app.collab.activity(
+                id,
+                user,
+                `${paused ? "paused" : "resumed"} the scheduled “${snippet(schedule.text, 60)}”`,
+            );
+        }
+
+        return schedule;
     }
 
     async cancelSchedule(id: ConversationId, user: User, scheduleId: string): Promise<void> {

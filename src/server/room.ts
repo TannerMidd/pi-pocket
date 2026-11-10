@@ -848,7 +848,7 @@ export class Room {
                 .sort((a, b) => a.next - b.next)
                 // `every` and `zone` as data too, for the Schedules sheet's editor, and `version`, which each edit
                 // changes (its task), so a save made from an older copy is refused instead of undoing that edit.
-                .map(({ id, text, next, every, zone, by, runs, createdAt, taskId }) => ({
+                .map(({ id, text, next, every, zone, by, runs, createdAt, taskId, paused }) => ({
                     id,
                     version: String(taskId),
                     text,
@@ -858,6 +858,7 @@ export class Room {
                     ...(by === undefined ? {} : { by }),
                     runs,
                     createdAt,
+                    ...(paused === undefined ? {} : { paused: paused.at, pausedBy: paused.by }),
                 })),
             // The branch is read from the repository each time, so one Pi or a person switched to shows on the next update.
             branch: this.#readHead(),

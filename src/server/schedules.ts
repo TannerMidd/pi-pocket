@@ -78,6 +78,9 @@ const ownedBy = (schedule: Schedule | undefined, runtime: Runtime): schedule is 
 const own = (items: Record<string, Schedule>, id: string): Schedule | undefined =>
     Object.hasOwn(items, id) ? items[id] : undefined;
 
+/** How long a paused schedule's task sleeps before it looks again: it keeps a live task, so the board still finds it. */
+const PAUSED_RECHECK_MS = 30 * 24 * 60 * 60_000;
+
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
 export type ScheduleRequest = {
@@ -120,6 +123,15 @@ export class Schedules {
 
                     if (schedule === undefined) {
                         return runtime.commit(() => finished, context);
+                    }
+
+                    // Paused: it waits for a resume, which hands it to a new task; this one only looks again now and then.
+                    if (schedule.paused !== undefined) {
+                        return runtime.sleepUntil(
+                            runtime.now() + PAUSED_RECHECK_MS,
+                            { phase: "wait" },
+                            context,
+                        );
                     }
 
                     return runtime.sleepUntil(schedule.next, { phase: "send" }, context);
@@ -186,6 +198,10 @@ export class Schedules {
 
             if (!ownedBy(item, runtime)) {
                 return finished;
+            }
+
+            if (item.paused !== undefined) {
+                return { status: "running", checkpoint: { phase: "wait" } };
             }
 
             if (stopped === undefined) {
@@ -503,6 +519,65 @@ export class Schedules {
                 : nextRepeat(at.every, now, zone);
 
         return { next, every: at.every };
+    }
+
+    /**
+     * Pause a schedule, or resume it. Paused, it sends nothing and keeps its place. Resumed, a repeat goes on from its
+     * next time still to come; one that goes out once and whose time passed while paused goes out now. Either way a
+     * new task takes it over, as for an edit, so a sending under way when it was paused is the last. Throws a 404 for no
+     * such schedule.
+     */
+    async pause(
+        conversationId: ConversationId,
+        scheduleId: string,
+        paused: boolean,
+        by: { id: string },
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        if (!this.running) {
+            throw new HttpError(409, "Schedules are turned off in Extensions.");
+        }
+
+        let replaced: Schedule["taskId"] | undefined;
+
+        const updated = await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = own(doc.items, scheduleId);
+
+            if (item === undefined) {
+                throw new HttpError(404, "No such scheduled message");
+            }
+
+            if ((item.paused !== undefined) === paused) {
+                return JSON.parse(JSON.stringify(item)) as Schedule;
+            }
+
+            replaced = item.taskId;
+            item.taskId = await tx.createTask(
+                this.task,
+                { scheduleId },
+                { ownership: { kind: "conversation" }, background: true, conversationId },
+            );
+
+            if (paused) {
+                item.paused = { at: app.now(), by: by.id };
+            } else {
+                delete item.paused;
+
+                if (item.every !== undefined && item.next <= app.now()) {
+                    item.next = nextRepeat(item.every, app.now(), item.zone);
+                }
+            }
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
+        }, context);
+
+        if (replaced !== undefined) {
+            await app.harness.abortTask(replaced, context).catch(() => undefined);
+        }
+
+        return updated;
     }
 
     /** Stop a schedule: it sends nothing more. Returns it; undefined when there is no such schedule. */
