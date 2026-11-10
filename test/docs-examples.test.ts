@@ -12,15 +12,17 @@ import {
     say,
     scriptedModel,
     until,
+    work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { AuthorsDoc } from "../src/server/docs.ts";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const DOCS = fileURLToPath(new URL("../docs/", import.meta.url));
 const EXAMPLES = join(DOCS, "examples");
@@ -121,6 +123,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
             ["clock.ts", false],
             ["my-words.ts", false],
             ["no-force-push.ts", false],
+            ["pi-notes.ts", false],
             ["quiet-note.ts", false],
             ["read-page.ts", false],
             ["server-status.ts", false],
@@ -131,6 +134,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
         "clock.ts",
         "my-words.ts",
         "no-force-push.ts",
+        "pi-notes.ts",
         "quiet-note.ts",
         "read-page.ts",
         "server-status.ts",
@@ -321,4 +325,28 @@ test("the example extensions load as drop-ins, off until the owner turns them on
     } finally {
         app.detach(tab.client);
     }
+});
+
+test("Pi notes: notes beside one of Pi's sessions come along when it continues here", async () => {
+    await app.setExtensionEnabled(owner(app), "pi-notes.ts", true);
+    const manager = SessionManager.inMemory(work);
+
+    manager.appendMessage({ role: "user", content: "Where were we?", timestamp: 1 });
+    manager.appendMessage(fauxAssistantMessage([fauxText("At the release.")]));
+    const folder = join(process.env.PI_CODING_AGENT_DIR!, "sessions", "--notes--");
+
+    mkdirSync(folder, { recursive: true });
+    const path = join(folder, "noted.jsonl");
+
+    writeFileSync(
+        path,
+        `${[manager.getHeader(), ...manager.getEntries()].map((each) => JSON.stringify(each)).join("\n")}\n`,
+    );
+    writeFileSync(`${path}.notes.md`, "Ship on Friday.");
+    assert.deepEqual((await app.piSessions.preview(owner(app), path)).companions, ["Notes"]);
+    const { id, notes } = await app.commands.continuePiSession(owner(app), path);
+
+    assert.deepEqual(notes, ["Brought Pi's notes along."]);
+    await say(app, id, "carry on");
+    assert.match(prompt, /Notes kept with this session in Pi[\s\S]*Ship on Friday\./);
 });

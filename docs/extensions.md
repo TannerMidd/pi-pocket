@@ -102,6 +102,7 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 - [examples/my-words.ts](examples/my-words.ts): the module of [Your first extension](extensions/first-extension.md), a tool and a command.
 - [examples/clock.ts](examples/clock.ts): a tool, and a command (`/clock-zone`) that sets the time zone that it uses in a session.
 - [examples/no-force-push.ts](examples/no-force-push.ts): a hook that stops some bash calls, and a prompt section that tells Pi so.
+- [examples/pi-notes.ts](examples/pi-notes.ts): notes kept beside one of Pi's sessions come along when it continues here ([Files that come with Pi's sessions](extensions/pi-session-companions.md)).
 - [examples/read-page.ts](examples/read-page.ts): a tool that reads a public web page with `host.fetchPublic`, and fences its text with `host.text`.
 - [examples/server-status.ts](examples/server-status.ts) with [examples/server-status.js](examples/server-status.js): a page on the rail, with a route that reads the machine's load and memory, and events that keep it live.
 - [examples/quiet-note.ts](examples/quiet-note.ts) with [examples/quiet-note.js](examples/quiet-note.js): an input the transcript can fold. The model still reads the whole message.
@@ -109,6 +110,10 @@ These examples work. `npm test` runs them (`test/docs-examples.test.ts`):
 ## Execution environments for workspaces
 
 Modules can register an execution provider for a workspace URI scheme such as `ssh`. See [Execution environments for workspaces](extensions/workspaces.md) and the experimental [`host.registerWorkspaceProvider`](extensions/reference/host.md#registerworkspaceprovider) API.
+
+## Files that come with Pi's sessions
+
+Modules can carry a file that a Pi extension keeps beside each Pi session file into a session continued here. See [Files that come with Pi's sessions](extensions/pi-session-companions.md) and the experimental [`host.registerPiSessionCompanion`](extensions/reference/host.md#registerpisessioncompanion) API.
 
 ## Rules that are easy to break
 

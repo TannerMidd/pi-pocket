@@ -179,12 +179,15 @@ export function PiSessionSheet({ path }) {
             setBusy(true);
 
             try {
-                const { id } = await actions.continuePiSession(path);
+                const { id, notes = [] } = await actions.continuePiSession(path);
 
                 open(id);
                 notify(
                     "info",
-                    "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",
+                    [
+                        "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",
+                        ...notes,
+                    ].join(" "),
                 );
             } finally {
                 going.current = false;
@@ -220,6 +223,13 @@ export function PiSessionSheet({ path }) {
                 <dt>Messages</dt>
                 <dd>${info.messages}</dd>
             </div>
+            ${
+                info.companions?.length > 0 &&
+                html`<div>
+                    <dt>Includes</dt>
+                    <dd>${info.companions.join(", ")}</dd>
+                </div>`
+            }
         </dl>
         ${
             !info.cwdExists &&
