@@ -19,10 +19,11 @@ const ENTRYPOINT = "sdk-cli";
 
 /**
  * The Claude Code version requests are shaped as: the one pi-ai's Anthropic transport reports in its
- * `claude-cli/<version>` user-agent, which Anthropic gates models on. Set the environment variable to raise it when
- * a model's floor is higher. It is read when the server starts.
+ * `claude-cli/<version>` user-agent, which Anthropic gates models on. Raise it with each Pi update that raises that
+ * user-agent: `test/anthropic-shape.test.ts` checks that the two match. The environment variable overrides it, read when
+ * the server starts.
  */
-const VERSION = process.env.PI_POCKET_ANTHROPIC_CC_VERSION ?? "2.1.280";
+const VERSION = process.env.PI_POCKET_ANTHROPIC_CC_VERSION ?? "2.1.322";
 
 /** A system block of an Anthropic request body. */
 type TextBlock = { type?: string; text?: string; [key: string]: unknown };

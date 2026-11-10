@@ -502,6 +502,7 @@ export class CacheKeeper {
         const options: ObservedOptions = {
             ...rest,
             maxTokens: 1,
+            disableContinuation: true,
             maxRetries: 0,
             signal: abort.signal,
             [FINAL_PAYLOAD]: (payload) => {

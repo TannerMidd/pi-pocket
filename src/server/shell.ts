@@ -5,7 +5,7 @@
  * done part of its work, so its entry says it was cut off. The entry goes in as a write submission, which Pi Durable
  * queues while Pi works and places where a message can go.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Message } from "@earendil-works/pi-ai";
 import {

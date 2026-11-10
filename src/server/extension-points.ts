@@ -7,7 +7,7 @@
  * - `browser`: a session's browser page (`browser.ts`), with the actions an extension needs and nothing of the page's
  *   internals: no script to run in it, and a `fill` for a person's value that core never shows.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Browsers } from "./browser.ts";
 import type { BrowserPage, Target } from "./browser/page.ts";
 import { normalizeUrl } from "./browser/urls.ts";
