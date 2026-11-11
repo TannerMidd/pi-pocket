@@ -10507,7 +10507,7 @@ textarea.notes {
 }
 
 .memory-scope-count {
-    color: var(--faint);
+    color: var(--muted);
     font: 11.5px var(--mono);
     font-variant-numeric: tabular-nums;
 }
