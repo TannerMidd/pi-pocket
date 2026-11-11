@@ -6,7 +6,7 @@
  * the address answers nothing.
  */
 import { randomBytes } from "node:crypto";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { PocketApp } from "./app.ts";
 import { type PublicLink, PublicLinksDoc } from "./docs.ts";

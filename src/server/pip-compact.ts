@@ -10,7 +10,7 @@
  * its own notes. It keeps what PiP's person asked for, what is still open, and what PiP follows and watches (which
  * live on the server, and work on as they did). What it costs is added to `pi.usage`, once, as Pi Durable's are.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import {
