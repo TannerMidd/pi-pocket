@@ -8900,6 +8900,25 @@ div.group-head {
     min-width: 0;
 }
 
+/* On a phone the value goes under the level: side by side, the value had no room left to show. */
+@media (max-width: 480px) {
+    .model-tier {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .model-tier select {
+        grid-area: 1 / 1;
+    }
+
+    .model-tier button {
+        grid-area: 1 / 2;
+    }
+
+    .model-tier input {
+        grid-area: 2 / 1 / 3 / 3;
+    }
+}
+
 .model-tier-buttons {
     gap: 8px;
 }
