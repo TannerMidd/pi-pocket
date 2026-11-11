@@ -331,6 +331,31 @@ test(
 );
 
 test(
+    "openConversation opens the viewer on an artifact, and ignores a bad option",
+    real,
+    async () => {
+        const sheet = () =>
+            inPage<unknown>(
+                `const { store } = await import("/store.js"); return JSON.stringify(store.state.sheet)`,
+            );
+        const open = (options: string) =>
+            inPage(
+                `const { closeSheet } = await import("/store.js"); closeSheet();
+                globalThis.meterPocket.openConversation("${session}", ${options}); return "null"`,
+            );
+
+        await page.navigate(base);
+        await until(() => has(rail("Meter")), "the meter's rail button");
+        await open(`{ artifact: "plan", version: 2 }`);
+        assert.deepEqual(await sheet(), { type: "viewer", id: "plan", version: 2 });
+        await open(`{ artifact: "plan", version: 0 }`);
+        assert.deepEqual(await sheet(), { type: "viewer", id: "plan" }, "a bad version is ignored");
+        await open(`{ artifact: 7 }`);
+        assert.equal(await sheet(), null, "a bad artifact opens no viewer");
+    },
+);
+
+test(
     "a status item opens its panel beside the conversation, which the Files panel replaces",
     real,
     async () => {

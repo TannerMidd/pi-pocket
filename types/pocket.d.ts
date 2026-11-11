@@ -2819,10 +2819,13 @@ export interface Pocket {
      */
     conversationId(): number | null;
     /**
-     * Opens a conversation through normal navigation. The server still checks access.
+     * Opens a conversation through normal navigation. The server still checks access. With `options.artifact`, it then
+     * opens the app's viewer on that artifact of the conversation (at `options.version`, a positive integer, or the
+     * latest). It does not say whether the artifact exists: a missing one fails as in the Artifacts sheet. A bad
+     * `artifact` or `version` is ignored.
      * @since 0.16.0
      */
-    openConversation(id: number | string): void;
+    openConversation(id: number | string, options?: { artifact?: string; version?: number }): void;
     /**
      * Hears which session the tab shows: the listener gets its id, or null, now and on each change. Returns how to stop.
      * @since 0.20.0

@@ -81,7 +81,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `version`, `module`, `title`, and `pocketVersion` (connected-server package version, since 0.16.0; not the API level).
 - `h`, `html`, `Fragment`, and the hooks: `useState`, `useEffect`, `useLayoutEffect`, `useRef`, `useMemo`, `useCallback`, and `useReducer`.
 - The pieces `Icon`, `Loader`, `Spinner`, `Markdown`, and `Switch`, with the props that [pocket](../reference/pocket.md) gives.
-- `api`, `on`, `rail`, `menu`, `launcher`, `page`, `sheet`, `toolCall`, `openPage`, `closePage`, `openSheet`, `closeSheet`, `notify`, `me`, `conversationId`, `openConversation` (since 0.16.0), `style`, and `onDispose`.
+- `api`, `on`, `rail`, `menu`, `launcher`, `page`, `sheet`, `toolCall`, `openPage`, `closePage`, `openSheet`, `closeSheet`, `notify`, `me`, `conversationId`, `openConversation` (since 0.16.0; its `options.artifact` and `options.version` are experimental, since 0.29.0), `style`, and `onDispose`.
 - What a page's or a sheet's component gets: `pocket`, `close`, and a sheet's `props`.
 - The icon names that [pocket](../reference/pocket.md) lists. Other icon names can go. An unknown name shows `grid`, so a module does not fail.
 - Safe mode: `?noext=1` and `?noext=0` on the app's address.

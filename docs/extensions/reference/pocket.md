@@ -251,12 +251,23 @@ The id of the session that this tab shows, a number as in its address (`/s/12`),
 ### `openConversation`
 
 ```ts
-openConversation(id: number | string): void;
+openConversation(id: number | string, options?: { artifact?: string; version?: number }): void;
 ```
 
 Since 0.16.0 · Stable
 
 Open a positive integer conversation id through normal app navigation. This closes the extension page and keeps normal Back behavior. Sheets close when changing conversations; call `pocket.closeSheet()` first to close your own sheet even when that conversation is already open. The server still checks access; an id grants no access. Invalid ids throw. Use a bound start's `session` or a human list item's `conversationId`, not a private app URL.
+
+`options.artifact` (since 0.29.0 · experimental) opens the app's artifact viewer on that artifact of the conversation, after the conversation opens. `options.version` is a positive integer; without it the viewer shows the latest version. It returns nothing. The server still checks access when the conversation loads, so a missing artifact or no access fails quietly, as in the Artifacts sheet. A `artifact` that is not a string, or a `version` that is not a positive integer, is ignored. Older apps ignore `options` and only open the conversation.
+
+```js
+// A page lists artifacts that agents made in other sessions: a tap opens one in the viewer.
+html`<button
+    onClick=${() => pocket.openConversation(ask.session, { artifact: "intake-502-check", version: 2 })}
+>
+    Read the plan
+</button>`;
+```
 
 ### `onConversation`
 
