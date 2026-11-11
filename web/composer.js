@@ -1026,6 +1026,7 @@ export function Composer() {
     const filled = text.trim() !== "" || files.length > 0;
     const uploading = files.some((file) => file.state === "uploading");
     const canSend =
+        store.state.me != null &&
         !sending &&
         !uploading &&
         (text.trim() !== "" ||
