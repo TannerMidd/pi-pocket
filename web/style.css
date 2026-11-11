@@ -20928,6 +20928,28 @@ pre.gallery-code {
     font-size: 12px;
 }
 
+/* Reply's quotes in Separate (Appearance): a strip each over the session's box, in order; many scroll. */
+.quote-strips {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 40vh;
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x)) 0;
+    overflow: hidden auto;
+}
+
+.quote-strips .quote-strip {
+    flex: none;
+    min-width: 0;
+    margin: 0;
+}
+
+.quote-strips-clear {
+    align-self: flex-end;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
 .quote-strip-text {
     flex: 1;
     min-width: 0;
@@ -20948,6 +20970,163 @@ pre.gallery-code {
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* A quote after words in a message: a little room above it too. */
+.user-text > * + .reply-quote {
+    margin-top: 0.4rem;
+}
+
+/* Quotes Reply put in the message box (quote-box.js). The box keeps its own text, which goes clear while there is a
+ * quote; the drawing under it shows the same lines, each quote styled. Only color, fills, and lines differ there: a
+ * change of size, weight, or spacing would move the words away from the caret. */
+.quote-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: calc(8px * var(--space-y)) calc(16px * var(--space-x)) 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.quote-count strong {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.quote-count .link {
+    font-size: 12px;
+}
+
+.composer.quoting textarea {
+    position: relative;
+    z-index: 1;
+    color: transparent;
+    caret-color: var(--text);
+    /* Room for each quote's ×. */
+    padding-right: calc(16px * var(--space-x) + 28px);
+}
+
+.quote-box-drawing,
+.quote-box-over {
+    position: absolute;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.quote-box-drawing {
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.quote-box-over {
+    z-index: 2;
+}
+
+.quote-box-scroll {
+    position: relative;
+    transform: translateY(var(--quote-scroll, 0px));
+}
+
+.composer.sending .quote-box-drawing {
+    opacity: 0.5;
+}
+
+.quote-box-line {
+    display: block;
+}
+
+.quote-line {
+    color: var(--muted);
+}
+
+.quote-line-mark {
+    color: var(--accent);
+}
+
+/* Each quote is one block, its lines (empty ones too) inside it. */
+.quote-block {
+    display: block;
+}
+
+[data-quote-style="fade"] .quote-block,
+[data-quote-style="tint"] .quote-block {
+    /* Out to the left by as much as it goes in: the words stay where the box has them. */
+    margin-left: -6px;
+    padding-left: 6px;
+    --quote-fill: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+[data-quote-style="fade"] .quote-block {
+    border-radius: 4px 0 0 4px;
+    background: linear-gradient(90deg, var(--quote-fill), transparent 85%);
+}
+
+[data-quote-style="tint"] .quote-block {
+    --quote-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 6px;
+    background: var(--quote-fill);
+}
+
+[data-quote-style="ghost"] .quote-line {
+    color: color-mix(in oklab, var(--muted) 72%, var(--bg));
+}
+
+[data-quote-style="ghost"] .quote-line-mark {
+    color: var(--edge);
+}
+
+/* A first Backspace under a quote: the next one removes it. */
+.quote-block.marked .quote-line,
+.quote-block.marked .quote-line-mark {
+    color: var(--err);
+}
+
+.quote-block.marked {
+    --quote-fill: var(--err-soft);
+}
+
+.quote-block.marked .quote-line-text {
+    text-decoration: line-through;
+    text-decoration-color: var(--err-line);
+}
+
+/* One mark for a quote: Markdown needs a "> " on each of its lines, the eye only the first. The others keep their room,
+   so the words stay where the box's caret has them. */
+.quote-line + .quote-line .quote-line-mark {
+    color: transparent;
+}
+
+.quote-remove {
+    position: absolute;
+    right: 6px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: var(--r-row);
+    color: var(--muted);
+    pointer-events: auto;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .quote-remove:hover {
+        color: var(--text);
+        background: var(--hover);
+    }
+}
+
+@media (pointer: coarse) {
+    .quote-remove {
+        width: 26px;
+        height: 26px;
+        margin-top: -1px;
+    }
 }
 
 /* Your picture in the name sheet: a preview and its buttons. */
