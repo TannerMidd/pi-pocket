@@ -294,7 +294,8 @@ function Screen({ frame, interactive, send }) {
         return () => element.removeEventListener("wheel", wheel);
     }, [interactive, send]);
 
-    // Firefox gives a paste to the element it last edited, not the focused screen: hear it on the document.
+    // Firefox gives a paste to the element it last edited, not the focused screen: take it on the document, in
+    // the capture phase, before that element's own paste handler (the composer's) can act on it.
     useEffect(() => {
         if (!interactive) {
             return undefined;
@@ -305,13 +306,14 @@ function Screen({ frame, interactive, send }) {
 
             if (text !== null) {
                 event.preventDefault();
+                event.stopPropagation();
                 send({ type: "text", text });
             }
         };
 
-        document.addEventListener("paste", paste);
+        document.addEventListener("paste", paste, true);
 
-        return () => document.removeEventListener("paste", paste);
+        return () => document.removeEventListener("paste", paste, true);
     }, [interactive, send]);
 
     if (!interactive) {
