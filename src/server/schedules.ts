@@ -244,8 +244,10 @@ export class Schedules {
         const stopped = this.#stopped(conversationId, schedule);
         const last = lastSending(schedule, input);
         // Its last message, not yet in the transcript: the session has not taken it, so another would only wait too.
+        // Only a repeat skips: one edited to go out once sends its one message, and never skips without end.
         const waiting =
             stopped === undefined &&
+            schedule.every !== undefined &&
             last !== undefined &&
             (await this.#queued(runtime, last, context)) &&
             // Run again after a crash, this phase may find its own message sent already: that one counts as sent.

@@ -171,3 +171,38 @@ test("an edit or a pause hands a repeat to a new task, which still finds its wai
         rmSync(flag, { force: true });
     }
 });
+
+test("a repeat edited to go out once, while its last message waits, sends once and does not skip", async () => {
+    await app?.close();
+    app = await openApp(
+        scriptedModel(route),
+        join(root, "schedules-queue-once"),
+        () => Date.now() + offset,
+    );
+    const id = await newSession(app);
+    const flag = join(work, "hold.flag");
+
+    writeFileSync(flag, "");
+
+    try {
+        await app.commands.submit(id, owner(app), { text: "hold", requestId: crypto.randomUUID() });
+        await until(() => app!.isBusy(id), "Pi to be at work");
+        const repeat = await app.commands.schedule(id, owner(app), {
+            when: "every 10m ping",
+            zone: "UTC",
+        });
+        const item = async () =>
+            (await app!.harness.snapshot(ScheduleDoc, id, context))?.items[repeat.id];
+
+        later(11);
+        await until(async () => (await item())?.runs === 1, "the first time to go out");
+        await app.commands.updateSchedule(id, owner(app), repeat.id, {
+            text: "ping once",
+            next: Date.now() + offset + 5 * 60_000,
+        });
+        later(6);
+        await until(async () => (await item()) === undefined, "the one-time message to go out");
+    } finally {
+        rmSync(flag, { force: true });
+    }
+});
