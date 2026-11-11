@@ -34,6 +34,7 @@ import {
     type SubmissionId,
     type SubmissionRecord,
     type TaskRuntime,
+    type ToolRegistration,
     type Tx,
 } from "@earendil-works/pi-durable";
 import { type PendingReport, PlanDoc, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
@@ -43,6 +44,48 @@ import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
+
+/** Pi Pocket's options on a tool definition, beside Pi Durable's own. */
+export interface ToolOptions {
+    /** Give this tool to every subagent, even one started with a tool list, while its extension runs there. */
+    readonly subagents?: "always";
+}
+
+/** Tools before a tool filter: a parent may have left them out, and wraps can change who calls them. */
+function toolsOf(extensions: readonly Extension[]): ToolRegistration[] {
+    const tools = new Map(
+        extensions.flatMap((extension) => (extension.tools ?? []).map((tool) => [tool.name, tool])),
+    );
+
+    for (const extension of extensions) {
+        for (const wrap of extension.wraps ?? []) {
+            if (!("tool" in wrap)) {
+                continue;
+            }
+
+            const tool = tools.get(wrap.tool);
+
+            if (tool === undefined) {
+                continue;
+            }
+
+            try {
+                const wrapped = wrap.wrap(tool);
+
+                if (wrapped.name === tool.name) {
+                    tools.set(tool.name, wrapped);
+                } else {
+                    tools.delete(tool.name);
+                }
+            } catch {
+                // Resolution reports a failed wrap and drops its tool; do not bring it back here.
+                tools.delete(tool.name);
+            }
+        }
+    }
+
+    return [...tools.values()];
+}
 
 // Exclude Agent Teams by name even while it is off; enabling it later must not give nested agents delegation.
 const AgentTeams = defineExtension({ name: "pocket-agent-teams" });
@@ -985,10 +1028,19 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                           ).values(),
                       ]
                     : [];
+            const removed = [SubagentTools, AgentTeams, Ask];
+            const selected = parent.extensions.filter(
+                (extension) => !removed.some((each) => each.name === extension.name),
+            );
+            const inheritedTools =
+                action === "spawn" && args.tools !== undefined ? toolsOf(selected) : [];
+            const always = inheritedTools.filter(
+                (tool) => (tool as ToolRegistration & ToolOptions).subagents === "always",
+            );
             const tools =
                 args.tools === undefined
                     ? undefined
-                    : args.tools.map((tool) => {
+                    : [...new Set(args.tools)].map((tool) => {
                           const found = parentTools.find((each) => each.name === tool);
 
                           if (found === undefined) {
@@ -999,12 +1051,21 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
                           return found;
                       });
-            const codemode = parentTools.find((tool) => tool.name === "codemode");
+
+            if (tools !== undefined) {
+                for (const tool of always) {
+                    if (!tools.some((each) => each.name === tool.name)) {
+                        tools.push(tool);
+                    }
+                }
+            }
+
+            const codemode = inheritedTools.find((tool) => tool.name === "codemode");
 
             if (
                 codemode !== undefined &&
                 tools?.some((tool) => tool.callers?.includes("model") === false) === true &&
-                !tools.includes(codemode)
+                !tools.some((tool) => tool.name === codemode.name)
             ) {
                 tools.push(codemode);
             }
@@ -1044,8 +1105,24 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                         ownership: { kind: "task", taskId: anchor },
                     });
 
+                    const inherited = (await tx.doc(AgentDoc, child.id)).extensions;
+                    // Keep a fixed list (remote sessions use one), and any choices this session already made.
+                    const extensions = Array.isArray(inherited)
+                        ? inherited
+                              .filter((name) => !removed.some((each) => each.name === name))
+                              .map((name) => ({ name }))
+                        : {
+                              ...(inherited?.add === undefined
+                                  ? {}
+                                  : { add: inherited.add.map((name) => ({ name })) }),
+                              remove: [
+                                  ...(inherited?.remove ?? []).map((name) => ({ name })),
+                                  ...removed,
+                              ],
+                          };
+
                     await configure(tx, child.id, {
-                        extensions: { remove: [SubagentTools, AgentTeams, Ask] },
+                        extensions,
                         instructions: `You are the subagent "${name}". You work for another agent, not directly for a person, although a person may open your conversation and talk to you. Answer requests completely but concisely: your final answer is what gets reported back.`,
                         ...(model === undefined ? {} : { model }),
                         ...(thinking === undefined ? {} : { thinkingLevel: thinking }),
