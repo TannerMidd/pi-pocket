@@ -16,7 +16,15 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { HttpError } from "../src/server/errors.ts";
-import { idFor, parseModelList } from "../src/server/custom-providers.ts";
+import {
+    DEFAULT_TIERS,
+    idFor,
+    parseModelList,
+    priceOf,
+    priceOfEntry,
+    tiersOf,
+    tiersOfEntry,
+} from "../src/server/custom-providers.ts";
 
 const agentDir = process.env.PI_CODING_AGENT_DIR!;
 const modelsFile = join(agentDir, "models.json");
@@ -107,7 +115,10 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
 
     assert.equal(made.id, "home-llm");
     assert.equal(made.key, "stored");
-    assert.deepEqual(made.models, ["qwen-big", "typed-by-hand"]);
+    assert.deepEqual(
+        made.models.map((model) => model.id),
+        ["qwen-big", "typed-by-hand"],
+    );
     assert.equal(statSync(modelsFile).mode & 0o777, 0o600);
 
     const entry = readModels().providers["home-llm"];
@@ -142,14 +153,14 @@ test("adding one makes Pi's folder and models.json, keeps the key in auth.json, 
     assert.equal(seenAuth, "Bearer sk-moved");
     await app.customProviders.update("home-llm", { baseUrl, apiKey: "sk-secret" });
 
-    // A move that Pi's check refuses keeps the sign-in it had.
+    // A refused move keeps the sign-in it had.
     await assert.rejects(
         app.customProviders.update("home-llm", {
             baseUrl: moved,
             apiKey: "sk-refused",
             models: [{ id: "half", contextWindow: 0.5 }],
         }),
-        /contextWindow/,
+        /context window must be a whole number/,
     );
     assert.ok(readFileSync(authFile, "utf8").includes("sk-secret"));
 
@@ -208,7 +219,10 @@ test("an edit keeps what it does not change; no key uses the placeholder; removi
         noKey: true,
     });
 
-    assert.deepEqual(edited.models, ["qwen-big", "llama-small"]);
+    assert.deepEqual(
+        edited.models.map((model) => model.id),
+        ["qwen-big", "llama-small"],
+    );
     assert.equal(edited.key, "none");
 
     const entry = readModels().providers["home-llm"];
@@ -258,7 +272,7 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
     );
     assert.equal(readFileSync(modelsFile, "utf8"), refused);
 
-    // Nor does Pi Pocket write one Pi would refuse (a context window floored to 0).
+    // Nor does a model that Pi would refuse (a context window of half a token) change the file.
     const empty = '{"providers":{}}';
 
     writeFileSync(modelsFile, empty);
@@ -269,7 +283,7 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
             noKey: true,
             models: [{ id: "half", contextWindow: 0.5 }],
         }),
-        /contextWindow/,
+        /context window must be a whole number/,
     );
     assert.equal(readFileSync(modelsFile, "utf8"), empty);
 
@@ -405,4 +419,276 @@ test("Find models sends one Authorization header, also for an endpoint with auth
     await app.models.refresh({ allowNetwork: false });
     await app.customProviders.discover({ baseUrl, id: "bearer" });
     assert.equal(seenAuth, "Bearer sk-bearer");
+});
+
+test("thinking levels: each of Pi's levels once, in Pi's order, each sending a value", () => {
+    assert.equal(tiersOf("m", null), null);
+    assert.deepEqual(
+        tiersOf("m", [
+            { level: "high", value: " hard " },
+            { level: "low", value: "low" },
+            { level: "off", value: "" },
+        ]),
+        [
+            { level: "off", value: "" },
+            { level: "low", value: "low" },
+            { level: "high", value: "hard" },
+        ],
+    );
+    assert.throws(() => tiersOf("m", []), /thinking levels/);
+    assert.throws(() => tiersOf("m", [{ level: "turbo", value: "x" }]), /one of/);
+    assert.throws(
+        () =>
+            tiersOf("m", [
+                { level: "low", value: "a" },
+                { level: "low", value: "b" },
+            ]),
+        /twice/,
+    );
+    assert.throws(() => tiersOf("m", [{ level: "low", value: " " }]), /needs a value/);
+
+    // Read back as Pi reads an entry: a level the map leaves out sends its name, but xhigh and max then are not there.
+    assert.equal(tiersOfEntry({ id: "m" }), null);
+    assert.deepEqual(tiersOfEntry({ id: "m", reasoning: true }), [
+        { level: "off", value: "" },
+        { level: "minimal", value: "minimal" },
+        { level: "low", value: "low" },
+        { level: "medium", value: "medium" },
+        { level: "high", value: "high" },
+    ]);
+});
+
+test("a model's images and thinking levels go into models.json, and Pi offers what they say", async () => {
+    await app.customProviders.create({
+        name: "Caps",
+        baseUrl,
+        noKey: true,
+        models: [
+            { id: "seer", images: true, thinking: DEFAULT_TIERS },
+            {
+                id: "own-names",
+                thinking: [
+                    { level: "low", value: "quick" },
+                    { level: "high", value: "deep" },
+                ],
+            },
+            { id: "plain" },
+        ],
+    });
+
+    const models = readModels().providers.caps.models;
+
+    assert.deepEqual(models[0], {
+        id: "seer",
+        input: ["text", "image"],
+        reasoning: true,
+        thinkingLevelMap: {
+            off: null,
+            minimal: null,
+            low: "low",
+            medium: "medium",
+            high: "high",
+            xhigh: "xhigh",
+            max: "max",
+        },
+    });
+    assert.deepEqual(models[2], { id: "plain" });
+
+    const seer = app.models.getModel("caps", "seer");
+
+    assert.deepEqual(seer?.input, ["text", "image"]);
+    assert.equal(seer?.reasoning, true);
+    assert.deepEqual(app.models.getModel("caps", "plain")?.input, ["text"]);
+    assert.deepEqual(app.models.getModel("caps", "own-names")?.thinkingLevelMap, {
+        off: null,
+        minimal: null,
+        low: "quick",
+        medium: null,
+        high: "deep",
+        xhigh: null,
+        max: null,
+    });
+
+    const listed = app.customProviders.list().find((each) => each.id === "caps")!;
+
+    const unset = { contextWindow: null, maxTokens: null, cost: null };
+
+    assert.deepEqual(listed.models, [
+        { id: "seer", images: true, thinking: DEFAULT_TIERS, ...unset },
+        {
+            id: "own-names",
+            images: false,
+            thinking: [
+                { level: "low", value: "quick" },
+                { level: "high", value: "deep" },
+            ],
+            ...unset,
+        },
+        { id: "plain", images: false, thinking: null, ...unset },
+    ]);
+
+    // An edit changes what it is given, keeps a model's hand-made fields, and leaves out-of-form models as they were.
+    const config = readModels();
+
+    config.providers.caps.models[0].cost = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+    writeFileSync(modelsFile, JSON.stringify(config));
+    await app.customProviders.update("caps", {
+        models: [{ id: "seer", images: false, thinking: null }, { id: "own-names" }, "plain"],
+    });
+
+    const after = readModels().providers.caps.models;
+
+    assert.deepEqual(after[0], {
+        id: "seer",
+        cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+    });
+    assert.equal(after[1].thinkingLevelMap.low, "quick", "a model sent without them keeps them");
+    assert.equal(app.models.getModel("caps", "seer")?.reasoning, false);
+    await assert.rejects(
+        app.customProviders.update("caps", {
+            models: [{ id: "seer", thinking: [{ level: "low", value: "" }] }],
+        }),
+        /needs a value/,
+    );
+    await app.customProviders.remove("caps");
+});
+
+test("discovery reads the model ids and vLLM's max_model_len, nothing a vendor adds", () => {
+    assert.deepEqual(
+        parseModelList({
+            data: [
+                {
+                    id: "router/claude",
+                    context_length: 200000,
+                    context_window: 200000,
+                    max_completion_tokens: 64000,
+                    top_provider: { context_length: 200000, max_completion_tokens: 64000 },
+                    pricing: { prompt: "0.000003", completion: "0.000015" },
+                    architecture: { input_modalities: ["text", "image"] },
+                    supported_parameters: ["tools", "reasoning"],
+                    capabilities: ["completion", "vision", "thinking"],
+                },
+                { id: "vllm/qwen", max_model_len: 32768.7 },
+                { id: "broken", max_model_len: -5 },
+            ],
+        }),
+        [{ id: "broken" }, { id: "router/claude" }, { id: "vllm/qwen", contextWindow: 32768 }],
+    );
+});
+
+test("prices: input and output dollars per million tokens, the cache ones 0 when not given", () => {
+    assert.equal(priceOf("m", null), null);
+    assert.deepEqual(priceOf("m", { input: 3, output: 15 }), {
+        input: 3,
+        output: 15,
+        cacheRead: 0,
+        cacheWrite: 0,
+    });
+    assert.throws(() => priceOf("m", { input: 3 }), /input and output/);
+    assert.throws(() => priceOf("m", { input: -1, output: 1 }), /from 0/);
+    assert.throws(() => priceOf("m", { input: "3", output: 1 }), /from 0/);
+    assert.throws(() => priceOf("m", "free"), /input and output/);
+
+    // Read back as Pi reads an entry: none without both input and output.
+    assert.equal(priceOfEntry({ id: "m" }), null);
+    assert.equal(priceOfEntry({ id: "m", cost: { input: 1 } }), null);
+    assert.deepEqual(
+        priceOfEntry({
+            id: "m",
+            cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0, tiers: [] },
+        }),
+        { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+    );
+});
+
+test("a model's context window, maximum output, and price go into models.json, and Pi uses them", async () => {
+    const price = { input: 0.5, output: 1.5, cacheRead: 0.05, cacheWrite: 0 };
+
+    await app.customProviders.create({
+        name: "Priced",
+        baseUrl,
+        noKey: true,
+        models: [
+            {
+                id: "big",
+                contextWindow: 262144,
+                maxTokens: 32768,
+                cost: { input: 0.5, output: 1.5, cacheRead: 0.05 },
+            },
+            { id: "default", contextWindow: null, maxTokens: null, cost: null },
+        ],
+    });
+
+    const [big, plain] = readModels().providers.priced.models;
+
+    assert.deepEqual(big, { id: "big", contextWindow: 262144, maxTokens: 32768, cost: price });
+    assert.deepEqual(plain, { id: "default" }, "null leaves Pi's defaults and no price");
+
+    const model = app.models.getModel("priced", "big");
+
+    assert.equal(model?.contextWindow, 262144);
+    assert.equal(model?.maxTokens, 32768);
+    assert.deepEqual(model?.cost, price);
+    assert.equal(app.models.getModel("priced", "default")?.contextWindow, 128000);
+    assert.deepEqual(
+        app.customProviders
+            .list()
+            .find((each) => each.id === "priced")
+            ?.models.map((each) => ({
+                contextWindow: each.contextWindow,
+                maxTokens: each.maxTokens,
+                cost: each.cost,
+            })),
+        [
+            { contextWindow: 262144, maxTokens: 32768, cost: price },
+            { contextWindow: null, maxTokens: null, cost: null },
+        ],
+    );
+
+    // A new price keeps hand-made tiers; null takes a field out; a model sent without them keeps them.
+    const config = readModels();
+    const tiers = [
+        { inputTokensAbove: 200000, input: 1, output: 3, cacheRead: 0.1, cacheWrite: 0 },
+    ];
+
+    config.providers.priced.models[0].cost.tiers = tiers;
+    writeFileSync(modelsFile, JSON.stringify(config));
+    await app.customProviders.update("priced", {
+        models: [
+            { id: "big", contextWindow: null, cost: { input: 0.6, output: 1.8 } },
+            { id: "default", maxTokens: 8192 },
+        ],
+    });
+
+    const [bigAfter, plainAfter] = readModels().providers.priced.models;
+
+    assert.deepEqual(bigAfter, {
+        id: "big",
+        maxTokens: 32768,
+        cost: { input: 0.6, output: 1.8, cacheRead: 0, cacheWrite: 0, tiers },
+    });
+    assert.deepEqual(plainAfter, { id: "default", maxTokens: 8192 });
+    assert.equal(app.models.getModel("priced", "big")?.contextWindow, 128000);
+    assert.deepEqual(app.models.getModel("priced", "big")?.cost.tiers, tiers);
+
+    await app.customProviders.update("priced", { models: [{ id: "big", cost: null }, "default"] });
+    assert.equal(readModels().providers.priced.models[0].cost, undefined, "no price: tiers go too");
+    assert.equal(app.models.getModel("priced", "big")?.cost.input, 0);
+
+    for (const bad of [
+        { maxTokens: 0 },
+        { contextWindow: 2_000_000_000 },
+        { contextWindow: "8k" },
+    ]) {
+        await assert.rejects(
+            app.customProviders.update("priced", { models: [{ id: "big", ...bad }] }),
+            /whole number of tokens/,
+        );
+    }
+
+    await assert.rejects(
+        app.customProviders.update("priced", { models: [{ id: "big", cost: { output: 1 } }] }),
+        /input and output/,
+    );
+    await app.customProviders.remove("priced");
 });
