@@ -34,6 +34,7 @@ import {
     uid,
 } from "./store.js";
 import { useDock } from "./dock.js";
+import { fromServer } from "./seen.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
@@ -2465,7 +2466,7 @@ function SchedulesPill({ schedules }) {
             html`<span class="schedules-tip" role="tooltip">
                 <span class="row">
                     <span>Next in</span>
-                    <span class="countdown">${countdown(next.next, now)}</span>
+                    <span class="countdown">${countdown(fromServer(next.next), now)}</span>
                 </span>
                 <span class="what">${next.text}</span>
                 <span class="muted">
