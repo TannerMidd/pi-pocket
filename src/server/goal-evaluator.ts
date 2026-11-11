@@ -1,13 +1,13 @@
 /** Check a goal against session evidence in a separate model request with no tools. */
 import { once } from "node:events";
 import type { Context } from "@earendil-works/chord/context";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import { type AssistantMessage, clampThinkingLevel, type Usage } from "@earendil-works/pi-ai";
 import { type HookApi, type ModelRef, ProviderDoc } from "@earendil-works/pi-durable";
 import { clip } from "./fence.ts";
 import { noWait } from "./limit-gate.ts";
 
 const TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_TOKENS = 1024;
+const MAX_OUTPUT_TOKENS = 2048;
 const MAX_EVIDENCE_CHARS = 24_000;
 
 export type GoalVerdict = "met" | "continue" | "blocked";
@@ -82,6 +82,7 @@ export async function evaluateGoal(
 
         const sessionId = (await api.snapshot(ProviderDoc, api.conversationId, context))?.sessionId;
         const timestamp = Date.now();
+        const reasoning = clampThinkingLevel(model, "low");
 
         signal.throwIfAborted();
 
@@ -108,6 +109,7 @@ export async function evaluateGoal(
                     signal,
                     timeoutMs: TIMEOUT_MS,
                     maxRetries: 0,
+                    ...(reasoning === "off" ? {} : { reasoning }),
                     maxTokens:
                         model.maxTokens > 0
                             ? Math.min(model.maxTokens, MAX_OUTPUT_TOKENS)
@@ -131,6 +133,15 @@ export async function evaluateGoal(
                 reason: deadline.aborted
                     ? "The goal evaluation timed out."
                     : "The goal evaluation failed.",
+                model: modelRef,
+                usage,
+            };
+        }
+
+        if (response.stopReason === "length") {
+            return {
+                verdict: "unavailable",
+                reason: "The goal evaluator reached its output limit.",
                 model: modelRef,
                 usage,
             };
