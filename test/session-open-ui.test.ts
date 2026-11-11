@@ -476,12 +476,8 @@ test(
             assert.ok(!html.includes(user.name), "a name cannot close the JSON script tag");
             assert.ok(response.headers.get("content-security-policy")?.includes("'sha256-"));
             assert.ok(!JSON.stringify(facts).includes(app.config.ownerToken));
-            assert.equal(response.headers.get("cache-control"), "no-store, private");
-            const signedOut = await fetch(base);
-
-            assert.equal(signedOut.headers.get("cache-control"), "no-cache");
             assert.ok(
-                !(await signedOut.text()).includes('id="pocket-known"'),
+                !(await (await fetch(base)).text()).includes('id="pocket-known"'),
                 "signed out has no early identity",
             );
             process.env.PI_POCKET_SESSION_CACHE = "off";

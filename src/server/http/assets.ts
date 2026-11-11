@@ -312,9 +312,8 @@ export function serveApp(
         // The page as it is: the browser finds the modules as it runs them.
     }
 
-    // A page that names who is signed in must not come back from a cache, the back/forward cache included.
     send(response, 200, body, "text/html; charset=utf-8", {
-        "cache-control": facts === undefined ? "no-cache" : "no-store, private",
+        "cache-control": "no-cache",
         "content-security-policy": policy,
     });
 }
