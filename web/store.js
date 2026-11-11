@@ -2761,12 +2761,9 @@ export const actions = {
             ...schedule,
             zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
+    /** The editor's change: it keeps the schedule's time zone unless it gives `zone`, for a new time of day. */
     updateSchedule: (id, schedule) =>
-        api(
-            `c/${current()}/schedules/${encodeURIComponent(id)}`,
-            { ...schedule, zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-            { method: "PUT" },
-        ),
+        api(`c/${current()}/schedules/${encodeURIComponent(id)}`, schedule, { method: "PUT" }),
     cancelSchedule: (id) => api(`c/${current()}/schedules/${encodeURIComponent(id)}/cancel`, {}),
     pauseSchedule: (id, paused) =>
         api(`c/${current()}/schedules/${encodeURIComponent(id)}/pause`, { paused }),

@@ -116,8 +116,17 @@ function timing(draft, schedule, now) {
 
     const every =
         draft.days.length === 7 ? { at: draft.at } : { at: draft.at, days: [...draft.days] };
+    const old = schedule?.every;
+    // The same days at the same time keep the zone they were set in; a new time of day is on this device's clock.
+    const same =
+        old !== undefined &&
+        old.at === every.at &&
+        (old.days ?? []).join() === (every.days ?? []).join() &&
+        schedule.next > now;
 
-    return { next: nextClock(draft.at, draft.days, now), send: { every } };
+    return same
+        ? { next: schedule.next, send: { every } }
+        : { next: nextClock(draft.at, draft.days, now), send: { every, zone: deviceZone() } };
 }
 
 /** What is wrong with a draft before it goes to the server, in a few words; undefined when nothing is. */
@@ -349,7 +358,7 @@ function ScheduleEditor({ schedule, onDone }) {
         ${
             otherZone &&
             html`<p class="muted small">
-                Set in ${schedule.zone}. Saving uses this device's time zone, ${deviceZone()}.
+                Set in ${schedule.zone}. A new time of day uses this device's time zone, ${deviceZone()}.
             </p>`
         }
         ${

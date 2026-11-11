@@ -324,7 +324,11 @@ test(
 test("the editor's Pause keeps what was typed, and Save after it still works", real, async () => {
     const id = await newSession(app);
 
-    await app.commands.schedule(id, owner(app), { when: "every 30m before", zone: "UTC" });
+    // Not this device's zone: a save that leaves the time of day as it was keeps it.
+    await app.commands.schedule(id, owner(app), {
+        when: "every weekday 8:00 before",
+        zone: "Pacific/Kiritimati",
+    });
     await page.setViewport(VIEWPORTS.mobile);
     await page.navigate(`${base}/s/${id}`);
     await until(
@@ -388,6 +392,7 @@ test("the editor's Pause keeps what was typed, and Save after it still works", r
     await page.click({ selector: ".sched-editor .button.primary" });
     await until(async () => (await items(id))[0]?.text === "typed, not saved", "the save", 10_000);
     assert.ok((await items(id))[0]?.paused !== undefined, "still paused after the save");
+    assert.equal((await items(id))[0]?.zone, "Pacific/Kiritimati");
 });
 
 test("the Schedules sheet says how often a repeat skipped its time", real, async () => {
