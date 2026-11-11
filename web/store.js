@@ -3131,9 +3131,10 @@ let waitingInserts = [];
 
 /**
  * Take, once, what `insertIntoComposer` put for `conversationId` that no box took yet: its files, and its text after
- * `current` (the box's words), or null for none. Null when nothing waits for it.
+ * `current` (the box's words), or null for none. Null when nothing waits for it. `underQuote`: `current` ends in a quote
+ * that is a piece, which inline text goes under: joined to its line, the quote would be plain text.
  */
-export function takeInsert(current, conversationId) {
+export function takeInsert(current, conversationId, underQuote = false) {
     const forThis = (insert) => insert.for === conversationId || insert.for === null;
     const mine = waitingInserts.filter(forThis);
 
@@ -3146,7 +3147,7 @@ export function takeInsert(current, conversationId) {
 
     for (const insert of mine) {
         if (insert.text !== "") {
-            const gap = insert.inline ? " " : "\n\n";
+            const gap = !insert.inline ? "\n\n" : underQuote && text === current ? "\n" : " ";
 
             text =
                 text.trim() === ""

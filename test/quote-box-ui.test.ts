@@ -216,6 +216,35 @@ test("a quote does not go with a command: a shell command stays as typed", real,
     assert.equal(await inPage(`${STORE}.store.state.pendingShells.length`), 0);
 });
 
+test(
+    "a draft ↓ brings back keeps its quotes, an inline insert goes under them, and a command waits",
+    real,
+    async () => {
+        await caretAt(0);
+        await page.type(undefined, "prior", { append: true });
+        await page.press("Enter");
+        await see(`document.querySelector('${BOX}').value === ''`, "prior sent");
+        await page.type(undefined, "!printf safe", { append: true });
+        await reply("victim.txt");
+        await caretAt(0);
+        await page.press("ArrowUp");
+        await see(`document.querySelector('${BOX}').value === 'prior'`, "prior recalled");
+        await caretAt(-1);
+        await page.press("ArrowDown");
+        await see(`document.querySelectorAll('.quote-remove').length === 1`, "the piece back");
+        await page.evaluate(`${STORE}.insertIntoComposer('@noted.txt ', [], { inline: true })`);
+        await see(`document.querySelector('${BOX}').value.includes('noted')`, "the mention in");
+        assert.equal(await inPage(`document.querySelectorAll('.quote-remove').length`), 1);
+        await page.press("Enter");
+        await see(
+            `[...document.querySelectorAll('.toast, [role=status]')].some((each) => each.textContent.includes('A quote cannot go with a command'))`,
+            "the notice",
+        );
+        assert.equal(await boxText(), "!printf safe\n> victim.txt\n@noted.txt ", "nothing went");
+        assert.equal(await inPage(`${STORE}.store.state.pendingShells.length`), 0);
+    },
+);
+
 test("the drawing follows the box when a file row comes in over it", real, async () => {
     await reply("over a file");
     const gap = () =>

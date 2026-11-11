@@ -744,7 +744,8 @@ export function Composer() {
     const [marked, setMarked] = useState(null);
     // The passages Reply put in strips over the box instead (`loadStrips`).
     const [strips, setStrips] = useState(() => loadStrips(conversationId));
-    // ↑ through what was sent before: where in that list, and the draft ↓ comes back to. Ctrl+R searches it.
+    // ↑ through what was sent before: where in that list, and the draft ↓ comes back to, with its pieces. Ctrl+R
+    // searches it.
     const [browsing, setBrowsing] = useState(null);
     const [searching, setSearching] = useState(false);
     const [inlineFiles, setInlineFiles] = useState(() => localStorage.getItem(INLINE_KEY) === "1");
@@ -925,8 +926,11 @@ export function Composer() {
 
     useEffect(() => {
         // It waits while a send is on its way: the box then holds only what goes.
-        const taken =
-            insert && !sending ? takeInsert(drafts.get(conversationId), conversationId) : null;
+        const draft = drafts.get(conversationId);
+        const underQuote = piecesIn(draft, piecesNow.current).some(
+            (piece) => draft.slice(piece.end).trim() === "",
+        );
+        const taken = insert && !sending ? takeInsert(draft, conversationId, underQuote) : null;
 
         if (taken?.files.length > 0) {
             addFiles(taken.files);
@@ -1254,9 +1258,14 @@ export function Composer() {
         }
 
         // A command runs or expands only as it is: a quote with it, in strips that go first or in its own text, would
-        // stop it or become part of it (a "> …" line is a redirection to a shell).
+        // stop it or become part of it (a "> …" line is a redirection to a shell). A piece an edit made plain text, its
+        // words still where they were (`removed`), counts too: what put them back or joined its line may have lost it.
+        const quoteIn = [...piecesNow.current, ...removed.current].some((piece) =>
+            text.startsWith(piece.text, piece.start),
+        );
+
         if (
-            (strips.length > 0 || quoted.length > 0) &&
+            (strips.length > 0 || quoted.length > 0 || quoteIn) &&
             (parsed || shell || template || text.trimStart().startsWith("/skill:"))
         ) {
             return notify("info", "A quote cannot go with a command. Remove the quotes to run it.");
@@ -1397,7 +1406,12 @@ export function Composer() {
                 return false;
             }
 
-            setBrowsing({ index, draft: browsing?.draft ?? text });
+            // The draft keeps its quotes, pieces again when ↓ brings it back.
+            setBrowsing({
+                index,
+                draft: browsing?.draft ?? text,
+                pieces: browsing?.pieces ?? piecesNow.current,
+            });
             recall(list[index]);
 
             return true;
@@ -1415,6 +1429,7 @@ export function Composer() {
         } else {
             setBrowsing(null);
             recall(browsing.draft);
+            keepPieces(browsing.pieces);
         }
 
         return true;
