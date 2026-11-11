@@ -394,6 +394,12 @@ test("a glob of every file, a name as text, and a write to .env are not reads of
         "cp .env.example .env",
         "tar --exclude=.env -czf out.tgz .",
         "cat > .env <<EOF\nA=1\nEOF",
+        "cat > README.md <<'EOF'\nCopy .env.example to .env, then run it.\nEOF",
+        'git commit -m "Stop tracking .env"',
+        'gh pr create --title "Docs" --body "Explain .env.local"',
+        "sed -i 's/.env/.env.local/' README.md",
+        "git rm --cached .env",
+        "touch .env",
     ]) {
         assert.equal(app.secrets.blocked("bash", { command }, work), undefined, command);
     }
@@ -403,6 +409,9 @@ test("a glob of every file, a name as text, and a write to .env are not reads of
         "echo $(cat .env)",
         "wc -l < .env",
         "grep -r --include=.env KEY .",
+        'git commit -m "$(cat .env)"',
+        "sed -n p .env",
+        "cat <<EOF | grep KEY .env\nA=1\nEOF",
     ]) {
         assert.ok(app.secrets.blocked("bash", { command }, work) !== undefined, command);
     }
