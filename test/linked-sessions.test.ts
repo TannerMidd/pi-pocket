@@ -23,7 +23,8 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { LinkedSessionCallsDoc, TurnsDoc } from "../src/server/docs.ts";
+import { LinkedSessionCallsDoc, type SessionMeta, TurnsDoc } from "../src/server/docs.ts";
+import { LinkedSessions } from "../src/server/linked-sessions.ts";
 
 let app: App;
 
@@ -771,4 +772,323 @@ test("a view names a linked session's peer only to someone who can see that peer
 
     assert.deepEqual(views[0]!.field("linkedPeers"), { [origin!.address]: id });
     assert.deepEqual(views[1]!.field("linkedPeers"), {});
+});
+
+const takes = (id: ConversationId, take: unknown, key: string = crypto.randomUUID(), on = app) =>
+    on.linkedSessions.reports(id, { take } as { take: boolean }, key);
+/** The stored record of the call `key` in session `id`. */
+const callRecord = async (id: ConversationId, key: string, on = app) =>
+    (await on.harness.snapshot(LinkedSessionCallsDoc, id, context))?.items[
+        createHash("sha256").update(`${id}:${key}`).digest("hex")
+    ];
+
+/** Each run end of a session (not a subagent) in `on`, from now until `off()`. */
+const runEnds = (on: App) => {
+    const ends: { id: number; outcome: string }[] = [];
+    const off = on.events.on("run.ended", (run) => {
+        if (run.conversationId === run.session) {
+            ends.push({ id: run.conversationId, outcome: run.outcome });
+        }
+    });
+
+    return {
+        count: (id: ConversationId, outcome?: string) =>
+            ends.filter(
+                (each) =>
+                    each.id === Number(id) && (outcome === undefined || each.outcome === outcome),
+            ).length,
+        off,
+    };
+};
+
+/** Time for a run end's report to land, when one goes: a report that does not come cannot be awaited. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+const runEndReport = /Linked session \S+ (finished its run|failed|was stopped)/;
+const hasSwitch = (id: ConversationId, on = app) =>
+    Object.hasOwn(on.sessionMeta(id) ?? {}, "linkedReports");
+
+test("a lead that turns its answers off hears no run end: done, failed, or stopped", async () => {
+    const model = scriptedModel((request) => {
+        const { text } = lastText(request as never);
+
+        if (text.includes("FAIL_NOW")) {
+            return {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: "the model fell over",
+            } as never;
+        }
+
+        if (text.includes("STREAM_A_WHILE")) {
+            return fauxAssistantMessage([fauxText("word ".repeat(80_000))]);
+        }
+
+        return fauxAssistantMessage([fauxText("Done.")]);
+    });
+    const isolated = await openApp(model, join(root, "reports-off-data"));
+    const ends = runEnds(isolated);
+
+    try {
+        const lead = await newSession(isolated);
+
+        await say(isolated, lead, "hello");
+        assert.deepEqual(await takes(lead, false, "off", isolated), { take: false });
+        assert.equal(isolated.sessionMeta(lead)?.linkedReports, false);
+        const before = (await modelTexts(isolated, lead)).length;
+        const done = await isolated.linkedSessions.start(lead, { message: "DO_IT" }, "done");
+        const failed = await isolated.linkedSessions.start(lead, { message: "FAIL_NOW" }, "fail");
+
+        await until(
+            () =>
+                ends.count(done.session, "done") === 1 &&
+                ends.count(failed.session, "failed") === 1,
+            "the done run and the failed run",
+        );
+        const stopped = await isolated.linkedSessions.start(
+            lead,
+            { message: "STREAM_A_WHILE" },
+            "stream",
+        );
+
+        await until(() => isolated.isBusy(stopped.session), "the run to start");
+        await isolated.linkedSessions.stop(lead, { to: stopped.address }, "stop");
+        await until(() => ends.count(stopped.session, "aborted") === 1, "the stopped run");
+        await settle();
+
+        const texts = await modelTexts(isolated, lead);
+
+        assert.equal(texts.filter((text) => runEndReport.test(text)).length, 0);
+        assert.equal(texts.length, before, "no new run in the lead");
+        assert.equal(isolated.isBusy(lead), false);
+    } finally {
+        ends.off();
+        await isolated.close();
+    }
+});
+
+test("a lead with its answers off hears nothing from an archived linked session", async () => {
+    const id = await source();
+    const ends = runEnds(app);
+
+    try {
+        await takes(id, false);
+        const { session: target, address } = await start(id);
+
+        await until(() => ends.count(target) === 1, "the first run");
+        await archive(id, address);
+        assert.equal(app.sessionMeta(target)?.archived, true);
+        const before = (await modelTexts(app, id)).length;
+
+        await send(id, address);
+        await until(() => ends.count(target) === 2, "the archived session's run");
+        await settle();
+        assert.deepEqual(await reports(id, runEndReport), []);
+        assert.equal((await modelTexts(app, id)).length, before, "no new run in the lead");
+    } finally {
+        ends.off();
+    }
+});
+
+test("turning a lead's answers back on brings them back and removes the switch", async () => {
+    const id = await source();
+    const ends = runEnds(app);
+    const finished = /Linked session \S+ finished its run/;
+
+    try {
+        assert.deepEqual(await takes(id, false), { take: false });
+        const { session: target, address } = await start(id);
+
+        await until(() => ends.count(target) === 1, "the first run");
+        await settle();
+        assert.equal((await reports(id, finished)).length, 0);
+
+        assert.deepEqual(await takes(id, true), { take: true });
+        assert.equal(hasSwitch(id), false);
+        await app.linkedSessions.send(id, { to: address, message: "more work" }, "again");
+        await until(async () => (await reports(id, finished)).length === 1, "the report");
+        assert.match((await reports(id, finished))[0]!, /more work/);
+        await until(() => !app.isBusy(id), "the lead to answer");
+        await settle();
+        assert.equal((await reports(id, finished)).length, 1);
+    } finally {
+        ends.off();
+    }
+});
+
+test("with its answers off, a lead's message asks the target for a reply", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+    const asks = /Your final answer does not reach that session by itself/;
+    const comes = /your final answer reaches it by itself/;
+    const last = async () =>
+        (await modelTexts(app, target))
+            .filter((text) => text.startsWith('"') && text.includes("<linked-session-message>"))
+            .at(-1)!;
+
+    await until(async () => (await sent(target)) === 1, "the first message");
+    assert.deepEqual(await send(id, address), { answers: true });
+    await until(async () => (await sent(target)) === 2, "the message with answers on");
+    assert.match(await last(), comes);
+    assert.doesNotMatch(await last(), asks);
+
+    await takes(id, false);
+    assert.deepEqual(await send(id, address), { answers: false });
+    await until(async () => (await sent(target)) === 3, "the message with answers off");
+    assert.match(await last(), asks);
+    assert.doesNotMatch(await last(), comes);
+});
+
+test("a repeated reports call acts once, whatever its arguments", async () => {
+    const id = await source();
+
+    assert.deepEqual(await takes(id, false, "switch-once"), { take: false });
+    const meta = JSON.stringify(app.sessionMeta(id));
+
+    assert.deepEqual(await takes(id, false, "switch-once"), { take: false });
+    assert.deepEqual(await takes(id, true, "switch-once"), { take: false });
+    assert.equal(JSON.stringify(app.sessionMeta(id)), meta);
+    assert.equal(app.sessionMeta(id)?.linkedReports, false);
+
+    // Turned back on with another key: a repeat of the first key returns its result and does not turn it off again.
+    assert.deepEqual(await takes(id, true, "back-on"), { take: true });
+    assert.deepEqual(await takes(id, false, "switch-once"), { take: false });
+    assert.deepEqual(await takes(id, false, "back-on"), { take: true });
+    assert.equal(hasSwitch(id), false);
+
+    const record = await callRecord(id, "switch-once");
+
+    assert.equal(record?.conversationId, Number(id));
+    assert.equal(record?.by, owner(app).id);
+    assert.deepEqual(record?.result, { take: false });
+});
+
+test("reports refuses a take that is not a boolean, and stores nothing", async () => {
+    const id = await source();
+    const notBoolean = { name: "TypeError", message: /`take`: true or false/ };
+
+    for (const [at, take] of [undefined, "false", 0, null, 1].entries()) {
+        const key = `not-boolean-${String(at)}`;
+
+        await assert.rejects(takes(id, take, key), notBoolean);
+        assert.equal(hasSwitch(id), false);
+        assert.equal(await callRecord(id, key), undefined);
+    }
+
+    await assert.rejects(app.linkedSessions.reports(id, undefined as never, "none"), notBoolean);
+    assert.equal(await callRecord(id, "none"), undefined);
+    // Checked first: a key that already switched does not make a bad argument pass.
+    await takes(id, false, "switched");
+    await assert.rejects(takes(id, "true", "switched"), notBoolean);
+    assert.deepEqual((await callRecord(id, "switched"))?.result, { take: false });
+});
+
+test("reports is refused in plan mode, past a spend limit, or without the turn", async () => {
+    const id = await source();
+
+    const refused = async (why: RegExp) => {
+        const key = crypto.randomUUID();
+
+        await assert.rejects(takes(id, false, key), why);
+        assert.equal(hasSwitch(id), false);
+        assert.equal(await callRecord(id, key), undefined);
+    };
+
+    await app.commands.setPlan(id, owner(app), true);
+    await refused(/plan mode/);
+    await app.commands.setPlan(id, owner(app), false);
+
+    await app.spend.setSessionBudget(owner(app), id, 0.01);
+    await recordCost(app, id, 0.02);
+    await until(() => app.spend.sessionSpent(id) === 0.02, "the spend");
+    await refused(/spend limit/);
+    await app.spend.setSessionBudget(owner(app), id, null);
+
+    const driver = app.config.addUser("Reports driver", "guest").user;
+
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: true, driver: driver.id, asks: [] });
+    }, context);
+    await refused(/driving/);
+    await app.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(TurnsDoc, id), { on: false, driver: undefined, asks: [] });
+    }, context);
+    assert.deepEqual(await takes(id, false), { take: false });
+});
+
+test("a key that switched reports cannot archive or stop, and an archive's key cannot switch reports", async () => {
+    const id = await source();
+    const { session: target, address } = await start(id);
+    const conflict = (error: unknown) =>
+        error instanceof Error && (error as { status?: number }).status === 409;
+
+    await until(async () => (await sent(target)) === 1 && !app.isBusy(target), "the first answer");
+    await takes(id, false, "switch-key");
+    await assert.rejects(archive(id, address, true, "switch-key"), conflict);
+    await assert.rejects(stop(id, address, "switch-key"), conflict);
+    assert.notEqual(app.sessionMeta(target)?.archived, true);
+    assert.deepEqual((await callRecord(id, "switch-key"))?.result, { take: false });
+
+    await archive(id, address, true, "archive-key");
+    await assert.rejects(takes(id, true, "archive-key"), conflict);
+    assert.equal(app.sessionMeta(id)?.linkedReports, false);
+    assert.deepEqual((await callRecord(id, "archive-key"))?.result, {
+        archived: true,
+        repeating: 0,
+    });
+});
+
+test("watch decides at the run's end, with nothing in flight: a lead with its answers off, or archived, gets no report", async () => {
+    // A controlled watch, its listener called directly: it returns the report's work when one goes, and nothing when
+    // the lead takes none. No timing: what goes is decided before any wait.
+    const metas: Record<number, Partial<SessionMeta>> = { 1: {}, 2: { linkedFrom: { id: 1 } } };
+    let listener: ((run: unknown) => unknown) | undefined;
+    const notices: string[] = [];
+    const fake = {
+        events: {
+            on: (event: string, each: (run: unknown) => unknown) => {
+                assert.equal(event, "run.ended");
+                listener = each;
+
+                return () => {};
+            },
+        },
+        sessionMeta: (id: ConversationId) => metas[Number(id)],
+        harness: {
+            commit: () => Promise.reject(new Error("no store in this test")),
+        },
+        notice: (_level: string, text: string) => notices.push(text),
+    };
+
+    new LinkedSessions(fake as never).watch();
+    const end = (outcome: string) =>
+        listener!({ conversationId: 2, session: 2, outcome, failure: undefined });
+
+    for (const outcome of ["done", "failed", "aborted"]) {
+        const report = end(outcome);
+
+        assert.ok(report instanceof Promise, `the lead takes it by default (${outcome})`);
+        await report;
+    }
+
+    metas[1] = { linkedReports: false };
+
+    for (const outcome of ["done", "failed", "aborted"]) {
+        assert.equal(end(outcome), undefined, `no report with answers off (${outcome})`);
+    }
+
+    metas[1] = { archived: true };
+    assert.equal(end("done"), undefined, "an archived lead takes none");
+    // A child's own archive changes nothing: the switch on the lead decides.
+    metas[1] = { linkedReports: false };
+    metas[2] = { linkedFrom: { id: 1 }, archived: true };
+    assert.equal(end("done"), undefined);
+    metas[1] = {};
+    const back = end("done");
+
+    assert.ok(back instanceof Promise, "turned back on, the lead takes it");
+    await back;
+    // A subagent's run in the child is never a report.
+    assert.equal(listener!({ conversationId: 2, session: 3, outcome: "done" }), undefined);
+    assert.equal(notices.length, 4, "each report that went tried the store, and said so");
 });

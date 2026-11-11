@@ -64,7 +64,10 @@ function tooLong(message: string): void {
     }
 }
 
-type CallOutcome = { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
+type CallOutcome =
+    | { busy: boolean; stopping?: boolean }
+    | { archived: boolean; repeating: number }
+    | { take: boolean };
 type CallRecord = { conversationId?: number; by?: string; at: number; result?: CallOutcome };
 
 /** The record of call `token` in `calls`, made when there is none, the oldest pruned to make room. */
@@ -360,7 +363,8 @@ export class LinkedSessions implements LinkedSessionsApi {
      * Carry each linked session's end of run to the session that started it: its final answer, or why it failed or
      * stopped. Until the returned function is called. The report goes as a message from the linked session, once for
      * each run, and lands at its lead's next pause; a lead that cannot take it now (plan mode, a spend limit, someone
-     * else's turn) is told in a notice instead, so nothing waits in silence.
+     * else's turn) is told in a notice instead, so nothing waits in silence. An archived lead, or one that turned its
+     * answers off (`reports`), gets nothing: read when the run ends, so it holds for every linked session it started.
      */
     watch(): () => void {
         return this.#app.events.on("run.ended", (run) => {
@@ -373,7 +377,9 @@ export class LinkedSessions implements LinkedSessionsApi {
 
             const lead = meta.linkedFrom.id as unknown as ConversationId;
 
-            if (this.#app.sessionMeta(lead)?.archived === true) {
+            const leadMeta = this.#app.sessionMeta(lead);
+
+            if (leadMeta?.archived === true || leadMeta?.linkedReports === false) {
                 return;
             }
 
@@ -866,8 +872,8 @@ export class LinkedSessions implements LinkedSessionsApi {
     /**
      * Send a message to a linked session, by the source's address for it. Taken, not answered: no reply waits. It lands
      * at the target's next pause (`steer`, the default), or after its run (`steer: false`). `answers` says whether the
-     * target's final answer comes back to the source by itself: only when the source started it. Otherwise the message
-     * asks the target to reply when an answer is needed.
+     * target's final answer comes back to the source by itself: only when the source started it, and did not turn its
+     * answers off (`reports`). Otherwise the message asks the target to reply when an answer is needed.
      */
     async send(
         source: ConversationId,
@@ -953,9 +959,86 @@ export class LinkedSessions implements LinkedSessionsApi {
         return { answers: this.#leads(source, id) };
     }
 
-    /** Whether `source` started `target`: then `target`'s end of run reports to `source` by itself (`watch`). */
+    /**
+     * Whether `source` started `target` and takes its answers: then `target`'s end of run reports to `source` by itself
+     * (`watch`). False when `source` turned its answers off (`reports`).
+     */
     #leads(source: ConversationId, target: ConversationId): boolean {
+        if (this.#app.sessionMeta(source)?.linkedReports === false) {
+            return false;
+        }
+
         return this.#app.sessionMeta(target)?.linkedFrom?.id === Number(source);
+    }
+
+    /**
+     * Set whether `source`, as a lead, takes the run-end answers of the sessions it started. The switch is on the lead
+     * (`linkedReports` in its meta), so it holds for every one: old, new, archived. The checks of `archive`, on `source`
+     * itself. A repeat with the same `key` changes nothing again, and returns what the first call set.
+     */
+    async reports(
+        source: ConversationId,
+        request: { take: boolean },
+        key: string,
+    ): Promise<{ take: boolean }> {
+        const take = (request as { take?: unknown } | undefined)?.take;
+
+        if (typeof take !== "boolean") {
+            throw new TypeError("reports needs `take`: true or false.");
+        }
+
+        const app = this.#app;
+        const token = callKey(source, key);
+        const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
+            ?.items[token];
+        const user = this.#person(source, previous?.by);
+
+        app.requireSteer(user);
+
+        if (previous?.conversationId !== undefined && previous.conversationId !== Number(source)) {
+            throw new HttpError(409, "This call already refers to another linked session.");
+        }
+
+        if (previous?.result !== undefined && "take" in previous.result) {
+            return { take: previous.result.take };
+        }
+
+        await this.#maySend(source, user);
+
+        // The switch and its receipt are one commit: a crash leaves neither.
+        return app.harness.commit(async (tx) => {
+            const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
+
+            if (record.conversationId !== undefined && record.conversationId !== Number(source)) {
+                throw new HttpError(409, "This call already refers to another linked session.");
+            }
+
+            if (record.result !== undefined && !("take" in record.result)) {
+                throw new HttpError(409, "This call already did something else.");
+            }
+
+            if (record.result !== undefined) {
+                return { take: record.result.take };
+            }
+
+            const meta = (await tx.doc(SessionsDoc)).items[String(source)];
+
+            if (meta === undefined) {
+                throw new HttpError(404, "Not a session");
+            }
+
+            if (take) {
+                delete meta.linkedReports;
+            } else {
+                meta.linkedReports = false;
+            }
+
+            record.conversationId = Number(source);
+            record.by ??= user.id;
+            record.result = { take };
+
+            return { take };
+        }, context);
     }
 
     /**
