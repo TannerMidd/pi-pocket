@@ -189,8 +189,8 @@ function isEnvGlob(name: string): boolean {
     return globExpression(name).test(".env") && /env/i.test(name.replace(/\[[^\]]*\]|[*?]/g, ""));
 }
 
-/** Commands whose words are only text, or files they do not read: a file they name is not read. */
-const TEXT_COMMANDS = new Set(["echo", "printf", "touch"]);
+/** Commands whose words are only text: a file they name is not read. */
+const TEXT_COMMANDS = new Set(["echo", "printf"]);
 /** Commands whose last word is where they write: `cp .env.example .env` reads no `.env`. */
 const COPY_COMMANDS = new Set(["cp", "mv", "install"]);
 /** Words that come before a command's name: `sudo cp`, `then echo`. */
@@ -199,168 +199,10 @@ const PREFIXES = new Set(
 );
 /** Options whose value is a name to leave out: `--exclude=.env` reads no `.env`. */
 const EXCLUSION = /^--(exclude|ignore)$/i;
-/** Options whose value is a message: `git commit -m "Stop tracking .env"` reads no `.env`. */
-const MESSAGE = /^(-m|--message|--body|--title)$/;
-const MESSAGE_VALUE = /^--(message|body|title)=/;
-/** Commands whose first word, or the value of `-e`, is a script: `sed 's/.env/x/' f` reads no `.env`. */
-const SCRIPT_COMMANDS = new Set(["sed", "awk", "gawk"]);
-/** Their options that take the next word: a script (`-e`), a file of one (`-f`), or another value (`-F`, `-v`). */
-const SCRIPT_OPTIONS = /^(-[efFlv]|--(expression|file))$/;
-const HEREDOC = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/g;
-const REDIRECT = /[<>]+&?/y;
-
-/** A command without its heredocs' bodies: their lines are text a command reads in, not commands. */
-function withoutBodies(command: string): string {
-    const lines = command.split("\n");
-    const out: string[] = [];
-
-    for (let at = 0; at < lines.length; at++) {
-        out.push(lines[at]!);
-
-        for (const [, tabs, , delimiter] of lines[at]!.matchAll(HEREDOC)) {
-            const ends = (line: string) =>
-                (tabs === "-" ? line.replace(/^\t+/, "") : line) === delimiter;
-
-            do {
-                at++;
-            } while (at < lines.length && !ends(lines[at]!));
-
-            if (at < lines.length) {
-                out.push(lines[at]!);
-            }
-        }
-    }
-
-    return out.join("\n");
-}
-
-interface ShellWord {
-    start: number;
-    end: number;
-    text: string;
-}
-
-/** Where a quoted part that starts at `at` ends. */
-function quoteEnd(command: string, at: number): number {
-    if (command[at] === "'") {
-        const end = command.indexOf("'", at + 1);
-
-        return end === -1 ? command.length : end + 1;
-    }
-
-    let end = at + 1;
-
-    while (end < command.length && command[end] !== '"') {
-        end += command[end] === "\\" ? 2 : 1;
-    }
-
-    return end + 1;
-}
-
-/** A command's shell words, quotes kept whole, for each simple command; where output goes is not a word. */
-function simpleCommands(command: string): ShellWord[][] {
-    const all: ShellWord[][] = [[]];
-    let redirect = false;
-    let at = 0;
-
-    while (at < command.length) {
-        const char = command[at]!;
-
-        if (/[;&|()\n]/.test(char)) {
-            all.push([]);
-            redirect = false;
-            at++;
-        } else if (/\s/.test(char)) {
-            at++;
-        } else if (char === "<" || char === ">") {
-            REDIRECT.lastIndex = at;
-            REDIRECT.test(command);
-            at = REDIRECT.lastIndex;
-            redirect = true;
-        } else {
-            const start = at;
-
-            while (at < command.length && !/[\s;&|()<>]/.test(command[at]!)) {
-                const each = command[at]!;
-
-                at =
-                    each === "\\"
-                        ? at + 2
-                        : each === "'" || each === '"'
-                          ? quoteEnd(command, at)
-                          : at + 1;
-            }
-
-            if (!redirect) {
-                all.at(-1)!.push({ start, end: at, text: command.slice(start, at) });
-            }
-
-            redirect = false;
-        }
-    }
-
-    return all;
-}
 
 /**
- * A command with the words that are only text left empty: heredoc bodies, the value of `-m`, `--message`, `--body`, and
- * `--title`, and a `sed` or `awk` script. A word with a substitution in it is kept: `-m "$(cat .env)"` reads `.env`.
- */
-function withoutText(command: string): string {
-    const text = withoutBodies(command);
-    const ranges: [number, number][] = [];
-
-    const add = (word: ShellWord | undefined, from = word?.start) => {
-        if (word !== undefined && !/\$\(|`/.test(word.text.replace(/'[^']*'/g, ""))) {
-            ranges.push([from!, word.end]);
-        }
-    };
-
-    for (const words of simpleCommands(text)) {
-        const first = words.findIndex(
-            (word) => !PREFIXES.has(word.text) && !/^[A-Za-z_]\w*=/.test(word.text),
-        );
-        const script = first !== -1 && SCRIPT_COMMANDS.has(basename(words[first]!.text));
-        let scriptWord = script;
-
-        for (let at = first + 1; first !== -1 && at < words.length; at++) {
-            const word = words[at]!;
-            const value = MESSAGE_VALUE.exec(word.text);
-
-            if (MESSAGE.test(word.text)) {
-                add(words[++at]);
-            } else if (value !== null) {
-                add(word, word.start + value[0].length);
-            } else if (script && SCRIPT_OPTIONS.test(word.text)) {
-                // With `-e` or `-f` no word is the script; a `-f` file is read.
-                scriptWord &&= !/^(-[ef]|--(expression|file))$/.test(word.text);
-                at++;
-
-                if (/^(-e|--expression)$/.test(word.text)) {
-                    add(words[at]);
-                }
-            } else if (scriptWord && !word.text.startsWith("-")) {
-                add(word);
-                scriptWord = false;
-            }
-        }
-    }
-
-    let out = "";
-    let from = 0;
-
-    for (const [start, end] of ranges) {
-        out += `${text.slice(from, start)}''`;
-        from = end;
-    }
-
-    return out + text.slice(from);
-}
-
-/**
- * A command's words: all of them, and those that may name a file it reads. Not read: the words of `echo`, `printf`, and
- * `touch`, `git rm --cached`, where output goes (`>`, `>>`), a heredoc's delimiter, an excluded name, where `cp` or
- * `mv` writes, and text (`withoutText`).
+ * A command's words: all of them, and those that may name a file it reads. Not read: the words of `echo` and `printf`,
+ * where output goes (`>`, `>>`), a heredoc's delimiter, an excluded name, and where `cp` or `mv` writes.
  */
 function commandWords(command: string): { all: string[]; read: string[] } {
     const all: string[] = [];
@@ -372,7 +214,7 @@ function commandWords(command: string): { all: string[]; read: string[] } {
             .filter((word) => word !== "" && !word.startsWith("-"));
 
     // Each simple command on its own: a separator, a subshell, or a substitution starts the next.
-    for (const part of withoutText(command).split(/[;|&\n()`]+/)) {
+    for (const part of command.split(/[;|&\n()`]+/)) {
         const tokens = part
             .split(/([<>]+&?)|[\s'"]+/)
             .filter((token): token is string => token !== undefined && token !== "");
@@ -407,12 +249,7 @@ function commandWords(command: string): { all: string[]; read: string[] } {
             }
         }
 
-        if (
-            name !== undefined &&
-            (TEXT_COMMANDS.has(name) ||
-                // `git rm --cached .env` stops tracking it, and reads nothing.
-                (name === "git" && args.includes("rm") && tokens.includes("--cached")))
-        ) {
+        if (name !== undefined && TEXT_COMMANDS.has(name)) {
             continue;
         }
 
