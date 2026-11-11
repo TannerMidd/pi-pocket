@@ -99,7 +99,7 @@ interface ToolOptions {
 }
 ```
 
-Since 0.29.0 · Stable
+Since 0.29.0 · Experimental
 
 Pi Pocket's options on a tool definition, beside Pi Durable's own. Add them with `Object.assign` after `defineTool` ([Tools](../tools.md#tools-for-every-subagent)).
 

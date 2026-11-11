@@ -47,7 +47,7 @@ const lookup = Object.assign(defineTool({ … }), {
 } satisfies ToolOptions);
 ```
 
-Since 0.29.0. This is an addition, so the API version stays 2. Older Pi Pocket ignores the field; it does not add the tool. A gallery entry that needs this behavior sets `minPocket` ([API versions](reference/api-versions.md)).
+Since 0.29.0, experimental: it can change in a minor release. This is an addition, so the API version stays 2. Older Pi Pocket ignores the field; it does not add the tool. A gallery entry that needs this behavior sets `minPocket` ([API versions](reference/api-versions.md)).
 
 ## Return a result
 
