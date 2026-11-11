@@ -256,6 +256,21 @@ test("without a list, tool selection and deferred tools stay as before", async (
     assert.ok(agent.deferred.some((tool) => tool.name === "test_optional_waiting"));
 });
 
+test("without a list, the subagent's extensions stay the host's defaults", async () => {
+    const parent = await newSession(app);
+    const extensions = (await (await app.conversation(parent)).agent(context)).extensions;
+
+    await (
+        await app.conversation(parent)
+    ).configure(
+        { extensions: { remove: extensions.filter((each) => each.name === "test-subagent-only") } },
+        context,
+    );
+    const { agent } = await spawn(undefined, parent);
+
+    assert.ok(agent.extensions.some((extension) => extension.name === "test-subagent-only"));
+});
+
 test("a list that already has a marked tool gets it once", async () => {
     const { agent, state } = await spawn(["read", "codemode", "test_always", "test_waiting"]);
 

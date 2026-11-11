@@ -1105,8 +1105,12 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                         ownership: { kind: "task", taskId: anchor },
                     });
 
-                    const inherited = (await tx.doc(AgentDoc, child.id)).extensions;
-                    // Keep a fixed list (remote sessions use one), and any choices this session already made.
+                    // With a tool list, keep a fixed list and this session's choices: the tools it names, and the
+                    // marked ones, come from this session's extensions. Without one, the host's defaults, as before.
+                    const inherited =
+                        tools === undefined
+                            ? undefined
+                            : (await tx.doc(AgentDoc, child.id)).extensions;
                     const extensions = Array.isArray(inherited)
                         ? inherited
                               .filter((name) => !removed.some((each) => each.name === name))
