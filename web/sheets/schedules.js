@@ -135,12 +135,11 @@ function timing(draft, schedule, now) {
     const same =
         old !== undefined &&
         old.at === every.at &&
-        (old.days ?? []).join() === (every.days ?? []).join() &&
-        schedule.next > now;
+        (old.days ?? []).join() === (every.days ?? []).join();
+    // A paused one keeps its old next time, maybe past: the preview then counts on, but the zone stays.
+    const next = same && schedule.next > now ? schedule.next : nextClock(draft.at, draft.days, now);
 
-    return same
-        ? { next: schedule.next, send: { every } }
-        : { next: nextClock(draft.at, draft.days, now), send: { every, zone: deviceZone() } };
+    return { next, send: same ? { every } : { every, zone: deviceZone() } };
 }
 
 /** What is wrong with a draft before it goes to the server, in a few words; undefined when nothing is. */
