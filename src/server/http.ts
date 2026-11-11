@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, normalize, sep } from "node:path";
 import { Auth } from "./auth.ts";
+import { helloUser } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { createApi } from "./http/api.ts";
 import { artifact } from "./http/artifacts.ts";
@@ -39,22 +40,12 @@ function pageFacts(
     request: IncomingMessage,
     auth: Auth,
     app: HttpOptions["app"],
-):
-    | { user: { id: string; name: string; role: string; sessions?: number[] }; build: string }
-    | undefined {
+): { user: ReturnType<typeof helloUser>; build: string } | undefined {
     const user = auth.user(request);
 
     return user === undefined || process.env.PI_POCKET_SESSION_CACHE === "off"
         ? undefined
-        : {
-              user: {
-                  id: user.id,
-                  name: user.name,
-                  role: user.role,
-                  ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
-              },
-              build: app.build,
-          };
+        : { user: helloUser(user), build: app.build };
 }
 
 export function createHandler(options: HttpOptions) {

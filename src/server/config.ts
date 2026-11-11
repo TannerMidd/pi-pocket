@@ -58,6 +58,16 @@ export interface User {
     avatar?: number;
 }
 
+/** Who is signed in, as `hello` says it to a tab, and as the app page carries it (`serveApp`). */
+export function helloUser(user: User) {
+    return {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
+    };
+}
+
 /** An invite not yet used, kept by its code's sha256 (the code itself is only shown to whoever made it). */
 export interface StoredInvite {
     codeHash: string;

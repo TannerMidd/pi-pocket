@@ -54,7 +54,7 @@ import { Commands } from "./commands.ts";
 import { ExtensionSessions } from "./extension-sessions.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
 import { removeAvatar, saveAvatar } from "./avatars.ts";
-import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
+import { APP_ROOT, ConfigStore, helloUser, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
@@ -2593,12 +2593,7 @@ export class PocketApp {
 
     async hello(user: User) {
         return {
-            user: {
-                id: user.id,
-                name: user.name,
-                role: user.role,
-                ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
-            },
+            user: helloUser(user),
             users: this.people(user),
             models: await this.modelList(),
             guard: await this.guardStatus(),
