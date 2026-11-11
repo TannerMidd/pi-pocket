@@ -8791,23 +8791,117 @@ div.group-head {
 .custom-endpoint-models {
     display: flex;
     flex-direction: column;
-    max-height: 280px;
+    max-height: 420px;
     overflow-y: auto;
     border: 1px solid var(--hair);
     border-radius: var(--r-control);
     background: var(--bg);
 }
 
-.custom-endpoint-model.check {
+.custom-endpoint-model + .custom-endpoint-model {
+    border-top: 1px solid var(--hair);
+}
+
+/* A model: its checkbox and id, then, once chosen, Images, its thinking levels, and its context and price on the right. */
+.custom-endpoint-model-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 12px;
     min-height: 40px;
+    padding: 4px 12px;
+}
+
+.custom-endpoint-model-name.check {
+    flex: 1 1 200px;
+    min-width: 0;
     margin: 0;
-    padding: 0 12px;
     color: var(--text);
     overflow-wrap: anywhere;
 }
 
-.custom-endpoint-model + .custom-endpoint-model {
-    border-top: 1px solid var(--hair);
+.custom-endpoint-model-caps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px 12px;
+    margin-left: auto;
+}
+
+.custom-endpoint-model-caps .check {
+    margin: 0;
+}
+
+.model-thinking-button {
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.model-thinking-button.on {
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+.model-thinking-button.bad {
+    color: var(--warn);
+    border-color: var(--warn-line);
+}
+
+/* A model's thinking levels, or its context and price, opened under its row. */
+.model-thinking,
+.model-limits {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 12px 12px;
+    padding: 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--card);
+}
+
+.model-thinking p,
+.model-limits p {
+    margin: 0;
+}
+
+.model-limits-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 8px;
+}
+
+.model-limits input {
+    min-width: 0;
+}
+
+.model-thinking-on.check {
+    margin: 0;
+    color: var(--text);
+}
+
+.model-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.model-tier {
+    display: grid;
+    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-tier select,
+.model-tier input {
+    min-width: 0;
+}
+
+.model-tier-buttons {
+    gap: 8px;
 }
 
 .custom-endpoint-buttons {

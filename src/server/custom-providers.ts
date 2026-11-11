@@ -6,7 +6,9 @@
  *
  * Pi Pocket rewrites `models.json` only when it is plain JSON that Pi accepts: a file with comments or trailing commas
  * (which Pi reads) or one that Pi refuses is left alone, with a message, so a hand-made file never loses anything.
- * Fields it does not manage (headers, compat, a model's metadata) are kept as they are.
+ * Fields it does not manage (headers, compat, a model's other metadata) are kept as they are. Of a model's metadata, the
+ * form sets only image input (`input`), thinking (`reasoning` and `thinkingLevelMap`), its context window and maximum
+ * output (`contextWindow`, `maxTokens`), and its price (`cost`, whose hand-made `tiers` stay).
  */
 import {
     chmodSync,
@@ -37,8 +39,62 @@ const MAX_KEY = 4000;
 /** How long, and how much, an endpoint's model list may take. */
 const DISCOVER_MS = 10_000;
 const DISCOVER_BYTES = 5_000_000;
+/** The most tokens a context window or output may have, and the most dollars per million tokens. */
+const MAX_TOKENS = 1_000_000_000;
+const MAX_PRICE = 1_000_000;
+
+/** Pi's thinking levels, in order: a model's `thinkingLevelMap` names what each one sends. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/** One level a model thinks at, and what it sends the endpoint for it; `off` may send nothing (`""`). */
+export interface ThinkingTier {
+    level: ThinkingLevel;
+    value: string;
+}
+
+/** The levels a model gets when thinking is turned on: low to max, each sending its own name. */
+export const DEFAULT_TIERS: ThinkingTier[] = (
+    ["low", "medium", "high", "xhigh", "max"] as const
+).map((level) => ({ level, value: level }));
+
+const MAX_TIER_VALUE = 64;
+
+/** A model's price in dollars per million tokens: Pi's `cost`, without its tiers. */
+export interface ModelPrice {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+}
 
 export interface CustomModel {
+    id: string;
+    /** Its context window in tokens, or null for Pi's default. Left out of a change: as it was. */
+    contextWindow?: number | null;
+    /** The most tokens it writes in one answer, or null for Pi's default. Left out of a change: as it was. */
+    maxTokens?: number | null;
+    /** It sees images (`input` has `"image"`). Left out of a change: as it was. */
+    images?: boolean;
+    /** The levels it thinks at, or null when it does not think. Left out of a change: as it was. */
+    thinking?: ThinkingTier[] | null;
+    /** What it costs, or null when it costs nothing. Left out of a change: as it was. */
+    cost?: ModelPrice | null;
+}
+
+/** A model as the form sees it: what the endpoint says it can do, read back from `models.json`. */
+export interface CustomModelInfo {
+    id: string;
+    images: boolean;
+    thinking: ThinkingTier[] | null;
+    contextWindow: number | null;
+    maxTokens: number | null;
+    cost: ModelPrice | null;
+}
+
+/** A model an endpoint lists, with its context window when it is a vLLM server (`max_model_len`). */
+export interface ListedModel {
     id: string;
     contextWindow?: number;
 }
@@ -47,7 +103,7 @@ export interface CustomProvider {
     id: string;
     name: string;
     baseUrl: string;
-    models: string[];
+    models: CustomModelInfo[];
     /** Where its key is: Pi's sign-ins, `models.json` (a hand-made entry), none (the placeholder), or nowhere. */
     key: "stored" | "file" | "none" | "missing";
 }
@@ -101,7 +157,7 @@ function baseUrlOf(value: unknown): string {
     return raw.replace(/\/+$/, "");
 }
 
-/** The models asked for: ids, each once, with a context window when the endpoint said one. */
+/** The models asked for: ids, each once, with what the form says of each. */
 function modelsOf(value: unknown): CustomModel[] {
     if (!Array.isArray(value)) {
         throw new HttpError(400, "models must be a list.");
@@ -124,17 +180,223 @@ function modelsOf(value: unknown): CustomModel[] {
             );
         }
 
-        const window = entry?.contextWindow;
+        const images = entry?.images;
+
+        if (images !== undefined && typeof images !== "boolean") {
+            throw new HttpError(400, `${id}: images must be true or false.`);
+        }
+
+        const window = tokensOf(id, entry?.contextWindow, "context window");
+        const most = tokensOf(id, entry?.maxTokens, "maximum output");
 
         seen.set(id, {
             id,
-            ...(typeof window === "number" && Number.isFinite(window) && window > 0
-                ? { contextWindow: Math.floor(window) }
-                : {}),
+            ...(window === undefined ? {} : { contextWindow: window }),
+            ...(most === undefined ? {} : { maxTokens: most }),
+            ...(images === undefined ? {} : { images }),
+            ...(entry?.thinking === undefined ? {} : { thinking: tiersOf(id, entry.thinking) }),
+            ...(entry?.cost === undefined ? {} : { cost: priceOf(id, entry.cost) }),
         });
     }
 
     return [...seen.values()];
+}
+
+/** A count of tokens as asked for: a whole number, null for Pi's default, or undefined to leave it as it is. */
+function tokensOf(id: string, value: unknown, name: string): number | null | undefined {
+    if (value === undefined || value === null) {
+        return value;
+    }
+
+    if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > MAX_TOKENS
+    ) {
+        throw new HttpError(
+            400,
+            `${id}: the ${name} must be a whole number of tokens, from 1 to ${MAX_TOKENS.toLocaleString("en-US")}.`,
+        );
+    }
+
+    return value;
+}
+
+/** A price as asked for: dollars per million tokens, input and output given and the cache ones 0 when not; or null. */
+export function priceOf(id: string, value: unknown): ModelPrice | null {
+    if (value === null) {
+        return null;
+    }
+
+    const given = (typeof value === "object" ? value : {}) as Json;
+
+    if (given.input === undefined || given.output === undefined) {
+        throw new HttpError(400, `${id}: a price needs its input and output dollars.`);
+    }
+
+    const rate = (field: keyof ModelPrice): number => {
+        const each = given[field] ?? 0;
+
+        if (typeof each !== "number" || !Number.isFinite(each) || each < 0 || each > MAX_PRICE) {
+            throw new HttpError(
+                400,
+                `${id}: a price is dollars per million tokens, from 0 to ${MAX_PRICE.toLocaleString("en-US")}.`,
+            );
+        }
+
+        return each;
+    };
+
+    return {
+        input: rate("input"),
+        output: rate("output"),
+        cacheRead: rate("cacheRead"),
+        cacheWrite: rate("cacheWrite"),
+    };
+}
+
+/** A model entry's price as Pi reads it, without its tiers; null when it has none (Pi then counts it free). */
+export function priceOfEntry(model: Json): ModelPrice | null {
+    const cost = model.cost as Json | null | undefined;
+
+    if (typeof cost?.input !== "number" || typeof cost.output !== "number") {
+        return null;
+    }
+
+    const rate = (value: unknown) => (typeof value === "number" ? value : 0);
+
+    return {
+        input: cost.input,
+        output: cost.output,
+        cacheRead: rate(cost.cacheRead),
+        cacheWrite: rate(cost.cacheWrite),
+    };
+}
+
+/** A model's thinking levels as asked for: null (it does not think), or each of Pi's levels at most once. */
+export function tiersOf(id: string, value: unknown): ThinkingTier[] | null {
+    if (value === null) {
+        return null;
+    }
+
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new HttpError(400, `${id}: give its thinking levels, or turn thinking off.`);
+    }
+
+    const tiers = new Map<ThinkingLevel, string>();
+
+    for (const each of value as (Json | null)[]) {
+        const level = each?.level;
+        const sent = typeof each?.value === "string" ? each.value.trim() : undefined;
+
+        if (!THINKING_LEVELS.includes(level as ThinkingLevel)) {
+            throw new HttpError(
+                400,
+                `${id}: a thinking level is one of ${THINKING_LEVELS.join(", ")}.`,
+            );
+        }
+
+        if (tiers.has(level as ThinkingLevel)) {
+            throw new HttpError(400, `${id}: the level ${String(level)} is there twice.`);
+        }
+
+        if (
+            sent === undefined ||
+            sent.length > MAX_TIER_VALUE ||
+            (sent === "" && level !== "off")
+        ) {
+            throw new HttpError(
+                400,
+                `${id}: the level ${String(level)} needs a value of 1 to ${String(MAX_TIER_VALUE)} characters.`,
+            );
+        }
+
+        tiers.set(level as ThinkingLevel, sent);
+    }
+
+    return THINKING_LEVELS.filter((level) => tiers.has(level)).map((level) => ({
+        level,
+        value: tiers.get(level)!,
+    }));
+}
+
+/**
+ * A model's thinking levels as Pi reads its entry: none without `reasoning`; else each level the map does not mark
+ * null, sending what the map says. A level the map leaves out sends its own name, as Pi does, except xhigh and max,
+ * which Pi then leaves out; and off, which sends nothing.
+ */
+export function tiersOfEntry(model: Json): ThinkingTier[] | null {
+    if (model.reasoning !== true) {
+        return null;
+    }
+
+    const map = (
+        typeof model.thinkingLevelMap === "object" && model.thinkingLevelMap !== null
+            ? model.thinkingLevelMap
+            : {}
+    ) as Record<string, unknown>;
+
+    return THINKING_LEVELS.flatMap((level): ThinkingTier[] => {
+        const sent = map[level];
+
+        if (sent === null || (sent === undefined && (level === "xhigh" || level === "max"))) {
+            return [];
+        }
+
+        if (typeof sent === "string") {
+            return [{ level, value: sent }];
+        }
+
+        return [{ level, value: level === "off" ? "" : level }];
+    });
+}
+
+/**
+ * Sets what the form changes in a model's entry: image input, thinking, context window, maximum output, and price.
+ * Other fields stay as they are, and so do the price tiers of a hand-made price.
+ */
+function applyForm(entry: Json, model: CustomModel): Json {
+    for (const field of ["contextWindow", "maxTokens"] as const) {
+        if (model[field] === null) {
+            delete entry[field];
+        } else if (model[field] !== undefined) {
+            entry[field] = model[field];
+        }
+    }
+
+    if (model.cost === null) {
+        delete entry.cost;
+    } else if (model.cost !== undefined) {
+        const tiers = (entry.cost as Json | null | undefined)?.tiers;
+
+        entry.cost = { ...model.cost, ...(Array.isArray(tiers) ? { tiers } : {}) };
+    }
+
+    if (model.images === true) {
+        entry.input = ["text", "image"];
+    } else if (model.images === false) {
+        delete entry.input;
+    }
+
+    if (model.thinking === null) {
+        delete entry.reasoning;
+        delete entry.thinkingLevelMap;
+    } else if (model.thinking !== undefined) {
+        const sent = new Map(model.thinking.map((tier) => [tier.level, tier.value]));
+
+        entry.reasoning = true;
+        // Every level named: null where it is not one of the model's. Off without a value sends nothing.
+        entry.thinkingLevelMap = Object.fromEntries(
+            THINKING_LEVELS.flatMap((level) => {
+                const value = sent.get(level);
+
+                return value === "" ? [] : [[level, value ?? null]];
+            }),
+        );
+    }
+
+    return entry;
 }
 
 /** The text of models.json as it is now; undefined when there is none. */
@@ -164,15 +426,18 @@ export function idFor(name: string, taken: (id: string) => boolean): string {
     return id;
 }
 
-/** The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows. */
-export function parseModelList(body: unknown): CustomModel[] {
+/**
+ * The ids of an endpoint's models, from an OpenAI `/models` answer, with vLLM's context windows (`max_model_len`). Nothing
+ * else is read: model lists have no common way to say what a model can do or costs, so the form leaves that to the owner.
+ */
+export function parseModelList(body: unknown): ListedModel[] {
     const list = (body as Json | null)?.data;
 
     if (!Array.isArray(list)) {
         throw new Error("The answer has no list of models.");
     }
 
-    const models = new Map<string, CustomModel>();
+    const models = new Map<string, ListedModel>();
 
     for (const entry of list as (Json | null)[]) {
         const id = entry?.id;
@@ -181,7 +446,7 @@ export function parseModelList(body: unknown): CustomModel[] {
         if (typeof id === "string" && id !== "" && id.length <= MAX_ID) {
             models.set(id, {
                 id,
-                ...(typeof window === "number" && window >= 1
+                ...(typeof window === "number" && window >= 1 && window <= MAX_TOKENS
                     ? { contextWindow: Math.floor(window) }
                     : {}),
             });
@@ -221,9 +486,17 @@ export class CustomProviders {
                 id,
                 name: typeof entry.name === "string" ? entry.name : id,
                 baseUrl: entry.baseUrl as string,
-                models: (Array.isArray(entry.models) ? (entry.models as Json[]) : [])
-                    .map((model) => model?.id)
-                    .filter((model): model is string => typeof model === "string"),
+                models: (Array.isArray(entry.models) ? (entry.models as (Json | null)[]) : [])
+                    .filter((model): model is Json => typeof model?.id === "string")
+                    .map((model) => ({
+                        id: model.id as string,
+                        images: Array.isArray(model.input) && model.input.includes("image"),
+                        thinking: tiersOfEntry(model),
+                        contextWindow:
+                            typeof model.contextWindow === "number" ? model.contextWindow : null,
+                        maxTokens: typeof model.maxTokens === "number" ? model.maxTokens : null,
+                        cost: priceOfEntry(model),
+                    })),
                 key: this.#keyOf(id, entry),
             }))
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -316,9 +589,11 @@ export class CustomProviders {
                     ]),
                 );
 
-                entry.models = modelsOf(input.models).map(
-                    (model) => before.get(model.id) ?? entryOf(model),
-                );
+                entry.models = modelsOf(input.models).map((model) => {
+                    const kept = before.get(model.id);
+
+                    return kept === undefined ? entryOf(model) : applyForm({ ...kept }, model);
+                });
             }
 
             if (key === NO_KEY) {
@@ -380,7 +655,7 @@ export class CustomProviders {
      * Ask an endpoint for its models (`GET <baseUrl>/models`), with the key given, or else the saved endpoint's own.
      * The owner's to ask, so a local or private address is allowed: that is where such servers often are.
      */
-    discover(input: { baseUrl?: unknown; apiKey?: unknown; id?: unknown }): Promise<CustomModel[]> {
+    discover(input: { baseUrl?: unknown; apiKey?: unknown; id?: unknown }): Promise<ListedModel[]> {
         // After any save in progress: a saved key is read with the address it belongs to.
         return this.#serial(() => this.#discover(input));
     }
@@ -389,7 +664,7 @@ export class CustomProviders {
         baseUrl?: unknown;
         apiKey?: unknown;
         id?: unknown;
-    }): Promise<CustomModel[]> {
+    }): Promise<ListedModel[]> {
         const baseUrl = baseUrlOf(input.baseUrl);
         const headers = new Headers({ accept: "application/json" });
         let key =
@@ -682,10 +957,7 @@ async function refusal(path: string): Promise<string | undefined> {
 }
 
 function entryOf(model: CustomModel): Json {
-    return {
-        id: model.id,
-        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-    };
+    return applyForm({ id: model.id }, model);
 }
 
 /** A response's text, refused past `max` bytes. */
