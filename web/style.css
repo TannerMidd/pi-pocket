@@ -11602,9 +11602,29 @@ textarea.notes {
         font-size: 12px;
     }
 
+    /* A phone's picked schedule: its title and its buttons stay put, and only the message and its facts scroll. */
     .rb-bar {
         max-height: 70dvh;
+        overflow: hidden;
+    }
+
+    .rb-bar .rb-detail {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .rb-bar .rb-detail-head,
+    .rb-bar .rb-actions {
+        flex: none;
+    }
+
+    .rb-bar .rb-detail-body {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
     }
 }
 
