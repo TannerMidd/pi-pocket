@@ -8,6 +8,9 @@
 const MIN_INTERVAL_MINUTES = 10;
 /** How far ahead a one-time message may go. */
 const MAX_AHEAD_MS = 366 * 24 * 60 * 60_000;
+/** The longest repeat, in minutes: longer ones would go past what a date can hold. */
+const MAX_INTERVAL_MINUTES = 366 * 1440;
+const TOO_LONG = "A schedule must repeat at least once in 366 days.";
 
 /** What `parseWhen` accepts; the defaults are the constants above. */
 export type WhenLimits = {
@@ -276,6 +279,10 @@ export function parseWhen(
                 );
             }
 
+            if (interval.minutes > MAX_INTERVAL_MINUTES) {
+                throw new Error(TOO_LONG);
+            }
+
             // "every 2 days 8:00" would repeat every two days from now, with "8:00" in the message.
             const next = lower[1 + interval.used] ?? "";
 
@@ -390,6 +397,10 @@ export function checkRepeat(given: unknown, limits: WhenLimits = {}): Repeat {
             throw new Error(
                 `A schedule can repeat at most every ${repeatMinutes} ${repeatMinutes === 1 ? "minute" : "minutes"}.`,
             );
+        }
+
+        if (minutes > MAX_INTERVAL_MINUTES) {
+            throw new Error(TOO_LONG);
         }
 
         return { minutes };

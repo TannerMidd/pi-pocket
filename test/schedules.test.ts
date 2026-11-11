@@ -21,7 +21,13 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { AuthorsDoc, ChatDoc, ScheduleDoc } from "../src/server/docs.ts";
 import { DEFAULT_SCHEDULE_LIMITS } from "../src/server/schedules.ts";
-import { describeRepeat, nextClockTime, parseWhen, zonedMoment } from "../src/server/when.ts";
+import {
+    checkRepeat,
+    describeRepeat,
+    nextClockTime,
+    parseWhen,
+    zonedMoment,
+} from "../src/server/when.ts";
 
 const iso = (moment: number) => new Date(moment).toISOString();
 /** Sunday, October 4, 2026, 10:00 in Chicago (15:00 UTC). */
@@ -85,6 +91,8 @@ test("the shortest repeat and the furthest ahead can be set", () => {
         sunday + 400 * day,
     );
     assert.throws(() => parseWhen("in 400d x", sunday, chicago), /up to a year ahead/);
+    assert.throws(() => parseWhen("every 999999999999m x", sunday, chicago), /366 days/);
+    assert.throws(() => checkRepeat({ minutes: 1e15 }), /366 days/, "the editor too");
 });
 
 test("clock times hold across daylight saving changes", () => {
