@@ -1,6 +1,7 @@
 // OpenAI-compatible endpoints from the Providers sheet: models.json made when missing, keys in auth.json, hand-made
 // files left alone, and an endpoint's models discovered.
 import { cleanUp, openApp, owner, root, scriptedModel } from "./helpers.ts";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
@@ -483,13 +484,12 @@ test("a model's images and thinking levels go into models.json, and Pi offers wh
         input: ["text", "image"],
         reasoning: true,
         thinkingLevelMap: {
-            off: null,
-            minimal: null,
+            minimal: "minimal",
             low: "low",
             medium: "medium",
             high: "high",
-            xhigh: "xhigh",
-            max: "max",
+            xhigh: null,
+            max: null,
         },
     });
     assert.deepEqual(models[2], { id: "plain" });
@@ -498,6 +498,14 @@ test("a model's images and thinking levels go into models.json, and Pi offers wh
 
     assert.deepEqual(seer?.input, ["text", "image"]);
     assert.equal(seer?.reasoning, true);
+    // Thinking turned on keeps Off selectable and leaves out the levels most endpoints refuse.
+    assert.deepEqual(getSupportedThinkingLevels(seer!), [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+    ]);
     assert.deepEqual(app.models.getModel("caps", "plain")?.input, ["text"]);
     assert.deepEqual(app.models.getModel("caps", "own-names")?.thinkingLevelMap, {
         off: null,

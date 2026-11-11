@@ -18,10 +18,10 @@ const LEVELS = [
     ["max", "Max"],
 ];
 const LEVEL_NAMES = new Map(LEVELS);
-/** The levels a model gets when thinking is turned on, each sending its own name. */
-const DEFAULT_TIERS = ["low", "medium", "high", "xhigh", "max"].map((level) => ({
+/** The levels Pi offers a reasoning model with no map: off to high, each sending its own name; off sends nothing. */
+const DEFAULT_TIERS = ["off", "minimal", "low", "medium", "high"].map((level) => ({
     level,
-    value: level,
+    value: level === "off" ? "" : level,
 }));
 const order = (tiers) => LEVELS.flatMap(([level]) => tiers.filter((tier) => tier.level === level));
 

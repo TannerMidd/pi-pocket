@@ -54,10 +54,13 @@ export interface ThinkingTier {
     value: string;
 }
 
-/** The levels a model gets when thinking is turned on: low to max, each sending its own name. */
+/**
+ * The levels a model gets when thinking is turned on: the ones Pi offers a reasoning model that has no map (off to
+ * high, not xhigh or max), each sending its own name; off sends nothing.
+ */
 export const DEFAULT_TIERS: ThinkingTier[] = (
-    ["low", "medium", "high", "xhigh", "max"] as const
-).map((level) => ({ level, value: level }));
+    ["off", "minimal", "low", "medium", "high"] as const
+).map((level) => ({ level, value: level === "off" ? "" : level }));
 
 const MAX_TIER_VALUE = 64;
 
