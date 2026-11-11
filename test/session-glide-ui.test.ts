@@ -1,6 +1,5 @@
-// What arrives after a session is on screen glides to the bottom (`catchUp` in web/transcript.js). It used to jump:
-// the catch-up window opened at the switch, so a slow answer landed after it, and a session that opened from the
-// server's view never opened one.
+// A catch-up glides to the bottom (`catchUp` in web/transcript.js): the server's first view after kept rows show, or
+// after a reconnect, however late it comes. It used to jump: the window opened at the switch. Later updates do not.
 import { cleanUp, newSession, openApp, root, say, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -23,6 +22,7 @@ let server: Server;
 let browsers: Browsers;
 let page: BrowserPage;
 let base = "";
+let events: PromiseWithResolvers<void> | undefined;
 
 /** Run a script in the page and read back the JSON it returns. */
 async function inPage<T>(script: string): Promise<T> {
@@ -35,9 +35,20 @@ before(async () => {
     }
 
     app = await openApp(scriptedModel());
-    server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
-    );
+    const handler = createHandler({
+        app,
+        listen: { host: "127.0.0.1", port: 0 },
+        restart: () => {},
+    });
+
+    // `events` holds the server's views, as a slow connection does.
+    server = createServer(async (request, response) => {
+        if (/^\/api\/(events|poll)/.test(request.url ?? "")) {
+            await events?.promise;
+        }
+
+        await handler(request, response);
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
@@ -88,6 +99,20 @@ async function openOn(id: ConversationId, text: string): Promise<void> {
     `);
 }
 
+/** The connection drops and comes back, as after a sleep, with a draw between. */
+async function reconnect(): Promise<void> {
+    await page.evaluate(`
+        const { store } = await import("/store.js");
+
+        store.set({ connection: "closed" });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        store.set({ connection: "open" });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        return "null";
+    `);
+}
+
 /**
  * Add `text` to the session on screen as a new row, the way a view from the server does, and watch for a glide
  * (`column.animate`) against a jump of the scroll. `afterMs` waits first, so the catch-up window can pass.
@@ -131,38 +156,24 @@ async function arrive(text: string, afterMs = 0): Promise<{ glided: boolean; jum
     `);
 }
 
-test(
-    "a catch-up that arrives after the old window still glides, and does not jump",
-    real,
-    async () => {
-        const id = await newSession(app);
-
-        await say(app, id, "shown first");
-        await openOn(id, "shown first");
-
-        // Past the old window, which opened at the switch: 3 s. The rows are on screen, so this still glides.
-        const seen = await arrive("late but gliding", 3200);
-
-        assert.equal(seen.glided, true, "the column glides");
-        assert.equal(seen.jumped, false, "the scroll does not jump");
-        // A first update must not start another deadline that makes a later catch-up or reconnect jump.
-        const later = await arrive("later still", 3200);
-
-        assert.equal(later.glided, true, "a later update glides too");
-        assert.equal(later.jumped, false, "no deadline can make the next update jump");
-    },
-);
-
-test("rows that arrive for a session opened from the server glide in", real, async () => {
+test("a late catch-up glides, and an update after its window does not", real, async () => {
     const id = await newSession(app);
 
-    await say(app, id, "opened from the server");
-    await openOn(id, "opened from the server");
+    await say(app, id, "shown first");
+    await openOn(id, "shown first");
+    await reconnect();
 
-    const seen = await arrive("and then this");
+    // Past the old window of 3 s: the first view after the reconnect is still the catch-up.
+    const seen = await arrive("late but gliding", 3200);
 
-    assert.equal(seen.glided, true, "a session opened from the server glides too");
-    assert.equal(seen.jumped, false, "no jump");
+    assert.equal(seen.glided, true, "the column glides");
+    assert.equal(seen.jumped, false, "the scroll does not jump");
+    // Past the catch-up's window, an update draws as streaming always did.
+    assert.equal(
+        (await arrive("later still", 3200)).glided,
+        false,
+        "a later update does not glide",
+    );
 });
 
 test(
@@ -174,6 +185,7 @@ test(
 
         await say(app, id, long(0));
         await openOn(id, long(0));
+        await reconnect();
 
         const seen = await inPage<{ glided: boolean; jumped: boolean; redraw: boolean }>(`
         const { store } = await import("/store.js");
@@ -241,6 +253,7 @@ test("a reader scrolled up keeps the same row when a late catch-up arrives", rea
 
     await say(app, id, "a reader's place");
     await openOn(id, "a reader's place");
+    await reconnect();
     const displacement = await inPage<number>(`
         const { store } = await import('/store.js');
         const view = store.state.view;
@@ -274,15 +287,8 @@ test(
 
         await say(app, id, "here before the sleep");
         await openOn(id, "here before the sleep");
-        // The connection drops and comes back, as after a sleep: the rows are still on screen, and what arrives glides.
-        await page.evaluate(`
-        const { store } = await import("/store.js");
-
-        store.set({ connection: "closed" });
-        store.set({ connection: "open" });
-
-        return "null";
-    `);
+        // The rows are still on screen after the reconnect, and what arrives glides.
+        await reconnect();
 
         const again = await arrive("after the reconnect");
 
@@ -300,6 +306,8 @@ test(
             "saved on the device",
             15_000,
         );
+        // The server's view waits, so what arrives first after the cached rows is the catch-up.
+        events = Promise.withResolvers();
         await page.reload();
         await until(
             async () =>
@@ -311,6 +319,9 @@ test(
         );
 
         const reloaded = await arrive("after the reload");
+
+        events.resolve();
+        events = undefined;
 
         assert.equal(reloaded.glided, true, "a reload glides what arrives after the cached rows");
         assert.equal(reloaded.jumped, false, "a reload does not jump");
