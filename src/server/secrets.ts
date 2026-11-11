@@ -14,7 +14,7 @@
  * names, or a symbolic link, and not one a command computes, nor a folder searched as a whole. Neither is a boundary
  * between Pi and the files of the user it runs as.
  */
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ConfigStore } from "./config.ts";
@@ -87,6 +87,36 @@ function real(path: string): string {
             return path;
         }
     }
+}
+
+/** Where a path that is there leads, links followed; undefined when it is not there (then it is not read). */
+function linked(path: string): string | undefined {
+    if (lstatSync(path, { throwIfNoEntry: false }) === undefined) {
+        return undefined;
+    }
+
+    try {
+        return realpathSync(path);
+    } catch {
+        return undefined;
+    }
+}
+
+function isFolder(path: string): boolean {
+    return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+const GLOB = /[*?[]/;
+/** How many links a command's words are followed in the folders it names, past the one it runs in. */
+const LINK_CHECKS = 1000;
+
+/** Where core's secrets are, once for each call judged. */
+interface Roots {
+    files: Set<string>;
+    data: string[];
+    agent: string[];
+    /** The names of core's files, and `auth.json`: a word whose last part is none of them names none of them. */
+    names: string[];
 }
 
 /** A glob's words as a regular expression over whole paths (`*`, `?`, and `[...]`; no `**`). */
@@ -317,8 +347,10 @@ export class CoreSecrets {
             return undefined;
         }
 
+        const roots = this.#roots();
+
         for (const path of paths(args)) {
-            const why = this.#path(resolve(cwd, this.#home(path)));
+            const why = this.#path(resolve(cwd, this.#home(path)), roots);
 
             if (why !== undefined) {
                 return why;
@@ -338,9 +370,9 @@ export class CoreSecrets {
     }
 
     /** Why a path is off limits, or undefined: the path as given, and where its links lead. */
-    #path(path: string, envFile = isEnvFile): string | undefined {
+    #path(path: string, roots: Roots): string | undefined {
         for (const each of new Set([path, real(path)])) {
-            const why = this.#protected(each, envFile);
+            const why = this.#protected(each, isEnvFile, roots);
 
             if (why !== undefined) {
                 return why;
@@ -350,20 +382,20 @@ export class CoreSecrets {
         return undefined;
     }
 
-    #roots(): { files: string[]; data: string[]; agent: string[] } {
+    #roots(): Roots {
         const both = (path: string) => [...new Set([resolve(path), real(path)])];
+        const files = this.files().flatMap(both);
 
         return {
-            files: this.files().flatMap(both),
+            files: new Set(files),
             data: both(this.#options.dataDir),
             agent: both(this.#options.agentDir),
+            names: [...new Set([...files.map((file) => basename(file)), "auth.json"])],
         };
     }
 
-    #protected(path: string, envFile: (name: string) => boolean): string | undefined {
-        const roots = this.#roots();
-
-        if (roots.files.includes(path)) {
+    #protected(path: string, envFile: (name: string) => boolean, roots: Roots): string | undefined {
+        if (roots.files.has(path)) {
             return `${basename(path)} holds Pi Pocket's secrets`;
         }
 
@@ -393,19 +425,31 @@ export class CoreSecrets {
             .split(/[\s;|&<>()'"`=,]+/)
             .map((word) => word.replace(/^[{[]+|[}\]]+$/g, ""))
             .filter((word) => word !== "" && !word.startsWith("-"));
-        // A word may be relative to the folder the command runs in, the home folder, or a folder the command names.
-        const bases = [
-            ...new Set([cwd, ...words.filter((word) => isAbsolute(word) && !/[*?[]/.test(word))]),
-        ];
         const roots = this.#roots();
+        // A word may be relative to the folder the command runs in, or a folder the command names, and where they lead.
+        const bases = new Set([cwd, real(cwd)]);
+
+        for (const word of new Set(words)) {
+            if (isAbsolute(word) && !GLOB.test(word) && isFolder(word)) {
+                bases.add(word).add(real(word));
+            }
+        }
+
+        // In a folder that is off limits as a whole, every word names what it holds.
+        const inside = new Set(
+            [...bases].filter(
+                (base) => this.#protected(join(base, "_"), isEnvWord, roots) !== undefined,
+            ),
+        );
         const candidates = [
             ...roots.files,
             ...roots.data.map((data) => join(data, "x.")),
             ...roots.agent.map((agent) => join(agent, "auth.json")),
         ];
+        let links = LINK_CHECKS;
 
         for (const word of words) {
-            const glob = /[*?[]/.test(word);
+            const glob = GLOB.test(word);
 
             if (
                 isEnvWord(basename(word)) ||
@@ -414,12 +458,32 @@ export class CoreSecrets {
                 return `${basename(word)} is a file of secrets`;
             }
 
-            for (const base of isAbsolute(word) ? [""] : bases) {
-                const path = resolve(base || "/", word);
+            // Only a word that ends in the name of one of core's files, or passes through `x.`, can name one as written.
+            const last = glob ? globExpression(basename(word)) : undefined;
+            const named =
+                word.split("/").some((part) => part.startsWith("x.")) ||
+                (last === undefined
+                    ? roots.names.includes(basename(word))
+                    : [...roots.names, "x.any"].some((name) => last.test(name)));
+
+            for (const base of isAbsolute(word) ? ["/"] : bases) {
+                const literal = named || inside.has(base);
+                // A link may lead anywhere: followed where the command runs, and a bounded number of times elsewhere.
+                const follow = !glob && (base === cwd || isAbsolute(word) || links-- > 0);
+
+                if (!literal && !follow) {
+                    continue;
+                }
+
+                const path = resolve(base, word);
 
                 if (glob) {
                     // The folder before the first wildcard (`x.*` in the data folder) may be off limits as a whole.
-                    const prefix = this.#protected(path.slice(0, path.search(/[*?[]/)), isEnvWord);
+                    const prefix = this.#protected(
+                        path.slice(0, path.search(GLOB)),
+                        isEnvWord,
+                        roots,
+                    );
 
                     if (prefix !== undefined) {
                         return prefix;
@@ -441,10 +505,18 @@ export class CoreSecrets {
                 }
 
                 // Only a word that names a path: `config.json` alone is any project's, unless the command is in the folder.
-                const why = this.#path(path, isEnvWord);
+                const why = literal ? this.#protected(path, isEnvWord, roots) : undefined;
 
                 if (why !== undefined) {
                     return why;
+                }
+
+                const target = follow ? linked(path) : undefined;
+                const led =
+                    target === undefined ? undefined : this.#protected(target, isEnvWord, roots);
+
+                if (led !== undefined) {
+                    return led;
                 }
             }
         }

@@ -382,6 +382,18 @@ test("ordinary work goes on: other files, a project's config.json, templates, an
     assert.ok(!isEnvFile(".env.example") && !isEnvFile("environment.ts") && !isEnvFile("env"));
 });
 
+test("a long command is judged at once: each word is not checked again for each folder it names", () => {
+    const words = Array.from({ length: 1000 }, (_, at) => `/usr/lib/p${at} rel${at}`);
+    const started = performance.now();
+
+    assert.equal(
+        app.secrets.blocked("bash", { command: `ls ${words.join(" ")}` }, work),
+        undefined,
+    );
+    // About 5 ms; the check that ran for each word and folder took minutes.
+    assert.ok(performance.now() - started < 1000, "judged in under a second");
+});
+
 test("with home in the data folder (as an installation's service has), ~ and $HOME name core's files", () => {
     const home = process.env.HOME;
 
