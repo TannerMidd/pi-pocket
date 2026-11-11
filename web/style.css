@@ -18973,9 +18973,13 @@ textarea.notes {
         display: block;
     }
 
-    /* Above the message box and the jump to the newest message, both at the bottom right. */
+    /* Above the message box and the jump to the newest message, both at the bottom right. The message box grows with
+     * what it holds (a held-messages bar, a queue): its height is measured, and the mark keeps above it. */
     .pip-bubble {
-        bottom: calc(176px + env(safe-area-inset-bottom));
+        bottom: max(
+            calc(176px + env(safe-area-inset-bottom)),
+            calc(var(--composer-rise, 0px) + 56px)
+        );
     }
 
     .pip-scrim {
