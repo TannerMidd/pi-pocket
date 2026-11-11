@@ -103,7 +103,7 @@ Since 0.29.0 · Stable
 
 Pi Pocket's options on a tool definition, beside Pi Durable's own. Add them with `Object.assign` after `defineTool` ([Tools](../tools.md#tools-for-every-subagent)).
 
-- `subagents: "always"`: give the tool to every subagent whose extensions include it, even when its `tools` list leaves it out. It is added once. A deferred tool is offered at once with a tool list; a tool that only scripts call brings codemode. Without a list, or on send, nothing changes. It does not add its extension. The tool's prompt and spawn result do not mention the marker or the tools it adds.
+- `subagents: "always"`: give the tool to every subagent whose extensions include it, when the session enables it, even when its `tools` list leaves it out. It is added once. A deferred tool is offered at once with a tool list; a tool that only scripts call brings codemode. Without a list, or on send, nothing changes. It does not add its extension. The tool's prompt and spawn result do not mention the marker or the tools it adds.
 
 Older Pi Pocket ignores the field. The API version stays 2: this is an addition, not a break.
 

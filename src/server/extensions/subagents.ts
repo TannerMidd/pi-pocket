@@ -51,42 +51,6 @@ export interface ToolOptions {
     readonly subagents?: "always";
 }
 
-/** Tools before a tool filter: a parent may have left them out, and wraps can change who calls them. */
-function toolsOf(extensions: readonly Extension[]): ToolRegistration[] {
-    const tools = new Map(
-        extensions.flatMap((extension) => (extension.tools ?? []).map((tool) => [tool.name, tool])),
-    );
-
-    for (const extension of extensions) {
-        for (const wrap of extension.wraps ?? []) {
-            if (!("tool" in wrap)) {
-                continue;
-            }
-
-            const tool = tools.get(wrap.tool);
-
-            if (tool === undefined) {
-                continue;
-            }
-
-            try {
-                const wrapped = wrap.wrap(tool);
-
-                if (wrapped.name === tool.name) {
-                    tools.set(tool.name, wrapped);
-                } else {
-                    tools.delete(tool.name);
-                }
-            } catch {
-                // Resolution reports a failed wrap and drops its tool; do not bring it back here.
-                tools.delete(tool.name);
-            }
-        }
-    }
-
-    return [...tools.values()];
-}
-
 // Exclude Agent Teams by name even while it is off; enabling it later must not give nested agents delegation.
 const AgentTeams = defineExtension({ name: "pocket-agent-teams" });
 // Nor does a subagent ask the person (`ask.ts`): it works for another agent, and nobody reads its chat.
@@ -1029,13 +993,16 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                       ]
                     : [];
             const removed = [SubagentTools, AgentTeams, Ask];
-            const selected = parent.extensions.filter(
-                (extension) => !removed.some((each) => each.name === extension.name),
+            // Marked tools this session enables, of the extensions a subagent keeps: a tool it disabled stays out.
+            const kept = new Set(
+                parent.extensions
+                    .filter((extension) => !removed.some((each) => each.name === extension.name))
+                    .flatMap((extension) => (extension.tools ?? []).map((tool) => tool.name)),
             );
-            const inheritedTools =
-                action === "spawn" && args.tools !== undefined ? toolsOf(selected) : [];
-            const always = inheritedTools.filter(
-                (tool) => (tool as ToolRegistration & ToolOptions).subagents === "always",
+            const always = parentTools.filter(
+                (tool) =>
+                    kept.has(tool.name) &&
+                    (tool as ToolRegistration & ToolOptions).subagents === "always",
             );
             const tools =
                 args.tools === undefined
@@ -1060,7 +1027,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 }
             }
 
-            const codemode = inheritedTools.find((tool) => tool.name === "codemode");
+            const codemode = parentTools.find((tool) => tool.name === "codemode");
 
             if (
                 codemode !== undefined &&

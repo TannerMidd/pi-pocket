@@ -33,7 +33,7 @@ export default function createMyWords() {
 
 ## Tools for every subagent
 
-Set `subagents: "always"` on a tool that every subagent needs. When Pi starts a subagent with a `tools` list, Pi Pocket adds the marked tools from the extensions that run there, once each. It never adds an extension: a tool from one removed for subagents, or left out of a session's fixed extension list, does not come along. Without a tool list, nothing changes. The tool's prompt and spawn result do not mention the marker or the tools it adds.
+Set `subagents: "always"` on a tool that every subagent needs. When Pi starts a subagent with a `tools` list, Pi Pocket adds the marked tools that the session enables, from the extensions that run there, once each. It never adds an extension: a tool from one removed for subagents, or left out of a session's fixed extension list, does not come along. Without a tool list, nothing changes. The tool's prompt and spawn result do not mention the marker or the tools it adds.
 
 A marked tool with `deferred: true` is offered at once when the subagent has a tool list: a subagent has no tool search. A tool that only scripts call keeps that rule, and brings codemode with it. Sending more work to an existing subagent does not change its tools.
 

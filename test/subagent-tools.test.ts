@@ -298,7 +298,7 @@ test("a marked tool that only scripts call also gets codemode, in On and Only mo
     app.setExtensionSettings(owner(app), "codemode", { mode: "on" });
 });
 
-test("Only mode still brings codemode when the parent disabled its marked tools", async () => {
+test("Only mode still brings codemode under the parent's tool filter", async () => {
     app.setExtensionSettings(owner(app), "codemode", { mode: "only" });
     const parent = await newSession(app);
     const parentAgent = await (await app.conversation(parent)).agent(context);
@@ -311,7 +311,7 @@ test("Only mode still brings codemode when the parent disabled its marked tools"
                 (extension) => extension.name !== "test-subagent-tools",
             ),
             tools: parentAgent.callable
-                .filter((tool) => tool.name === "subagent")
+                .filter((tool) => tool.name === "subagent" || tool.name === "only_always")
                 .concat(parentAgent.tools.filter((tool) => tool.name === "codemode")),
         },
         context,
@@ -336,7 +336,7 @@ test("sending a follow-up does not add marked tools to an existing subagent", as
     assert.deepEqual((await app.agentState(child))?.tools, ["read"]);
 });
 
-test("marked tools of a loaded extension also come along when the parent disabled them", async () => {
+test("marked tools that the parent disabled stay out", async () => {
     const parent = await newSession(app);
 
     await app.harness.commit(async (tx) => {
@@ -344,7 +344,6 @@ test("marked tools of a loaded extension also come along when the parent disable
     }, context);
     const { agent } = await spawn(["read"], parent);
 
-    assert.ok(agent.tools.some((tool) => tool.name === "test_always"));
-    assert.ok(agent.tools.some((tool) => tool.name === "test_waiting"));
-    assert.ok(agent.callable.some((tool) => tool.name === "test_script"));
+    assert.ok(!agent.callable.some((tool) => tool.name.startsWith("test_")));
+    assert.ok(!agent.tools.some((tool) => tool.name.startsWith("test_")));
 });
