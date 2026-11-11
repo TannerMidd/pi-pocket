@@ -138,10 +138,7 @@ export class HiddenValues {
      * value it would fall inside, until none.
      */
     safe(text: string, conversationId: ConversationId | number): number {
-        return safeCut(
-            text,
-            this.for(conversationId).map((each) => each.value),
-        );
+        return safeCut(text, new Starts(this.for(conversationId).map((each) => each.value)));
     }
 
     /**
@@ -166,7 +163,7 @@ export class HiddenValues {
         onOutput: NonNullable<ShellExecOptions["onOutput"]>,
     ): { onOutput: NonNullable<ShellExecOptions["onOutput"]>; flush: () => void } {
         const values = this.for(conversationId);
-        const texts = values.map((each) => each.value);
+        const starts = new Starts(values.map((each) => each.value));
         const pending = new Map<
             string,
             { text: string; context: Context; info: ShellOutputInfo }
@@ -201,7 +198,7 @@ export class HiddenValues {
 
                 const before = pending.get(info.stream)?.text ?? "";
                 const joined = replaceAll(before + text, values);
-                const cut = safeCut(joined, texts);
+                const cut = safeCut(joined, starts);
 
                 pending.set(info.stream, { text: joined.slice(cut), context, info });
                 emit(joined.slice(0, cut), context, info);
@@ -214,32 +211,100 @@ export class HiddenValues {
     }
 }
 
-/** How much of `text` can be shown before more comes: `HiddenValues.safe`, for these values. */
-function safeCut(text: string, values: readonly string[]): number {
+/** Values by how they start, so a place in a text is checked only against the values that can start there. */
+class Starts {
+    /** Each value's first `MIN_HIDDEN` characters, and the values that start so. */
+    readonly #byStart = new Map<string, string[]>();
+    /** Each value's shorter starts; its first character, and its first two, by their codes. */
+    readonly #short = new Set<string>();
+    readonly #first = new Uint8Array(65536);
+    readonly #pair = new Uint8Array(65536);
+    readonly longest: number;
+
+    constructor(values: readonly string[]) {
+        let longest = 0;
+
+        for (const value of values) {
+            const key = value.slice(0, MIN_HIDDEN);
+            const same = this.#byStart.get(key) ?? [];
+
+            same.push(value);
+            this.#byStart.set(key, same);
+            this.#first[value.charCodeAt(0)] = 1;
+            this.#pair[pair(value, 0)] = 1;
+            longest = Math.max(longest, value.length);
+
+            for (let length = 1; length < MIN_HIDDEN; length++) {
+                this.#short.add(value.slice(0, length));
+            }
+        }
+
+        this.longest = longest;
+    }
+
+    /** Whether a value may start at `at`, by its first two characters: most places in a text are told at once. */
+    #may(text: string, at: number): boolean {
+        return (
+            this.#first[text.charCodeAt(at)] === 1 &&
+            (at + 1 === text.length || this.#pair[pair(text, at)] === 1)
+        );
+    }
+
+    /** Whether the end of `text` from `at` is the start of a value, not all of it. */
+    starts(text: string, at: number): boolean {
+        if (!this.#may(text, at)) {
+            return false;
+        }
+
+        if (text.length - at < MIN_HIDDEN) {
+            return this.#short.has(text.slice(at));
+        }
+
+        const values = this.#byStart.get(text.slice(at, at + MIN_HIDDEN));
+        const rest = values === undefined ? "" : text.slice(at);
+
+        return (values ?? []).some((value) => value.length > rest.length && value.startsWith(rest));
+    }
+
+    /** Whether a whole value starts at `at` in `text` and goes past `cut`. */
+    spans(text: string, at: number, cut: number): boolean {
+        return (
+            this.#may(text, at) &&
+            (this.#byStart.get(text.slice(at, at + MIN_HIDDEN)) ?? []).some(
+                (value) => at + value.length > cut && text.startsWith(value, at),
+            )
+        );
+    }
+}
+
+/** The first two characters of `text` at `at`, as one number. */
+function pair(text: string, at: number): number {
+    return ((text.charCodeAt(at) << 8) ^ text.charCodeAt(at + 1)) & 0xffff;
+}
+
+/**
+ * How much of `text` can be shown before more comes: `HiddenValues.safe`, for these values. Only the last characters,
+ * fewer than the longest value, can start one or hold one that the cut falls inside.
+ */
+function safeCut(text: string, starts: Starts): number {
     let cut = text.length;
 
-    for (const value of values) {
-        for (let length = Math.min(value.length - 1, text.length); length > 0; length--) {
-            if (text.endsWith(value.slice(0, length))) {
-                cut = Math.min(cut, text.length - length);
-                break;
-            }
+    for (let at = Math.max(0, text.length - starts.longest + 1); at < text.length; at++) {
+        if (starts.starts(text, at)) {
+            cut = at;
+            break;
         }
     }
 
-    for (let moved = true; moved;) {
+    // A whole value in the text ends in it: one can go past the cut only when something is held back.
+    for (let moved = cut < text.length; moved;) {
         moved = false;
 
-        for (const value of values) {
-            for (
-                let at = text.indexOf(value);
-                at !== -1 && at < cut;
-                at = text.indexOf(value, at + 1)
-            ) {
-                if (at + value.length > cut) {
-                    cut = at;
-                    moved = true;
-                }
+        for (let at = Math.max(0, cut - starts.longest + 1); at < cut; at++) {
+            if (starts.spans(text, at, cut)) {
+                cut = at;
+                moved = true;
+                break;
             }
         }
     }
