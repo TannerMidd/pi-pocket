@@ -2609,6 +2609,8 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // The shortest repeat, so the Schedules sheet's editor keeps Save off for one the server refuses.
+                scheduleRepeatMinutes: this.schedules.limits.repeatMinutes,
                 // The browser modules this person's tabs load (`extension-ui.js`), each with the tools its module
                 // installs: the only ones whose calls it may describe (`pocket.toolCall`).
                 ui: this.#browserModules(user),
