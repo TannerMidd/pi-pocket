@@ -144,6 +144,7 @@ A module split into parts keeps its name for the part others import, with the re
 | `browser.ts`                             | `Browsers`: one headless Chromium for every conversation, started with the first page and stopped after the last; each conversation's page |
 | `browser/page.ts`                        | `BrowserPage`: one conversation's page: its events, screencast frames, console, navigation, and what Pi and people do to it                |
 | `browser/cdp.ts`                         | The DevTools protocol over a pipe (`--remote-debugging-pipe`), and the Chromium process; `BrowserError`                                    |
+| `browser/identity.ts`                    | The browser's client hints: its brand (Chromium, Google Chrome, Brave, Edge), full version, and this machine's platform                    |
 | `browser/discovery.ts`                   | Finding a Chromium-based browser on this machine, and where its profile goes                                                               |
 | `browser/page-scripts.ts`                | The scripts that run inside a page: the outline with refs for Pi, finding a target, selecting                                              |
 | `browser/keys.ts`                        | Key names and combinations as key events                                                                                                   |
