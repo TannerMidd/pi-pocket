@@ -998,10 +998,10 @@ export function signOut() {
 
 /**
  * What the sessions this tab keeps in its memory may take in all, as the length of their JSON: once parsed they take
- * about 1.6 times that (measured on real sessions), so about 50 MB. However many sessions that is: 26 real ones took
+ * about 1.6 times that (measured on real sessions), so about 25 MB. However many sessions that is: 26 real ones took
  * 7.5 MB. The device keeps more (`DEVICE_CHARS`): a session that went from memory loads from there in a moment.
  */
-const KEPT_CHARS = 32_000_000;
+const KEPT_CHARS = 16_000_000;
 /**
  * What the sessions this browser keeps on the device (`session-cache.js`, IndexedDB) may take in all, as the length of
  * their JSON: about 100 MB. Shared by every tab of the browser; the sessions used longest ago go first.
