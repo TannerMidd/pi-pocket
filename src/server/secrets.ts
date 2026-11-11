@@ -45,8 +45,6 @@ export interface CoreSecretsOptions {
 
 /** The most old values kept hidden after they changed, so a server that keeps changing them does not fill the list. */
 const MAX_RETIRED = 200;
-/** A stored value of a module whose settings are unknown (it is off) is hidden when it looks like a key: no spaces. */
-const KEY_LIKE = /^\S{12,}$/;
 /** Fields of `auth.json` that hold keys and tokens. */
 const AUTH_FIELD = /key|token|secret|access|refresh|password|credential|cookie|session/i;
 /** The fewest characters core hides of its own: a shorter one would hide ordinary output. */
@@ -339,21 +337,11 @@ export class CoreSecrets {
         const found: FoundSecret[] = [{ value: config.ownerToken, label: "owner token" }];
 
         for (const module of config.extensionSettingModules()) {
-            const fields = this.#options.settingsOf(module);
             const stored = config.extensionSettings(module);
 
-            if (fields === undefined) {
-                // A module that is off: which of its values are secret is unknown, so each that looks like a key is.
-                for (const [name, value] of Object.entries(stored)) {
-                    if (typeof value === "string" && KEY_LIKE.test(value)) {
-                        found.push({ value, label: label(`setting ${module}.${name}`) });
-                    }
-                }
-
-                continue;
-            }
-
-            for (const field of fields) {
+            // A module that is off declares no settings: which of its values are secret is unknown, so none is hidden.
+            // One hidden while it was on stays hidden, as an old value.
+            for (const field of this.#options.settingsOf(module) ?? []) {
                 if (field.type !== "text" || field.secret !== true) {
                     continue;
                 }

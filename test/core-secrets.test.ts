@@ -39,12 +39,13 @@ const S = {
     authRefresh: fake("auth-oauth-refresh"),
     newAuthKey: fake("auth-new-api-key"),
     previewSecret: fake("preview-secret"),
-    offModule: fake("off-module-key"),
 };
 /** Values that are not secret: they must show as they are. */
 const PLAIN = {
     region: "plain-region-value-12345",
     authType: "api_key",
+    /** A stored value of a module that is off: no spaces, but not a secret. */
+    offModel: "claude-sonnet-4-5",
 };
 /** Everything the model was sent, to check that no secret reached it. */
 const sent: string[] = [];
@@ -142,14 +143,6 @@ export default (_host, web) => {
 };
 `,
     );
-    writeFileSync(
-        join(dataDir, "extensions", "dormant.ts"),
-        `/** Dormant: a module that is off, with a secret setting, for tests. */
-export default (_host, web) => {
-    web.settings([{ name: "key", label: "Key", type: "text", secret: true }]);
-};
-`,
-    );
     writeAuth(S.authKey);
     app = await openApp(scriptedModel(route), dataDir);
     await app.setExtensionEnabled(owner(app), "vault.ts", true);
@@ -157,8 +150,8 @@ export default (_host, web) => {
         apiKey: S.apiKey,
         region: PLAIN.region,
     });
-    // A module that is off keeps its values in config.json: which are secret is unknown, so a key-like one is hidden.
-    app.config.setExtensionSettings("dormant", { key: S.offModule });
+    // A module that is off keeps its values in config.json: which are secret is unknown, so none is hidden.
+    app.config.setExtensionSettings("dormant", { model: PLAIN.offModel });
     // A part of core with a secret in a file of its own (as Pi Pocket Teams' previews have): it adds the file.
     writeFileSync(join(dataDir, "preview-secret"), S.previewSecret, { mode: 0o600 });
     app.secrets.watchFile({
@@ -180,7 +173,6 @@ test("each source of core's secrets is hidden by name: settings, owner token, pu
         "owner token",
         "secret vault.apiKey",
         "secret vault.token",
-        "setting dormant.key",
         "push private key",
         "auth example-api",
         "auth example-oauth",
@@ -201,7 +193,6 @@ test("a command's output hides every secret, in the transcript and in what the m
         app.config.ownerToken,
         S.apiKey,
         S.defaultToken,
-        S.offModule,
         push.vapid.privateKey,
         S.authKey,
         S.authAccess,
@@ -209,7 +200,7 @@ test("a command's output hides every secret, in the transcript and in what the m
         S.previewSecret,
     ];
 
-    writeDump(...secrets, PLAIN.region, push.vapid.publicKey);
+    writeDump(...secrets, PLAIN.region, PLAIN.offModel, push.vapid.publicKey);
 
     const id = await newSession(app);
     const before = sent.length;
@@ -219,7 +210,6 @@ test("a command's output hides every secret, in the transcript and in what the m
         "owner token",
         "secret vault.apiKey",
         "secret vault.token",
-        "setting dormant.key",
         "push private key",
         "auth example-api",
         "auth example-oauth",
@@ -232,6 +222,7 @@ test("a command's output hides every secret, in the transcript and in what the m
     assertHidden(sent.slice(before).join("\n"), ...secrets);
     // What is not secret shows as it is.
     assert.ok(turn.includes(PLAIN.region), "a setting that is not secret shows");
+    assert.ok(turn.includes(PLAIN.offModel), "a value of a module that is off shows");
     assert.ok(turn.includes(push.vapid.publicKey), "the push public key shows");
 });
 
@@ -244,7 +235,7 @@ test("the reported command, with Lancet Guard off: config.json's secrets are hid
     assert.match(turn, /\[secret vault\.apiKey\]/);
     assert.match(turn, /\[owner token\]/);
     assert.ok(turn.includes(PLAIN.region));
-    assertHidden(await stored(id), app.config.ownerToken, S.apiKey, S.offModule);
+    assertHidden(await stored(id), app.config.ownerToken, S.apiKey);
 });
 
 test("saving settings hides the new value at once, in sessions already open and in new ones, and the old one stays hidden", async () => {
@@ -478,12 +469,12 @@ test("the block is enforced in Pi's own tool calls while the Lancet Guard module
 });
 
 test("a value that is too short to hide safely is not hidden, and the list never takes the values", () => {
-    app.config.setExtensionSettings("dormant", { key: "short" });
+    app.config.setExtensionSettings("vault", { apiKey: "short" });
     app.secrets.sync();
 
     assert.equal(app.hidden.replace("short words", 1), "short words");
-    // The earlier value of the module that is off stays hidden.
-    assert.equal(app.hidden.replace(S.offModule, 1), "[setting dormant.key]");
+    // The earlier value stays hidden.
+    assert.equal(app.hidden.replace(S.newApiKey, 1), "[secret vault.apiKey]");
 });
 
 test("output that starts no secret streams at once; only a possible start of one waits for the next chunk", () => {
