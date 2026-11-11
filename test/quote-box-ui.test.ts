@@ -262,6 +262,10 @@ test("Replies while a send is on its way all come in after it, in order", real, 
 
 test("a quote taken out by the box's own editing comes back a piece with undo", real, async () => {
     await reply("one");
+    // The box sets its caret in an animation frame after the quote lands: let it, or it comes after Ctrl+A.
+    await page.evaluate(
+        `await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))`,
+    );
     await page.type(undefined, "hello", { append: true });
     await page.press("Control+a");
     await page.press("Delete");
