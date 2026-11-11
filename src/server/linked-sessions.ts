@@ -1108,7 +1108,9 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         await this.#mayAct(source, id, user);
         const repeating = archived
-            ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+            ? (await app.schedules.list(id)).filter(
+                  (item) => item.every !== undefined && item.paused === undefined,
+              ).length
             : 0;
 
         // The archive and its receipt are one commit: a crash leaves neither, and a key for another session is refused
