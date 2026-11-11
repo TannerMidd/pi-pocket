@@ -152,6 +152,89 @@ function globExpression(glob: string): RegExp {
     return new RegExp(`^${out}$`);
 }
 
+/** A glob that names `.env` files in particular (`.env*`, `*.env`), not one that names every file (`*`, `.*`). */
+function isEnvGlob(name: string): boolean {
+    return globExpression(name).test(".env") && /env/i.test(name.replace(/\[[^\]]*\]|[*?]/g, ""));
+}
+
+/** Commands whose words are only text: a file they name is not read. */
+const TEXT_COMMANDS = new Set(["echo", "printf"]);
+/** Commands whose last word is where they write: `cp .env.example .env` reads no `.env`. */
+const COPY_COMMANDS = new Set(["cp", "mv", "install"]);
+/** Words that come before a command's name: `sudo cp`, `then echo`. */
+const PREFIXES = new Set(
+    "sudo command builtin exec time if then do else elif while until ! {".split(" "),
+);
+/** Options whose value is a name to leave out: `--exclude=.env` reads no `.env`. */
+const EXCLUSION = /^--(exclude|ignore)$/i;
+
+/**
+ * A command's words: all of them, and those that may name a file it reads. Not read: the words of `echo` and `printf`,
+ * where output goes (`>`, `>>`), a heredoc's delimiter, an excluded name, and where `cp` or `mv` writes.
+ */
+function commandWords(command: string): { all: string[]; read: string[] } {
+    const all: string[] = [];
+    const read: string[] = [];
+    const clean = (text: string) =>
+        text
+            .split(/[=,]+/)
+            .map((word) => word.replace(/^[{[]+|[}\]]+$/g, ""))
+            .filter((word) => word !== "" && !word.startsWith("-"));
+
+    // Each simple command on its own: a separator, a subshell, or a substitution starts the next.
+    for (const part of command.split(/[;|&\n()`]+/)) {
+        const tokens = part
+            .split(/([<>]+&?)|[\s'"]+/)
+            .filter((token): token is string => token !== undefined && token !== "");
+        const args: string[] = [];
+        let name: string | undefined;
+        let after: string | undefined;
+
+        for (const token of tokens) {
+            if (/^[<>]/.test(token)) {
+                after = token;
+                continue;
+            }
+
+            const before = after;
+            const [, option, value = ""] = /^(--?[\w-]+)=(.*)$/.exec(token) ?? [];
+            const words = clean(option === undefined ? token : EXCLUSION.test(option) ? "" : value);
+
+            after = EXCLUSION.test(token) ? token : undefined;
+            all.push(...words);
+
+            if (before === "<") {
+                read.push(...words);
+            } else if (before !== undefined) {
+                // Where output goes, a heredoc's delimiter or a here-string, or a name left out: none is read.
+            } else if (name !== undefined) {
+                args.push(...words);
+            } else if (/^[A-Za-z_]\w*=/.test(token) || token.startsWith("-")) {
+                read.push(...words);
+            } else if (!PREFIXES.has(token)) {
+                name = basename(token);
+                read.push(...words);
+            }
+        }
+
+        if (name !== undefined && TEXT_COMMANDS.has(name)) {
+            continue;
+        }
+
+        const into =
+            name !== undefined &&
+            COPY_COMMANDS.has(name) &&
+            args.length > 1 &&
+            !tokens.some((token) =>
+                /^(-[A-Za-z]*t[A-Za-z]*|--target-directory(=.*)?)$/.test(token),
+            );
+
+        read.push(...(into ? args.slice(0, -1) : args));
+    }
+
+    return { all, read };
+}
+
 const SHELL_TOOLS = new Set(["bash", "powershell", "background"]);
 /** Tools whose `path` only writes a whole new file: they read nothing back. */
 const WRITE_ONLY = new Set(["write"]);
@@ -421,15 +504,12 @@ export class CoreSecrets {
     }
 
     #command(command: string, cwd: string): string | undefined {
-        const words = this.#home(command)
-            .split(/[\s;|&<>()'"`=,]+/)
-            .map((word) => word.replace(/^[{[]+|[}\]]+$/g, ""))
-            .filter((word) => word !== "" && !word.startsWith("-"));
+        const { all, read: words } = commandWords(this.#home(command));
         const roots = this.#roots();
         // A word may be relative to the folder the command runs in, or a folder the command names, and where they lead.
         const bases = new Set([cwd, real(cwd)]);
 
-        for (const word of new Set(words)) {
+        for (const word of new Set(all)) {
             if (isAbsolute(word) && !GLOB.test(word) && isFolder(word)) {
                 bases.add(word).add(real(word));
             }
@@ -451,10 +531,7 @@ export class CoreSecrets {
         for (const word of words) {
             const glob = GLOB.test(word);
 
-            if (
-                isEnvWord(basename(word)) ||
-                (glob && globExpression(basename(word)).test(".env"))
-            ) {
+            if (isEnvWord(basename(word)) || (glob && isEnvGlob(basename(word)))) {
                 return `${basename(word)} is a file of secrets`;
             }
 

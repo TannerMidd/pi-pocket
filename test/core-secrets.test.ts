@@ -382,6 +382,31 @@ test("ordinary work goes on: other files, a project's config.json, templates, an
     assert.ok(!isEnvFile(".env.example") && !isEnvFile("environment.ts") && !isEnvFile("env"));
 });
 
+test("a glob of every file, a name as text, and a write to .env are not reads of a secret", () => {
+    for (const command of [
+        "ls *",
+        "du -sh *",
+        "git add *",
+        "for f in *; do wc -l $f; done",
+        "ls .*",
+        "echo .env >> .gitignore",
+        "cp .env.example .env",
+        "tar --exclude=.env -czf out.tgz .",
+        "cat > .env <<EOF\nA=1\nEOF",
+    ]) {
+        assert.equal(app.secrets.blocked("bash", { command }, work), undefined, command);
+    }
+
+    for (const command of [
+        "cp .env /tmp/copy",
+        "echo $(cat .env)",
+        "wc -l < .env",
+        "grep -r --include=.env KEY .",
+    ]) {
+        assert.ok(app.secrets.blocked("bash", { command }, work) !== undefined, command);
+    }
+});
+
 test("a long command is judged at once: each word is not checked again for each folder it names", () => {
     const words = Array.from({ length: 1000 }, (_, at) => `/usr/lib/p${at} rel${at}`);
     const started = performance.now();
