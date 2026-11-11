@@ -19,6 +19,7 @@ import { after, before, test } from "node:test";
 import { HttpError } from "../src/server/errors.ts";
 import {
     DEFAULT_TIERS,
+    THINKING_LEVELS,
     idFor,
     parseModelList,
     priceOf,
@@ -559,6 +560,34 @@ test("a model's images and thinking levels go into models.json, and Pi offers wh
         /needs a value/,
     );
     await app.customProviders.remove("caps");
+});
+
+test("an edit saves a hand-made reasoning model with every level off as it is", async () => {
+    await app.customProviders.create({
+        name: "Fixed",
+        baseUrl,
+        noKey: true,
+        models: [{ id: "always", thinking: DEFAULT_TIERS }],
+    });
+
+    const config = readModels();
+    const levels = Object.fromEntries(THINKING_LEVELS.map((level) => [level, null]));
+
+    config.providers.fixed.models[0].thinkingLevelMap = levels;
+    writeFileSync(modelsFile, JSON.stringify(config));
+
+    const listed = app.customProviders.list().find((each) => each.id === "fixed")!;
+
+    assert.deepEqual(listed.models[0]?.thinking, []);
+
+    // What the form sends back for it on a rename.
+    await app.customProviders.update("fixed", { name: "Fixed 2", models: listed.models });
+
+    const kept = readModels().providers.fixed.models[0];
+
+    assert.equal(kept.reasoning, true);
+    assert.deepEqual(kept.thinkingLevelMap, levels);
+    await app.customProviders.remove("fixed");
 });
 
 test("discovery reads the model ids and vLLM's max_model_len, nothing a vendor adds", () => {
