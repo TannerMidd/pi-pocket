@@ -1,6 +1,6 @@
 /**
  * Lancet Guard for Pi Pocket's tools. Before a bash, write, or edit call, the guard from the user's Pi install judges
- * it. Blocks become error results for the model. "Ask" verdicts wait for anyone in the conversation to approve or deny
+ * it. Before any call, core's rule blocks one that would read a file Pi Pocket keeps secrets in (`secrets.ts`). Blocks become error results for the model. "Ask" verdicts wait for anyone in the conversation to approve or deny
  * the call in the app. The answer is stored in the call's memo, so a restart after the answer never asks twice.
  */
 import { AgentDoc, defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
