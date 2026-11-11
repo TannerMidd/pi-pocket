@@ -69,7 +69,13 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
-import { globalModelSettings, projectModelDefault } from "./project-model.ts";
+import {
+    globalModelSettings,
+    piGlobalSettings,
+    projectModelDefault,
+    rememberLevel,
+    rememberedLevel,
+} from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
 import {
@@ -646,9 +652,10 @@ export class Commands {
      * The model a new session starts with, always one a person chose: `prefer` (with its thinking level) when it is
      * signed in here, or else the owner's default, even when it is not signed in now: the session then shows that, and
      * its first message fails in sight, where another model would spend on what nobody chose for it. Without an owner's
-     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model,
-     * then Pi's global default. A no-cwd caller (imports and PiP itself) keeps the legacy default selection. Never
-     * the first model there is: with none chosen, the session starts without a model, and someone picks one.
+     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model (at
+     * its level in Pi's `modelThinkingLevels`, when it has one), then Pi's global default. A no-cwd caller (imports and
+     * PiP itself) keeps the legacy default selection. Never the first model there is: with none chosen, the session
+     * starts without a model, and someone picks one.
      */
     #defaultModel(
         prefer?: {
@@ -704,7 +711,10 @@ export class Commands {
               : project !== undefined
                 ? project.thinkingLevel
                 : lastPicked !== undefined
-                  ? last?.thinkingLevel
+                  ? ((cwd === undefined
+                        ? undefined
+                        : rememberedLevel(defaults, lastPicked.provider, lastPicked.id)) ??
+                    last?.thinkingLevel)
                   : cwd === undefined
                     ? settings.getDefaultThinkingLevel()
                     : global?.defaultThinkingLevel) ?? "off") as ModelThinkingLevel;
@@ -1985,7 +1995,17 @@ export class Commands {
             );
         }
 
+        // A model picked with no level thinks as hard as a person last chose for it, as in Pi's TUI.
+        const remembered =
+            request.model === undefined || request.thinkingLevel !== undefined
+                ? undefined
+                : rememberedLevel(
+                      piGlobalSettings(app.defaultCwd),
+                      request.model.provider,
+                      request.model.modelId,
+                  );
         const wanted = (request.thinkingLevel ??
+            remembered ??
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
@@ -2026,6 +2046,10 @@ export class Commands {
 
         if (ref !== undefined && request.pipPanel !== true) {
             app.config.lastModel = { provider: ref.provider, modelId: ref.modelId, thinkingLevel };
+
+            if (request.thinkingLevel !== undefined && model?.reasoning === true) {
+                await rememberLevel(app.defaultCwd, ref.provider, ref.modelId, thinkingLevel);
+            }
         }
 
         const changes: string[] = [];
