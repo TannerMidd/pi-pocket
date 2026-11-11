@@ -1964,3 +1964,73 @@ test("a HEIC photo shows a stored image only where its place is sure", real, asy
         "/api/c/1/file?path=%2Fu%2Fb.png",
     ]);
 });
+
+test(
+    "Memory's scope switch lists that scope's lessons, and a lesson added goes there",
+    real,
+    async () => {
+        const writer = { userId: owner(app).id, byPi: false, name: "Owner" };
+
+        await app.memory.add(first, work, writer, {
+            text: "Project lesson one.",
+            scope: "project",
+        });
+        await app.memory.add(first, work, writer, {
+            text: "Everywhere lesson one.",
+            scope: "everywhere",
+        });
+        await fresh();
+        await goTo(first);
+        await page.evaluate(`(await import("/store.js")).openSheet({ type: "memory" })`);
+
+        const listed = () =>
+            inPage<{ texts: string[]; on: string; counts: string[] }>(`
+            return JSON.stringify({
+                texts: [...document.querySelectorAll(".sheet .lesson-text")].map((each) => each.textContent),
+                on: document.querySelector(".memory-scope button.on")?.getAttribute("aria-label") ?? "",
+                counts: [...document.querySelectorAll(".memory-scope-count")].map((each) => each.textContent),
+            });
+        `);
+        const shows = (texts: string[], what: string) =>
+            until(
+                async () => JSON.stringify((await listed()).texts) === JSON.stringify(texts),
+                what,
+            );
+
+        await shows(["Project lesson one."], "this project's lessons only");
+        assert.deepEqual((await listed()).counts, ["1", "1"]);
+        assert.match((await listed()).on, /^This project: 1 lesson$/);
+        await tap(".memory-scope button:not(.on)");
+        await shows(["Everywhere lesson one."], "everywhere's lessons only");
+        // Added now, it goes where the switch points.
+        await page.evaluate(`
+        const box = document.querySelector(".lesson-add textarea");
+
+        box.value = "Everywhere lesson two.";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+    `);
+        await tap(".lesson-add .button.primary:not([disabled])");
+        await until(
+            async () => (await listed()).texts.includes("Everywhere lesson two."),
+            "the new lesson in the list",
+        );
+
+        const view = await app.memory.view(first, owner(app));
+
+        assert.equal(
+            view.lessons.find((lesson) => lesson.text === "Everywhere lesson two.")?.scope,
+            "everywhere",
+        );
+        // On a wide screen the sheet takes the wide sheets' room.
+        await page.setViewport(VIEWPORTS.desktop);
+        await until(
+            async () =>
+                (await inPage<number>(
+                    `return JSON.stringify(document.querySelector(".sheet").getBoundingClientRect().width)`,
+                )) > 700,
+            "a wide sheet",
+        );
+        await page.setViewport(VIEWPORTS.mobile);
+        await page.evaluate(`(await import("/store.js")).closeSheet()`);
+    },
+);

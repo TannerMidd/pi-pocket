@@ -10476,18 +10476,44 @@ textarea.notes {
 }
 
 .lesson-add > .row {
-    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
-.lesson-add .segmented {
-    background: var(--bg);
-    flex: 1 0 auto;
+/* Where the lesson goes: the scope chosen above. */
+.lesson-add-for {
+    flex: 1;
+    min-width: 0;
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Memory's scope: which lessons the sheet lists, and where one added goes; each half a thumb's tap, with its count. */
+.memory-scope {
+    align-self: stretch;
     flex-wrap: nowrap;
 }
 
-.lesson-add .segmented button {
+.memory-scope button {
     flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 36px;
     white-space: nowrap;
+}
+
+.memory-scope-count {
+    color: var(--faint);
+    font: 11.5px var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-scope button.on .memory-scope-count {
+    color: var(--muted);
 }
 
 /* Done when: a goal met, or one Pi gave up on. */
