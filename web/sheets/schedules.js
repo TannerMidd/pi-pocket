@@ -44,18 +44,42 @@ const timeValue = (ms) => {
 const fromFields = (date, time) =>
     date === "" || time === "" ? Number.NaN : new Date(`${date}T${time}`).getTime();
 
-/** The next moment after `now` this device's clock shows `at` on one of `days`: the preview of a repeat. */
-function nextClock(at, days, now) {
+/** The next moment after `now` that the clock of `zone` shows `at` on one of `days`: the preview of a repeat. */
+function nextClock(at, days, now, zone = deviceZone()) {
     const [hour, minute] = at.split(":").map(Number);
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: zone,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "numeric",
+        weekday: "short",
+    });
+
+    const wall = (ms) => {
+        const of = Object.fromEntries(
+            parts.formatToParts(ms).map((part) => [part.type, part.value]),
+        );
+
+        return {
+            utc: Date.UTC(of.year, of.month - 1, of.day, of.hour, of.minute),
+            day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(of.weekday),
+            date: [Number(of.year), Number(of.month) - 1, Number(of.day)],
+        };
+    };
 
     for (let ahead = 0; ahead <= 8; ahead++) {
-        const day = new Date(now);
+        const [year, month, date] = wall(now + ahead * 86_400_000).date;
+        const target = Date.UTC(year, month, date, hour, minute);
+        // The zone's offset at that moment, read twice so a change of clocks that day is found.
+        let at = target - (wall(target).utc - target);
 
-        day.setDate(day.getDate() + ahead);
-        day.setHours(hour, minute, 0, 0);
+        at = target - (wall(at).utc - at);
 
-        if (day.getTime() > now && days.includes(day.getDay())) {
-            return day.getTime();
+        if (at > now && days.includes(wall(at).day)) {
+            return at;
         }
     }
 
@@ -136,8 +160,11 @@ function timing(draft, schedule, now) {
         old !== undefined &&
         old.at === every.at &&
         (old.days ?? []).join() === (every.days ?? []).join();
-    // A paused one keeps its old next time, maybe past: the preview then counts on, but the zone stays.
-    const next = same && schedule.next > now ? schedule.next : nextClock(draft.at, draft.days, now);
+    // A paused one keeps its old next time, maybe past: the preview then counts on, in the zone it keeps.
+    const next =
+        same && schedule.next > now
+            ? schedule.next
+            : nextClock(draft.at, draft.days, now, same ? schedule.zone : deviceZone());
 
     return { next, send: same ? { every } : { every, zone: deviceZone() } };
 }
