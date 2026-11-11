@@ -167,7 +167,7 @@ test("the Schedules sheet says how often a repeat skipped its time", real, async
         await until(
             async () =>
                 await inPage<boolean>(
-                    "const row=[...document.querySelectorAll('.rb-sched')].find(row=>row.querySelector('.rb-sched-text')?.textContent==='skipping');return JSON.stringify(row?.querySelector('.rb-sched-rel')?.textContent.includes('2'))",
+                    "const row=[...document.querySelectorAll('.rb-sched')].find(row=>row.querySelector('.rb-sched-text')?.textContent==='skipping');return JSON.stringify(Boolean(row?.querySelector('.rb-sched-rel')?.textContent.includes('2')))",
                 ),
             "the actual Running board schedule",
         );
