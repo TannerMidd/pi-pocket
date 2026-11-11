@@ -343,7 +343,41 @@ function Group({ title, lessons, data, empty, conversationId, pendingOnly = fals
     </div>`;
 }
 
-/** The lessons Pi keeps: what waits for approval, this project's, and everywhere's; and one added by hand. */
+/**
+ * The sheet's scope: which lessons it lists, and where one added by hand goes. Each shows how many it holds, and for the
+ * owner how many of them wait for approval, so none hides behind the other.
+ */
+function ScopeSwitch({ scope, setScope, lessons, waiting }) {
+    const option = (which, label) => {
+        const count = lessons.filter(
+            (lesson) => lesson.scope === which && !waiting.includes(lesson),
+        ).length;
+        const pending = waiting.filter((lesson) => lesson.scope === which).length;
+        const said = `${label}: ${count} ${count === 1 ? "lesson" : "lessons"}${pending > 0 ? `, ${pending} to approve` : ""}`;
+
+        return html`<button
+            role="radio"
+            aria-checked=${scope === which ? "true" : "false"}
+            aria-label=${said}
+            class=${scope === which ? "on" : ""}
+            onClick=${() => setScope(which)}
+        >
+            <span>${label}</span>
+            <span class="memory-scope-count">${count}</span>
+            ${pending > 0 && html`<span class="tab-count">${pending}</span>`}
+        </button>`;
+    };
+
+    return html`<div class="segmented memory-scope" role="radiogroup" aria-label="Lessons for">
+        ${option("project", "This project")}
+        ${option("everywhere", "Everywhere")}
+    </div>`;
+}
+
+/**
+ * The lessons Pi keeps: what waits for approval, this project's, and everywhere's; and one added by hand. The scope
+ * switch picks which of the two it lists, and where a new one goes.
+ */
 export function MemorySheet({ draft: initial = "", conversationId, pendingOnly = false }) {
     const id = conversationId ?? store.state.conversationId;
     const data = useMemory(id, pendingOnly);
@@ -354,19 +388,19 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     const title = pendingOnly ? "Pending memories" : "Memory";
 
     if (pendingOnly && store.state.me?.role !== "owner") {
-        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+        return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${true}>
             <p class="muted">Only the owner can review pending memories.</p>
         <//>`;
     }
 
     if (!data) {
-        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+        return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${true}>
             <p class="muted">Loading…</p>
         <//>`;
     }
 
     if (pendingOnly && data.restartRequired) {
-        return html`<${Sheet} title=${title} onClose=${closeSheet}>
+        return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${true}>
             <p class="muted">
                 Restart the server from Menu → Restart server to review pending memories across projects.
             </p>
@@ -378,7 +412,10 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     const waiting = data.owner
         ? data.lessons.filter((lesson) => lesson.pending || lesson.proposal)
         : [];
-    const shown = data.lessons.filter((lesson) => !waiting.includes(lesson));
+    const shown = data.lessons.filter(
+        (lesson) => lesson.scope === chosen && !waiting.includes(lesson),
+    );
+    const waitingHere = waiting.filter((lesson) => lesson.scope === chosen);
 
     const add = () => {
         if (busy || text.trim() === "") {
@@ -400,7 +437,12 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     };
 
     if (pendingOnly) {
-        return html`<${Sheet} title=${title} onClose=${closeSheet} className="pending-memories">
+        return html`<${Sheet}
+            title=${title}
+            onClose=${closeSheet}
+            wide=${true}
+            className="pending-memories"
+        >
             <p class="muted small">
                 Memories waiting for your approval, across every project and everywhere.
                 Approve only what you want Pi to keep; until then Pi goes on as before.
@@ -416,10 +458,19 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
         <//>`;
     }
 
-    return html`<${Sheet} title=${title} onClose=${closeSheet}>
+    return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${true}>
         <p class="muted small">
             Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. ${project ? html`Those for <b>${project.name}</b> go to every session in it, worktrees too; the rest go everywhere.` : "PiP keeps lessons for everywhere."} Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.
         </p>
+        ${
+            project &&
+            html`<${ScopeSwitch}
+                scope=${chosen}
+                setScope=${setScope}
+                lessons=${data.lessons}
+                waiting=${waiting}
+            />`
+        }
         ${
             data.canWrite &&
             html`<div class="lesson-add">
@@ -437,27 +488,9 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                     }}
                 ></textarea>
                 <div class="row">
-                    ${
-                        project &&
-                        html`<div class="segmented grow" role="radiogroup" aria-label="For">
-                            <button
-                                role="radio"
-                                aria-checked=${chosen === "project" ? "true" : "false"}
-                                class=${chosen === "project" ? "on" : ""}
-                                onClick=${() => setScope("project")}
-                            >
-                                This project
-                            </button>
-                            <button
-                                role="radio"
-                                aria-checked=${chosen === "everywhere" ? "true" : "false"}
-                                class=${chosen === "everywhere" ? "on" : ""}
-                                onClick=${() => setScope("everywhere")}
-                            >
-                                Everywhere
-                            </button>
-                        </div>`
-                    }
+                    <span class="muted small lesson-add-for">
+                        ${chosen === "project" ? `For ${project.name}` : "For every session and PiP"}
+                    </span>
                     <button
                         class="button primary"
                         disabled=${busy || text.trim() === ""}
@@ -469,31 +502,34 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
             </div>`
         }
         ${
-            waiting.length > 0 &&
+            waitingHere.length > 0 &&
             html`<${Group}
-                title=${`To approve · ${waiting.length}`}
-                lessons=${waiting}
+                title=${`To approve · ${waitingHere.length}`}
+                lessons=${waitingHere}
                 data=${data}
                 conversationId=${id}
             />`
         }
         ${
-            project &&
+            chosen === "project" &&
             html`<${Group}
                 title=${`This project: ${project.name}`}
-                lessons=${shown.filter((lesson) => lesson.scope === "project")}
+                lessons=${shown}
                 data=${data}
                 conversationId=${id}
                 empty="Nothing yet."
             />`
         }
-        <${Group}
-            title="Everywhere"
-            lessons=${shown.filter((lesson) => lesson.scope === "everywhere")}
-            data=${data}
-            conversationId=${id}
-            empty="Nothing yet."
-        />
+        ${
+            chosen === "everywhere" &&
+            html`<${Group}
+                title="Everywhere"
+                lessons=${shown}
+                data=${data}
+                conversationId=${id}
+                empty="Nothing yet."
+            />`
+        }
     <//>`;
 }
 
