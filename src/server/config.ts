@@ -230,6 +230,11 @@ export class ConfigStore {
         return { ...(this.#config.extensionSettings?.[module] ?? {}) };
     }
 
+    /** The modules the owner set values for, on or off. */
+    extensionSettingModules(): string[] {
+        return Object.keys(this.#config.extensionSettings ?? {});
+    }
+
     /** Keep a module's values, all of them at once; none drops its entry. */
     setExtensionSettings(module: string, values: Record<string, string | number | boolean>): void {
         const all = { ...(this.#config.extensionSettings ?? {}) };
