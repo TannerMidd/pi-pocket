@@ -1,5 +1,5 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
-import { onRoute, popRoute, pushRoute, routeState } from "./back.js";
+import { onRoute, popRoute, pushRoute, routeState, routeUnder } from "./back.js";
 import { hostCan, onPageVisibility, pageVisible } from "./host.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
@@ -2527,6 +2527,18 @@ export function navigate(
         ...sheetChange(sheet, state),
     }));
     showKept(conversationId);
+}
+
+/**
+ * Go up to the session this one belongs to (a subagent's parent). Opened over it, back to its entry, as a swipe back
+ * goes; reached another way (the list, a notification), in this route's place. Either way no entry of this route stays
+ * above the parent's, for back to open again.
+ */
+export function navigateUp(conversationId) {
+    navigate(
+        conversationId,
+        routeUnder() === `/s/${conversationId}` ? { back: true } : { replace: true },
+    );
 }
 
 /** The number of the last session gone to, so a read of the device that comes late does not show an older one. */

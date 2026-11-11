@@ -270,6 +270,77 @@ test(
 );
 
 test(
+    "Back to main session goes up: back from the main session does not open the subagent again",
+    real,
+    async () => {
+        const id = await started(0);
+        const other = await newSession(app);
+
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.quick !== undefined,
+            "the quick subagent",
+        );
+
+        const quick = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.quick!
+            .conversationId;
+        const at = (path: string, what: string) =>
+            see(
+                `return JSON.stringify(location.pathname === "${path}" && document.querySelector(".composer textarea") !== null)`,
+                what,
+            );
+        const go = (to: ConversationId) =>
+            page.evaluate(`(await import("/store.js")).navigate(${Number(to)}); return "true"`);
+
+        const up = async () => {
+            await see(
+                `return JSON.stringify(document.querySelector(".parent-session") !== null)`,
+                "Back to main session",
+            );
+            await settled();
+            await page.click({ selector: ".parent-session" });
+            await at(`/s/${id}`, "the main session");
+            await settled();
+        };
+
+        const back = () => page.evaluate(`history.back(); return "true"`);
+
+        // Phones and wide screens alike: history is the same on both.
+        for (const viewport of [VIEWPORTS.mobile, VIEWPORTS.desktop]) {
+            await page.setViewport(viewport);
+
+            // Back alone, untouched: from the subagent to the session it was opened from.
+            await page.navigate(`${base}/s/${other}`);
+            await at(`/s/${other}`, "another session");
+            await go(id);
+            await at(`/s/${id}`, "the main session");
+            await go(quick);
+            await at(`/s/${quick}`, "the subagent");
+            await back();
+            await at(`/s/${id}`, "back from the subagent, to the main session");
+            await back();
+            await at(`/s/${other}`, "back again, to the session before");
+
+            // Opened from the main session: up is back to its entry.
+            await go(id);
+            await at(`/s/${id}`, "the main session");
+            await go(quick);
+            await at(`/s/${quick}`, "the subagent");
+            await up();
+            await back();
+            await at(`/s/${other}`, "back from the main session, past the subagent");
+
+            // Reached another way: the main session takes the subagent's place.
+            await go(quick);
+            await at(`/s/${quick}`, "the subagent, from another session");
+            await up();
+            await back();
+            await at(`/s/${other}`, "back from the main session, where the subagent was");
+        }
+    },
+);
+
+test(
     "a working subagent shows its model in the top bar on a phone, where the composer hides it; a tap opens the model sheet",
     real,
     async () => {
