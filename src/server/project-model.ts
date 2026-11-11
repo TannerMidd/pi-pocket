@@ -36,30 +36,9 @@ export function rememberedLevel(
     return isThinkingLevel(level) ? level : undefined;
 }
 
-/** Read Pi's global settings fresh, so a level set in the TUI counts and a write keeps the TUI's other entries. */
+/** Read Pi's global settings fresh, so a level set in the TUI since counts. Pocket never writes them. */
 export function piGlobalSettings(cwd: string): SettingsManager {
     return SettingsManager.create(cwd, getAgentDir(), { projectTrusted: false });
-}
-
-/** Remember a person's level for a model in Pi's own map. A failed save leaves the file and the session as they are. */
-export async function rememberLevel(
-    cwd: string,
-    provider: string,
-    modelId: string,
-    level: ModelThinkingLevel,
-): Promise<void> {
-    try {
-        const settings = piGlobalSettings(cwd);
-
-        if (settings.getModelThinkingLevel(provider, modelId) !== level) {
-            settings.setModelThinkingLevel(provider, modelId, level);
-            await settings.flush();
-        }
-
-        settings.drainErrors();
-    } catch {
-        // Pi's settings stay as they were.
-    }
 }
 
 /** No project setting, including defaultProjectTrust, can grant trust to itself. Unreadable trust fails closed. */

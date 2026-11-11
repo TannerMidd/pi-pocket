@@ -139,17 +139,15 @@ test("a thinking level belongs to its model: a switch takes the level chosen for
             ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
         });
 
-    // The TUI's entry for another model stays when Pocket writes one.
-    writeFileSync(file, JSON.stringify({ modelThinkingLevels: { "faux/kept": "low" } }));
-    await pick("thinker", "high");
+    // A switch with no level takes the TUI's level for that model, and Pocket never writes the map.
+    const map = JSON.stringify({ modelThinkingLevels: { "faux/thinker": "high" } });
+
+    writeFileSync(file, map);
     await pick("other", "low");
     await pick("thinker");
     assert.equal((await app.agentState(id))?.thinkingLevel, "high");
-    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).modelThinkingLevels, {
-        "faux/kept": "low",
-        "faux/thinker": "high",
-        "faux/other": "low",
-    });
+    await pick("thinker", "medium");
+    assert.equal(readFileSync(file, "utf8"), map);
 
     // A new session on the last model picked takes the level set for it in the TUI since.
     app.config.lastModel = { provider: "faux", modelId: "other", thinkingLevel: "low" };

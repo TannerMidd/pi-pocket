@@ -73,7 +73,6 @@ import {
     globalModelSettings,
     piGlobalSettings,
     projectModelDefault,
-    rememberLevel,
     rememberedLevel,
 } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
@@ -1995,9 +1994,11 @@ export class Commands {
             );
         }
 
-        // A model picked with no level thinks as hard as a person last chose for it, as in Pi's TUI.
+        // A model picked with no level takes the level Pi's TUI keeps for it; PiP's panel keeps its own.
         const remembered =
-            request.model === undefined || request.thinkingLevel !== undefined
+            request.model === undefined ||
+            request.thinkingLevel !== undefined ||
+            request.pipPanel === true
                 ? undefined
                 : rememberedLevel(
                       piGlobalSettings(app.defaultCwd),
@@ -2046,10 +2047,6 @@ export class Commands {
 
         if (ref !== undefined && request.pipPanel !== true) {
             app.config.lastModel = { provider: ref.provider, modelId: ref.modelId, thinkingLevel };
-
-            if (request.thinkingLevel !== undefined && model?.reasoning === true) {
-                await rememberLevel(app.defaultCwd, ref.provider, ref.modelId, thinkingLevel);
-            }
         }
 
         const changes: string[] = [];
