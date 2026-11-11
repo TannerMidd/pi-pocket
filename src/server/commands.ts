@@ -1366,6 +1366,8 @@ export class Commands {
         // panel has no place to show them, so a Stop there withdraws them, as before.
         const held = app.pip.ownerOf(id) === undefined ? await this.#hold(id) : 0;
 
+        await app.objectiveGoals.stoppedByUser(id);
+
         // Subagents' reports go: a person meant the work stopped.
         await this.#discardReports(id);
         void conversation
