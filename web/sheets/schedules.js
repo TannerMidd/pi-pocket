@@ -1,6 +1,14 @@
 // Scheduled messages of this session: what is coming, and an editor to set one up or change it.
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { actions, attempt, canSteer, closeSheet, openSheet, store } from "../store.js";
+import {
+    actions,
+    attempt,
+    canSteer,
+    closeSheet,
+    openSheet,
+    serverClockOffset,
+    store,
+} from "../store.js";
 import { countdown, formatWhen, html, Icon, Sheet, useSecond } from "../ui.js";
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -11,6 +19,12 @@ const WEEKENDS = [0, 6];
 const UNITS = { minutes: 1, hours: 60, days: 1440 };
 const deviceZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const pad = (number) => String(number).padStart(2, "0");
+
+/** The server's time now: schedules hold the server's clock, which each hello gives (`serverClockOffset`). */
+const serverNow = () => Date.now() + serverClockOffset();
+
+/** `useSecond` on the server's clock: a countdown to a server time stays right on a device whose clock is off. */
+const useServerSecond = (on) => useSecond(on) + serverClockOffset();
 
 /** A moment as a date field's value, on this device's clock: `2026-11-08`. */
 const dateValue = (ms) => {
@@ -49,7 +63,7 @@ function nextClock(at, days, now) {
 }
 
 /** A while from now, rounded up to the next five minutes: where a new one-time message starts. */
-const soon = () => Math.ceil((Date.now() + 60 * 60_000) / 300_000) * 300_000;
+const soon = () => Math.ceil((serverNow() + 60 * 60_000) / 300_000) * 300_000;
 
 /** Days of the week in words: "Weekdays", "Mon, Wed, Fri". */
 function daysText(days) {
@@ -167,7 +181,7 @@ function ScheduleEditor({ schedule, onDone }) {
     const [saving, setSaving] = useState(false);
     const [pausing, setPausing] = useState(false);
     const changed = schedule !== undefined && version !== schedule.version;
-    const now = useSecond(true);
+    const now = useServerSecond(true);
     const set = (change) => setDraft((old) => ({ ...old, ...change }));
     const { next, send } = timing(draft, schedule, now);
     const wrong = problem(draft, next, now);
@@ -202,7 +216,7 @@ function ScheduleEditor({ schedule, onDone }) {
     const quick = (ms) => set({ kind: "once", date: dateValue(ms), time: timeValue(ms) });
 
     const tomorrowNine = () => {
-        const at = new Date();
+        const at = new Date(serverNow());
 
         at.setDate(at.getDate() + 1);
         at.setHours(9, 0, 0, 0);
@@ -264,10 +278,10 @@ function ScheduleEditor({ schedule, onDone }) {
                     />
                 </div>
                 <div class="sched-chips">
-                    <button class="chip" onClick=${() => quick(Date.now() + 30 * 60_000)}>
+                    <button class="chip" onClick=${() => quick(serverNow() + 30 * 60_000)}>
                         in 30m
                     </button>
-                    <button class="chip" onClick=${() => quick(Date.now() + 2 * 60 * 60_000)}>
+                    <button class="chip" onClick=${() => quick(serverNow() + 2 * 60 * 60_000)}>
                         in 2h
                     </button>
                     <button class="chip" onClick=${() => quick(tomorrowNine())}>
@@ -492,7 +506,7 @@ export function SchedulesSheet() {
     const [quickText, setQuickText] = useState("");
     // The schedule open in the editor: its id, "new", or none.
     const [editing, setEditing] = useState(null);
-    const now = useSecond(schedules.length > 0);
+    const now = useServerSecond(schedules.length > 0);
     const steer = canSteer();
     const archived = store.state.sessions.some(
         (session) => session.id === store.state.conversationId && session.archived,
