@@ -373,6 +373,16 @@ test("ordinary work goes on: other files, a project's config.json, templates, an
     assert.ok(!isEnvFile(".env.example") && !isEnvFile("environment.ts") && !isEnvFile("env"));
 });
 
+test("a word that cannot be a path (too long, under a file) is not a secret's file, and the call goes on", () => {
+    for (const command of [
+        `curl -H "Authorization: Bearer ${"a".repeat(400)}" https://example.com`,
+        `ls ${import.meta.filename}/x`,
+    ]) {
+        // ENAMETOOLONG and ENOTDIR threw out of the rule: the call failed with a raw fs error.
+        assert.equal(app.secrets.blocked("bash", { command }, work), undefined);
+    }
+});
+
 test("a glob of every file, a name as text, and a write to .env are not reads of a secret", () => {
     for (const command of [
         "ls *",

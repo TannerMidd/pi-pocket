@@ -87,13 +87,16 @@ function real(path: string): string {
     }
 }
 
-/** Where a path that is there leads, links followed; undefined when it is not there (then it is not read). */
+/**
+ * Where a path that is there leads, links followed; undefined when it cannot be read (not there, no access, not a path
+ * at all): then no link of it leads to a secret.
+ */
 function linked(path: string): string | undefined {
-    if (lstatSync(path, { throwIfNoEntry: false }) === undefined) {
-        return undefined;
-    }
-
     try {
+        if (lstatSync(path, { throwIfNoEntry: false }) === undefined) {
+            return undefined;
+        }
+
         return realpathSync(path);
     } catch {
         return undefined;
@@ -101,7 +104,11 @@ function linked(path: string): string | undefined {
 }
 
 function isFolder(path: string): boolean {
-    return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+    try {
+        return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+    } catch {
+        return false;
+    }
 }
 
 const GLOB = /[*?[]/;
