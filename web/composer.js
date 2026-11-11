@@ -9,6 +9,7 @@ import {
     parseCommand,
     parseTemplate,
     planAvailable,
+    schedulesAvailable,
     suggestCommands,
 } from "./commands.js";
 import { QuoteLayer, quoteStyleOf } from "./quote-box.js";
@@ -45,6 +46,7 @@ import {
     uid,
 } from "./store.js";
 import { useDock } from "./dock.js";
+import { fromServer } from "./seen.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
@@ -55,15 +57,18 @@ import { MicButton, useDictation } from "./voice.js";
 import {
     APPLE,
     contextLevel,
+    countdown,
     fileUrl,
     formatBytes,
     formatTokens,
+    formatWhen,
     html,
     Icon,
     Marked,
     modelLabel,
     shortModelName,
     Spinner,
+    useSecond,
 } from "./ui.js";
 
 /**
@@ -2503,7 +2508,17 @@ function fitStatus(line, again = false) {
         return;
     }
 
-    const key = line.textContent;
+    // A tip shown above an item (the schedules' countdown) changes every second, but not the line's width.
+    const key = [...line.childNodes]
+        .map((node) =>
+            node instanceof Element
+                ? [...node.querySelectorAll("[role=tooltip]")].reduce(
+                      (text, tip) => text.replace(tip.textContent, ""),
+                      node.textContent,
+                  )
+                : node.textContent,
+        )
+        .join("");
 
     // Hidden, it has no width to fit: the observer hears it show.
     if ((!again && fitted.get(line) === key) || line.clientWidth === 0) {
@@ -2780,6 +2795,85 @@ defineItem("status", {
         const count = backgroundNow();
 
         return count > 0 && backgroundTitle(count);
+    },
+});
+
+/** The open session's scheduled messages, soonest first (the server sends them with the conversation). */
+function schedulesNow() {
+    return schedulesAvailable() ? (store.state.view.schedules ?? []) : [];
+}
+
+/** What the pill says in words: the schedules that go out, the next one's time, and how many are paused. */
+function schedulesTitle(schedules) {
+    const active = schedules.filter((each) => each.paused === undefined);
+    const paused = schedules.length - active.length;
+    const pausedText = paused > 0 ? `${paused} paused` : "";
+
+    return active.length === 0
+        ? `${pausedText}. Open the schedules`
+        : `${active.length} scheduled: the next goes out at ${formatWhen(active[0].next)}${paused > 0 ? `, ${pausedText}` : ""}. Open the schedules`;
+}
+
+/**
+ * The session's scheduled messages: a pill on the left of the status line, across from the background one. Hovered, it
+ * counts down to the next; clicked, it opens the Schedules sheet.
+ */
+function SchedulesPill({ schedules }) {
+    const [hover, setHover] = useState(false);
+    const active = schedules.filter((each) => each.paused === undefined);
+    const paused = schedules.length - active.length;
+    // All paused: it says so, and has nothing to count down to.
+    const idle = active.length === 0;
+    const now = useSecond(hover && !idle);
+    const next = active[0];
+    const repeats = active.filter((each) => each.repeat !== undefined).length;
+
+    return html`<button
+        class=${`schedules-now ${idle ? "paused" : ""}`}
+        data-part="schedules-now"
+        aria-label=${schedulesTitle(schedules)}
+        onPointerEnter=${(event) => event.pointerType === "mouse" && setHover(true)}
+        onPointerLeave=${() => setHover(false)}
+        onFocus=${(event) => event.currentTarget.matches(":focus-visible") && setHover(true)}
+        onBlur=${() => setHover(false)}
+        onClick=${() => {
+            setHover(false);
+            openSheet({ type: "schedules" });
+        }}
+    >
+        <${Icon} name=${idle ? "pause" : "clock"} size=${11} />
+        <span class="num">${idle ? paused : active.length}</span>
+        <span class="word">${idle ? " paused" : " scheduled"}</span>
+        ${
+            hover &&
+            !idle &&
+            html`<span class="schedules-tip" role="tooltip">
+                <span class="row">
+                    <span>Next in</span>
+                    <span class="countdown">${countdown(fromServer(next.next), now)}</span>
+                </span>
+                <span class="what">${next.text}</span>
+                <span class="muted">
+                    ${formatWhen(next.next)} · ${active.length} scheduled${repeats > 0 ? ` · ${repeats} repeating` : ""}${paused > 0 ? ` · ${paused} paused` : ""}
+                </span>
+            </span>`
+        }
+    </button>`;
+}
+
+defineItem("status", {
+    id: "core:schedules",
+    label: "Scheduled messages",
+    order: 50,
+    render() {
+        const schedules = schedulesNow();
+
+        return schedules.length > 0 && html`<${SchedulesPill} schedules=${schedules} />`;
+    },
+    detail() {
+        const schedules = schedulesNow();
+
+        return schedules.length > 0 && schedulesTitle(schedules);
     },
 });
 defineItem("status", {

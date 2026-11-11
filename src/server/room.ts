@@ -854,15 +854,36 @@ export class Room {
             plan: this.plan,
             schedules: Object.values(this.schedules)
                 .sort((a, b) => a.next - b.next)
-                .map(({ id, text, next, every, by, runs, skipped, skippedAt }) => ({
-                    id,
-                    text,
-                    next,
-                    ...(every === undefined ? {} : { repeat: describeRepeat(every) }),
-                    ...(by === undefined ? {} : { by }),
-                    runs,
-                    ...(skipped === undefined ? {} : { skipped, skippedAt }),
-                })),
+                // `every` and `zone` as data too, for the Schedules sheet's editor, and `version`, which each edit
+                // changes (a pause does not), so a save made from an older copy is refused instead of undoing that edit.
+                .map(
+                    ({
+                        id,
+                        text,
+                        next,
+                        every,
+                        zone,
+                        by,
+                        runs,
+                        createdAt,
+                        revision,
+                        paused,
+                        skipped,
+                        skippedAt,
+                    }) => ({
+                        id,
+                        version: String(revision ?? 0),
+                        text,
+                        next,
+                        ...(every === undefined ? {} : { repeat: describeRepeat(every), every }),
+                        zone,
+                        ...(by === undefined ? {} : { by }),
+                        runs,
+                        ...(skipped === undefined ? {} : { skipped, skippedAt }),
+                        createdAt,
+                        ...(paused === undefined ? {} : { paused: paused.at, pausedBy: paused.by }),
+                    }),
+                ),
             // What a Stop held: each message's start and who wrote it, as the queue shows them.
             held: this.held.map((item) => ({
                 key: item.key,
