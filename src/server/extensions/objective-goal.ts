@@ -44,10 +44,11 @@ function readVerdict(
         return undefined;
     }
 
+    const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]+)\r?\n```$/iu.exec(text);
     let result: unknown;
 
     try {
-        result = JSON.parse(text);
+        result = JSON.parse(fenced?.[1] ?? text);
     } catch {
         return undefined;
     }

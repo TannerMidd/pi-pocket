@@ -459,6 +459,38 @@ test("ordinary sessions never call the evaluator and a blocked verdict stops a g
     assert.match(await goal(app, id, "status"), /Blocked/);
 });
 
+test("a verdict accepts a single JSON fence with a valid object", async (t) => {
+    const valid = { verdict: "met", reason: "The fixture produced the required evidence." };
+    const fenced = ["```json", JSON.stringify(valid), "```"].join("\r\n");
+    const cases = [
+        { reply: `\n${fenced}\n`, status: /Completed/ },
+        { reply: `The verdict follows.\n${fenced}`, status: /Paused/ },
+        { reply: `${fenced}\n${fenced}`, status: /Paused/ },
+        {
+            reply: `\`\`\`json\n${JSON.stringify({ ...valid, extra: true })}\n\`\`\``,
+            status: /Paused/,
+        },
+        { reply: "```json\n{verdict: met}\n```", status: /Paused/ },
+    ];
+    let reply = "";
+    const model = scriptedModel((request) =>
+        fauxAssistantMessage(isEvaluator(request) ? reply : "I checked the fixture."),
+    );
+    const app = await openApp(model, join(root, "objective-goal-fenced-verdict"));
+
+    t.after(() => app.close());
+
+    for (const example of cases) {
+        reply = example.reply;
+
+        const id = await session(app);
+
+        await goal(app, id, "Verify the fixture evidence.");
+        await waitForIdle(app, id);
+        assert.match(await goal(app, id, "status"), example.status, example.reply);
+    }
+});
+
 test("a goal that does not use tools cannot keep repeating without progress", async (t) => {
     let work = 0;
     const model = scriptedModel((request) => {
