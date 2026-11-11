@@ -427,6 +427,24 @@ test("a long command is judged at once: each word is not checked again for each 
     );
     // About 5 ms; the check that ran for each word and folder took minutes.
     assert.ok(performance.now() - started < 1000, "judged in under a second");
+
+    // Code such as `x.items.map` is not a drop-in's folder: it was joined to each folder named (2.8 s for 401).
+    const folders = Array.from({ length: 400 }, (_, at) => join(work, "folders", `f${at}`));
+    const code = Array.from({ length: 4000 }, (_, at) => `v${at} = x.items.map((x) => x.v${at});`);
+
+    folders.forEach((folder) => mkdirSync(folder, { recursive: true }));
+
+    const again = performance.now();
+
+    assert.equal(
+        app.secrets.blocked(
+            "bash",
+            { command: `ls ${folders.join(" ")}; node -e '${code.join("\n")}'` },
+            work,
+        ),
+        undefined,
+    );
+    assert.ok(performance.now() - again < 500, "judged in under half a second");
 });
 
 test("with home in the data folder (as an installation's service has), ~ and $HOME name core's files", () => {

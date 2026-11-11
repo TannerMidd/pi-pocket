@@ -14,7 +14,7 @@
  * names, or a symbolic link, and not one a command computes, nor a folder searched as a whole. Neither is a boundary
  * between Pi and the files of the user it runs as.
  */
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ConfigStore } from "./config.ts";
@@ -112,6 +112,31 @@ function isFolder(path: string): boolean {
 }
 
 const GLOB = /[*?[]/;
+
+/** The drop-ins' data folders in a data folder: `x.*`. */
+function drops(data: string): string[] {
+    try {
+        return readdirSync(data).filter((name) => name.startsWith("x."));
+    } catch {
+        return [];
+    }
+}
+
+/** Whether a part of a word is, or as a glob matches, a drop-in's data folder that is there. */
+function isDrop(part: string, names: Set<string>): boolean {
+    if (!part.startsWith("x.")) {
+        return false;
+    }
+
+    if (!GLOB.test(part)) {
+        return names.has(part);
+    }
+
+    const matches = globExpression(part);
+
+    return [...names].some((name) => matches.test(name));
+}
+
 /** How many links a command's words are followed in the folders it names, past the one it runs in. */
 const LINK_CHECKS = 1000;
 
@@ -122,6 +147,8 @@ interface Roots {
     agent: string[];
     /** The names of core's files, and `auth.json`: a word whose last part is none of them names none of them. */
     names: string[];
+    /** The drop-ins' data folders (`x.*`) that are in the data folder now. */
+    drops: Set<string>;
 }
 
 /** A glob's words as a regular expression over whole paths (`*`, `?`, and `[...]`; no `**`). */
@@ -626,12 +653,14 @@ export class CoreSecrets {
     #roots(): Roots {
         const both = (path: string) => [...new Set([resolve(path), real(path)])];
         const files = this.files().flatMap(both);
+        const data = both(this.#options.dataDir);
 
         return {
             files: new Set(files),
-            data: both(this.#options.dataDir),
+            data,
             agent: both(this.#options.agentDir),
             names: [...new Set([...files.map((file) => basename(file)), "auth.json"])],
+            drops: new Set(data.flatMap(drops)),
         };
     }
 
@@ -684,24 +713,30 @@ export class CoreSecrets {
             ...roots.data.map((data) => join(data, "x.")),
             ...roots.agent.map((agent) => join(agent, "auth.json")),
         ];
+        const near = new Set([cwd, ...inside]);
         let links = LINK_CHECKS;
 
-        for (const word of words) {
+        // The same word twice is judged the same.
+        for (const word of new Set(words)) {
             const glob = GLOB.test(word);
 
             if (isEnvWord(basename(word)) || (glob && isEnvGlob(basename(word)))) {
                 return `${basename(word)} is a file of secrets`;
             }
 
-            // Only a word that ends in the name of one of core's files, or passes through `x.`, can name one as written.
+            // Only a word that ends in the name of one of core's files, or passes through a drop-in's folder, can name one
+            // as written. JavaScript (`x.items.map`) passes through none, so it is not joined to every folder named.
             const last = glob ? globExpression(basename(word)) : undefined;
             const named =
-                word.split("/").some((part) => part.startsWith("x.")) ||
+                word.split("/").some((part) => isDrop(part, roots.drops)) ||
                 (last === undefined
                     ? roots.names.includes(basename(word))
                     : [...roots.names, "x.any"].some((name) => last.test(name)));
 
-            for (const base of isAbsolute(word) ? ["/"] : bases) {
+            // Once no link is left to follow elsewhere, a word that names nothing is tried only where it can still lead.
+            const tried = isAbsolute(word) ? ["/"] : named || links > 0 ? bases : near;
+
+            for (const base of tried) {
                 const literal = named || inside.has(base);
                 // A link may lead anywhere: followed where the command runs, and a bounded number of times elsewhere.
                 const follow = !glob && (base === cwd || isAbsolute(word) || links-- > 0);
