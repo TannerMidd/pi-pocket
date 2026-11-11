@@ -293,16 +293,20 @@ export function EndpointForm({ editing, onDone, onCancel }) {
     const [noKey, setNoKey] = useState(editing?.key === "none");
     // The models chosen, in order, and what the endpoint listed (with a vLLM server's context
     // windows).
-    const [chosen, setChosen] = useState((editing?.models ?? []).map((model) => model.id));
+    // A server from before these fields sends each model as its id alone.
+    const known = (editing?.models ?? []).map((model) =>
+        typeof model === "string" ? { id: model } : model,
+    );
+    const [chosen, setChosen] = useState(known.map((model) => model.id));
     // What each model is, by id: it sees images, its thinking levels (null: it does not think), and
     // its context window, maximum output, and price, as their fields' text.
     const [caps, setCaps] = useState(
         () =>
             new Map(
-                (editing?.models ?? []).map((model) => [
+                known.map((model) => [
                     model.id,
-                    // A server from before these fields sends none: no images, no thinking, Pi's
-                    // defaults, no price.
+                    // A model with none of these fields: no images, no thinking, Pi's defaults, no
+                    // price.
                     {
                         images: model.images === true,
                         thinking: Array.isArray(model.thinking) ? model.thinking : null,
