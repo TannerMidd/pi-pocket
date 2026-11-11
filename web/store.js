@@ -313,8 +313,11 @@ export const store = {
         auth: null,
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
-        /** A passage the session's next message quotes (Reply): `{ text }`. Leaving the session drops it. */
-        replyQuote: null,
+        /**
+         * The passages Reply quoted that wait for the session's message box, in order: `[{ text }]`. The box takes each
+         * as it can (not while a send is on its way). Leaving the session drops them.
+         */
+        replyQuotes: [],
         /**
          * A passage PiP's next message quotes (Ask PiP, or Reply on PiP's own board): `{ text, session? }`, with the
          * session it came from. One for PiP wherever it shows, so moving PiP between its places keeps it as it is.
@@ -457,7 +460,7 @@ export const openId = (state = store.state) =>
  * whose box has PiP's quote) and back from there. Going to another session drops it.
  */
 const keptReply = (state, id, over) =>
-    (over === null ? id : over.id) === openId(state) ? { replyQuote: state.replyQuote } : {};
+    (over === null ? id : over.id) === openId(state) ? { replyQuotes: state.replyQuotes } : {};
 
 // ─── People: presence, typing, and the side chat ───────────────────────────────────
 
@@ -473,7 +476,7 @@ function peopleFor(id, reads = store.state.chatReads) {
         presence: [],
         notes: null,
         chatQuote: null,
-        replyQuote: null,
+        replyQuotes: [],
         chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
@@ -3074,7 +3077,11 @@ export const showsPip = (state = store.state) =>
 
 /** Reply to a passage of the conversation shown: on PiP's board, it is PiP's quote. */
 export function quoteReply(text) {
-    store.set(showsPip() ? { pipQuote: { text } } : { replyQuote: { text } });
+    store.set((state) =>
+        showsPip(state)
+            ? { pipQuote: { text } }
+            : { replyQuotes: [...state.replyQuotes, { text }] },
+    );
 }
 
 /**
@@ -3086,24 +3093,17 @@ export function dropQuote(quote) {
         return;
     }
 
-    if (quote === store.state.replyQuote) {
-        store.set({ replyQuote: null });
+    if (store.state.replyQuotes.includes(quote)) {
+        store.set((state) => ({ replyQuotes: state.replyQuotes.filter((each) => each !== quote) }));
     } else if (quote === store.state.pipQuote) {
         store.set({ pipQuote: null });
     }
 }
 
-/**
- * A send that did not go gives its quote back, unless another took its place meanwhile: to PiP's box (`pip`), or to the
- * box of session `id` while it is still open.
- */
-export function giveBackQuote(quote, pip, id) {
-    const free = pip
-        ? store.state.pipQuote === null
-        : store.state.replyQuote === null && openId() === id;
-
-    if (quote && free) {
-        store.set(pip ? { pipQuote: quote } : { replyQuote: quote });
+/** A send to PiP that did not go gives its quote back, unless another took its place meanwhile. */
+export function giveBackQuote(quote) {
+    if (quote && store.state.pipQuote === null) {
+        store.set({ pipQuote: quote });
     }
 }
 

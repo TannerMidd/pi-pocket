@@ -990,7 +990,7 @@ function Composer({ id, busy, board = false }) {
         }
 
         if (!success) {
-            giveBackQuote(quoted, true);
+            giveBackQuote(quoted);
         }
     };
 
