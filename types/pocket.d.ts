@@ -884,7 +884,9 @@ export interface LinkedSessions {
      * Starts a session linked to `source`, in `cwd` or the source's folder, and sends it `message` as its first
      * message. `model` is `provider/modelId`; `thinking` is any level (since 0.25.0; before, no higher than the source's). `cwd` is since 0.19.0:
      * an older Pi Pocket ignores it, and starts the session in the source's folder. A blank `cwd` counts as none; a
-     * relative one resolves against the server process's folder, not the source's.
+     * relative one resolves against the server process's folder, not the source's. `answers` (since 0.29.0) says
+     * whether its final answer comes back to the source by itself: false when the source turned its answers off with
+     * `reports`. An older Pi Pocket does not return it.
      * @since 0.14.0
      * @experimental
      */
@@ -898,7 +900,7 @@ export interface LinkedSessions {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }>;
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }>;
     /**
      * Sends `message` to the linked session at the address `to`: at its next pause (since 0.28.0; before, only with
      * `steer: true`), or with `steer: false` after its run. `answers` (since 0.28.0) says whether its final answer comes

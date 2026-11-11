@@ -464,7 +464,7 @@ start(
 
 Since 0.14.0 · Experimental
 
-Makes a session linked to `source` and sends it `message` as its first message. It returns the new session's id, and the address that `source` uses for it.
+Makes a session linked to `source` and sends it `message` as its first message. It returns the new session's id, and the address that `source` uses for it. `answers` (since 0.29.0) says whether its final answer comes back to `source` by itself: it is `false` when `source` turned its answers off with [`linkedSessions.reports`](#linkedsessionsreports). An older Pi Pocket does not return it.
 
 - The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.

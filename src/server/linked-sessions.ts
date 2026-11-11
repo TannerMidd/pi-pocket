@@ -575,7 +575,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }> {
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }> {
         return this.#start(source, request, key);
     }
 
@@ -590,7 +590,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         },
         key: string,
         actor?: RequestActor,
-    ): Promise<{ session: ConversationId; address: string }> {
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }> {
         const app = this.#app;
 
         actor?.current();
@@ -655,7 +655,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         );
         actor?.current();
 
-        return { session, address };
+        return { session, address, answers: this.#leads(source, session) };
     }
 
     /** Use the normal folder-picker validation for an explicit working directory. */

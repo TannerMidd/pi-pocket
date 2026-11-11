@@ -72,7 +72,7 @@ export interface LinkedSessionsApi {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }>;
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }>;
     /**
      * Send `message` to the linked session at address `to`: at its next pause, or with `steer: false` after its run.
      * `answers` says whether its final answer comes back to the source by itself (the source started it, and did not

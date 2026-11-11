@@ -132,9 +132,10 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
 
             if (args.action === "start") {
                 let address: string;
+                let answers: boolean | undefined;
 
                 try {
-                    ({ address } = await linked.start(
+                    ({ address, answers } = await linked.start(
                         api.conversationId,
                         {
                             title: args.title,
@@ -157,6 +158,13 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
                               (error as { choose?: unknown } | null)?.choose === true
                               ? why
                               : `${why} Do not look for a way around it: stop and tell the person.`,
+                    );
+                }
+
+                // A server older than the switch says nothing of it: its answers come back.
+                if (answers === false) {
+                    return reply(
+                        `Started linked session ${address} and sent its first message. Its final answer does not come to you by itself, because you turned the answers off: its first message asks it to send the answer, when you asked for one. Do not poll.`,
                     );
                 }
 

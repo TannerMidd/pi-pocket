@@ -939,6 +939,14 @@ test("with its answers off, a lead's message asks the target for a reply", async
     assert.doesNotMatch(await last(), comes);
 });
 
+test("with its answers off, start says its answer does not come by itself", async () => {
+    const id = await source();
+
+    assert.equal((await start(id)).answers, true);
+    await takes(id, false);
+    assert.equal((await start(id)).answers, false);
+});
+
 test("a repeated reports call acts once, whatever its arguments", async () => {
     const id = await source();
 
