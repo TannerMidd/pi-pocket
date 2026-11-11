@@ -1544,6 +1544,13 @@ function sameValues(before, after) {
     return true;
 }
 
+/** The rows a view drew last time (`drawnRows`), if they read all else as this draw does (`shared`); else none. */
+function rowsBefore(before, view, shared) {
+    return before[view] && shared.every((value, at) => Object.is(value, before[view].shared[at]))
+        ? before[view].rows
+        : new Map();
+}
+
 /** The store's keys rows depend on, through what `AllSessions` works out for them (`LIST_KEYS` but the sessions). */
 const ROW_KEYS = [
     "server",
@@ -2431,19 +2438,24 @@ function AllSessions({ compact = false }) {
         hovers,
         ...ROW_KEYS.map((key) => store.state[key]),
     ];
-    const drawing = (view) =>
-        before[view] && shared.every((value, at) => Object.is(value, before[view].shared[at]))
-            ? before[view].rows
-            : new Map();
     // The list's rows are not drawn while a search hides them, past the draw that hides them.
     const frozen =
         searching && wasSearching.current && before.base?.localeRevision === localeRevision;
 
+    // No closure of this draw holds the draw before's rows (`last` lives on the ref until the draw is done): each row
+    // element keeps the tree it was first drawn in, whose handlers hold this draw's scope, and a scope that held the
+    // rows before would keep every earlier tree, and the elements they had, for as long as the page stays.
     drawnRows.current = {
         base: frozen ? before.base : { shared, rows: new Map(), localeRevision },
         matches: searching ? { shared, rows: new Map() } : null,
+        last: {
+            base: rowsBefore(before, "base", shared),
+            matches: rowsBefore(before, "matches", shared),
+        },
     };
-    const last = { base: drawing("base"), matches: drawing("matches") };
+    useLayoutEffect(() => {
+        drawnRows.current.last = null;
+    });
 
     const rowOf = ({ session, branches, descendants }, index, group, needle, view) => {
         // Linked sessions fold under the one that started them; a search shows them all, with nothing to fold.
@@ -2465,7 +2477,7 @@ function AllSessions({ compact = false }) {
             needle: searchMarks ? undefined : needle,
             folders: tab === "folders" && needle === "",
         };
-        const kept = last[view].get(session.id);
+        const kept = drawnRows.current.last[view].get(session.id);
 
         if (kept && sameValues(kept.place, place)) {
             drawnRows.current[view].rows.set(session.id, kept);

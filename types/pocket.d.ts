@@ -1014,7 +1014,7 @@ export interface LinkedSession {
  * A human-facing linked session that the authenticated person can see.
  * @since 0.16.0
  */
-export interface HumanLinkedSession extends LinkedSession {
+export interface HumanLinkedSession extends Omit<LinkedSession, "failed"> {
     /**
      * Its id, for pocket.openConversation. Other metadata keeps LinkedSession's audience rules.
      * @since 0.16.0
@@ -1072,7 +1072,7 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface WebRequest {
     /**
      * One immutable language snapshot for this request. Older servers omit it; use English then.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     readonly locale?: {
@@ -1387,7 +1387,7 @@ export interface PublicLinks {
 export interface PublicPageRequest {
     /**
      * One immutable language snapshot for this request. Older servers omit it; use English then.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     readonly locale?: {
@@ -1464,19 +1464,19 @@ export type PublicPageHandler = (
  * One language's UI text, as a module declares it (`web.uiLocales`): a language tag, the language's own name, and text
  * for the app's own labels by message key. A module gives a part of them; English, which Pi Pocket keeps, is the
  * fallback of each key.
- * @since 0.28.0
+ * @since Unreleased
  * @experimental
  */
 export interface UiLocalePack {
     /**
      * The language tag, as `Intl.getCanonicalLocales` writes it: `zh-CN` for `zh-cn`. `"en"` is Pi Pocket's own.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     readonly id: string;
     /**
      * The language's name for itself, as the language list shows it: one line, up to 80 characters, as plain text.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     readonly label: string;
@@ -1484,7 +1484,7 @@ export interface UiLocalePack {
      * The app's own labels, by message key, as text: at least one key of its own, and a part of the catalog is enough.
      * The keys that it leaves out show English. Keys that English does not have are left out, and a message that is
      * empty or blank counts as none. A translation says the same placeholder names as English (`{name}`).
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     readonly messages: Readonly<Record<string, string>>;
@@ -1641,7 +1641,7 @@ export interface Web {
      * and its messages by key, with at least one key each. Core merges them over its English, key by key, in the order
      * that the modules load. A mistake throws, so the module does not load and the version before it stays. See
      * [`UiLocalePack`](#uilocalepack).
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     uiLocales(packs: readonly UiLocalePack[]): void;
@@ -2775,13 +2775,13 @@ export interface Pocket {
     readonly title: string;
     /**
      * Fixed UI text in the current language, with literal named interpolation and English fallback. Does not escape HTML.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
     /**
      * Hear language or catalog changes. Not called immediately; removed when this module version goes. Returns a stop function.
-     * @since 0.28.0
+     * @since Unreleased
      * @experimental
      */
     onLocaleChange(listener: () => void): () => void;

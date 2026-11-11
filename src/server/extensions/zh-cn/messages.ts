@@ -3,6 +3,23 @@ export default {
     id: "zh-CN",
     label: "简体中文",
     messages: {
+        "web.composer.release0281.interrupt-hint":
+            "立即停止本轮运行（包括工具调用），然后发送此消息。队列中的消息仍保留在队列中",
+        "web.composer.release0281.stop-title":
+            "停止（按两次 Esc）。队列中的消息会暂存，直到有人发送",
+        "web.composer.release0281.held-you": " · 你",
+        "web.composer.release0281.held-one": "已暂存 1 条消息。",
+        "web.composer.release0281.held-many": "已暂存 {count} 条消息。",
+        "web.composer.release0281.held-why-one": "停止操作已将此消息暂存，发送后 Pi 才会收到。",
+        "web.composer.release0281.held-why-many": "停止操作已将这些消息暂存，发送后 Pi 才会收到。",
+        "web.composer.release0281.held-send-title": "按顺序将这些消息发送给 Pi",
+        "web.composer.release0281.held-edit-title": "取回消息框中编辑",
+        "web.composer.release0281.held-withdraw-title": "撤回：Pi 不会收到此消息",
+        "web.running-board.release0281.skipped": " · 已跳过 {count} 次",
+        "web.sheets.schedules.release0281.skipped-once":
+            "已跳过一次，最近一次为 {when}：上一条消息仍在队列中等待",
+        "web.sheets.schedules.release0281.skipped-many":
+            "已跳过 {count} 次，最近一次为 {when}：上一条消息仍在队列中等待",
         "server.design.docsite-components.snippet.button.copy": "复制",
         "server.design.docsite.build.aria-label.menu": "菜单",
         "server.extensions.ask-someone.index.setup.answered.button.delete": "删除",

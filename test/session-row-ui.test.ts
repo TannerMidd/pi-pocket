@@ -621,6 +621,21 @@ test(
         assert.deepEqual(await sidebar(), { changes: 0, width: edge.to, root: `${edge.width}px` });
         await page.input([{ type: "mouse", action: "up", ...at(60) }]);
         assert.equal((await sidebar()).root, `${edge.to}px`, "the root takes the width once");
+        // Let go outside the page: the next move, with no button down, ends the drag.
+        const now = await inPage<{ x: number; y: number }>(`
+            const box = document.querySelector(".sidebar .resize-handle").getBoundingClientRect();
+            return JSON.stringify({ x: box.left + 4, y: box.top + box.height / 2 });
+        `);
+        const veiled = () =>
+            inPage<boolean>(`return String(!!document.querySelector(".resize-veil"))`);
+
+        await page.input([
+            { type: "mouse", action: "down", ...now },
+            { type: "mouse", action: "move", x: now.x - 30, y: now.y, pressed: true },
+        ]);
+        assert.equal(await veiled(), true, "dragging");
+        await page.input([{ type: "mouse", action: "move", x: now.x - 40, y: now.y }]);
+        assert.equal(await veiled(), false, "the drag ended");
         await inPage(`(await import("/theme.js")).setPrefs({ sidebarWidth: 312 }); return "null"`);
     },
 );

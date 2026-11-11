@@ -74,6 +74,12 @@ export function SchedulesSheet() {
                                     { when: nextLine(schedule), who: setBy(schedule.by) },
                                 )}${archived ? t("web.sheets.schedules.archived", " · session archived") : ""}
                             </div>
+                            ${
+                                schedule.skipped > 0 &&
+                                html`<div class="muted small" data-part="schedule-skipped">
+                                    ${schedule.skipped === 1 ? t("web.sheets.schedules.release0281.skipped-once", "Skipped once, last {when}: its last message still waits in the queue", { when: formatWhen(schedule.skippedAt) }) : t("web.sheets.schedules.release0281.skipped-many", "Skipped {count} times, last {when}: its last message still waits in the queue", { count: schedule.skipped, when: formatWhen(schedule.skippedAt) })}
+                                </div>`
+                            }
                         </div>
                         ${
                             steer &&

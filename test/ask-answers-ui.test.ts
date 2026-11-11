@@ -51,7 +51,7 @@ const sees = (expression: string) =>
 const SHOWN = `return JSON.stringify([...${card}.querySelectorAll("[aria-pressed=true], input")]
     .map((each) => (each.tagName === "INPUT" ? each.value : each.textContent.trim())))`;
 const shown = () => inPage<string[]>(SHOWN);
-const key = `"pocket.person." + encodeURIComponent(${store}.store.state.me.id) + ":ask.ask-1"`;
+let key = "";
 const saved = () => inPage<string | null>(`return JSON.stringify(localStorage.getItem(${key}))`);
 
 before(async () => {
@@ -88,15 +88,19 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     const other = await newSession(app);
     const form = { title: "Set up", fields, submit: "Send" };
     const request = { id: "ask-1", conversationId: id, taskId: 1 as unknown as TaskId };
+    const ask = (createdAt: number, callId?: string) =>
+        void app.approvals.request(
+            { ...request, tool: "ask", subject: "Set up", reason: "", createdAt, form, callId },
+            context,
+        );
+    const first = Date.now();
     // A secret is not kept: it is typed again.
     const answers = ["MySQL", "Postgres", "SQLite", "ann", ""];
 
+    key = `"pocket.person." + encodeURIComponent(${store}.store.state.me.id) + ":ask.${id}"`;
     // A session with a message: the view the tab keeps of it on a switch lists its card.
     await say(app, id, "Hello");
-    void app.approvals.request(
-        { ...request, tool: "ask", subject: "Set up", reason: "", createdAt: Date.now(), form },
-        context,
-    );
+    ask(first);
     await page.navigate(`${base}/s/${id}`);
     await sees(`${card} !== null`);
     await page.type({ selector: ".ask-other" }, "MySQL");
@@ -126,7 +130,7 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     assert.match((await saved())!, /x{4097}/);
 
     // One that no longer fits the form goes, rather than breaking the card.
-    await page.evaluate(`localStorage.setItem(${key}, "{}")`);
+    await page.evaluate(`localStorage.setItem(${key}, '{"ask-1@${first}": {}}')`);
     await page.reload();
     await sees(`${card} !== null`);
     assert.deepEqual(await shown(), ["", "", ""]);
@@ -136,4 +140,71 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     assert.notEqual(await saved(), null);
     app.approvals.answer("ask-1", { allow: false, by: "Someone else" });
     await until(async () => (await saved()) === null, "the answers gone");
+
+    // It ends while another session shows: a later ask with its id does not get its answers, and
+    // they go. What another tab typed for the later one stays, though this tab first shows the
+    // session as it kept it, with the ask that ended.
+    ask(first + 1);
+    await sees(`${card} !== null`);
+    await page.type({ selector: "input[name=user]" }, "ann");
+    await page.evaluate(`${store}.navigate(${other})`);
+    await sees(`${card} === null`);
+    app.approvals.answer("ask-1", { allow: false, by: "Someone else" });
+    ask(first + 2);
+    const none = { picked: [], other: "" };
+    const theirs = { db: none, parts: none, user: "cy", password: "" };
+    const typed = JSON.stringify({ [`ask-1@${first + 2}`]: theirs });
+
+    await page.evaluate(`localStorage.setItem(${key}, ${JSON.stringify(typed)})`);
+    await page.evaluate(`${store}.navigate(${id})`);
+    await until(
+        async () => (await shown().catch(() => [])).join() === ",cy,",
+        "the other tab's answers",
+    );
+    assert.equal(await saved(), typed, "the ended ask's went");
+
+    // The same call asks again, later, as after a restart: what was typed stays.
+    ask(first + 3, "call-1");
+    await until(async () => (await shown().catch(() => [])).join() === ",,", "another ask, empty");
+    // It rises in: typed into once it stands still.
+    await sees(`document.getAnimations().every((each) => each.playState !== "running")`);
+    await page.type({ selector: "input[name=user]" }, "bob");
+    ask(first + 4, "call-1");
+    await sees(`${store}.store.state.view.approvals[0]?.createdAt === ${first + 4}`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
+    await page.reload();
+    await sees(`${card} !== null`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
+
+    // The same call name in another session must not inherit this session's draft.
+    await page.evaluate(`${store}.navigate(${other})`);
+    await sees(`${card} === null`);
+    void app.approvals.request(
+        {
+            id: "ask-other",
+            conversationId: other,
+            taskId: 1 as TaskId,
+            tool: "ask",
+            subject: "Set up",
+            reason: "",
+            createdAt: first + 5,
+            callId: "call-1",
+            form,
+        },
+        context,
+    );
+    await sees(`${card} !== null`);
+    assert.deepEqual(await shown(), ["", "", ""], "another session has no draft from call-1");
+    await page.type({ selector: "input[name=user]" }, "Literal other user");
+    await page.type({ selector: "input[name=password]" }, "other-private-value");
+    const otherSaved = await inPage<string | null>(
+        `return JSON.stringify((await import('/person-storage.js')).personStorage.get('ask.${other}'))`,
+    );
+
+    assert.match(otherSaved!, /Literal other user/);
+    assert.doesNotMatch(otherSaved!, /other-private-value|bob/);
+    await page.evaluate(`${store}.navigate(${id})`);
+    await sees(`${card} !== null && ${store}.store.state.view.conversation.id===${id}`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
+    app.approvals.answer("ask-other", { allow: false, by: "test cleanup" });
 });

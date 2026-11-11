@@ -3065,7 +3065,118 @@ export const WP2_RELEASE_KEYS: readonly {
         existingEn: true,
     },
 ];
+export const WP2_MAIN_0281_RETIRED_KEYS = [
+    "web.composer.send-modes.stops-run-right-also",
+    "web.composer.stop-button.title.stop-esc-twice",
+] as const;
+export const WP2_MAIN_0281_KEYS: readonly {
+    key: string;
+    english: string;
+    zh: string;
+    source: "main-0.28.1";
+    existingEn: boolean | null;
+}[] = [
+    {
+        key: "web.composer.release0281.interrupt-hint",
+        english:
+            "Stops the run right now (also its tool call), then sends it. The queued messages stay queued",
+        zh: "立即停止本轮运行（包括工具调用），然后发送此消息。队列中的消息仍保留在队列中",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-you",
+        english: " · you",
+        zh: " · 你",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-one",
+        english: "1 message held.",
+        zh: "已暂存 1 条消息。",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-many",
+        english: "{count} messages held.",
+        zh: "已暂存 {count} 条消息。",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-why-one",
+        english: "Stop kept it from Pi until sent.",
+        zh: "停止操作已将此消息暂存，发送后 Pi 才会收到。",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-why-many",
+        english: "Stop kept them from Pi until sent.",
+        zh: "停止操作已将这些消息暂存，发送后 Pi 才会收到。",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.sheets.message.release028.hide",
+        english: "Hide",
+        zh: "隐藏",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.sheets.message.release028.show",
+        english: "Show",
+        zh: "显示",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-send-title",
+        english: "Send them to Pi, in their order",
+        zh: "按顺序将这些消息发送给 Pi",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-edit-title",
+        english: "Take it back into the message box to change it",
+        zh: "取回消息框中编辑",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.held-withdraw-title",
+        english: "Withdraw: Pi will not get it",
+        zh: "撤回：Pi 不会收到此消息",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.composer.release0281.stop-title",
+        english: "Stop (Esc twice). Queued messages are held until someone sends them",
+        zh: "停止（按两次 Esc）。队列中的消息会暂存，直到有人发送",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+    {
+        key: "web.sessions.session-row.text.run-failed-why",
+        english: "Run failed: {failure}",
+        zh: "运行失败：{failure}",
+        source: "main-0.28.1",
+        existingEn: true,
+    },
+];
+
 export const WP2_KEYS = [
-    ...WP2_HISTORY.filter((row) => !(WP2_RETIRED_KEYS as readonly string[]).includes(row.key)),
+    ...WP2_HISTORY.filter(
+        (row) =>
+            !([...WP2_RETIRED_KEYS, ...WP2_MAIN_0281_RETIRED_KEYS] as readonly string[]).includes(
+                row.key,
+            ),
+    ),
     ...WP2_RELEASE_KEYS,
+    ...WP2_MAIN_0281_KEYS,
 ];

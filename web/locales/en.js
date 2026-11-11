@@ -3,6 +3,23 @@
 export const EN_LABEL = "English";
 
 export const EN = Object.freeze({
+    "web.composer.release0281.interrupt-hint":
+        "Stops the run right now (also its tool call), then sends it. The queued messages stay queued",
+    "web.composer.release0281.stop-title":
+        "Stop (Esc twice). Queued messages are held until someone sends them",
+    "web.composer.release0281.held-you": " · you",
+    "web.composer.release0281.held-one": "1 message held.",
+    "web.composer.release0281.held-many": "{count} messages held.",
+    "web.composer.release0281.held-why-one": "Stop kept it from Pi until sent.",
+    "web.composer.release0281.held-why-many": "Stop kept them from Pi until sent.",
+    "web.composer.release0281.held-send-title": "Send them to Pi, in their order",
+    "web.composer.release0281.held-edit-title": "Take it back into the message box to change it",
+    "web.composer.release0281.held-withdraw-title": "Withdraw: Pi will not get it",
+    "web.running-board.release0281.skipped": " · skipped {count}×",
+    "web.sheets.schedules.release0281.skipped-once":
+        "Skipped once, last {when}: its last message still waits in the queue",
+    "web.sheets.schedules.release0281.skipped-many":
+        "Skipped {count} times, last {when}: its last message still waits in the queue",
     "signin.invite-expired": "Ask for a new one.",
     "signin.invite-expired-title": "Invite expired",
     "signin.invite-used": "Each invite works once, and only until it expires. Ask for a new one.",

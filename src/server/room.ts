@@ -28,6 +28,8 @@ import {
     DecisionsDoc,
     type Goal,
     GoalDoc,
+    HeldDoc,
+    type HeldMessage,
     LinkedSessionPeersDoc,
     type Notes,
     NotesDoc,
@@ -88,6 +90,7 @@ export const ROOM_DOCS = new Set(
         GoalDoc,
         WatchDoc,
         LinkedSessionPeersDoc,
+        HeldDoc,
     ].map((doc) => doc.definition.kind),
 );
 /** A typing indicator lasts this long unless the browser renews it. */
@@ -380,6 +383,8 @@ export class Room {
     decisions: Record<string, Decision> = {};
     plan: { on: boolean; by?: string; at?: number } = { on: false };
     schedules: Record<string, Schedule> = {};
+    /** The messages a Stop held out of the queue, in their order. */
+    held: HeldMessage[] = [];
     goal: Goal | undefined;
     watch: PrWatch | undefined;
     /** The sessions this one knows by an address (`linked-sessions.ts`): whom each linked session's message is from. */
@@ -460,6 +465,7 @@ export class Room {
         this.schedules = {
             ...((await harness.snapshot(ScheduleDoc, this.id, context))?.items ?? {}),
         };
+        this.held = [...((await harness.snapshot(HeldDoc, this.id, context))?.items ?? [])];
         this.goal = (await harness.snapshot(GoalDoc, this.id, context))?.goal;
         this.watch = (await harness.snapshot(WatchDoc, this.id, context))?.watch;
         this.peers = {
@@ -532,6 +538,8 @@ export class Room {
             this.plan = { on: false, ...((value as Room["plan"] | null) ?? {}) };
         } else if (kind === ScheduleDoc.definition.kind) {
             this.schedules = { ...((value?.items as Record<string, Schedule>) ?? {}) };
+        } else if (kind === HeldDoc.definition.kind) {
+            this.held = [...((value?.items as HeldMessage[] | undefined) ?? [])];
         } else if (kind === GoalDoc.definition.kind) {
             this.goal = (value?.goal as Goal | undefined) ?? undefined;
         } else if (kind === WatchDoc.definition.kind) {
@@ -846,14 +854,22 @@ export class Room {
             plan: this.plan,
             schedules: Object.values(this.schedules)
                 .sort((a, b) => a.next - b.next)
-                .map(({ id, text, next, every, by, runs }) => ({
+                .map(({ id, text, next, every, by, runs, skipped, skippedAt }) => ({
                     id,
                     text,
                     next,
                     ...(every === undefined ? {} : { repeat: describeRepeat(every) }),
                     ...(by === undefined ? {} : { by }),
                     runs,
+                    ...(skipped === undefined ? {} : { skipped, skippedAt }),
                 })),
+            // What a Stop held: each message's start and who wrote it, as the queue shows them.
+            held: this.held.map((item) => ({
+                key: item.key,
+                mode: item.mode,
+                ...(item.by === undefined ? {} : { by: item.by }),
+                text: cutQueued(queuedText(item.content)),
+            })),
             // The branch is read from the repository each time, so one Pi or a person switched to shows on the next update.
             branch: this.#readHead(),
             goal:

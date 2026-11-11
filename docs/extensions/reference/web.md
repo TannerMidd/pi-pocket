@@ -200,7 +200,9 @@ Calls `listener` after the owner changes the module's settings. The module's tab
 uiLocales(packs: readonly UiLocalePack[]): void;
 ```
 
-Since 0.28.0 · Experimental
+Since Unreleased · Experimental
+
+This addition and the request locales below are not in the official 0.28.0 or 0.28.1 releases. Their first release is unassigned; the maintainers decide it.
 
 Declares the UI text of other languages, while it loads: each is a language tag, the language's own name, and its messages by key. Pi Pocket merges each language over its English, key by key, in the order that the modules load, and shows the merged text in the app and on the sign-in pages of this server. English stays the baseline: a module adds a language, and cannot change English.
 
@@ -225,7 +227,7 @@ interface UiLocalePack {
 }
 ```
 
-Since 0.28.0 · Experimental
+Since Unreleased · Experimental
 
 One language, as [`uiLocales`](#uilocales) takes it.
 
@@ -314,7 +316,7 @@ Since 0.14.0 · Stable
 
 What a handler gets.
 
-- Since 0.28.0 (experimental), `locale` is an immutable snapshot for this request. `lang` is the exact available language selected by `pocket_locale`, or `en` for a missing, invalid, unavailable, or safe-mode choice. `t(key, english, values?)` returns plain text with English fallback and literal named values. It does not escape HTML; escape it for the output context. Older servers omit `locale`; use English then. Do not keep it as a global current language or translate user content or model instructions.
+- Unreleased (experimental), `locale` is an immutable snapshot for this request. `lang` is the exact available language selected by `pocket_locale`, or `en` for a missing, invalid, unavailable, or safe-mode choice. `t(key, english, values?)` returns plain text with English fallback and literal named values. It does not escape HTML; escape it for the output context. Older servers omit `locale`; use English then. Do not keep it as a global current language or translate user content or model instructions.
 - `method`: the request's method.
 - `params`: the values of the path's `:name` parts, by name. They are text from outside: check a value before you make a file path from it.
 - `query`: the query string. `pocket.api("usage?days=7")` sends `days`.
@@ -470,7 +472,7 @@ Since 0.16.0 · Stable
 ### `HumanLinkedSession`
 
 ```ts
-interface HumanLinkedSession extends LinkedSession {
+interface HumanLinkedSession extends Omit<LinkedSession, "failed"> {
     conversationId: ConversationId;
 }
 ```
@@ -593,7 +595,7 @@ Since 0.22.0 · Experimental
 
 A request to a public page, from anyone with its address. It has no person.
 
-- Since 0.28.0 (experimental), `locale` is one immutable request snapshot with the same selection and fallback as [`WebRequest.locale`](#webrequest). Older servers omit it; use English then. `t` returns text, not escaped HTML. Escape the result, including interpolated values, before inserting it in the page. It never authorizes access or changes the meaning of the link.
+- Unreleased (experimental), `locale` is one immutable request snapshot with the same selection and fallback as [`WebRequest.locale`](#webrequest). Older servers omit it; use English then. `t` returns text, not escaped HTML. Escape the result, including interpolated values, before inserting it in the page. It never authorizes access or changes the meaning of the link.
 - `method`: `"GET"` to show the page (`HEAD` comes as `"GET"`), `"POST"` for a form on it.
 - `link`: the link that the address names. It is still open.
 - `query`: the query string.

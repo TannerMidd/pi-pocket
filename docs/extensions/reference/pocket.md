@@ -70,13 +70,15 @@ The module's title, as the Extensions sheet shows it.
 
 ## Language
 
+These experimental additions are not in the official 0.28.0 or 0.28.1 releases. Their first release is not assigned; the maintainers decide it. Check for the members at runtime.
+
 ### `t`
 
 ```ts
 t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
 ```
 
-Since 0.28.0 · Experimental
+Since Unreleased · Experimental
 
 The current language's fixed UI text for `key`, with explicit English fallback and literal named interpolation. It does not escape HTML. Do not pass user content, tool output, or model instructions through it. The key must be in the app's English catalog before a language pack can publish it.
 
@@ -86,7 +88,7 @@ The current language's fixed UI text for `key`, with explicit English fallback a
 onLocaleChange(listener: () => void): () => void;
 ```
 
-Since 0.28.0 · Experimental
+Since Unreleased · Experimental
 
 Hear accepted language or catalog changes. It does not call the listener immediately. Look up text when a component draws; update registered labels and redraw open components from this listener. The stop function removes it, and it also stops when this module version goes. No page reload or component remount is required.
 

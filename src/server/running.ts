@@ -78,6 +78,8 @@ export type BoardSchedule = {
     requestedBy?: string;
     createdAt: number;
     runs: number;
+    /** How many times it sent nothing because its last message still waited in the queue (`schedules.ts`). */
+    skipped?: number;
     /** The next times it goes out, the first being `next`: up to `UPCOMING`, within `UPCOMING_MS`. */
     upcoming: number[];
     /** Why it would not go out now (a spend limit, or nobody left to steer), when it would not. */
@@ -525,6 +527,7 @@ export async function runningBoard(app: PocketApp, user: User): Promise<RunningB
                     : { requestedBy: schedule.requestedBy }),
                 createdAt: schedule.createdAt,
                 runs: schedule.runs,
+                ...(schedule.skipped === undefined ? {} : { skipped: schedule.skipped }),
                 upcoming: upcomingOf(schedule.id, schedule.next, schedule.every, schedule.zone),
                 ...(held === undefined ? {} : { held }),
             });

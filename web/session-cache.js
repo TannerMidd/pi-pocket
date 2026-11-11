@@ -11,11 +11,19 @@
 
 const NAME = "pocket-sessions";
 
+/** How long an open may take before the cache counts as nothing kept: some browsers never answer. */
+const OPEN_MS = 1000;
+
 let opening;
 
 function database() {
     opening ??= new Promise((resolve, reject) => {
         const request = indexedDB.open(NAME, 1);
+        let late = false;
+        const timer = setTimeout(() => {
+            late = true;
+            reject(new Error("The session cache did not open"));
+        }, OPEN_MS);
 
         request.onupgradeneeded = () => {
             request.result.createObjectStore("views");
@@ -24,6 +32,15 @@ function database() {
 
         request.onsuccess = () => {
             const db = request.result;
+
+            clearTimeout(timer);
+
+            // It answered after the wait: nothing uses it, and a later call opens it again.
+            if (late) {
+                db.close();
+
+                return;
+            }
 
             // Another tab deletes or upgrades it: let go, and open it again when next needed.
             db.onversionchange = () => {
@@ -34,8 +51,15 @@ function database() {
             resolve(db);
         };
 
-        request.onerror = () => reject(request.error);
-        request.onblocked = () => reject(new Error("The session cache is open in an older tab"));
+        request.onerror = () => {
+            clearTimeout(timer);
+            reject(request.error);
+        };
+
+        request.onblocked = () => {
+            clearTimeout(timer);
+            reject(new Error("The session cache is open in an older tab"));
+        };
     }).catch((error) => {
         opening = undefined;
 

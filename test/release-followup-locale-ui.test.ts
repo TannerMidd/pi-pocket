@@ -245,7 +245,7 @@ for (const viewport of ["mobile", "desktop"] as const) {
             const saved = () =>
                 value<string | null>(
                     page,
-                    `return (await import('/person-storage.js')).personStorage.get('ask.${approvalId}')`,
+                    `return (await import('/person-storage.js')).personStorage.get('ask.${id}')`,
                 );
             const shown = () =>
                 value<string[]>(
@@ -254,6 +254,18 @@ for (const viewport of ["mobile", "desktop"] as const) {
                 );
 
             assert.match((await saved())!, /Literal MySQL.*Literal user value/);
+            const savedByEntry = JSON.parse((await saved())!) as Record<string, { user: string }>;
+
+            assert.equal(
+                Object.keys(savedByEntry).length,
+                1,
+                "one live ask entry is kept for this session",
+            );
+            assert.ok(
+                Object.keys(savedByEntry)[0]!.startsWith(`${approvalId}@`),
+                "the draft uses the actual session/call protocol",
+            );
+            assert.equal(Object.values(savedByEntry)[0]!.user, "Literal user value");
             await capture(
                 page,
                 viewport,

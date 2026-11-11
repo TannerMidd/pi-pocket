@@ -110,7 +110,7 @@ export default function createSchedules(host: PocketHost, web: ExtensionWeb) {
         execute: async (args, api) => {
             const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
             const line = (item: Schedule) =>
-                `${item.id}: ${item.every === undefined ? describeMoment(item.next, item.zone) : `${describeRepeat(item.every)}, next ${describeMoment(item.next, item.zone)}`} · ${item.text}`;
+                `${item.id}: ${item.every === undefined ? describeMoment(item.next, item.zone) : `${describeRepeat(item.every)}, next ${describeMoment(item.next, item.zone)}`}${(item.skipped ?? 0) > 0 ? `, skipped ${String(item.skipped)}× (last ${describeMoment(item.skippedAt ?? item.next, item.zone)}): its last message still waits in the queue` : ""} · ${item.text}`;
 
             if (args.action === "list") {
                 const items = await host.schedules.list(api.conversationId);
