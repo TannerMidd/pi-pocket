@@ -333,6 +333,15 @@ test("typing moved under a quote can be undone", real, async () => {
     assert.equal(await boxText(), "> one\nyes");
 });
 
+test("an edit the box cannot stop (a phone keyboard's) is the browser's alone", real, async () => {
+    await reply("one");
+    await caretAt(3);
+    await page.evaluate(`document.querySelector('${BOX}').dispatchEvent(
+        new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: false }))`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(await boxText(), "> one\n");
+});
+
 test(
     "quotes removed by × or Clear quotes come back pieces with undo, and the next key does not type over them",
     real,

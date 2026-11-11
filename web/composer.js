@@ -1769,7 +1769,9 @@ export function Composer() {
             marked,
         );
 
-        if (!step || onTheWay.has(conversationId)) {
+        // One the browser makes anyway (a phone keyboard's): doing ours too would edit twice. The quote it changes is
+        // plain text from then on (`update`), its words all kept.
+        if (!step || !event.cancelable || onTheWay.has(conversationId)) {
             return;
         }
 
