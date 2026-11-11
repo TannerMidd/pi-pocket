@@ -97,6 +97,7 @@ export const BUILT_IN_COMMANDS: ReadonlySet<string> = new Set([
     "plan",
     "schedule",
     "remember",
+    "goal",
     "until",
     "watch",
     "stop",

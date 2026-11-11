@@ -959,11 +959,13 @@ export function Composer() {
 
     /** Run a slash command. The text goes away once it worked; attached files stay for the next message. */
     const runCommand = async ({ command, arg }, sent) => {
-        // Only an extension's command runs on the server, which finds a first run by its request id.
+        // Commands that deduplicate on the server keep their request id with the draft until the reply arrives.
         const record = beginSend(
             conversationId,
             { text, quote: null, files: [] },
-            command.extension ? ["command", command.id, sent] : null,
+            command.extension || command.idempotent
+                ? ["command", command.id ?? command.name, sent]
+                : null,
         );
 
         if (!record) {
