@@ -914,12 +914,12 @@ export interface LinkedSessions {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string; answers: boolean }>;
+    ): Promise<{ session: ConversationId; address: string; answers?: boolean }>;
     /**
      * Sends `message` to the linked session at the address `to`: at its next pause (since 0.28.0; before, only with
      * `steer: true`), or with `steer: false` after its run. `answers` (since 0.28.0) says whether its final answer comes
      * back to the source by itself, which it does when the source started it; otherwise the message asks it to reply
-     * when an answer is needed.
+     * when an answer is needed. An older Pi Pocket does not return it.
      * @since 0.14.0
      * @experimental
      */
@@ -927,7 +927,7 @@ export interface LinkedSessions {
         source: ConversationId,
         request: { to: string; message: string; steer?: boolean },
         key: string,
-    ): Promise<{ answers: boolean }>;
+    ): Promise<{ answers?: boolean }>;
     /**
      * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
      * it has no run to stop, and the call only withdraws the queue. `busy` says whether it was working.
