@@ -20,19 +20,72 @@ import { copyText, modeTitle, plural, verdictOf } from "./system-widgets.js";
 
 const SAMPLE = "Sphinx of black quartz, judge my vow";
 
-const EMPTY = {
-    colors: ["No color matches.", "This system has no colors yet."],
+const emptyText = (t) => ({
+    colors: [
+        t("server.extensions.design.system-sections.colors.no-color-matches", "No color matches."),
+        t(
+            "server.extensions.design.system-sections.colors.system-no-colors-yet",
+            "This system has no colors yet.",
+        ),
+    ],
     type: ["No type token matches.", "This system has no type tokens yet."],
-    spacing: ["No spacing token matches.", "This system has no spacing yet."],
-    radii: ["No radius matches.", "This system has no corner radii yet."],
-    shadows: ["No shadow matches.", "This system has no shadows yet."],
-    motion: ["No motion token matches.", "This system has no motion yet."],
-};
+    spacing: [
+        t(
+            "server.extensions.design.system-sections.spacing.no-spacing-token-matches",
+            "No spacing token matches.",
+        ),
+        t(
+            "server.extensions.design.system-sections.spacing.system-no-spacing-yet",
+            "This system has no spacing yet.",
+        ),
+    ],
+    radii: [
+        t("server.extensions.design.system-sections.radii.no-radius-matches", "No radius matches."),
+        t(
+            "server.extensions.design.system-sections.radii.system-no-corner-radii",
+            "This system has no corner radii yet.",
+        ),
+    ],
+    shadows: [
+        t(
+            "server.extensions.design.system-sections.shadows.no-shadow-matches",
+            "No shadow matches.",
+        ),
+        t(
+            "server.extensions.design.system-sections.shadows.system-no-shadows-yet",
+            "This system has no shadows yet.",
+        ),
+    ],
+    motion: [
+        t(
+            "server.extensions.design.system-sections.motion.no-motion-token-matches",
+            "No motion token matches.",
+        ),
+        t(
+            "server.extensions.design.system-sections.motion.system-no-motion-yet",
+            "This system has no motion yet.",
+        ),
+    ],
+});
 
-const SCALES = {
-    spacing: { stepKind: "steps", size: "space", rolesNote: "where the system uses a step" },
-    radii: { stepKind: "scale", size: "sm", rolesNote: "by use, under the step each points at" },
-};
+const scaleText = (t) => ({
+    spacing: {
+        stepKind: "steps",
+        size: "space",
+        rolesNote: t(
+            "server.extensions.design.system-sections.roles-note.where-system-uses-step",
+            "where the system uses a step",
+        ),
+    },
+    radii: {
+        stepKind: "scale",
+        size: "sm",
+        rolesNote: t(
+            "server.extensions.design.system-sections.roles-note.under-step-points",
+            "by use, under the step each points at",
+        ),
+    },
+});
 
 const hexOf = (value) => {
     const color = parseColor(value);
@@ -60,6 +113,7 @@ function styleMeta(value) {
 }
 
 export function createSystemSections(env, widgets) {
+    const t = env.pocket.t;
     const { pocket, store } = env;
     const { html, useEffect, useRef, useState, Markdown } = pocket;
     const { Ico } = env.parts;
@@ -89,8 +143,16 @@ export function createSystemSections(env, widgets) {
                 <span class="dsy-row-text">
                     <span class="dsy-row-title">
                         <${CopyName} name=${token.name} />
-                        ${token.deprecated && html`<span class="dsy-tag warn">deprecated</span>`}
-                        ${edited && html`<span class="dsy-tag edit">edited</span>`}
+                        ${
+                            token.deprecated &&
+                            html`<span class="dsy-tag warn"
+                                >${t(
+                                    "server.extensions.design.system-sections.create-system-sections.token-row.span.deprecated",
+                                    "deprecated",
+                                )}</span
+                            >`
+                        }
+                        ${edited && html`<span class="dsy-tag edit">${t("server.extensions.design.system-sections.create-system-sections.token-row.span.edited", "edited")}</span>`}
                     </span>
                     ${sub && html`<span class="dsy-row-sub">${sub}</span>`}
                 </span>
@@ -174,7 +236,7 @@ export function createSystemSections(env, widgets) {
             const groups = groupsFor(ctx, section);
 
             return groups.length === 0
-                ? html`<p class="dsy-empty muted">${EMPTY[section][ctx.query ? 0 : 1]}</p>`
+                ? html`<p class="dsy-empty muted">${emptyText(t)[section][ctx.query ? 0 : 1]}</p>`
                 : render(ctx, groups);
         };
 
@@ -224,19 +286,31 @@ export function createSystemSections(env, widgets) {
                         class="dsy-look-card"
                         style=${`background:${color("surface")};box-shadow:0 0 0 1px ${color("border", "rgb(127 127 127 / .3)")}`}
                     >
-                        <strong style=${`color:${color("text")}`}>Card title</strong>
-                        <span style=${`color:${color("text")}`}>Body text reads at a glance.</span>
-                        <span style=${`color:${quiet}`}>Muted text for the details.</span>
+                        <strong style=${`color:${color("text")}`}
+                            >${t("server.extensions.design.system-sections.create-system-sections.overview.strong.card-title", "Card title")}</strong
+                        >
+                        <span style=${`color:${color("text")}`}
+                            >${t(
+                                "server.extensions.design.system-sections.create-system-sections.overview.span.body-text-reads-glance",
+                                "Body text reads at a glance.",
+                            )}</span
+                        >
+                        <span style=${`color:${quiet}`}
+                            >${t(
+                                "server.extensions.design.system-sections.create-system-sections.overview.span.muted-text-details",
+                                "Muted text for the details.",
+                            )}</span
+                        >
                         <span class="dsy-look-row">
                             <span
                                 class="dsy-look-button"
                                 style=${`background:${color("accent", color("text"))};color:${color("onAccent", color("surface"))}`}
-                                >Primary</span
+                                >${t("server.extensions.design.system-sections.create-system-sections.overview.span.primary", "Primary")}</span
                             >
                             <span
                                 class="dsy-look-button ghost"
                                 style=${`color:${color("text")};box-shadow:inset 0 0 0 1px ${color("border", quiet)}`}
-                                >Secondary</span
+                                >${t("server.extensions.design.system-sections.create-system-sections.overview.span.secondary", "Secondary")}</span
                             >
                         </span>
                         ${
@@ -420,7 +494,7 @@ export function createSystemSections(env, widgets) {
         ${
             roles.length > 0 &&
             html`<h3 class="dsy-section-label">
-                Roles
+                ${t("server.extensions.design.system-sections.create-system-sections.color-groups.h3.roles", "Roles")}
                 <span class="dsy-group-count"
                     >${roles.reduce((sum, group) => sum + group.total, 0)}</span
                 >
@@ -504,7 +578,7 @@ export function createSystemSections(env, widgets) {
                 visual: html`<span
                     class="dsy-leading"
                     style=${`line-height:${safeCss(now.value) || 1.4}`}
-                    >Aa<br />Aa</span
+                    >${t("server.extensions.design.system-sections.create-system-sections.type-parts.visual.aa", "Aa")}<br />${t("server.extensions.design.system-sections.create-system-sections.type-parts.visual.aa", "Aa")}</span
                 >`,
                 value,
             };
@@ -605,8 +679,12 @@ export function createSystemSections(env, widgets) {
                                   <span class="muted mono"
                                       >${showValue(step, ctx.model.value(step.name, mode))}</span
                                   >`
-                            : html`<span>Own value</span>
-                                  <span class="muted">not a step of the scale</span>`
+                            : html`<span
+                                      >${t("server.extensions.design.system-sections.create-system-sections.by-step.span.own-value", "Own value")}</span
+                                  >
+                                  <span class="muted"
+                                      >${t("server.extensions.design.system-sections.create-system-sections.by-step.span.not-step-scale", "not a step of the scale")}</span
+                                  >`
                     }
                 </h4>
                 <${Tiles}
@@ -620,7 +698,7 @@ export function createSystemSections(env, widgets) {
     }
 
     function scaleGroups(ctx, groups, section, tile) {
-        const { stepKind, size, rolesNote } = SCALES[section];
+        const { stepKind, size, rolesNote } = scaleText(t)[section];
 
         return groups.map(
             (group) =>
@@ -795,7 +873,7 @@ export function createSystemSections(env, widgets) {
         html`<button
             type="button"
             class="dsy-copy"
-            title="Copy the CSS value"
+            title=${t("server.extensions.design.system-sections.create-system-sections.copy-shadow.title.copy-css-value", "Copy the CSS value")}
             aria-label=${`Copy the CSS value of ${token.name}`}
             onClick=${async () => {
                 const css = shadowOf(firstValue(ctx, token).value);
@@ -1037,7 +1115,10 @@ export function createSystemSections(env, widgets) {
                         class="button primary"
                         onClick=${() => env.askPi("components")}
                     >
-                        <${Ico} name="sparkle" size=${15} /> Ask Pi for the core components
+                        <${Ico} name="sparkle" size=${15} /> ${t(
+                            "server.extensions.design.system-sections.create-system-sections.components.text.ask-pi-core-components",
+                            "Ask Pi for the core components",
+                        )}
                     </button>`
                 }
             </div>`;
@@ -1055,7 +1136,8 @@ export function createSystemSections(env, widgets) {
                 class="dsn-link dsy-more"
                 onClick=${() => env.askPi("component")}
             >
-                <${Ico} name="sparkle" size=${14} /> Ask Pi for another component
+                <${Ico} name="sparkle" size=${14} />
+                ${t("server.extensions.design.system-sections.create-system-sections.components.text.ask-pi-another-component", "Ask Pi for another component")}
             </button>`
         }`;
     }
@@ -1080,7 +1162,7 @@ export function createSystemSections(env, widgets) {
                     value=${draft ?? text}
                     maxlength="16000"
                     spellcheck="true"
-                    aria-label="Guidelines, in Markdown"
+                    aria-label=${t("server.extensions.design.system-sections.create-system-sections.guidelines.aria-label.guidelines-markdown", "Guidelines, in Markdown")}
                     onInput=${(event) => {
                         setDraft(event.currentTarget.value);
                         env.editGuidelines(event.currentTarget.value);
@@ -1097,7 +1179,7 @@ export function createSystemSections(env, widgets) {
                         class="button small"
                         onClick=${() => store.set({ sysWriting: false })}
                     >
-                        Done
+                        ${t("server.extensions.design.system-sections.create-system-sections.guidelines.button.done", "Done")}
                     </button>
                 </div>
             </div>`;
@@ -1106,7 +1188,9 @@ export function createSystemSections(env, widgets) {
         if (text.trim() === "") {
             return html`<div class="dsy-blank">
                 <${Ico} name="book" size=${28} />
-                <h3>No guidelines yet</h3>
+                <h3>
+                    ${t("server.extensions.design.system-sections.create-system-sections.guidelines.h3.no-guidelines-yet", "No guidelines yet")}
+                </h3>
                 <p class="muted">
                     Guidelines are the rules in words: the voice, the layout, what to do and what
                     not to do. Pi reads them before it designs.
@@ -1119,14 +1203,16 @@ export function createSystemSections(env, widgets) {
                             class="button primary"
                             onClick=${() => store.set({ sysWriting: true })}
                         >
-                            <${Ico} name="pen" size=${15} /> Write them
+                            <${Ico} name="pen" size=${15} />
+                            ${t("server.extensions.design.system-sections.create-system-sections.guidelines.text.write-them", "Write them")}
                         </button>
                         <button
                             type="button"
                             class="button"
                             onClick=${() => env.askPi("guidelines")}
                         >
-                            <${Ico} name="sparkle" size=${15} /> Ask Pi
+                            <${Ico} name="sparkle" size=${15} />
+                            ${t("server.extensions.design.system-sections.create-system-sections.guidelines.text.ask-pi", "Ask Pi")}
                         </button>
                     </div>`
                 }
@@ -1141,7 +1227,8 @@ export function createSystemSections(env, widgets) {
                     class="dsn-link dsy-edit-guidelines"
                     onClick=${() => store.set({ sysWriting: true })}
                 >
-                    <${Ico} name="pen" size=${13} /> Edit
+                    <${Ico} name="pen" size=${13} />
+                    ${t("server.extensions.design.system-sections.create-system-sections.guidelines.text.edit", "Edit")}
                 </button>`
             }
             <${Markdown} text=${text} />

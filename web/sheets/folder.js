@@ -19,6 +19,7 @@ import {
 import { sessionStarted } from "../extension-ui.js";
 import { APPLE, html, Icon, Sheet, shortPath } from "../ui.js";
 import { piSessionsAvailable } from "./pi-sessions.js";
+import { t } from "../ui-locale.js";
 
 /** Whether hidden folders show: kept for the next time the picker opens. */
 const HIDDEN_KEY = "pocket.folderHidden";
@@ -112,9 +113,12 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
             }}
         />
         <button class="button small primary" type="submit" disabled=${text.trim() === ""}>
-            OK
+            ${t("web.sheets.folder.line-input.button.ok", "OK")}
         </button>
-        <button class="icon-button" type="button" aria-label="Cancel" onClick=${onCancel}>
+        <button class="icon-button" type="button" aria-label=${t(
+            "web.sheets.folder.line-input.aria-label.cancel",
+            "Cancel",
+        )} onClick=${onCancel}>
             <${Icon} name="close" size=${16} />
         </button>
     </form>`;
@@ -429,14 +433,23 @@ export function CwdSheet({ mode, fromList = false }) {
             ? [
                   {
                       path: server.defaultCwd,
-                      name: "Default workspace",
+                      name: t(
+                          "web.sheets.folder.release028.default-workspace",
+                          "Default workspace",
+                      ),
                       icon: "folder",
                       pin: !changing,
                   },
               ]
             : []),
-        ...(home ? [{ path: home, name: "Home", icon: "home" }] : []),
-        { path: "/", name: "Computer", icon: "monitor" },
+        ...(home
+            ? [{ path: home, name: t("web.sheets.folder.release028.home", "Home"), icon: "home" }]
+            : []),
+        {
+            path: "/",
+            name: t("web.sheets.folder.release028.computer", "Computer"),
+            icon: "monitor",
+        },
     ];
 
     const place = (path, name, icon, key = null, pin = false) => html`<button
@@ -455,8 +468,8 @@ export function CwdSheet({ mode, fromList = false }) {
                 role="button"
                 tabindex="-1"
                 class=${`fp-pin ${alwaysDefault ? "on" : ""}`}
-                title=${alwaysDefault ? "Always open new sessions here" : "Open new sessions here by default"}
-                aria-label=${alwaysDefault ? "Always open new sessions here" : "Open new sessions here by default"}
+                title=${alwaysDefault ? t("web.sheets.folder.release028.always-default", "Always open new sessions here") : t("web.sheets.folder.release028.make-default", "Open new sessions here by default")}
+                aria-label=${alwaysDefault ? t("web.sheets.folder.release028.always-default", "Always open new sessions here") : t("web.sheets.folder.release028.make-default", "Open new sessions here by default")}
                 onClick=${toggleAlwaysDefault}
             >
                 <${Icon} name="pin" size=${13} />
@@ -466,7 +479,17 @@ export function CwdSheet({ mode, fromList = false }) {
     </button>`;
 
     return html`<${Sheet}
-        title=${changing ? "Move this session: pick a folder" : "New session: pick a folder"}
+        title=${
+            changing
+                ? t(
+                      "web.sheets.folder.cwd-sheet.title.move-session-pick-folder",
+                      "Move this session: pick a folder",
+                  )
+                : t(
+                      "web.sheets.folder.cwd-sheet.title.new-session-pick-folder",
+                      "New session: pick a folder",
+                  )
+        }
         onClose=${closeSheet}
         wide=${true}
         className="folder-sheet"
@@ -475,8 +498,14 @@ export function CwdSheet({ mode, fromList = false }) {
             <button
                 type="button"
                 class="icon-button"
-                aria-label="Up one folder"
-                title="Up one folder (Backspace)"
+                aria-label=${t(
+                    "web.sheets.folder.cwd-sheet.aria-label.up-one-folder",
+                    "Up one folder",
+                )}
+                title=${t(
+                    "web.sheets.folder.cwd-sheet.title.up-one-folder-backspace",
+                    "Up one folder (Backspace)",
+                )}
                 disabled=${!listing?.parent}
                 onClick=${up}
             >
@@ -487,8 +516,14 @@ export function CwdSheet({ mode, fromList = false }) {
                     ? html`<${LineInput}
                           class="fp-path-input"
                           value=${editing}
-                          placeholder="A path: ~/code or /srv"
-                          label="Go to a path"
+                          placeholder=${t(
+                              "web.sheets.folder.cwd-sheet.placeholder.path-code-srv",
+                              "A path: ~/code or /srv",
+                          )}
+                          label=${t(
+                              "web.sheets.folder.cwd-sheet.label.go-to-a-path",
+                              "Go to a path",
+                          )}
                           onSubmit=${goTo}
                           onCancel=${() => {
                               setEditing(null);
@@ -499,8 +534,11 @@ export function CwdSheet({ mode, fromList = false }) {
                           class="fp-crumbs"
                           ref=${crumbsBox}
                           onScroll=${(event) => markCut(event.currentTarget)}
-                          aria-label="Folder"
-                          title="Click the path's end to type one (Ctrl+L)"
+                          aria-label=${t("web.sheets.folder.cwd-sheet.aria-label.folder", "Folder")}
+                          title=${t(
+                              "web.sheets.folder.cwd-sheet.title.click-path-s-end",
+                              "Click the path's end to type one (Ctrl+L)",
+                          )}
                       >
                           ${crumbs.map((crumb, index) =>
                               index === crumbs.length - 1
@@ -509,7 +547,11 @@ export function CwdSheet({ mode, fromList = false }) {
                                         type="button"
                                         class="fp-crumb here"
                                         aria-current="location"
-                                        aria-label=${`${crumb.name}: type a path`}
+                                        aria-label=${t(
+                                            "web.sheets.folder.cwd-sheet.aria-label.type-path",
+                                            "{name}: type a path",
+                                            { name: crumb.name },
+                                        )}
                                         onClick=${() => setEditing(folder)}
                                     >
                                         ${crumb.name}
@@ -540,20 +582,23 @@ export function CwdSheet({ mode, fromList = false }) {
                     setNaming(true);
                 }}
             >
-                <${Icon} name="plus" size=${14} /> New folder
+                <${Icon} name="plus" size=${14} /> ${t(
+                    "web.sheets.folder.cwd-sheet.text.new-folder",
+                    "New folder",
+                )}
             </button>
         </div>
         ${
             missing !== null &&
             html`<div class="folder-missing">
                 <span>
-                    ${missingWhy ?? html`<span class="mono">${shortPath(missing, home)}</span> isn't there.`}
+                    ${missingWhy ?? html`<span class="mono">${shortPath(missing, home)}</span> ${t("web.sheets.folder.cwd-sheet.span.isn-t", "isn't there.")}`}
                 </span>
                 <span class="fp-missing-actions">
                     ${
                         missingWhy === null &&
                         html`<button class="button small" onClick=${() => make(missing)}>
-                            Create it
+                            ${t("web.sheets.folder.cwd-sheet.button.create-it", "Create it")}
                         </button>`
                     }
                     ${
@@ -568,12 +613,18 @@ export function CwdSheet({ mode, fromList = false }) {
                                     (done) => done && setMissing(null),
                                 )}
                         >
-                            Remove from favorites
+                            ${t(
+                                "web.sheets.folder.cwd-sheet.button.remove-from-favorites",
+                                "Remove from favorites",
+                            )}
                         </button>`
                     }
                     <button
                         class="icon-button"
-                        aria-label="Never mind"
+                        aria-label=${t(
+                            "web.sheets.folder.cwd-sheet.aria-label.never-mind",
+                            "Never mind",
+                        )}
                         onClick=${() => setMissing(null)}
                     >
                         <${Icon} name="close" size=${15} />
@@ -595,7 +646,13 @@ export function CwdSheet({ mode, fromList = false }) {
                             : null,
                     ),
                 )}
-                ${recent.length > 0 && html`<div class="fp-places-title">Recent</div>`}
+                ${
+                    recent.length > 0 &&
+                    html`<div class="fp-places-title">${t(
+                        "web.sheets.folder.cwd-sheet.div.recent",
+                        "Recent",
+                    )}</div>`
+                }
                 ${recent.map((path, index) => place(path, labels[index], "folder"))}
                 ${
                     !changing &&
@@ -605,7 +662,10 @@ export function CwdSheet({ mode, fromList = false }) {
                         class="link small fp-pi"
                         onClick=${() => openSheet({ type: "pi-sessions" })}
                     >
-                        Continue a Pi session…
+                        ${t(
+                            "web.sheets.folder.cwd-sheet.button.continue-a-pi-session",
+                            "Continue a Pi session…",
+                        )}
                     </button>`
                 }
             </nav>
@@ -613,7 +673,7 @@ export function CwdSheet({ mode, fromList = false }) {
                 class="fp-list"
                 ref=${list}
                 role="listbox"
-                aria-label="Folders"
+                aria-label=${t("web.sheets.folder.cwd-sheet.aria-label.folders", "Folders")}
                 tabindex="0"
                 onKeyDown=${onKeyDown}
             >
@@ -621,8 +681,14 @@ export function CwdSheet({ mode, fromList = false }) {
                     naming &&
                     html`<${LineInput}
                         class="fp-naming"
-                        placeholder="Folder name"
-                        label="The new folder's name"
+                        placeholder=${t(
+                            "web.sheets.folder.cwd-sheet.placeholder.folder-name",
+                            "Folder name",
+                        )}
+                        label=${t(
+                            "web.sheets.folder.cwd-sheet.label.the-new-folder-s-name",
+                            "The new folder's name",
+                        )}
                         onSubmit=${(name) => make(joined(folder, name))}
                         onCancel=${() => {
                             setNaming(false);
@@ -631,7 +697,14 @@ export function CwdSheet({ mode, fromList = false }) {
                     />`
                 }
                 ${failed && html`<p class="fp-note">${failed}</p>`}
-                ${!listing && !failed && html`<p class="fp-note">Opening…</p>`}
+                ${
+                    !listing &&
+                    !failed &&
+                    html`<p class="fp-note">${t(
+                        "web.sheets.folder.cwd-sheet.p.opening",
+                        "Opening…",
+                    )}</p>`
+                }
                 ${dirs.map(
                     (dir) => html`<button
                         key=${dir.path}
@@ -641,7 +714,14 @@ export function CwdSheet({ mode, fromList = false }) {
                         role="option"
                         aria-selected=${dir.path === selected ? "true" : "false"}
                         data-path=${dir.path}
-                        title=${touch ? undefined : "Double-click to open"}
+                        title=${
+                            touch
+                                ? undefined
+                                : t(
+                                      "web.sheets.folder.cwd-sheet.text.double-click-open",
+                                      "Double-click to open",
+                                  )
+                        }
                         onClick=${() => {
                             if (touch) {
                                 load(dir.path);
@@ -660,12 +740,22 @@ export function CwdSheet({ mode, fromList = false }) {
                         ${touch && html`<${Icon} name="chevron" size=${14} class="fp-chev" />`}
                     </button>`,
                 )}
-                ${listing && dirs.length === 0 && html`<p class="fp-note">No folders in here.</p>`}
+                ${
+                    listing &&
+                    dirs.length === 0 &&
+                    html`<p class="fp-note">${t(
+                        "web.sheets.folder.cwd-sheet.p.no-folders-in-here",
+                        "No folders in here.",
+                    )}</p>`
+                }
             </div>
         </div>
         <div class="fp-foot">
             <div class="fp-target" title=${target ? shortPath(target, home) : ""}>
-                <span class="muted">Folder:</span>
+                <span class="muted">${t(
+                    "web.sheets.folder.cwd-sheet.span.folder",
+                    "Folder:",
+                )}</span>
                 <span class="mono">${target ? shortPath(target, home) : "…"}</span>
                 ${
                     mayStar &&
@@ -674,8 +764,28 @@ export function CwdSheet({ mode, fromList = false }) {
                         type="button"
                         class=${`icon-button fp-star ${starred ? "on" : ""}`}
                         aria-pressed=${starred ? "true" : "false"}
-                        aria-label=${starred ? "Remove from favorites" : "Add to favorites"}
-                        title=${starred ? "Remove from favorites" : "Add to favorites"}
+                        aria-label=${
+                            starred
+                                ? t(
+                                      "web.sheets.folder.cwd-sheet.aria-label.remove-favorites",
+                                      "Remove from favorites",
+                                  )
+                                : t(
+                                      "web.sheets.folder.cwd-sheet.aria-label.add-favorites",
+                                      "Add to favorites",
+                                  )
+                        }
+                        title=${
+                            starred
+                                ? t(
+                                      "web.sheets.folder.cwd-sheet.title.remove-favorites",
+                                      "Remove from favorites",
+                                  )
+                                : t(
+                                      "web.sheets.folder.cwd-sheet.title.add-favorites",
+                                      "Add to favorites",
+                                  )
+                        }
                         disabled=${saving}
                         onClick=${toggleFavorite}
                     >
@@ -688,22 +798,34 @@ export function CwdSheet({ mode, fromList = false }) {
                     !changing &&
                     html`<label
                         class="check"
-                        title="The session gets a branch of its own, apart from this folder"
+                        title=${t(
+                            "web.sheets.folder.cwd-sheet.title.session-gets-branch-own",
+                            "The session gets a branch of its own, apart from this folder",
+                        )}
                     >
                         <input
                             type="checkbox"
                             checked=${worktree}
                             onChange=${(event) => setWorktree(event.currentTarget.checked)}
                         />
-                        Own git worktree
+                        ${t(
+                            "web.sheets.folder.cwd-sheet.input.own-git-worktree",
+                            "Own git worktree",
+                        )}
                     </label>`
                 }
                 <label class="check">
-                    <input type="checkbox" checked=${hidden} onChange=${toggleHidden} /> Show hidden
+                    <input type="checkbox" checked=${hidden} onChange=${toggleHidden} /> ${t(
+                        "web.sheets.folder.cwd-sheet.input.show-hidden",
+                        "Show hidden",
+                    )}
                 </label>
             </div>
             <div class="fp-buttons">
-                <button type="button" class="button" onClick=${closeSheet}>Cancel</button>
+                <button type="button" class="button" onClick=${closeSheet}>${t(
+                    "web.sheets.folder.cwd-sheet.button.cancel",
+                    "Cancel",
+                )}</button>
                 <button
                     type="button"
                     class="button primary"
@@ -711,7 +833,13 @@ export function CwdSheet({ mode, fromList = false }) {
                     disabled=${target === null || busy || here}
                     onClick=${() => use()}
                 >
-                    ${here ? "Already here" : changing ? "Move here" : "Open"}
+                    ${
+                        here
+                            ? t("web.sheets.folder.cwd-sheet.button.already", "Already here")
+                            : changing
+                              ? t("web.sheets.folder.cwd-sheet.button.move", "Move here")
+                              : t("web.sheets.folder.cwd-sheet.button.open", "Open")
+                    }
                 </button>
             </div>
         </div>

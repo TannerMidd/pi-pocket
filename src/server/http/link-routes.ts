@@ -12,6 +12,8 @@ import { describe, HttpError } from "../errors.ts";
 import { exposedError } from "../extension-web.ts";
 import type { PublicPageRequest } from "../host.ts";
 import { escapeHtml, readBody, send } from "./io.ts";
+import { pageLocale } from "./locale.ts";
+import type { RequestLocale } from "../ui-locales.ts";
 
 /** The largest form a public page takes: answers in words, not files. */
 export const MAX_FORM = 64 * 1024;
@@ -52,9 +54,9 @@ export const LINK_HEADERS: Readonly<Record<string, string>> = {
 };
 
 /** The page for a link that answers nothing, or a failure: the same for each, so an address tells nothing of others. */
-function plainPage(title: string, text: string): string {
+function plainPage(locale: RequestLocale, title: string, text: string): string {
     return `<!doctype html>
-<html lang="en">
+<html lang="${escapeHtml(locale.lang)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -74,10 +76,6 @@ h1 { font-size: 1.3rem; }
 function answerPage(response: ServerResponse, status: number, html: string): void {
     send(response, status, html, "text/html; charset=utf-8", { ...LINK_HEADERS });
 }
-
-const CLOSED_TITLE = "This link is not open";
-const CLOSED_TEXT =
-    "It may have closed, taken its answer already, or been ended. Ask whoever sent it for a new one.";
 
 /** A posted form's fields: urlencoded text alone. The last of a name that comes twice counts. */
 async function readForm(request: IncomingMessage, token: string): Promise<Record<string, string>> {
@@ -154,12 +152,27 @@ export async function linkRoute(
     token: string | undefined,
     url: URL,
 ): Promise<void> {
+    const locale = pageLocale(app, request, url);
+    const t = locale.t;
+    const closedTitle = t("server.http.public-link.closed-title", "This link is not open");
+    const closedText = t(
+        "server.http.public-link.closed-text",
+        "It may have closed, taken its answer already, or been ended. Ask whoever sent it for a new one.",
+    );
     const method = request.method === "HEAD" ? "GET" : request.method;
 
     if (method !== "GET" && method !== "POST") {
         response.setHeader("allow", "GET, HEAD, POST");
 
-        return answerPage(response, 405, plainPage("Not here", "This page is only read or sent."));
+        return answerPage(
+            response,
+            405,
+            plainPage(
+                locale,
+                t("server.http.public-link.not-here", "Not here"),
+                t("server.http.public-link.read-or-send", "This page is only read or sent."),
+            ),
+        );
     }
 
     const found = token === undefined ? undefined : await app.publicLinks.open(token);
@@ -167,7 +180,7 @@ export async function linkRoute(
 
     // A closed link, a token that names nothing, and a module turned off look the same.
     if (found === undefined || page === undefined) {
-        return answerPage(response, 404, plainPage(CLOSED_TITLE, CLOSED_TEXT));
+        return answerPage(response, 404, plainPage(locale, closedTitle, closedText));
     }
 
     let { link } = found;
@@ -188,7 +201,13 @@ export async function linkRoute(
             return answerPage(
                 response,
                 status,
-                plainPage("Not sent", error instanceof HttpError ? error.message : "Try again."),
+                plainPage(
+                    locale,
+                    t("server.http.public-link.not-sent", "Not sent"),
+                    error instanceof HttpError
+                        ? error.message
+                        : t("server.http.public-link.retry", "Try again."),
+                ),
             );
         }
 
@@ -196,7 +215,7 @@ export async function linkRoute(
         const counted = await app.publicLinks.claim(link.token);
 
         if (counted === undefined) {
-            return answerPage(response, 410, plainPage(CLOSED_TITLE, CLOSED_TEXT));
+            return answerPage(response, 410, plainPage(locale, closedTitle, closedText));
         }
 
         link = counted;
@@ -213,8 +232,16 @@ export async function linkRoute(
         }
 
         return busy
-            ? answerPage(response, 503, plainPage("Busy", "Try again in a moment."))
-            : answerPage(response, 404, plainPage(CLOSED_TITLE, CLOSED_TEXT));
+            ? answerPage(
+                  response,
+                  503,
+                  plainPage(
+                      locale,
+                      t("server.http.public-link.busy", "Busy"),
+                      t("server.http.public-link.retry-later", "Try again in a moment."),
+                  ),
+              )
+            : answerPage(response, 404, plainPage(locale, closedTitle, closedText));
     }
 
     running += 1;
@@ -232,6 +259,7 @@ export async function linkRoute(
     });
 
     const input: PublicPageRequest = {
+        locale,
         method,
         link: Object.freeze(link),
         query: url.searchParams,
@@ -310,8 +338,13 @@ export async function linkRoute(
 
         status = exposed?.status ?? 500;
         html = plainPage(
-            "Something went wrong",
-            exposed?.message ?? "This page could not be shown. Try again later.",
+            locale,
+            t("server.http.public-link.error", "Something went wrong"),
+            exposed?.message ??
+                t(
+                    "server.http.public-link.cannot-show",
+                    "This page could not be shown. Try again later.",
+                ),
         );
     } finally {
         clearTimeout(deadline);

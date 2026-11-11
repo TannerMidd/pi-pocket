@@ -637,6 +637,8 @@ export class PocketApp {
             },
             // Everyone's tabs hear the new list in `hello`: commands are for guests too, not by a browser module's access.
             commandsChanged: () => this.#websChanged("all"),
+            // The UI catalog changed: every tab reads it again, as it does on each new connection.
+            localesChanged: () => this.#websChanged("all"),
             presentationsChanged: () => {
                 // A new build in `hello`: what tabs kept shows the inputs as presented before.
                 this.#websChanged("all");
@@ -2636,6 +2638,8 @@ export class PocketApp {
                 deviceCache: process.env.PI_POCKET_SESSION_CACHE !== "off",
                 // This server's clock: peek tiles compare the browser's looks with when runs ended here.
                 now: Date.now(),
+                // The UI catalog's revision: a tab reads the catalog again when this changes, and on each connection.
+                localeRevision: this.webs.locales.revision,
                 // Collaboration features: 2 adds roles, take turns, reactions, pins, notes, mentions, and push.
                 collab: 2,
                 reactions: REACTIONS,

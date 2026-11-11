@@ -2,6 +2,7 @@
 import { useState } from "preact/hooks";
 import { actions, attempt, canSteer, closeSheet, store } from "../store.js";
 import { formatWhen, html, Icon, Sheet } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 /** Messages that go to Pi later or on repeat: set one up, see what is coming, cancel one. */
 export function SchedulesSheet() {
@@ -13,38 +14,51 @@ export function SchedulesSheet() {
     );
     const setBy = (id) =>
         id === undefined
-            ? "Pi"
+            ? t("web.sheets.schedules.schedules-sheet.set-by.pi", "Pi")
             : id === me?.id
-              ? "you"
-              : (users.find((user) => user.id === id)?.name ?? "someone");
+              ? t("web.sheets.schedules.schedules-sheet.set-by.content", "you")
+              : (users.find((user) => user.id === id)?.name ??
+                t("web.sheets.schedules.schedules-sheet.set-by.someone", "someone"));
     const add = () =>
         attempt(async () => {
             await actions.schedule(when);
             setWhen("");
         });
 
-    return html`<${Sheet} title="Scheduled messages" onClose=${closeSheet}>
+    return html`<${Sheet} title=${t(
+        "web.sheets.schedules.schedules-sheet.title.scheduled-messages",
+        "Scheduled messages",
+    )} onClose=${closeSheet}>
         <p class="muted small">
-            Pi gets these at their time, also when nobody is here, and the people in this session get a notification when it is done.
+            ${t("web.sheets.schedules.schedules-sheet.p.pi-gets-their-time", "Pi gets these at their time, also when nobody is here, and the people in this session get a notification when it is done.")}
         </p>
         ${
             steer &&
             html`<div class="row">
                 <input
-                    placeholder="in 2h check the deploy"
+                    placeholder=${t(
+                        "web.sheets.schedules.schedules-sheet.placeholder.h-check-deploy",
+                        "in 2h check the deploy",
+                    )}
                     value=${when}
                     onInput=${(event) => setWhen(event.currentTarget.value)}
                     onKeyDown=${(event) => event.key === "Enter" && add()}
                 />
                 <button class="button primary" disabled=${when.trim() === ""} onClick=${add}>
-                    Add
+                    ${t("web.sheets.schedules.schedules-sheet.button.add", "Add")}
                 </button>
             </div>
             <p class="muted small">
-                Start with when: in 30m, 7:00, tomorrow 9am, fri 17:30, every 2h, every weekday 8:00. Then what Pi gets.
+                ${t("web.sheets.schedules.schedules-sheet.p.start-m-tomorrow-am", "Start with when: in 30m, 7:00, tomorrow 9am, fri 17:30, every 2h, every weekday 8:00. Then what Pi gets.")}
             </p>`
         }
-        ${view.schedules.length === 0 && html`<p class="muted">Nothing is scheduled.</p>`}
+        ${
+            view.schedules.length === 0 &&
+            html`<p class="muted">${t(
+                "web.sheets.schedules.schedules-sheet.p.nothing-is-scheduled",
+                "Nothing is scheduled.",
+            )}</p>`
+        }
         ${
             view.schedules.length > 0 &&
             html`<div class="sheet-list">
@@ -54,12 +68,16 @@ export function SchedulesSheet() {
                         <div class="grow">
                             <div>${schedule.text}</div>
                             <div class="muted small">
-                                ${schedule.repeat ? `${schedule.repeat} · next ${formatWhen(schedule.next)}` : formatWhen(schedule.next)} · set by ${setBy(schedule.by)}${archived ? " · session archived" : ""}
+                                ${t(
+                                    "web.sheets.schedules.schedules-sheet.div.set-by",
+                                    "{when} · set by {who}",
+                                    { when: nextLine(schedule), who: setBy(schedule.by) },
+                                )}${archived ? t("web.sheets.schedules.archived", " · session archived") : ""}
                             </div>
                             ${
                                 schedule.skipped > 0 &&
                                 html`<div class="muted small" data-part="schedule-skipped">
-                                    Skipped ${schedule.skipped === 1 ? "once" : `${schedule.skipped} times`}, last ${formatWhen(schedule.skippedAt)}: its last message still waits in the queue
+                                    ${schedule.skipped === 1 ? t("web.sheets.schedules.release0281.skipped-once", "Skipped once, last {when}: its last message still waits in the queue", { when: formatWhen(schedule.skippedAt) }) : t("web.sheets.schedules.release0281.skipped-many", "Skipped {count} times, last {when}: its last message still waits in the queue", { count: schedule.skipped, when: formatWhen(schedule.skippedAt) })}
                                 </div>`
                             }
                         </div>
@@ -69,7 +87,7 @@ export function SchedulesSheet() {
                                 class="button small ghost"
                                 onClick=${() => attempt(() => actions.cancelSchedule(schedule.id))}
                             >
-                                Cancel
+                                ${t("web.sheets.schedules.schedules-sheet.button.cancel", "Cancel")}
                             </button>`
                         }
                     </div>`,
@@ -77,4 +95,14 @@ export function SchedulesSheet() {
             </div>`
         }
     <//>`;
+}
+
+/** When a scheduled message goes next: its repeat, then the time. */
+function nextLine(schedule) {
+    return schedule.repeat
+        ? t("web.sheets.schedules.schedules-sheet.div.next-repeat-when", "{repeat} · next {when}", {
+              repeat: schedule.repeat,
+              when: formatWhen(schedule.next),
+          })
+        : formatWhen(schedule.next);
 }

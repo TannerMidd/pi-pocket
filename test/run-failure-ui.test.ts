@@ -22,6 +22,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import { capture0281 } from "./main-0281-ui-evidence.ts";
 
 const chromium = findBrowser();
 const real = {
@@ -121,6 +122,33 @@ test(
             (await failureLine()) ?? "",
             /Run failed: .*Compaction failed: Summarization hit the token limit/,
         );
+
+        assert.ok(chromium, "Chromium is required for the locale failure-line regression");
+
+        for (const viewport of ["mobile", "desktop"] as const) {
+            await page.setViewport(VIEWPORTS[viewport]);
+            await page.evaluate("(await import('/ui-locale.js')).setLocale('zh-CN')");
+            await until(
+                async () => /[\u4e00-\u9fff]/u.test((await failureLine()) ?? ""),
+                "the real Run failed shell follows Chinese",
+            );
+            assert.ok(
+                (await failureLine())!.includes(failure()!),
+                "the failure reason stays literal",
+            );
+            assert.ok(!(await failureLine())!.includes("Run failed:"));
+            await capture0281(
+                page,
+                viewport + "-run-failed-chinese",
+                "Real compaction failure → persistent transcript run-failure row",
+                '[data-part="run-failure"]',
+            );
+            await page.evaluate("(await import('/ui-locale.js')).setLocale('en')");
+            await until(
+                async () => /^Run failed:/.test((await failureLine()) ?? ""),
+                "English failure shell returns without changing the reason",
+            );
+        }
 
         // The next run compacts: the line goes.
         failSummary = false;

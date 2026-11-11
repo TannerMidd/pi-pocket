@@ -50,6 +50,9 @@ import {
     Switch,
     writtenText,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
+import { moduleTitle } from "./builtin-locales.js";
+import { useArtifactBridge } from "./artifact-bridge.js";
 
 /**
  * The version of `pocket`. It goes up only when something extensions use changes in a way that breaks them; additions
@@ -349,7 +352,9 @@ function reason(error) {
         text = "";
     }
 
-    return text.trim() === "" ? "it gave no reason" : text;
+    return text.trim() === ""
+        ? t("web.extension-ui.reason.text.it-gave-no-reason", "it gave no reason")
+        : text;
 }
 
 /** Run a cleanup; one that fails says so in the console, and the rest still run. */
@@ -493,7 +498,18 @@ function sync(list, known = true) {
 async function load(entry) {
     const record = {
         module: entry.module,
-        title: entry.title,
+        get title() {
+            return moduleTitle({
+                file: `${entry.module}.ts`,
+                source:
+                    entry.module === "design" ||
+                    entry.module === "ask-someone" ||
+                    entry.module === "session-tags"
+                        ? "built-in"
+                        : "drop-in",
+                title: entry.title,
+            });
+        },
         url: entry.url,
         status: "loading",
         error: null,
@@ -549,7 +565,22 @@ async function load(entry) {
             throw new Error("it has no default export function");
         }
 
-        const dispose = await loaded.default(record.pocket);
+        // Design predates the public module boundary. Core supplies its internal integrations, not importable files.
+        const integration =
+            entry.module === "design"
+                ? {
+                      app: Object.freeze({
+                          get state() {
+                              return store.state;
+                          },
+                          subscribe: (listener) => store.subscribe(listener),
+                      }),
+                      share: (id, version) =>
+                          openSheet({ type: "artifact-share", id, version, back: "design" }),
+                      useArtifactBridge,
+                  }
+                : undefined;
+        const dispose = await loaded.default(record.pocket, integration);
 
         if (typeof dispose === "function") {
             record.disposers.push(dispose);
@@ -578,6 +609,20 @@ async function load(entry) {
  * A module failed, while it loaded or later (`how`): what it added goes, its cleanups run, what it tries next does
  * nothing, and a notice, its page or sheet, and the Extensions sheet say why.
  */
+/** How a module failed, as this module names it, in this language: the record keeps the English name. */
+const FAIL_WORDS = {
+    "failed to load": ["web.extension-ui.fail.text.failed-to-load", "failed to load"],
+    "was stopped": ["web.extension-ui.fail.text.was-stopped", "was stopped"],
+    failed: ["web.extension-ui.fail.text.failed", "failed"],
+};
+
+/** One of `FAIL_WORDS`, read as it draws so a new language shows at once. */
+function failWord(word) {
+    const [key, english] = FAIL_WORDS[word] ?? FAIL_WORDS["failed to load"];
+
+    return t(key, english);
+}
+
 function fail(record, error, how) {
     record.dead = true;
     teardown(record);
@@ -585,7 +630,14 @@ function fail(record, error, how) {
     record.error = reason(error);
     record.how = how;
     console.error(`${record.title}'s browser module ${how}`, error);
-    notify("error", `${record.title} ${how} in this browser: ${record.error}`);
+    notify(
+        "error",
+        t(
+            "web.extension-ui.fail.notice.title-how-browser",
+            "{title} {how} in this browser: {error}",
+            { title: record.title, how: failWord(how), error: record.error },
+        ),
+    );
     redraw();
 }
 
@@ -988,6 +1040,37 @@ function pocketFor(record) {
         },
         module: record.module,
         title: record.title,
+        /** Fixed UI text only: the current language, with literal named interpolation and English fallback. */
+        t,
+        /** A language or catalog revision changed; listeners are removed with this module version. */
+        onLocaleChange(listener) {
+            tick(record);
+
+            if (typeof listener !== "function") {
+                throw new Error("pocket.onLocaleChange: give it a function");
+            }
+
+            if (!live()) {
+                return () => {};
+            }
+
+            let revision = store.state.localeRevision;
+            const stop = store.subscribe((state) => {
+                if (state.localeRevision !== revision && live()) {
+                    revision = state.localeRevision;
+
+                    try {
+                        listener();
+                    } catch (error) {
+                        console.error(`${record.title}: an onLocaleChange listener failed`, error);
+                    }
+                }
+            });
+
+            record.disposers.push(stop);
+
+            return stop;
+        },
         // Drawing: the app's own Preact and htm, so components and hooks work with its renderer.
         h,
         html,
@@ -2035,10 +2118,10 @@ const cachedChips = new WeakMap();
 
 /** The chips that extensions put on a session's row: `{ key, label, title, run }`, `run` only for one that does something. */
 export function sessionChips(session) {
-    const revision = store.state.extensionsRev;
+    const { extensionsRev: revision, localeRevision } = store.state;
     const cached = cachedChips.get(session);
 
-    if (cached?.revision === revision) {
+    if (cached?.revision === revision && cached.localeRevision === localeRevision) {
         return cached.chips;
     }
 
@@ -2063,7 +2146,7 @@ export function sessionChips(session) {
             }));
     });
 
-    cachedChips.set(session, { revision, chips });
+    cachedChips.set(session, { revision, localeRevision, chips });
 
     return chips;
 }
@@ -2073,10 +2156,10 @@ const cachedWords = new WeakMap();
 
 /** The words that extensions give a session for the session list's search and the launcher's, lowercased. */
 export function sessionWords(session) {
-    const revision = store.state.extensionsRev;
+    const { extensionsRev: revision, localeRevision } = store.state;
     const cached = cachedWords.get(session);
 
-    if (cached?.revision === revision) {
+    if (cached?.revision === revision && cached.localeRevision === localeRevision) {
         return cached.words;
     }
 
@@ -2091,7 +2174,7 @@ export function sessionWords(session) {
             : [];
     });
 
-    cachedWords.set(session, { revision, words });
+    cachedWords.set(session, { revision, localeRevision, words });
 
     return words;
 }
@@ -2443,7 +2526,12 @@ class Guard extends Component {
 
     render({ children, name, fallback }, { failed, message }) {
         return failed
-            ? html`<div class="error-box">${name} failed: ${message}</div>
+            ? html`<div class="error-box">
+                  ${t("web.extension-ui.guard.div.name-failed", "{name} failed: {message}", {
+                      name,
+                      message,
+                  })}
+              </div>
                   ${fallback}`
             : children;
     }
@@ -2464,7 +2552,8 @@ const DIFF_HOOK = "__b";
 const RENDER_HOOK = "__r";
 const COMPONENT = "__c";
 const PARENT = "__";
-const NO_REASON = "it gave no reason";
+/** What a failure that threw nothing at all says, in this language. */
+const noReason = () => t("web.extension-ui.reason.text.it-gave-no-reason", "it gave no reason");
 /** What Preact calls of a component while it draws, besides its class's getDerivedStateFromProps. */
 const DRAWING = [
     "render",
@@ -2493,7 +2582,7 @@ function throwsSomething(run) {
         try {
             return run.apply(this, args);
         } catch (error) {
-            throw error ?? new Error(NO_REASON);
+            throw error ?? new Error(noReason());
         }
     };
 
@@ -2646,7 +2735,7 @@ options[RENDER_HOOK] = (vnode) => {
         try {
             beforeRender(vnode);
         } catch (error) {
-            throw error ?? new Error(NO_REASON);
+            throw error ?? new Error(noReason());
         }
     }
 };
@@ -2663,7 +2752,7 @@ function framedFence(spec) {
     if (!framedFences.has(spec.component)) {
         const Framed = (props) =>
             html`<${Guard}
-                name=${`Fence ${spec.id}`}
+                name=${t("web.extension-ui.fence.name", "Fence {id}", { id: spec.id })}
                 reset=${props.source}
                 fallback=${html`<pre data-lang=${props.lang}><code>${props.source}</code></pre>`}
             >
@@ -2691,19 +2780,40 @@ function componentId(component) {
 /** What a page or sheet shows: its component once its module is ready, else why not. */
 function Body({ record, spec, title, props, close }) {
     if (record === undefined) {
-        return html`<p class="muted">This extension is off.</p>`;
+        return html`<p class="muted">${t(
+            "web.extension-ui.body.p.this-extension-is-off",
+            "This extension is off.",
+        )}</p>`;
     }
 
     if (record.status === "failed") {
         return html`<div class="error-box">
-            ${record.title} ${record.how ?? "failed to load"} in this browser: ${record.error}
+            ${t(
+                "web.extension-ui.body.div.title-how-browser",
+                "{title} {how} in this browser: {error}",
+                {
+                    title: record.title,
+                    how: failWord(record.how ?? "failed to load"),
+                    error: record.error,
+                },
+            )}
         </div>`;
     }
 
     if (spec === undefined) {
         return record.status === "ready"
-            ? html`<p class="muted">${record.title} no longer has this.</p>`
-            : html`<${Loader} label=${`Loading ${title}`} />`;
+            ? html`<p class="muted">
+                  ${t(
+                      "web.extension-ui.body.p.title-no-longer-has",
+                      "{title} no longer has this.",
+                      { title: record.title },
+                  )}
+              </p>`
+            : html`<${Loader}
+                  label=${t("web.extension-ui.body.loader.label.loading-title", "Loading {title}", {
+                      title,
+                  })}
+              />`;
     }
 
     // A Guard that caught a failure stays with it until its component changes (the page added again, or updated).
@@ -2720,7 +2830,10 @@ export function ExtensionPage() {
     const target = store.state.page;
     const record = modules.get(target?.module);
     const spec = record?.adds.page.get(target?.id);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     // A page that keeps Esc for itself (`escape: false`): read as the key comes, as it may change.
     const keepsEscape = useRef(false);
     const close = useMemo(() => pageCloser(record, target?.id), [record, target?.id]);
@@ -2774,8 +2887,11 @@ export function ExtensionPage() {
             </div>
             <button
                 class="icon-button"
-                title="Back to the conversation (Esc)"
-                aria-label="Close"
+                title=${t(
+                    "web.extension-ui.extension-page.title.back-conversation-esc",
+                    "Back to the conversation (Esc)",
+                )}
+                aria-label=${t("web.extension-ui.extension-page.aria-label.close", "Close")}
                 onClick=${closePage}
             >
                 <${Icon} name="close" />
@@ -2791,7 +2907,10 @@ export function ExtensionPage() {
 export function ExtensionSheet({ sheet }) {
     const record = modules.get(sheet.module);
     const spec = record?.adds.sheet.get(sheet.sheetId);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     const close = useMemo(() => sheetCloser(record, sheet.sheetId), [record, sheet.sheetId]);
 
     return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${spec?.wide === true}>
@@ -2821,7 +2940,10 @@ export function ExtensionPanel({ leaving = false }) {
     const target = last.current;
     const record = modules.get(target?.module);
     const spec = record?.adds.panel.get(target?.id);
-    const title = spec?.title ?? record?.title ?? "Extension";
+    const title =
+        spec?.title ??
+        record?.title ??
+        t("web.sheets.gallery.gallery-entry-sheet.title.extension", "Extension");
     const close = useMemo(() => panelCloser(record, target?.id), [record, target?.id]);
     const beside = panelsBeside();
 
@@ -2844,8 +2966,11 @@ export function ExtensionPanel({ leaving = false }) {
                 html`<button
                     class="icon-button ext-panel-back"
                     type="button"
-                    aria-label="Back to the conversation"
-                    title="Back"
+                    aria-label=${t(
+                        "web.extension-ui.extension-panel.aria-label.back-to-the-conversation",
+                        "Back to the conversation",
+                    )}
+                    title=${t("web.extension-ui.extension-panel.title.back", "Back")}
                     onClick=${closeExtPanel}
                 >
                     <${Icon} name="back" size=${22} />
@@ -2864,8 +2989,12 @@ export function ExtensionPanel({ leaving = false }) {
                 html`<button
                     class="icon-button"
                     type="button"
-                    aria-label=${`Close ${title}`}
-                    title="Close"
+                    aria-label=${t(
+                        "web.extension-ui.extension-panel.aria-label.close-title",
+                        "Close {title}",
+                        { title },
+                    )}
+                    title=${t("web.extension-ui.extension-panel.title.close", "Close")}
                     onClick=${closeExtPanel}
                 >
                     <${Icon} name="close" size=${17} />

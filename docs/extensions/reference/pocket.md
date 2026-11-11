@@ -68,6 +68,30 @@ Since 0.14.0 · Stable
 
 The module's title, as the Extensions sheet shows it.
 
+## Language
+
+These experimental additions are not in the official 0.28.0 or 0.28.1 releases. Their first release is not assigned; the maintainers decide it. Check for the members at runtime.
+
+### `t`
+
+```ts
+t(key: string, english: string, values?: Readonly<Record<string, string | number>>): string;
+```
+
+Since Unreleased · Experimental
+
+The current language's fixed UI text for `key`, with explicit English fallback and literal named interpolation. It does not escape HTML. Do not pass user content, tool output, or model instructions through it. The key must be in the app's English catalog before a language pack can publish it.
+
+### `onLocaleChange`
+
+```ts
+onLocaleChange(listener: () => void): () => void;
+```
+
+Since Unreleased · Experimental
+
+Hear accepted language or catalog changes. It does not call the listener immediately. Look up text when a component draws; update registered labels and redraw open components from this listener. The stop function removes it, and it also stops when this module version goes. No page reload or component remount is required.
+
 ## Drawing
 
 These are the app's own Preact and htm. Use them, and not a copy of your own, so that your components draw as the app's components do.

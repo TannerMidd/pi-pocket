@@ -62,6 +62,7 @@ Pi Pocket sends every public page with a content security policy that puts it in
 
 The handler gets a [`PublicPageRequest`](reference/web.md#publicpagerequest):
 
+- Unreleased (experimental; not in official 0.28.0 or 0.28.1), optional `locale` supplies this request's immutable `lang` and `t(key, english, values?)`. It uses the exact available `pocket_locale` choice, else English, and safe mode uses English. Older servers omit it. The lookup returns text, not escaped HTML; escape it for the page. Never keep a global current language.
 - `method`: `"GET"`, or `"POST"` for a form. `HEAD` comes as `"GET"`.
 - `form`: the fields of a posted form (`application/x-www-form-urlencoded`), each as text. Nothing else is taken: no JSON and no files.
 - `link`: the link, with its `data`, `by`, `conversation`, and how many `uses` it has left. For a post, the count leaves out this one.

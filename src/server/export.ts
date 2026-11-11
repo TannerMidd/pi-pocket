@@ -4,6 +4,8 @@
  */
 import { presentationLine } from "./entry-presentation.ts";
 import { FROM_PREFIX, splitAttachments } from "./entry-format.ts";
+import { escapeHtml } from "./http/io.ts";
+import type { RequestLocale } from "./ui-locales.ts";
 import type { ClientBlock, ClientEntry } from "./projection.ts";
 
 /** Tool output beyond this keeps its start and end. */
@@ -135,7 +137,7 @@ function presentedMarkdown(
     return `<details><summary>${escapeSummary(summary)}</summary>\n\n${userMarkdown(entry, author)}\n\n</details>`;
 }
 
-export function transcriptMarkdown(input: ExportInput): string {
+export function transcriptMarkdown(input: ExportInput, locale?: RequestLocale): string {
     const results = new Map<string, Extract<ClientEntry, { kind: "toolResult" }>>();
 
     for (const entry of input.entries) {
@@ -189,8 +191,12 @@ export function transcriptMarkdown(input: ExportInput): string {
                     : presentedMarkdown(entry, input.authors[entry.id]),
             );
         } else if (entry.kind === "compaction") {
+            const title =
+                locale?.t("server.export.context-compacted", "Context compacted") ??
+                "Context compacted";
+
             sections.push(
-                `<details><summary>Context compacted</summary>\n\n${entry.summary}\n\n</details>`,
+                `<details><summary>${escapeHtml(title)}</summary>\n\n${entry.summary}\n\n</details>`,
             );
         } else if (entry.kind === "reset") {
             sections.push(

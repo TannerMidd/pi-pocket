@@ -207,6 +207,102 @@ const uiFor = async (who: string) =>
     ((await call(who, "/api/me")).data as { server: { ui: { module: string; url: string }[] } })
         .server.ui;
 
+test("locale declarations are staged once and sealed on commit or discard", () => {
+    let notifications = 0;
+    const webs = new ExtensionWebs({ localesChanged: () => notifications++ });
+    const packs = [{ id: "fr", label: "Français", messages: { "ui.close": "Fermer" } }];
+    const first = webs.stage("locale-once.ts", dropIns, "Locale once");
+
+    webs.locales.orderedBy(() => ["locale-once.ts"]);
+    const initial = webs.locales.snapshot();
+
+    first.web.uiLocales(packs);
+    assert.equal(first.part.empty, false, "a locale declaration is web content");
+    assert.equal(webs.describe("locale-once.ts"), undefined, "staged content is invisible");
+    assert.deepEqual(webs.locales.snapshot(), initial);
+    assert.equal(notifications, 0);
+    assert.throws(() => first.web.uiLocales(packs));
+    webs.check(first.part);
+    webs.commit(first.part);
+    assert.deepEqual(webs.describe("locale-once.ts")?.locales, ["fr"]);
+    assert.equal(
+        webs.locales.snapshot().locales.find((each) => each.id === "fr")?.messages["ui.close"],
+        "Fermer",
+    );
+    assert.equal(notifications, 1);
+    assert.throws(
+        () => first.web.uiLocales(packs),
+        /locale-once/,
+        "late declaration errors name their module",
+    );
+
+    const next = webs.stage("locale-once.ts", dropIns, "Locale once");
+
+    next.web.uiLocales(packs);
+    webs.discard(next.part);
+    assert.throws(
+        () => next.web.uiLocales(packs),
+        /locale-once/,
+        "discarded declaration errors name their module",
+    );
+    assert.deepEqual(
+        webs.describe("locale-once.ts")?.locales,
+        ["fr"],
+        "discard retains the previous version",
+    );
+    assert.equal(
+        webs.locales.snapshot().locales.find((each) => each.id === "fr")?.messages["ui.close"],
+        "Fermer",
+    );
+    assert.equal(notifications, 1, "discard sends no notification");
+    webs.remove("locale-once.ts");
+    assert.equal(webs.describe("locale-once.ts"), undefined);
+    assert.deepEqual(
+        webs.locales.snapshot().locales.map((each) => each.id),
+        ["en"],
+    );
+    assert.equal(notifications, 2, "removal sends a notification");
+});
+
+test("final validation rechecks presentation conflicts without publishing a candidate's locale", () => {
+    const changes = { locales: 0, presentations: 0 };
+    const webs = new ExtensionWebs({
+        localesChanged: () => changes.locales++,
+        presentationsChanged: () => changes.presentations++,
+    });
+    const candidate = webs.stage("candidate.ts", dropIns, "Candidate");
+
+    candidate.web.presentEntry({
+        kind: "x.candidate.note",
+        label: "Candidate",
+        userPrefix: "SHARED ",
+    });
+    candidate.web.uiLocales([{ id: "fr", label: "Français", messages: { "ui.close": "Fermer" } }]);
+    assert.equal(webs.presentations().byKind.size, 0);
+    assert.deepEqual(
+        webs.locales.snapshot().locales.map((each) => each.id),
+        ["en"],
+    );
+    webs.check(candidate.part);
+    const winner = webs.stage("winner.ts", dropIns, "Winner");
+
+    winner.web.presentEntry({ kind: "x.winner.note", label: "Winner", userPrefix: "SHARED " });
+    webs.check(winner.part);
+    webs.commit(winner.part);
+    assert.throws(() => webs.check(candidate.part), /userPrefix/);
+    webs.discard(candidate.part);
+    assert.equal(webs.presentations().byKind.size, 1);
+    assert.equal(webs.presentations().byKind.get("x.winner.note")?.label, "Winner");
+    assert.deepEqual(
+        webs.locales.snapshot().locales.map((each) => each.id),
+        ["en"],
+    );
+    assert.deepEqual(changes, { locales: 0, presentations: 1 });
+    webs.remove("winner.ts");
+    assert.equal(webs.presentations().byKind.size, 0);
+    assert.deepEqual(changes, { locales: 0, presentations: 2 });
+});
+
 test("a module's routes answer signed-in people, by who may use each", async () => {
     assert.deepEqual((await call("owner", "/api/x/panel/status")).data, { version: 1 });
 

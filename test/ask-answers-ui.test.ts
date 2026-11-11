@@ -175,4 +175,36 @@ test("answers outlive a switch, a reload, and a refused send, but not the card",
     await page.reload();
     await sees(`${card} !== null`);
     assert.deepEqual(await shown(), ["", "bob", ""]);
+
+    // The same call name in another session must not inherit this session's draft.
+    await page.evaluate(`${store}.navigate(${other})`);
+    await sees(`${card} === null`);
+    void app.approvals.request(
+        {
+            id: "ask-other",
+            conversationId: other,
+            taskId: 1 as TaskId,
+            tool: "ask",
+            subject: "Set up",
+            reason: "",
+            createdAt: first + 5,
+            callId: "call-1",
+            form,
+        },
+        context,
+    );
+    await sees(`${card} !== null`);
+    assert.deepEqual(await shown(), ["", "", ""], "another session has no draft from call-1");
+    await page.type({ selector: "input[name=user]" }, "Literal other user");
+    await page.type({ selector: "input[name=password]" }, "other-private-value");
+    const otherSaved = await inPage<string | null>(
+        `return JSON.stringify((await import('/person-storage.js')).personStorage.get('ask.${other}'))`,
+    );
+
+    assert.match(otherSaved!, /Literal other user/);
+    assert.doesNotMatch(otherSaved!, /other-private-value|bob/);
+    await page.evaluate(`${store}.navigate(${id})`);
+    await sees(`${card} !== null && ${store}.store.state.view.conversation.id===${id}`);
+    assert.deepEqual(await shown(), ["", "bob", ""]);
+    app.approvals.answer("ask-other", { allow: false, by: "test cleanup" });
 });

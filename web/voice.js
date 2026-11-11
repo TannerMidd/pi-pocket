@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { notify } from "./store.js";
 import { html, Icon } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** The browser's recognizer, looked up when used (so a page can stand one in), or undefined where there is none. */
 const Recognizer = () => globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
@@ -12,14 +13,34 @@ const Recognizer = () => globalThis.SpeechRecognition ?? globalThis.webkitSpeech
 export const voiceAvailable = () =>
     globalThis.isSecureContext !== false && typeof Recognizer() === "function";
 
-/** What each of the recognizer's errors means for the person; those not here are named as they are. */
+/**
+ * What each of the recognizer's errors means for the person, read as it draws; those not here are named as they
+ * are.
+ */
 const ERRORS = {
-    "not-allowed": "The microphone is blocked. Allow it for this site in the browser's settings.",
-    "service-not-allowed": "This browser does not allow dictation here.",
-    "no-speech": "No speech heard. Tap the mic and try again.",
-    "audio-capture": "No microphone found.",
-    network: "Dictation needs the network: the browser recognises speech on its own servers.",
-    "language-not-supported": "This browser cannot recognise your language.",
+    "not-allowed": () =>
+        t(
+            "web.voice.not-allowed.microphone-blocked-allow-site",
+            "The microphone is blocked. Allow it for this site in the browser's settings.",
+        ),
+    "service-not-allowed": () =>
+        t(
+            "web.voice.service-not-allowed.browser-not-allow-dictation",
+            "This browser does not allow dictation here.",
+        ),
+    "no-speech": () =>
+        t("web.voice.no-speech.no-speech-heard-tap", "No speech heard. Tap the mic and try again."),
+    "audio-capture": () => t("web.voice.audio-capture.no-microphone-found", "No microphone found."),
+    network: () =>
+        t(
+            "web.voice.network.dictation-needs-network-browser",
+            "Dictation needs the network: the browser recognises speech on its own servers.",
+        ),
+    "language-not-supported": () =>
+        t(
+            "web.voice.language-not-supported.browser-recognise-language",
+            "This browser cannot recognise your language.",
+        ),
 };
 
 /** The dictation that listens now: one at a time, in the whole app. */
@@ -271,7 +292,15 @@ export function useDictation(box, onText, { top = false } = {}) {
                     if (event.error !== "aborted") {
                         const level = event.error === "no-speech" ? "info" : "error";
 
-                        notify(level, ERRORS[event.error] ?? `Dictation stopped: ${event.error}.`);
+                        notify(
+                            level,
+                            ERRORS[event.error]?.() ??
+                                t(
+                                    "web.voice.use-dictation.start.text.dictation-stopped",
+                                    "Dictation stopped: {error}.",
+                                    { error: event.error },
+                                ),
+                        );
                     }
                 };
 
@@ -287,7 +316,14 @@ export function useDictation(box, onText, { top = false } = {}) {
                 } catch (error) {
                     this.recognition = null;
                     current = null;
-                    notify("error", `Dictation did not start: ${error.message ?? error}`);
+                    notify(
+                        "error",
+                        t(
+                            "web.voice.use-dictation.start.text.dictation-not-start",
+                            "Dictation did not start: {error}",
+                            { error: error.message ?? error },
+                        ),
+                    );
                 }
             },
             toggle() {
@@ -335,9 +371,16 @@ export function MicButton({ dictation, class: className = "", size = 17, part, d
         type="button"
         class=${`icon-button mic-button ${listening ? "listening" : ""} ${className}`}
         data-part=${part}
-        aria-label="Dictate"
+        aria-label=${t("web.voice.mic-button.aria-label.dictate", "Dictate")}
         aria-pressed=${listening ? "true" : "false"}
-        title=${listening ? "Listening: tap to stop (Alt+V)" : "Dictate (Alt+V)"}
+        title=${
+            listening
+                ? t(
+                      "web.voice.mic-button.title.listening-tap-stop-alt",
+                      "Listening: tap to stop (Alt+V)",
+                  )
+                : t("web.voice.mic-button.title.dictate-alt-v", "Dictate (Alt+V)")
+        }
         disabled=${disabled}
         onMouseDown=${(event) => event.preventDefault()}
         onClick=${toggle}

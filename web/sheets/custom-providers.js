@@ -1,3 +1,4 @@
+import { t } from "../ui-locale.js";
 // OpenAI-compatible endpoints in the Providers sheet: the "OpenAI Compatible" row adds one with a
 // URL and a key, its models picked from what the endpoint lists (GET /models) or typed by hand;
 // each endpoint's own row edits or removes it. The server keeps each in Pi's models.json, and its
@@ -50,7 +51,8 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             setListed(answer.models);
 
             if (answer.models.length === 0) {
-                setProblem("The endpoint lists no models. Add model IDs by hand.");
+                // null marks the local empty result; remote errors stay literal.
+                setProblem(null);
             }
         } catch (error) {
             setProblem(error.message ?? String(error));
@@ -92,7 +94,13 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                   })
                 : await api("custom-providers", body);
 
-            notify("info", `${saved.name}: ${saved.models.length} models saved.`);
+            notify(
+                "info",
+                t("web.sheets.custom-providers.release028.saved", "{name}: {count} models saved.", {
+                    name: saved.name,
+                    count: saved.models.length,
+                }),
+            );
             onDone();
         } catch (error) {
             setProblem(error.message ?? String(error));
@@ -115,21 +123,25 @@ export function EndpointForm({ editing, onDone, onCancel }) {
         busy === "";
     const keepsKey = editing && editing.key !== "none" && editing.key !== "missing";
     const findLabel =
-        busy === "discover" ? "Asking…" : listed === null ? "Find models" : "Find again";
+        busy === "discover"
+            ? t("web.sheets.custom-providers.release028.asking", "Asking…")
+            : listed === null
+              ? t("web.sheets.custom-providers.release028.find", "Find models")
+              : t("web.sheets.custom-providers.release028.again", "Find again");
 
     return html`<section
         class="auth-inline custom-endpoint-form"
-        aria-label=${editing ? `Edit ${editing.name}` : "Add an OpenAI-compatible endpoint"}
+        aria-label=${editing ? t("web.sheets.custom-providers.release028.edit", "Edit {name}", { name: editing.name }) : t("web.sheets.custom-providers.release028.add-endpoint", "Add an OpenAI-compatible endpoint")}
     >
         <div class="auth-inline-head">
-            <strong>${editing ? `Edit ${editing.name}` : "OpenAI-compatible endpoint"}</strong>
-            <button class="icon-button" aria-label="Close" onClick=${onCancel}>
+            <strong>${editing ? t("web.sheets.custom-providers.release028.edit", "Edit {name}", { name: editing.name }) : t("web.sheets.custom-providers.release028.endpoint", "OpenAI-compatible endpoint")}</strong>
+            <button class="icon-button" aria-label=${t("web.sheets.custom-providers.release028.close", "Close")} onClick=${onCancel}>
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
         <div class="auth-card">
             <label class="field">
-                <span class="label">Name</span>
+                <span class="label">${t("web.sheets.custom-providers.release028.name", "Name")}</span>
                 <input
                     ref=${first}
                     value=${name}
@@ -139,7 +151,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                 />
             </label>
             <label class="field">
-                <span class="label">Base URL</span>
+                <span class="label">${t("web.sheets.custom-providers.release028.url", "Base URL")}</span>
                 <input
                     value=${baseUrl}
                     type="url"
@@ -151,14 +163,14 @@ export function EndpointForm({ editing, onDone, onCancel }) {
             </label>
             <label class="field">
                 <span class="label">
-                    API key${keepsKey ? " (empty keeps the saved one)" : ""}
+                    ${t("web.sheets.custom-providers.release028.api-key", "API key")}${keepsKey ? t("web.sheets.custom-providers.release028.keeps-key", " (empty keeps the saved one)") : ""}
                 </span>
                 <input
                     type="password"
                     autocomplete="off"
                     value=${apiKey}
                     disabled=${noKey}
-                    placeholder=${noKey ? "No key" : "sk-…"}
+                    placeholder=${noKey ? t("web.sheets.custom-providers.release028.no-key", "No key") : "sk-…"}
                     onInput=${(event) => setApiKey(event.currentTarget.value)}
                 />
             </label>
@@ -168,11 +180,11 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                     checked=${noKey}
                     onChange=${(event) => setNoKey(event.currentTarget.checked)}
                 />
-                No key (a local server)
+                ${t("web.sheets.custom-providers.release028.local", "No key (a local server)")}
             </label>
             <div class="field">
                 <div class="custom-endpoint-models-head">
-                    <span class="label">Models · ${chosen.length} chosen</span>
+                    <span class="label">${t("web.sheets.custom-providers.release028.chosen", "Models · {count} chosen", { count: chosen.length })}</span>
                     <button
                         class="button small"
                         disabled=${baseUrl.trim() === "" || busy !== ""}
@@ -187,8 +199,8 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                     html`<label class="search">
                         <${Icon} name="search" size=${16} />
                         <input
-                            placeholder="Find a model"
-                            aria-label="Find a model of this endpoint"
+                            placeholder=${t("web.sheets.custom-providers.release028.find-model", "Find a model")}
+                            aria-label=${t("web.sheets.custom-providers.release028.find-endpoint-model", "Find a model of this endpoint")}
                             value=${query}
                             onInput=${(event) => setQuery(event.currentTarget.value)}
                         />
@@ -199,7 +211,7 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                     html`<div
                         class="custom-endpoint-models"
                         role="group"
-                        aria-label="Models to add"
+                        aria-label=${t("web.sheets.custom-providers.release028.models-add", "Models to add")}
                     >
                         ${shown.map(
                             (id) => html`<label class="check custom-endpoint-model" key=${id}>
@@ -211,15 +223,15 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                                 <span class="mono">${id}</span>
                             </label>`,
                         )}
-                        ${shown.length === 0 && html`<p class="muted small">No model matches.</p>`}
+                        ${shown.length === 0 && html`<p class="muted small">${t("web.sheets.custom-providers.release028.matches", "No model matches.")}</p>`}
                     </div>`
                 }
                 <div class="row">
                     <input
                         value=${typed}
                         autocomplete="off"
-                        aria-label="Model ID"
-                        placeholder="Add a model ID by hand"
+                        aria-label=${t("web.sheets.custom-providers.release028.model-id", "Model ID")}
+                        placeholder=${t("web.sheets.custom-providers.release028.type-id", "Add a model ID by hand")}
                         onInput=${(event) => setTyped(event.currentTarget.value)}
                         onKeyDown=${(event) => event.key === "Enter" && addTyped()}
                     />
@@ -228,15 +240,25 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                         disabled=${typed.trim() === ""}
                         onClick=${addTyped}
                     >
-                        Add
+                        ${t("web.sheets.custom-providers.release028.add", "Add")}
                     </button>
                 </div>
             </div>
-            ${problem && html`<p class="warn small" role="alert">${problem}</p>`}
+            ${
+                problem !== "" &&
+                html`<p class="warn small" role="alert">${
+                    problem === null
+                        ? t(
+                              "web.sheets.custom-providers.release028.no-models",
+                              "The endpoint lists no models. Add model IDs by hand.",
+                          )
+                        : problem
+                }</p>`
+            }
             <div class="row custom-endpoint-buttons">
-                <button class="button ghost" onClick=${onCancel}>Cancel</button>
+                <button class="button ghost" onClick=${onCancel}>${t("web.sheets.custom-providers.release028.cancel", "Cancel")}</button>
                 <button class="button primary" disabled=${!ready} onClick=${save}>
-                    ${busy === "save" ? "Saving…" : "Save"}
+                    ${busy === "save" ? t("web.sheets.custom-providers.release028.saving", "Saving…") : t("web.sheets.custom-providers.release028.save", "Save")}
                 </button>
             </div>
         </div>
@@ -265,8 +287,11 @@ export function useCustomProviders(owner) {
 export function removeCustomProvider(endpoint, done) {
     return (
         confirm(
-            `Remove ${endpoint.name}? Its models leave Pi's models.json, ` +
-                "and its key leaves Pi's sign-ins.",
+            t(
+                "web.sheets.custom-providers.release028.remove",
+                "Remove {name}? Its models leave Pi's models.json, and its key leaves Pi's sign-ins.",
+                { name: endpoint.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`custom-providers/${encodeURIComponent(endpoint.id)}`, undefined, {

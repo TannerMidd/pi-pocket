@@ -62,39 +62,43 @@ A gallery entry gives `pocketApi` and `minPocket`: the API version and the oldes
 
 ## When each part came
 
-Each member in the reference has its own Since line. These parts came together:
+Each member in the reference has its own Since line. `Unreleased` marks an addition in this proposed change, not in an official release. It assigns no future version; the maintainers set the first release. These parts came together:
 
-| Part                                                                                                                                                              | Since  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Built-in modules, the host, tools, sections, hooks                                                                                                                | 0.1.0  |
-| Drop-ins in the drop-in folder                                                                                                                                    | 0.3.0  |
-| `web`: routes, browser modules, events, cleanups                                                                                                                  | 0.14.0 |
-| `pocketApi`, `web.api`, and `pocket.version`                                                                                                                      | 0.14.0 |
-| `pocketApi` 2                                                                                                                                                     | 0.19.0 |
-| Slash commands (`web.command`)                                                                                                                                    | 0.14.0 |
-| `pocket.toolCall`                                                                                                                                                 | 0.14.0 |
-| `host.linkedSessions`                                                                                                                                             | 0.14.0 |
-| `pocket.panel` and `pocket.status` (experimental)                                                                                                                 | 0.19.0 |
-| Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                                                   | 0.19.0 |
-| `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                                                   | 0.19.0 |
-| `stop` and `archive` on `host.linkedSessions` (experimental)                                                                                                      | 0.28.0 |
-| The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental)                              | 0.20.0 |
-| `host.registerModelProvider` (experimental)                                                                                                                       | 0.20.0 |
-| `host.fetchPublic` (experimental)                                                                                                                                 | 0.20.0 |
-| Keys in the message boxes: `pocket.composerKey` (experimental)                                                                                                    | 0.20.0 |
-| The session's messages: `pocket.onConversation`, `messages`, `reveal` (experimental)                                                                              | 0.20.0 |
-| `group` in `pocket.menu` (experimental)                                                                                                                           | 0.21.0 |
-| Public pages: `web.publicPage` and `web.links` (experimental)                                                                                                     | 0.22.0 |
-| People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0 |
-| Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0 |
-| Give PiP a message: `pocket.pip.ask` (experimental)                                                                                                               | 0.26.0 |
-| A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0 |
-| The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0 |
-| Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0 |
-| Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0 |
-| How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0 |
-| `host.sessions.start` (experimental)                                                                                                                              | 0.28.0 |
-| Workspace providers: `host.registerWorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0 |
-| Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0 |
-| Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0 |
-| `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0 |
+| Part                                                                                                                                                              | Since      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Built-in modules, the host, tools, sections, hooks                                                                                                                | 0.1.0      |
+| Drop-ins in the drop-in folder                                                                                                                                    | 0.3.0      |
+| `web`: routes, browser modules, events, cleanups                                                                                                                  | 0.14.0     |
+| `pocketApi`, `web.api`, and `pocket.version`                                                                                                                      | 0.14.0     |
+| `pocketApi` 2                                                                                                                                                     | 0.19.0     |
+| Slash commands (`web.command`)                                                                                                                                    | 0.14.0     |
+| `pocket.toolCall`                                                                                                                                                 | 0.14.0     |
+| `host.linkedSessions`                                                                                                                                             | 0.14.0     |
+| `pocket.panel` and `pocket.status` (experimental)                                                                                                                 | 0.19.0     |
+| Slots: `pocket.topbar`, `composerButton`, `replyAction`, `insertText`, `arrange` (experimental)                                                                   | 0.19.0     |
+| `cwd` in `host.linkedSessions.start` and the human-bound `linkedSessions.start`                                                                                   | 0.19.0     |
+| `stop` and `archive` on `host.linkedSessions` (experimental)                                                                                                      | 0.28.0     |
+| The session list: `pocket.sessionChips`, `sessionAction`, `sessionFilter`, `sessionSearch`, and `WebRequest.sessions` (experimental)                              | 0.20.0     |
+| `host.registerModelProvider` (experimental)                                                                                                                       | 0.20.0     |
+| `host.fetchPublic` (experimental)                                                                                                                                 | 0.20.0     |
+| Keys in the message boxes: `pocket.composerKey` (experimental)                                                                                                    | 0.20.0     |
+| The session's messages: `pocket.onConversation`, `messages`, `reveal` (experimental)                                                                              | 0.20.0     |
+| `group` in `pocket.menu` (experimental)                                                                                                                           | 0.21.0     |
+| Public pages: `web.publicPage` and `web.links` (experimental)                                                                                                     | 0.22.0     |
+| People's values and the browser: `host.ask`, `hide`, `commandEnv`, `browser` (experimental)                                                                       | 0.22.0     |
+| Events, services, and settings: `host.on`, `web.provide`, `use`, `onService`, `settings`, `setting`, `onSettings`, `pocket.settings`, `onSettings` (experimental) | 0.22.0     |
+| Give PiP a message: `pocket.pip.ask` (experimental)                                                                                                               | 0.26.0     |
+| UI language packs and request locales; browser `pocket.t` and `pocket.onLocaleChange` (experimental)                                                              | Unreleased |
+| A person's role: `host.roleOf` (experimental)                                                                                                                     | 0.27.0     |
+| The page's scroll position: `scroll` in the `host.browser` snapshot (experimental)                                                                                | 0.27.0     |
+| Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0     |
+| Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0     |
+| How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0     |
+| `web.presentEntry`, `PresentEntry`, and `pocket.entryPresentation` (experimental)                                                                                 | 0.28.0     |
+| `host.registerWorkspaceProvider`, `WorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0     |
+| `pocket.fence`, `pocket.mathInline`, and their types (experimental)                                                                                               | 0.28.0     |
+| `host.sessions.start` (experimental)                                                                                                                              | 0.28.0     |
+| Workspace providers: `host.registerWorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0     |
+| Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0     |
+| Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0     |
+| `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0     |

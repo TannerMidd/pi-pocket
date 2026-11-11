@@ -6,6 +6,7 @@ import { nowDoing } from "./agent-now.js";
 import { store } from "./store.js";
 import { modelText } from "./subagents.js";
 import { html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /** Two clicks (or taps) this close together open the subagent, where `onOpen` is given: the board's. */
 const DOUBLE_MS = 350;
@@ -28,7 +29,11 @@ function doingOf(agent, peek) {
 
     const doing = nowDoing(agent, peek);
 
-    return peek === undefined && agent.asked !== undefined ? `Working on: ${agent.asked}` : doing;
+    return peek === undefined && agent.asked !== undefined
+        ? t("web.agent-tile.doing-of.text.working-on", "Working on: {asked}", {
+              asked: agent.asked,
+          })
+        : doing;
 }
 
 /**
@@ -40,6 +45,9 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
     const waiting = waitingOf(agent, peek);
     const state = waiting ? "waiting" : "working";
     const doing = doingOf(agent, peek);
+    const stateWords = waiting
+        ? t("web.agent-tile.agent-tile.span.needs-approval", "needs approval")
+        : t("web.agent-tile.agent-tile.span.working", "working");
     const last = useRef(0);
 
     // A double click, or a double tap: the first picks it, the second opens it. No native dblclick, which a double
@@ -63,7 +71,11 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
         data-peek=${agent.conversationId}
         data-peek-kind="agent"
         title=${`${agent.name}: ${doing}`}
-        aria-label=${`${agent.name}, ${waiting ? "needs approval" : "working"}: ${doing}`}
+        aria-label=${t(
+            "web.agent-tile.agent-tile.aria-label.name-state-doing",
+            "{name}, {state}: {doing}",
+            { name: agent.name, state: stateWords, doing },
+        )}
         onClick=${activate}
     >
         <span class="agent-tile-head">
@@ -73,9 +85,7 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
                 aria-hidden="true"
             ></span>
             <span class="agent-tile-name">${agent.name}</span>
-            <span class="agent-tile-state">
-                ${waiting ? "needs approval" : modelText(agent, { thinking: false }) || "working"}
-            </span>
+            <span class="agent-tile-state">${waiting ? stateWords : modelText(agent, { thinking: false }) || stateWords}</span>
         </span>
         <span class="agent-tile-now">${doing}</span>
     </button>`;

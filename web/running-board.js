@@ -8,6 +8,7 @@ import { folderColor } from "./avatar.js";
 import { useBack } from "./back.js";
 import { api, attempt, canSteer, navigate, notify, store } from "./store.js";
 import { html, Icon, Spinner } from "./ui.js";
+import { localeId, t } from "./ui-locale.js";
 
 /** How often the board asks again while it shows. */
 const EVERY_MS = 2000;
@@ -22,9 +23,24 @@ const DAY = 24 * HOUR;
 
 /** The timeline's ranges: how much it shows, the step between its ticks, and how wide an hour is at the least. */
 const RANGES = {
-    day: { label: "24h", span: DAY, step: 3 * HOUR, hourPx: 22 },
-    three: { label: "3d", span: 3 * DAY, step: 6 * HOUR, hourPx: 8 },
-    week: { label: "7d", span: 7 * DAY, step: DAY, hourPx: 4.2 },
+    day: {
+        label: () => t("web.running-board.range.day", "24h"),
+        span: DAY,
+        step: 3 * HOUR,
+        hourPx: 22,
+    },
+    three: {
+        label: () => t("web.running-board.range.three", "3d"),
+        span: 3 * DAY,
+        step: 6 * HOUR,
+        hourPx: 8,
+    },
+    week: {
+        label: () => t("web.running-board.range.week", "7d"),
+        span: 7 * DAY,
+        step: DAY,
+        hourPx: 4.2,
+    },
 };
 
 /** How far into the past a run's bar takes the pointer: a run that just began has a bar a pin's width wide. */
@@ -78,18 +94,29 @@ function elapsed(ms) {
     const s = Math.max(0, Math.floor(ms / 1000));
 
     if (s < 60) {
-        return `${s}s`;
+        return t("web.running-board.elapsed.seconds", "{seconds}s", { seconds: s });
     }
 
     const m = Math.floor(s / 60);
 
     if (m < 60) {
-        return `${m}m ${pad(s % 60)}s`;
+        return t("web.running-board.elapsed.minutes-seconds", "{minutes}m {seconds}s", {
+            minutes: m,
+            seconds: pad(s % 60),
+        });
     }
 
     const h = Math.floor(m / 60);
 
-    return h < 24 ? `${h}h ${pad(m % 60)}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+    return h < 24
+        ? t("web.running-board.elapsed.hours-minutes", "{hours}h {minutes}m", {
+              hours: h,
+              minutes: pad(m % 60),
+          })
+        : t("web.running-board.elapsed.days-hours", "{days}d {hours}h", {
+              days: Math.floor(h / 24),
+              hours: h % 24,
+          });
 }
 
 /** "45m", "1h 25m", "2d 16h". */
@@ -97,19 +124,32 @@ function span(ms) {
     const m = Math.round(Math.abs(ms) / MINUTE);
 
     if (m < 60) {
-        return `${m}m`;
+        return t("web.running-board.span.minutes", "{minutes}m", { minutes: m });
     }
 
     const h = Math.floor(m / 60);
 
     if (h < 24) {
-        return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
+        return m % 60
+            ? t("web.running-board.span.hours-minutes", "{hours}h {minutes}m", {
+                  hours: h,
+                  minutes: m % 60,
+              })
+            : t("web.running-board.span.hours", "{hours}h", { hours: h });
     }
 
-    return `${Math.floor(h / 24)}d${h % 24 ? ` ${h % 24}h` : ""}`;
+    return h % 24
+        ? t("web.running-board.span.days-hours", "{days}d {hours}h", {
+              days: Math.floor(h / 24),
+              hours: h % 24,
+          })
+        : t("web.running-board.span.days", "{days}d", { days: Math.floor(h / 24) });
 }
 
-const relative = (at, now) => (at >= now ? `in ${span(at - now)}` : `${span(now - at)} ago`);
+const relative = (at, now) =>
+    at >= now
+        ? t("web.running-board.relative.future", "in {time}", { time: span(at - now) })
+        : t("web.running-board.relative.past", "{time} ago", { time: span(now - at) });
 
 /** A moment in a schedule's own zone: "14:50", or with its day ("Mon 08:00", "12 Nov 09:00") when not today. */
 function clock(at, zone, now, { day = "auto" } = {}) {
@@ -119,10 +159,10 @@ function clock(at, zone, now, { day = "auto" } = {}) {
         formatter("en-CA", { timeZone: zone, dateStyle: "short" }).format(now);
 
     if (day === "never" || (day === "auto" && sameDay)) {
-        return formatter("en-GB", options).format(at);
+        return formatter(localeId() === "en" ? "en-GB" : localeId(), options).format(at);
     }
 
-    return formatter("en-GB", {
+    return formatter(localeId() === "en" ? "en-GB" : localeId(), {
         ...options,
         ...(at - now < 6 * DAY ? { weekday: "short" } : { day: "numeric", month: "short" }),
     })
@@ -148,16 +188,241 @@ const dollars = (amount) => (amount >= 100 ? `$${amount.toFixed(0)}` : `$${amoun
 const shortPath = (path) => path?.replace(/^\/home\/[^/]+/, "~").replace(/^\/root/, "~");
 
 /** Who set a schedule up, as its sheet says: you, a person, or Pi (for someone). */
+/** Fixed server descriptions only; names, commands, and unknown extension text stay literal. */
+function taskWords(task) {
+    switch (task.kind) {
+        case "pi.generation":
+            return task.label === "writing an answer"
+                ? t("web.running-board.task.answer", "writing an answer")
+                : task.label;
+        case "pi.compaction":
+            return task.label === "compacting the context"
+                ? t("web.running-board.task.compaction", "compacting the context")
+                : task.label;
+        case "pocket.subagent-reporter":
+            return task.label === "waiting for a subagent's answer"
+                ? t("web.running-board.task.reporter", "waiting for a subagent's answer")
+                : task.label;
+        case "pocket.follow-failure":
+            return task.label === "waiting for a failed subagent to answer a message"
+                ? t(
+                      "web.running-board.task.failure",
+                      "waiting for a failed subagent to answer a message",
+                  )
+                : task.label;
+        case "pi.tool":
+            return task.label === "running a tool"
+                ? t("web.running-board.task.tool", "running a tool")
+                : task.label.startsWith("running ")
+                  ? t("web.running-board.task.tool.named", "running {value}", {
+                        value: task.label.slice("running ".length),
+                    })
+                  : task.label;
+        case "pocket.extension-command":
+            return task.label === "running an extension command"
+                ? t("web.running-board.task.command", "running an extension command")
+                : task.label.startsWith("running /")
+                  ? t("web.running-board.task.command.named", "running /{value}", {
+                        value: task.label.slice("running /".length),
+                    })
+                  : task.label;
+        case "pocket.background":
+            return task.label === "running a command in the background"
+                ? t("web.running-board.task.background", "running a command in the background")
+                : task.label.startsWith("running in the background: ")
+                  ? t(
+                        "web.running-board.task.background.named",
+                        "running in the background: {value}",
+                        { value: task.label.slice("running in the background: ".length) },
+                    )
+                  : task.label;
+        case "pocket.shell":
+            return task.label === "running a command"
+                ? t("web.running-board.task.shell", "running a command")
+                : task.label.startsWith("running ")
+                  ? t("web.running-board.task.shell.named", "running {value}", {
+                        value: task.label.slice("running ".length),
+                    })
+                  : task.label;
+        case "pocket.subagent-courier":
+            return task.label === "taking subagents' reports to Pi at its next pause"
+                ? t(
+                      "web.running-board.task.courier",
+                      "taking subagents' reports to Pi at its next pause",
+                  )
+                : task.label.startsWith("holding subagents' reports: ")
+                  ? t(
+                        "web.running-board.task.courier-held",
+                        "holding subagents' reports: {reason}",
+                        {
+                            reason: heldWords(
+                                task.label.slice("holding subagents' reports: ".length),
+                            ),
+                        },
+                    )
+                  : task.label;
+
+        case "pocket.pip-follow": {
+            if (task.label === "following a session's run") {
+                return t("web.running-board.task.follow", "following a session's run");
+            }
+
+            const prefix = "following “";
+            const suffix = "” until its run ends";
+
+            return task.label.startsWith(prefix) && task.label.endsWith(suffix)
+                ? t(
+                      "web.running-board.task.follow-named",
+                      "following “{title}” until its run ends",
+                      { title: task.label.slice(prefix.length, -suffix.length) },
+                  )
+                : task.label;
+        }
+
+        case "pocket.pr-watch": {
+            if (task.label === "watching a pull request") {
+                return t("web.running-board.task.pr", "watching a pull request");
+            }
+
+            const match = /^watching PR #(\d+) until it is merged$/.exec(task.label);
+
+            return match
+                ? t(
+                      "web.running-board.task.pr-number",
+                      "watching PR #{number} until it is merged",
+                      { number: match[1] },
+                  )
+                : task.label;
+        }
+
+        case "pocket.repo-watch": {
+            if (task.label === "watching a repository") {
+                return t("web.running-board.task.repository", "watching a repository");
+            }
+
+            const match = /^watching (.+) for (.+)$/.exec(task.label);
+
+            return match
+                ? t("web.running-board.task.repository-named", "watching {repo} for {events}", {
+                      repo: match[1],
+                      events: match[2],
+                  })
+                : task.label;
+        }
+
+        default:
+            return task.label;
+    }
+}
+
+/** Exact server limit descriptions only: unrecognized reasons stay verbatim. */
+function heldWords(reason) {
+    if (reason === "they can no longer steer here") {
+        return t("web.running-board.held.no-steer", "they can no longer steer here");
+    }
+
+    const lost = /^(.*) can no longer steer here$/.exec(reason);
+
+    if (lost) {
+        return t("web.running-board.held.person-no-steer", "{name} can no longer steer here", {
+            name: lost[1],
+        });
+    }
+
+    const limit = /^(.*) reached (their|its) (\$[0-9]+\.[0-9]{2}) spend limit$/.exec(reason);
+
+    if (!limit) {
+        return reason;
+    }
+
+    if (limit[1] === "this session") {
+        return t(
+            "web.running-board.held.session-limit",
+            "this session reached its {amount} spend limit",
+            { amount: limit[3] },
+        );
+    }
+
+    if (limit[1] === "the session that started this one") {
+        return t(
+            "web.running-board.held.team-limit",
+            "the session that started this one reached its {amount} spend limit",
+            { amount: limit[3] },
+        );
+    }
+
+    return t("web.running-board.held.person-limit", "{name} reached their {amount} spend limit", {
+        name: limit[1],
+        amount: limit[3],
+    });
+}
+
+const TASK_WORDS = {
+    pending: () => t("web.running-board.status.pending", "pending"),
+    running: () => t("web.running-board.status.running", "running"),
+    waiting: () => t("web.running-board.status.waiting", "waiting"),
+    sleeping: () => t("web.running-board.status.sleeping", "sleeping"),
+    completing: () => t("web.running-board.status.completing", "completing"),
+};
+
+function repeatWords(schedule) {
+    const repeat = schedule.every;
+
+    if (repeat === undefined || localeId() === "en") {
+        return schedule.repeat;
+    }
+
+    if ("minutes" in repeat) {
+        const minutes = repeat.minutes;
+
+        return minutes % 1440 === 0
+            ? t("web.running-board.repeat.days", "every {count} days", { count: minutes / 1440 })
+            : minutes % 60 === 0
+              ? t("web.running-board.repeat.hours", "every {count} hours", { count: minutes / 60 })
+              : t("web.running-board.repeat.minutes", "every {count} minutes", { count: minutes });
+    }
+
+    const at = repeat.at;
+    const days = repeat.days;
+
+    if (days === undefined) {
+        return t("web.running-board.repeat.daily", "every day at {at}", { at });
+    }
+
+    if (days.join() === "1,2,3,4,5") {
+        return t("web.running-board.repeat.weekdays", "weekdays at {at}", { at });
+    }
+
+    if (days.join() === "0,6") {
+        return t("web.running-board.repeat.weekends", "weekends at {at}", { at });
+    }
+
+    const names = days
+        .map((day) =>
+            formatter(localeId(), { weekday: "short", timeZone: "UTC" }).format(
+                Date.UTC(2023, 0, 1 + day),
+            ),
+        )
+        .join(", ");
+
+    return t("web.running-board.repeat.days-at", "{days} at {at}", { days: names, at });
+}
+
 function setBy(schedule) {
     const { users, me } = store.state;
     const name = (id) =>
-        id === me?.id ? "you" : (users.find((user) => user.id === id)?.name ?? "someone");
+        id === me?.id
+            ? t("web.running-board.set-by.you", "you")
+            : (users.find((user) => user.id === id)?.name ??
+              t("web.running-board.set-by.someone", "someone"));
 
     if (schedule.by !== undefined) {
         return name(schedule.by);
     }
 
-    return schedule.requestedBy === undefined ? "Pi" : `Pi, for ${name(schedule.requestedBy)}`;
+    return schedule.requestedBy === undefined
+        ? "Pi"
+        : t("web.running-board.set-by.pi", "Pi, for {name}", { name: name(schedule.requestedBy) });
 }
 
 function useMatches(query) {
@@ -292,11 +557,27 @@ function useBoard() {
 
 /** The filters, most general first: what each keeps of a session row. */
 const FILTERS = [
-    { key: "all", label: "All", keep: () => true },
-    { key: "running", label: "Running", keep: (row) => row.run !== undefined },
-    { key: "scheduled", label: "Scheduled", keep: (row) => row.schedules.length > 0 },
-    { key: "approval", label: "Needs approval", keep: (row) => (row.run?.approvals ?? 0) > 0 },
-    { key: "held", label: "Held", keep: (row) => row.schedules.some((each) => each.held) },
+    { key: "all", label: () => t("web.running-board.filter.all", "All"), keep: () => true },
+    {
+        key: "running",
+        label: () => t("web.running-board.filter.running", "Running"),
+        keep: (row) => row.run !== undefined,
+    },
+    {
+        key: "scheduled",
+        label: () => t("web.running-board.filter.scheduled", "Scheduled"),
+        keep: (row) => row.schedules.length > 0,
+    },
+    {
+        key: "approval",
+        label: () => t("web.running-board.filter.approval", "Needs approval"),
+        keep: (row) => (row.run?.approvals ?? 0) > 0,
+    },
+    {
+        key: "held",
+        label: () => t("web.running-board.filter.held", "Held"),
+        keep: (row) => row.schedules.some((each) => each.held),
+    },
 ];
 
 export function RunningBoard() {
@@ -448,7 +729,7 @@ export function RunningBoard() {
                 {},
             );
             setSelected(null);
-            notify("info", "Schedule cancelled.");
+            notify("info", t("web.running-board.cancelled", "Schedule cancelled."));
             await reload();
         });
 
@@ -483,7 +764,9 @@ export function RunningBoard() {
                 title: each.title,
                 what: each.approval
                     ? `${each.approval.tool}: ${each.approval.subject}`
-                    : `${each.approvals} waiting for approval`,
+                    : t("web.running-board.needs.approval", "{count} waiting for approval", {
+                          count: each.approvals,
+                      }),
                 count: each.approvals,
             })),
         ...schedules
@@ -493,7 +776,9 @@ export function RunningBoard() {
                 schedule: each,
                 session: each.session,
                 title: each.sessionTitle,
-                what: `Held: ${each.held}`,
+                what: t("web.running-board.needs.held", "Held: {reason}", {
+                    reason: heldWords(each.held),
+                }),
             })),
     ];
 
@@ -501,32 +786,27 @@ export function RunningBoard() {
         class=${`board running-board ${phone ? "phone" : ""}`}
         data-part="running-board"
         ref=${box}
-        aria-label="Running now in every session"
+        aria-label=${t("web.running-board.title.all-sessions", "Running now in every session")}
     >
         <header class="board-head">
             <div class="board-title">
-                <h2>Running now</h2>
+                <h2>${t("web.sessions.rail.title.running-now", "Running now")}</h2>
                 <div class="board-sub">
                     ${
                         board
                             ? html`
-                                  <b>${rows.filter((row) => row.run !== undefined).length}</b>
-                                  ${" at work · "}
-                                  <b>${active}</b>
-                                  ${" running · "}
-                                  <b>${schedules.length}</b>
-                                  ${" scheduled"}
-                                  ${next && html`${" · next "}<b>${span(next.next - now)}</b>`}
+                                  ${t("web.running-board.summary", "{sessions} at work · {active} running · {schedules} scheduled", { sessions: rows.filter((row) => row.run !== undefined).length, active, schedules: schedules.length })}
+                                  ${next && html`${t("web.running-board.summary.next", " · next ")}<b>${span(next.next - now)}</b>`}
                               `
-                            : "Looking"
+                            : t("web.running-board.looking", "Looking")
                     }
                 </div>
             </div>
             ${!phone && html`<${Search} query=${query} setQuery=${setQuery} />`}
             <button
                 class="icon-button"
-                title="Back to the conversation (Esc)"
-                aria-label="Close"
+                title=${t("web.running-board.close.title", "Back to the conversation (Esc)")}
+                aria-label=${t("web.running-board.close", "Close")}
                 onClick=${closeRunning}
             >
                 <${Icon} name="close" />
@@ -545,7 +825,7 @@ export function RunningBoard() {
                           ${
                               error
                                   ? html`<span class="err">${error}</span>`
-                                  : html`<${Spinner} /> Looking…`
+                                  : html`<${Spinner} /> ${t("web.running-board.looking.progress", "Looking…")}`
                           }
                       </div>`
                     : html`
@@ -565,7 +845,7 @@ export function RunningBoard() {
                               setSelected(null);
                           }}
                       />
-                      <div class="board-legend rb-filters" role="group" aria-label="Show only">
+                      <div class="board-legend rb-filters" role="group" aria-label=${t("web.running-board.filters", "Show only")}>
                           ${FILTERS.map(
                               (each) => html`<button
                                   class=${`board-filter ${filter === each.key ? "on" : ""}`}
@@ -576,7 +856,7 @@ export function RunningBoard() {
                                       each.key !== "all" &&
                                       html`<span class=${`rb-mark rb-mark-${each.key}`}></span>`
                                   }
-                                  ${each.label}
+                                  ${each.label()}
                                   <span class="board-filter-count">
                                       ${rows.filter(each.keep).length}
                                   </span>
@@ -584,19 +864,25 @@ export function RunningBoard() {
                           )}
                       </div>
                       <div class="rb-body">
-                          <div class="rb-matrix" role="table" aria-label="Sessions">
+                          <div class="rb-matrix" role="table" aria-label=${t("web.running-board.sessions", "Sessions")}>
                               <div class="rb-thead" role="row">
-                                  <div role="columnheader">Session</div>
-                                  <div role="columnheader">Now</div>
-                                  <div role="columnheader">Schedule</div>
+                                  <div role="columnheader">${t("web.running-board.column.session", "Session")}</div>
+                                  <div role="columnheader">${t("web.running-board.column.now", "Now")}</div>
+                                  <div role="columnheader">${t("web.running-board.column.schedule", "Schedule")}</div>
                               </div>
                               ${
                                   shown.length === 0
                                       ? html`<div class="board-empty rb-none">
                                             ${
                                                 rows.length === 0
-                                                    ? "Nothing runs, and nothing is scheduled."
-                                                    : "Nothing matches."
+                                                    ? t(
+                                                          "web.running-board.empty",
+                                                          "Nothing runs, and nothing is scheduled.",
+                                                      )
+                                                    : t(
+                                                          "web.running-board.no-matches",
+                                                          "Nothing matches.",
+                                                      )
                                             }
                                         </div>`
                                       : shown.map(
@@ -685,7 +971,7 @@ function Search({ query, setQuery }) {
     return html`<label class=${`board-search ${query ? "filled" : ""}`}>
         <${Icon} name="search" size=${14} />
         <input
-            placeholder="Find a session, task, or schedule"
+            placeholder=${t("web.running-board.search", "Find a session, task, or schedule")}
             value=${query}
             onInput=${(event) => setQuery(event.currentTarget.value)}
             onKeyDown=${(event) => {
@@ -720,6 +1006,9 @@ function Timeline({
     // the whole board out at once, then draw it again. The observer says when it differs, after the browser's layout.
     const [width, setWidth] = useState(lastWidth);
     const [tip, setTip] = useState(null);
+    const localeRevision = store.state.localeRevision;
+
+    useEffect(() => setTip(null), [localeRevision]);
     const r = RANGES[range];
 
     useEffect(() => {
@@ -768,11 +1057,11 @@ function Timeline({
             day: midnight,
             label:
                 midnight || range === "week"
-                    ? formatter(undefined, {
+                    ? formatter(localeId() === "en" ? undefined : localeId(), {
                           weekday: "short",
                           ...(range === "week" ? { day: "numeric" } : {}),
                       }).format(local)
-                    : formatter("en-GB", {
+                    : formatter(localeId() === "en" ? "en-GB" : localeId(), {
                           hour: "2-digit",
                           minute: "2-digit",
                       }).format(local),
@@ -796,11 +1085,15 @@ function Timeline({
             const show = (event) => {
                 const box = event.currentTarget.getBoundingClientRect();
                 const who = prompt?.from ? `${prompt.from} · ` : "";
-                const sent = prompt?.at ? `sent ${relative(prompt.at, now)} · ` : "";
+                const sent = prompt?.at
+                    ? t("web.running-board.tip.sent", "sent {time} · ", {
+                          time: relative(prompt.at, now),
+                      })
+                    : "";
 
                 setTip({
-                    text: prompt?.text ?? "No message found",
-                    when: `${who}${sent}at work for ${elapsed(now - start)}`,
+                    text: prompt?.text ?? t("web.running-board.tip.no-message", "No message found"),
+                    when: `${who}${sent}${t("web.running-board.tip.working", "at work for {time}", { time: elapsed(now - start) })}`,
                     x: Math.min(
                         box.right - 20,
                         Math.max(box.left, (event.clientX ?? box.left) - 20),
@@ -815,7 +1108,7 @@ function Timeline({
                 key="run"
                 class="rb-runhit"
                 style=${`left:${Math.max(0, from - REACH)}px;width:${x(now) - Math.max(0, from - REACH)}px;--bar-from:${from - Math.max(0, from - REACH)}px`}
-                aria-label=${`At work for ${elapsed(now - start)}${prompt ? `. Last message: ${prompt.text}` : ""}`}
+                aria-label=${prompt ? t("web.running-board.run.label-message", "At work for {time}. Last message: {message}", { time: elapsed(now - start), message: prompt.text }) : t("web.running-board.run.label", "At work for {time}", { time: elapsed(now - start) })}
                 onPointerEnter=${(event) => event.pointerType === "mouse" && show(event)}
                 onPointerLeave=${(event) => event.pointerType === "mouse" && setTip(null)}
                 onClick=${(event) => (tip?.long ? setTip(null) : show(event))}
@@ -842,18 +1135,18 @@ function Timeline({
                     key=${`${schedule.id}-tail`}
                     class=${`rb-pin-tail ${schedule.held ? "held" : ""}`}
                     style=${`left:${x(last)}px;width:${Math.max(0, full - x(last))}px`}
-                    title=${`Goes on ${schedule.repeat ?? ""}`}
+                    title=${t("web.running-board.repeat.title", "Goes on {repeat}", { repeat: repeatWords(schedule) ?? "" })}
                 ></span>`);
             }
 
             schedule.upcoming
                 .filter((t) => t <= t1)
-                .forEach((t, i) => {
-                    const left = x(t);
-                    const label = `${clock(t, schedule.zone, now)}${zoneName(schedule.zone, t) ? ` ${zoneName(schedule.zone, t)}` : ""}`;
+                .forEach((at, i) => {
+                    const left = x(at);
+                    const label = `${clock(at, schedule.zone, now)}${zoneName(schedule.zone, at) ? ` ${zoneName(schedule.zone, at)}` : ""}`;
 
                     marks.push(html`<button
-                        key=${`${schedule.id}-${t}`}
+                        key=${`${schedule.id}-${at}`}
                         class=${`rb-pin ${schedule.every ? "repeat" : ""} ${i > 0 ? "later" : ""} ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
                         style=${`left:${left}px`}
                         aria-label=${`${schedule.text}, ${label}`}
@@ -864,7 +1157,7 @@ function Timeline({
 
                             setTip({
                                 text: schedule.text,
-                                when: `${label} · ${relative(t, now)}${schedule.held ? " · held" : ""}`,
+                                when: `${label} · ${relative(at, now)}${schedule.held ? t("web.running-board.tip.held", " · held") : ""}`,
                                 x: box.left,
                                 y: box.bottom,
                             });
@@ -883,7 +1176,7 @@ function Timeline({
                             class="rb-pin-label"
                             style=${`left:${left}px`}
                         >
-                            ${clock(t, HERE, now)}
+                            ${clock(at, HERE, now)}
                         </span>`);
                         labelled = true;
                     }
@@ -896,30 +1189,30 @@ function Timeline({
     return html`<section
         class="rb-timeline"
         data-part="running-timeline"
-        aria-label="Schedule timeline"
+        aria-label=${t("web.running-board.timeline", "Schedule timeline")}
     >
         <div class="rb-tl-head">
-            <h3>Coming up</h3>
-            <span class="rb-tl-next" title=${next ? `Next: ${next.text}` : ""}>
-                ${next ? next.text : "Nothing scheduled"}
+            <h3>${t("web.running-board.coming-up", "Coming up")}</h3>
+            <span class="rb-tl-next" title=${next ? t("web.running-board.next.title", "Next: {message}", { message: next.text }) : ""}>
+                ${next ? next.text : t("web.running-board.nothing-scheduled", "Nothing scheduled")}
             </span>
             ${
                 !phone &&
                 html`<span class="rb-legend" aria-hidden="true">
-                    <span><i class="rb-pin once"></i>once</span>
-                    <span><i class="rb-pin repeat"></i>repeats</span>
-                    <span><i class="rb-pin held"></i>held</span>
-                    <span><i class="rb-runbar busy"></i>at work</span>
+                    <span><i class="rb-pin once"></i>${t("web.running-board.legend.once", "once")}</span>
+                    <span><i class="rb-pin repeat"></i>${t("web.running-board.legend.repeats", "repeats")}</span>
+                    <span><i class="rb-pin held"></i>${t("web.running-board.legend.held", "held")}</span>
+                    <span><i class="rb-runbar busy"></i>${t("web.running-board.legend.at-work", "at work")}</span>
                 </span>`
             }
-            <div class="segmented rb-range" role="group" aria-label="Range">
+            <div class="segmented rb-range" role="group" aria-label=${t("web.running-board.range", "Range")}>
                 ${Object.entries(RANGES).map(
                     ([key, each]) => html`<button
                         class=${range === key ? "on" : ""}
                         aria-pressed=${range === key}
                         onClick=${() => setRange(key)}
                     >
-                        ${each.label}
+                        ${each.label()}
                     </button>`,
                 )}
             </div>
@@ -971,12 +1264,12 @@ function Timeline({
                     )}
                     <div class="rb-now" style=${`left:${x(now)}px`}>
                         <span>
-                            ${formatter("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}
+                            ${formatter(localeId() === "en" ? "en-GB" : localeId(), { hour: "2-digit", minute: "2-digit" }).format(now)}
                         </span>
                     </div>
                     ${
                         lanes.length === 0 &&
-                        html`<div class="rb-tl-empty">Nothing to show here.</div>`
+                        html`<div class="rb-tl-empty">${t("web.running-board.timeline.empty", "Nothing to show here.")}</div>`
                     }
                 </div>
             </div>
@@ -1024,38 +1317,38 @@ function Row({
 
     return html`<div class=${`rb-row ${lit ? "on" : ""}`} role="row" data-row=${row.id}>
         <div class="rb-who" role="cell">
-            <button class="rb-who-title" onClick=${() => onOpen(row.id)} title="Open the session">
+            <button class="rb-who-title" onClick=${() => onOpen(row.id)} title=${t("web.running-board.open.title", "Open the session")}>
                 <span class="folder-mark" style=${`--folder:${color}`}></span>
                 <span class="rb-ellipsis">${row.title}</span>
             </button>
             <span class="rb-who-meta">
             ${cwd && html`<span class="rb-who-path" title=${cwd}>${shortPath(cwd)}</span>`}
             <span class="rb-badges">
-                ${run?.busy && html`<span class="rb-badge ok"><i></i>Busy</span>`}
+                ${run?.busy && html`<span class="rb-badge ok"><i></i>${t("web.running-board.busy", "Busy")}</span>`}
                 ${
                     run?.approvals > 0 &&
-                    html`<span class="rb-badge warn"><i></i>${run.approvals} to approve</span>`
+                    html`<span class="rb-badge warn"><i></i>${t("web.running-board.to-approve", "{count} to approve", { count: run.approvals })}</span>`
                 }
-                ${held && html`<span class="rb-badge warn">Held</span>`}
-                ${!run && html`<span class="rb-badge">Idle</span>`}
+                ${held && html`<span class="rb-badge warn">${t("web.running-board.held", "Held")}</span>`}
+                ${!run && html`<span class="rb-badge">${t("web.running-board.idle", "Idle")}</span>`}
                 ${
                     steer &&
                     run?.busy &&
                     html`<button
                         class="rb-stop"
-                        title="Stop the run"
-                        aria-label=${`Stop the run in ${row.title}`}
+                        title=${t("web.running-board.stop-run", "Stop the run")}
+                        aria-label=${t("web.running-board.stop-session", "Stop the run in {title}", { title: row.title })}
                         onClick=${() => onStopRun(row.id)}
                     >
                         <${Icon} name="stop" size=${10} />
-                        <span>Stop</span>
+                        <span>${t("web.composer.stop-button.aria-label.stop", "Stop")}</span>
                     </button>`
                 }
             </span>
             </span>
         </div>
         <div class=${`rb-cell ${!working && scheduled ? "empty" : ""}`} role="cell">
-            <span class="rb-cell-label">Now</span>
+            <span class="rb-cell-label">${t("web.running-board.column.now", "Now")}</span>
             ${
                 run && run.tasks.length > 0
                     ? html`${shownTasks.map((task) => {
@@ -1068,7 +1361,7 @@ function Row({
                               (STOPPABLE[task.kind] !== undefined ||
                                   (task.subagent !== undefined && task.kind === "pi.generation"));
 
-                          return html`<div class="rb-task" key=${task.id} title=${task.label}>
+                          return html`<div class="rb-task" key=${task.id} title=${taskWords(task)}>
                               ${
                                   task.status === "running"
                                       ? html`<${Spinner} hidden=${true} />`
@@ -1078,12 +1371,12 @@ function Row({
                                   ${
                                       task.subagent &&
                                       html`<span class="rb-agent">${task.subagent}</span> `
-                                  }${task.label}
+                                  }${taskWords(task)}
                               </span>
                               <span
                                   class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
                               >
-                                  ${task.status}
+                                  ${TASK_WORDS[task.status]?.() ?? task.status}
                               </span>
                               <span class="rb-elapsed">
                                   ${task.since ? elapsed(now - task.since) : ""}
@@ -1092,8 +1385,8 @@ function Row({
                                   stoppable
                                       ? html`<button
                                             class="rb-x"
-                                            title="Stop"
-                                            aria-label=${`Stop ${task.label}`}
+                                            title=${t("web.running-board.stop", "Stop")}
+                                            aria-label=${t("web.running-board.stop-task", "Stop {task}", { task: taskWords(task) })}
                                             onClick=${() => onStopTask(task)}
                                         >
                                             <${Icon} name="stop" size=${12} />
@@ -1105,21 +1398,21 @@ function Row({
                       ${
                           shownTasks.length < tasks.length &&
                           html`<button class="rb-more" onClick=${() => setUnfolded(true)}>
-                              +${tasks.length - shownTasks.length} more
+                              ${t("web.running-board.more", "+{count} more", { count: tasks.length - shownTasks.length })}
                           </button>`
                       }
                       ${
                           (run.model || run.spent > 0) &&
                           html`<div class="rb-foot">
                               ${run.model && html`<span>${run.model}</span>`}
-                              ${run.spent > 0 && html`<span>${dollars(run.spent)} spent</span>`}
+                              ${run.spent > 0 && html`<span>${t("web.running-board.spent", "{amount} spent", { amount: dollars(run.spent) })}</span>`}
                           </div>`
                       }`
-                    : html`<div class="rb-idle">Nothing running</div>`
+                    : html`<div class="rb-idle">${t("web.running-board.nothing-running", "Nothing running")}</div>`
             }
         </div>
         <div class=${`rb-cell ${!scheduled && working ? "empty" : ""}`} role="cell">
-            <span class="rb-cell-label">Schedule</span>
+            <span class="rb-cell-label">${t("web.running-board.column.schedule", "Schedule")}</span>
             ${
                 row.schedules.length > 0
                     ? row.schedules.map(
@@ -1132,21 +1425,21 @@ function Row({
                               <span class="rb-sched-time" title=${schedule.zone}>
                                   ${
                                       schedule.held
-                                          ? "Held"
+                                          ? t("web.running-board.held", "Held")
                                           : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
                                   }
                               </span>
                               <span class="rb-sched-rule rb-ellipsis">
-                                  ${schedule.repeat ? `↻ ${schedule.repeat}` : "once"}
+                                  ${schedule.repeat ? `↻ ${repeatWords(schedule)}` : t("web.running-board.once", "once")}
                               </span>
                               <span class="rb-sched-rel">
                                   ${relative(schedule.next, now)}
                                   ${schedule.every ? ` · ${schedule.runs}×` : ""}
-                                  ${schedule.skipped > 0 ? ` · skipped ${schedule.skipped}×` : ""}
+                                  ${schedule.skipped > 0 ? t("web.running-board.release0281.skipped", " · skipped {count}×", { count: schedule.skipped }) : ""}
                               </span>
                           </button>`,
                       )
-                    : html`<div class="rb-idle">No schedule</div>`
+                    : html`<div class="rb-idle">${t("web.running-board.no-schedule", "No schedule")}</div>`
             }
         </div>
     </div>`;
@@ -1161,44 +1454,44 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             <button class="rb-detail-title rb-ellipsis" onClick=${() => onOpen(schedule.session)}>
                 ${schedule.sessionTitle}
             </button>
-            <button class="icon-button" aria-label="Close details" onClick=${onClose}>
+            <button class="icon-button" aria-label=${t("web.running-board.details.close", "Close details")} onClick=${onClose}>
                 <${Icon} name="close" size=${16} />
             </button>
         </div>
         ${
             schedule.held &&
             html`<div class="rb-held">
-                Held: ${schedule.held}. At its time it is cancelled, unless that changes first.
+                ${t("web.running-board.details.held", "Held: {reason}. At its time it is cancelled, unless that changes first.", { reason: heldWords(schedule.held) })}
             </div>`
         }
         <pre class="rb-message">${schedule.text}</pre>
         <dl class="rb-facts">
-            <dt>Repeats</dt>
-            <dd>${schedule.repeat ?? "no, once"}</dd>
-            <dt>Next</dt>
+            <dt>${t("web.running-board.details.repeats", "Repeats")}</dt>
+            <dd>${repeatWords(schedule) ?? t("web.running-board.details.once", "no, once")}</dd>
+            <dt>${t("web.running-board.details.next", "Next")}</dt>
             <dd>
                 ${clock(schedule.next, schedule.zone, now, { day: "always" })}
                 ${zone && ` ${zone}`}
                 ${" · "}
                 ${relative(schedule.next, now)}
             </dd>
-            <dt>Zone</dt>
+            <dt>${t("web.running-board.details.zone", "Zone")}</dt>
             <dd>${schedule.zone}</dd>
-            <dt>Set by</dt>
+            <dt>${t("web.running-board.details.set-by", "Set by")}</dt>
             <dd>${setBy(schedule)}</dd>
-            <dt>Set up</dt>
+            <dt>${t("web.running-board.details.created", "Set up")}</dt>
             <dd>${relative(schedule.createdAt, now)}</dd>
             ${
                 schedule.every &&
-                html`<dt>Went out</dt>
-                    <dd>${schedule.runs} ${schedule.runs === 1 ? "time" : "times"}</dd>`
+                html`<dt>${t("web.running-board.details.sent", "Went out")}</dt>
+                    <dd>${schedule.runs === 1 ? t("web.running-board.details.one-run", "{count} time", { count: schedule.runs }) : t("web.running-board.details.runs", "{count} times", { count: schedule.runs })}</dd>`
             }
-            <dt>Id</dt>
+            <dt>${t("web.running-board.details.id", "Id")}</dt>
             <dd class="mono">${schedule.id}</dd>
         </dl>
         ${
             schedule.upcoming.length > 1 &&
-            html`<div class="rb-sub">Coming up</div>
+            html`<div class="rb-sub">${t("web.running-board.coming-up", "Coming up")}</div>
                 <div class="rb-upcoming">
                     ${schedule.upcoming.slice(0, 5).map(
                         (t) =>
@@ -1210,11 +1503,11 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
                 </div>`
         }
         <div class="rb-actions">
-            <button class="button" onClick=${() => onOpen(schedule.session)}>Open session</button>
+            <button class="button" onClick=${() => onOpen(schedule.session)}>${t("web.running-board.open-session", "Open session")}</button>
             ${
                 steer &&
                 html`<button class="button danger" onClick=${() => onCancel(schedule)}>
-                    Cancel
+                    ${t("web.running-board.cancel", "Cancel")}
                 </button>`
             }
         </div>
@@ -1227,7 +1520,7 @@ function Needs({ needs, colorOf, onOpen, onPick }) {
     }
 
     return html`<div class="rb-panel board-needs" data-part="running-needs">
-        <div class="label">Needs you <span class="board-needs-count">${needs.length}</span></div>
+        <div class="label">${t("web.running-board.needs-you", "Needs you")} <span class="board-needs-count">${needs.length}</span></div>
         ${needs.map(
             (each) => html`<button
                 key=${each.key}
@@ -1257,7 +1550,7 @@ function NextUp({ schedules, now, colorOf, onPick }) {
     }
 
     return html`<div class="rb-panel" data-part="running-next">
-        <div class="label">Next up</div>
+        <div class="label">${t("web.running-board.next-up", "Next up")}</div>
         ${times.map(
             ({ at, schedule }) => html`<button
                 key=${`${scheduleKey(schedule)}-${at}`}

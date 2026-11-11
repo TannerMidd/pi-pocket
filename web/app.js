@@ -86,6 +86,7 @@ import {
     usePresence,
     WIDE,
 } from "./ui.js";
+import { t } from "./ui-locale.js";
 import { toggleDictation } from "./voice.js";
 
 /** What changed in the session's folder: lines added and removed, and how many files. It opens Changes. */
@@ -103,12 +104,24 @@ function ChangesButton() {
     const removed = files.reduce((sum, file) => sum + (file.removed ?? 0), 0);
     const lines = added > 0 || removed > 0;
     const count = files.length + (changes.more ?? 0);
-    const counted = `${count} ${count === 1 ? "file" : "files"}`;
+    const counted =
+        count === 1
+            ? t("web.app.changes-button.text.one-file", "1 file")
+            : t("web.app.changes-button.text.files", "{count} files", { count });
+    const label = lines
+        ? t(
+              "web.app.changes-button.aria-label.changes-counted-lines",
+              "Changes: {counted}, {added} lines added and {removed} removed",
+              { counted, added, removed },
+          )
+        : t("web.app.changes-button.aria-label.changes-counted", "Changes: {counted}", {
+              counted,
+          });
 
     return html`<button
         class="changes-button"
-        title="Uncommitted changes in this session's folder"
-        aria-label=${`Changes: ${counted}${lines ? `, ${added} lines added and ${removed} removed` : ""}`}
+        title=${t("app.changes-uncommitted", "Uncommitted changes in this session's folder")}
+        aria-label=${label}
         onClick=${() => setFilesOpen(true, "changes")}
     >
         ${added > 0 && html`<span class="added">+${added}</span>`}
@@ -121,7 +134,7 @@ function ChangesButton() {
 // and reorder in Appearance, with extensions' between them. The menu stays last.
 defineItem("topbar", {
     id: "core:subagents",
-    label: "Subagents working",
+    label: () => t("app.subagents-working", "Subagents working"),
     order: 100,
     render() {
         const busy = (store.state.view.subagents ?? []).filter((agent) => agent.busy).length;
@@ -130,8 +143,10 @@ defineItem("topbar", {
             busy > 0 &&
             html`<button
                 class="icon-button"
-                aria-label=${`Subagents: ${busy} working`}
-                title="Subagents working"
+                aria-label=${t("app.subagents-busy", "Subagents: {count} working", {
+                    count: busy,
+                })}
+                title=${t("app.subagents-working", "Subagents working")}
                 onClick=${openSubagents}
             >
                 <span class="pulse"></span>
@@ -142,39 +157,39 @@ defineItem("topbar", {
 });
 defineItem("topbar", {
     id: "core:changes",
-    label: "Changes",
+    label: () => t("app.changes", "Changes"),
     order: 200,
     render: () => filesAvailable() && html`<${ChangesButton} key=${store.state.conversationId} />`,
 });
 defineItem("topbar", {
     id: "core:peeks",
-    label: "Peek tiles",
+    label: () => t("app.peek-tiles", "Peek tiles"),
     order: 300,
     render: () => html`<${PeeksButton} />`,
 });
 defineItem("topbar", {
     id: "core:files",
-    label: "Files",
+    label: () => t("app.files", "Files"),
     order: 400,
     render: () => html`<${FilesButton} />`,
 });
 defineItem("topbar", {
     id: "core:browser",
-    label: "Browser",
+    label: () => t("app.browser", "Browser"),
     order: 500,
     render: () => html`<${BrowserButton} />`,
 });
 defineItem("topbar", {
     id: "core:artifacts",
-    label: "Artifacts",
+    label: () => t("app.artifacts", "Artifacts"),
     order: 600,
     render() {
         const artifacts = store.state.view.artifacts?.length ?? 0;
 
         return html`<button
             class=${`icon-button badge-host ${artifacts > 0 ? "quiet-phone" : "quiet"}`}
-            aria-label="Artifacts"
-            title="Artifacts"
+            aria-label=${t("app.artifacts", "Artifacts")}
+            title=${t("app.artifacts", "Artifacts")}
             onClick=${() => openSheet({ type: "artifacts" })}
         >
             <${Icon} name="artifact" />
@@ -184,20 +199,20 @@ defineItem("topbar", {
 });
 defineItem("topbar", {
     id: "core:people",
-    label: "People",
+    label: () => t("app.people", "People"),
     order: 700,
     render: () => html`<${PeopleButton} />`,
 });
 defineItem("topbar", {
     id: "core:menu",
-    label: "Menu",
+    label: () => t("app.menu", "Menu"),
     order: 1000,
     fixed: true,
     render: () =>
         html`<button
             class="icon-button"
-            aria-label="Menu"
-            title="Menu"
+            aria-label=${t("app.menu", "Menu")}
+            title=${t("app.menu", "Menu")}
             aria-haspopup="dialog"
             aria-expanded=${store.state.sheet?.type === "menu"}
             onClick=${() => openSheet({ type: "menu" })}
@@ -209,15 +224,15 @@ defineItem("topbar", {
 // PiP opened as a board (Appearance → PiP → Board): its × closes it, back to what was in the session's place.
 defineItem("topbar", {
     id: "core:pip-close",
-    label: "Close PiP",
+    label: () => t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP"),
     order: 1100,
     fixed: true,
     render: () =>
         pipBoard() &&
         html`<button
             class="icon-button"
-            aria-label="Close PiP"
-            title="Close PiP"
+            aria-label=${t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP")}
+            title=${t("web.pip.pip-panel.aria-label.close-pi-p", "Close PiP")}
             onClick=${closePip}
         >
             <${Icon} name="close" />
@@ -246,15 +261,24 @@ function Topbar() {
         }),
         [sessions, conversationId],
     );
-    const title = conversation?.title ?? listed ?? (store.state.missing ? "Not found" : "Loading…");
+    const title =
+        conversation?.title ??
+        listed ??
+        (store.state.missing ? t("app.not-found", "Not found") : t("ui.loading", "Loading…"));
     // How far down it reaches: PiP's window on a short wide screen stops below its buttons.
     const edge = useEdge("--topbar-h", (rect) => rect.bottom);
 
     return html`<header class="topbar" data-part="topbar" ref=${edge}>
         <button
             class="icon-button badge-host topbar-back"
-            aria-label=${waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
-            title="Sessions"
+            aria-label=${
+                waiting > 0
+                    ? t("app.back-waiting", "Back to sessions, {count} waiting for you", {
+                          count: waiting,
+                      })
+                    : t("app.back-to-sessions", "Back to sessions")
+            }
+            title=${t("app.sessions", "Sessions")}
             onClick=${toSessions}
         >
             <${Icon} name="back" size=${22} />
@@ -263,8 +287,20 @@ function Topbar() {
         <div class="title">
             <button
                 class="title-open"
-                aria-label=${`${title}${folder ? `, in ${folder}` : ""}: session menu`}
-                title=${cwd ? `${shortPath(cwd, server?.home)}\nSession menu` : "Session menu"}
+                aria-label=${
+                    folder
+                        ? t(
+                              "web.app.topbar.aria-label.title-in-folder-menu",
+                              "{title}, in {folder}: {menu}",
+                              { title, folder, menu: t("app.session-menu", "Session menu") },
+                          )
+                        : `${title}: ${t("app.session-menu", "Session menu")}`
+                }
+                title=${
+                    cwd
+                        ? `${shortPath(cwd, server?.home)}\n${t("app.session-menu", "Session menu")}`
+                        : t("app.session-menu", "Session menu")
+                }
                 disabled=${!conversation}
                 onClick=${() => openSheet({ type: "menu" })}
             ></button>
@@ -281,12 +317,20 @@ function Topbar() {
                 ${
                     conversation?.kind === "subagent"
                         ? html`<span class="title-folder title-parent">
-                              subagent of ${conversation.parent?.title ?? "?"}
+                              ${t("web.app.topbar.span.subagent-of", "subagent of {title}", {
+                                  title: conversation.parent?.title ?? "?",
+                              })}
                           </span>
                           <button
                               class="title-model"
-                              aria-label=${`Model: ${modelLabel(view.agent)}: change it`}
-                              title=${`Model: ${modelLabel(view.agent)}`}
+                              aria-label=${t(
+                                  "web.app.topbar.aria-label.model-change-it",
+                                  "Model: {model}: change it",
+                                  { model: modelLabel(view.agent) },
+                              )}
+                              title=${t("web.app.topbar.title.model", "Model: {model}", {
+                                  model: modelLabel(view.agent),
+                              })}
                               onClick=${() => openSheet({ type: "model" })}
                           >
                               <span class="title-model-name">${shortModel(view.agent)}</span>
@@ -300,19 +344,38 @@ function Topbar() {
                               (branchAvailable()
                                   ? html`<button
                                         class="title-branch"
-                                        aria-label=${view.branch?.detached ? `No branch, at ${branch}: switch to one` : `Branch ${branch}: switch or make a branch`}
-                                        title=${view.branch?.detached ? "No branch: switch to one" : "Switch or make a branch"}
+                                        aria-label=${
+                                            view.branch?.detached
+                                                ? t(
+                                                      "web.app.topbar.aria-label.no-branch-at",
+                                                      "No branch, at {branch}: switch to one",
+                                                      { branch },
+                                                  )
+                                                : t(
+                                                      "web.app.topbar.aria-label.branch-switch-make",
+                                                      "Branch {branch}: switch or make a branch",
+                                                      { branch },
+                                                  )
+                                        }
+                                        title=${
+                                            view.branch?.detached
+                                                ? t("app.branch-none", "No branch: switch to one")
+                                                : t("app.branch-switch", "Switch or make a branch")
+                                        }
                                         onClick=${() => openSheet({ type: "branch" })}
                                     >
                                         <${Icon} name="fork" size=${10} /><span class="title-branch-name">${branch}</span>
                                     </button>`
-                                  : html`<span class="title-branch" title="The git branch">
+                                  : html`<span class="title-branch" title=${t("app.branch", "The git branch")}>
                                         <${Icon} name="fork" size=${10} /><span class="title-branch-name">${branch}</span>
                                     </span>`)
                           }
                           ${
                               conversation?.worktree &&
-                              html`<span class="title-worktree" aria-hidden="true">worktree</span>`
+                              html`<span class="title-worktree" aria-hidden="true">${t(
+                                  "web.app.topbar.span.worktree",
+                                  "worktree",
+                              )}</span>`
                           }`
                 }
             </span>
@@ -511,14 +574,21 @@ function App() {
     const state = store.state;
 
     useEffect(() => {
+        // The session's title is the person's own words: it stays as it is, and the fixed part follows the language.
+        const name = t("app.title", "Pi Pocket");
+
         document.title = state.view.conversation?.title
-            ? `${state.view.conversation.title} · Pi Pocket`
-            : "Pi Pocket";
-    }, [state.view.conversation?.title]);
+            ? `${state.view.conversation.title} · ${name}`
+            : name;
+    }, [state.view.conversation?.title, state.localeRevision]);
 
     if (state.me === undefined) {
         return html`<${Boot}
-            caption=${state.notices.some((notice) => notice.level === "error") ? "waiting for the server" : "starting"}
+            caption=${
+                state.notices.some((notice) => notice.level === "error")
+                    ? t("boot.waiting", "waiting for the server")
+                    : t("boot.starting", "starting")
+            }
         />
         <${Notices} />`;
     }
@@ -933,7 +1003,13 @@ startSwipes((where) => {
     // The subagents board or an extension's page in the conversation's place (or the home screen's): right goes back,
     // as its × does.
     if (where === "board") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return {
+            right: {
+                path: iconPath("back"),
+                label: t("web.ui.sheet.aria-label.back", "Back"),
+                run: goBack,
+            },
+        };
     }
 
     if (conversationId === null || !view.conversation || missing) {
@@ -941,7 +1017,13 @@ startSwipes((where) => {
     }
 
     if (where === "files") {
-        return { right: { path: iconPath("back"), label: "Back", run: goBack } };
+        return {
+            right: {
+                path: iconPath("back"),
+                label: t("web.ui.sheet.aria-label.back", "Back"),
+                run: goBack,
+            },
+        };
     }
 
     // Back to the list, or to the session before when that is where back goes.
@@ -950,11 +1032,17 @@ startSwipes((where) => {
     return {
         right: {
             path: iconPath("back"),
-            label: toList ? "Sessions" : "Back",
+            label: toList
+                ? t("app.sessions", "Sessions")
+                : t("web.ui.sheet.aria-label.back", "Back"),
             run: () => (canGoBack() ? goBack() : toSessions()),
         },
         left: filesAvailable()
-            ? { path: iconPath("folder"), label: "Files", run: () => setFilesOpen(true) }
+            ? {
+                  path: iconPath("folder"),
+                  label: t("app.files", "Files"),
+                  run: () => setFilesOpen(true),
+              }
             : null,
         up: () => openSheet({ type: "places" }),
     };
@@ -1005,7 +1093,14 @@ if (shared !== null) {
         (share) =>
             share
                 ? store.set({ sheet: { type: "share", share } })
-                : notify("error", "What was shared did not arrive. Share it again."),
-        () => notify("error", "What was shared could not be read. Share it again."),
+                : notify(
+                      "error",
+                      t("app.shared-missing", "What was shared did not arrive. Share it again."),
+                  ),
+        () =>
+            notify(
+                "error",
+                t("app.shared-unreadable", "What was shared could not be read. Share it again."),
+            ),
     );
 }

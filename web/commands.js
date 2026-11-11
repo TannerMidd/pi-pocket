@@ -1,7 +1,9 @@
+import { t } from "./ui-locale.js";
 // Slash commands in the message box ("/compact", "/model sonnet", …). They run here in the app and are never sent to Pi.
 import { browserAvailable, openInBrowser, toggleBrowser } from "./browser.js";
 import { filesAvailable, toggleFiles } from "./files-panel.js";
 import { branchAvailable } from "./sheets/branch.js";
+import { levelLabel } from "./sheets/model.js";
 import { memoryAvailable, remember } from "./sheets/memory.js";
 import { togglePeeks } from "./peeks.js";
 import { askPip, openPip, pipAvailable } from "./pip.js";
@@ -202,7 +204,7 @@ async function copyLast() {
         return notify("info", "Copied Pi’s last reply.");
     }
 
-    notify("info", "Pi has not replied yet.");
+    notify("info", t("web.commands.no-reply", "Pi has not replied yet."));
 }
 
 function showSession() {
@@ -211,13 +213,16 @@ function showSession() {
     const window = view.agent?.contextWindow;
     const level =
         view.agent?.reasoning && view.agent.thinkingLevel !== "off"
-            ? ` (${view.agent.thinkingLevel})`
+            ? ` (${levelLabel(view.agent.thinkingLevel)})`
             : "";
     const parts = [`${modelLabel(view.agent)}${level}`];
 
     if (window) {
         parts.push(
-            `context ${Math.round(((stats.contextTokens ?? 0) / window) * 100)}% of ${formatTokens(window)}`,
+            t("web.commands.context-use", "context {percent}% of {window}", {
+                percent: Math.round(((stats.contextTokens ?? 0) / window) * 100),
+                window: formatTokens(window),
+            }),
         );
     }
 
@@ -229,40 +234,53 @@ function showSession() {
  * `args` in brackets is optional. `available` hides a command where it does not apply. Keep the names the same as
  * `BUILT_IN_COMMANDS` in `src/server/extension-web.ts`, which keeps them from extensions' commands.
  */
-const COMMANDS = [
+const commands = () => [
     {
         name: "compact",
-        args: "[what to keep]",
-        description: "Summarize older messages to free up context",
+        args: t("builtin.command.copy-1", "[what to keep]"),
+        description: t("builtin.command.copy-0", "Summarize older messages to free up context"),
         run: (arg) => actions.compact(arg || undefined),
     },
     {
         name: "reset",
-        args: "[handoff note]",
-        description: "Start a new context: Pi starts fresh, history stays",
+        args: t("builtin.command.copy-3", "[handoff note]"),
+        description: t(
+            "builtin.command.copy-2",
+            "Start a new context: Pi starts fresh, history stays",
+        ),
         run: (arg) => actions.reset(arg || undefined),
     },
     {
         name: "instructions",
-        args: "[text]",
-        description: "Set what Pi is told with every message here",
+        args: t("builtin.command.copy-5", "[text]"),
+        description: t("builtin.command.copy-4", "Set what Pi is told with every message here"),
         available: isSession,
         run: (arg) =>
             arg === "" ? openSheet({ type: "instructions" }) : actions.setInstructions(arg),
     },
-    { name: "model", args: "[name]", description: "Switch the model", run: switchModel },
-    { name: "thinking", args: "[level]", description: "Set the thinking level", run: setThinking },
+    {
+        name: "model",
+        args: t("builtin.command.copy-7", "[name]"),
+        description: t("builtin.command.copy-6", "Switch the model"),
+        run: switchModel,
+    },
+    {
+        name: "thinking",
+        args: t("builtin.command.copy-9", "[level]"),
+        description: t("builtin.command.copy-8", "Set the thinking level"),
+        run: setThinking,
+    },
     {
         name: "new",
-        args: "[folder]",
-        description: "Start a new session in this folder",
+        args: t("builtin.command.copy-11", "[folder]"),
+        description: t("builtin.command.copy-10", "Start a new session in this folder"),
         available: () => !scoped(),
         run: newSession,
     },
     {
         name: "name",
-        args: "[title]",
-        description: "Rename this session",
+        args: t("builtin.command.copy-13", "[title]"),
+        description: t("builtin.command.copy-12", "Rename this session"),
         available: isSession,
         run: (arg) =>
             arg === ""
@@ -271,8 +289,8 @@ const COMMANDS = [
     },
     {
         name: "cwd",
-        args: "[folder]",
-        description: "Change the working directory",
+        args: t("builtin.command.copy-11", "[folder]"),
+        description: t("builtin.command.copy-14", "Change the working directory"),
         run: (arg) =>
             arg === ""
                 ? openSheet({ type: "cwd", mode: "change" })
@@ -280,7 +298,10 @@ const COMMANDS = [
     },
     {
         name: "plan",
-        description: "Plan mode on or off: Pi reads and proposes, and changes nothing",
+        description: t(
+            "builtin.command.copy-15",
+            "Plan mode on or off: Pi reads and proposes, and changes nothing",
+        ),
         available: () => planAvailable() && isSession(),
         run: async () => {
             const on = !store.state.view.plan?.on;
@@ -296,9 +317,11 @@ const COMMANDS = [
     },
     {
         name: "schedule",
-        args: "<when> <message>",
-        description:
+        args: t("builtin.command.copy-17", "<when> <message>"),
+        description: t(
+            "builtin.command.copy-16",
             "Send Pi a message later or on repeat: in 2h …, tomorrow 9:00 …, every weekday 8:00 …",
+        ),
         available: schedulesAvailable,
         run: async (arg) => {
             if (arg === "") {
@@ -312,8 +335,11 @@ const COMMANDS = [
     },
     {
         name: "remember",
-        args: "<lesson>",
-        description: "Keep a lesson for Pi in every session of this project",
+        args: t("builtin.command.copy-19", "<lesson>"),
+        description: t(
+            "builtin.command.copy-18",
+            "Keep a lesson for Pi in every session of this project",
+        ),
         available: () => memoryAvailable() && store.state.me?.role !== "viewer",
         run: async (arg) => {
             if (arg === "") {
@@ -332,8 +358,11 @@ const COMMANDS = [
     },
     {
         name: "until",
-        args: "<command>",
-        description: "Pi keeps going until a check passes, such as npm test (5 checks at most)",
+        args: t("builtin.command.copy-21", "<command>"),
+        description: t(
+            "builtin.command.copy-20",
+            "Pi keeps going until a check passes, such as npm test (5 checks at most)",
+        ),
         available: goalsAvailable,
         run: async (arg) => {
             if (arg === "") {
@@ -346,98 +375,139 @@ const COMMANDS = [
     },
     {
         name: "watch",
-        args: "[PR number or URL]",
-        description:
+        args: t("builtin.command.copy-23", "[PR number or URL]"),
+        description: t(
+            "builtin.command.copy-22",
             "Watch this session's pull request: Pi fixes failed checks and answers reviews until it is merged",
+        ),
         available: watchAvailable,
         run: (arg) => watchPr(arg),
     },
-    { name: "stop", description: "Stop the current run", run: () => actions.abort() },
-    { name: "copy", description: "Copy Pi’s last reply", run: copyLast },
+    {
+        name: "stop",
+        description: t("builtin.command.copy-24", "Stop the current run"),
+        run: () => actions.abort(),
+    },
+    {
+        name: "copy",
+        description: t("builtin.command.copy-25", "Copy Pi’s last reply"),
+        run: copyLast,
+    },
     {
         name: "find",
-        args: "[text]",
-        description: "Find in this session’s messages",
+        args: t("builtin.command.copy-5", "[text]"),
+        description: t("builtin.command.copy-26", "Find in this session’s messages"),
         run: (arg) => openSheet({ type: "find", query: arg }),
     },
-    { name: "session", description: "Show the model, context use, and cost", run: showSession },
+    {
+        name: "session",
+        description: t("builtin.command.copy-27", "Show the model, context use, and cost"),
+        run: showSession,
+    },
     {
         name: "export",
-        description: "Download this conversation as Markdown",
+        description: t("builtin.command.copy-28", "Download this conversation as Markdown"),
         run: () => location.assign(`/api/c/${store.state.view.conversation.id}/export`),
     },
     {
         name: "resume",
-        description: "Switch to another session",
+        description: t("builtin.command.copy-29", "Switch to another session"),
         run: () => store.set({ drawer: true }),
     },
     {
         name: "chat",
-        description: "Open the people chat",
+        description: t("builtin.command.copy-30", "Open the people chat"),
         available: collab,
         run: () => openSheet({ type: "chat" }),
     },
     {
         name: "browser",
-        args: "[address]",
-        description: "Open the browser Pi uses, or an address in it, such as localhost:5173",
+        args: t("builtin.command.copy-32", "[address]"),
+        description: t(
+            "builtin.command.copy-31",
+            "Open the browser Pi uses, or an address in it, such as localhost:5173",
+        ),
         available: browserAvailable,
         run: (arg) => (arg === "" ? toggleBrowser() : openInBrowser(arg)),
     },
     {
         name: "files",
-        description: "Show or hide the Files tile: the folder's files, and what changed",
+        description: t(
+            "builtin.command.copy-33",
+            "Show or hide the Files tile: the folder's files, and what changed",
+        ),
         available: filesAvailable,
         run: () => toggleFiles("files"),
     },
     {
         name: "changes",
-        description: "Review the folder's uncommitted changes, file by file",
+        description: t(
+            "builtin.command.copy-34",
+            "Review the folder's uncommitted changes, file by file",
+        ),
         available: filesAvailable,
         run: () => toggleFiles("changes"),
     },
     {
         name: "branch",
-        args: "[name]",
-        description: "Switch the folder to another git branch, or make one",
+        args: t("builtin.command.copy-7", "[name]"),
+        description: t(
+            "builtin.command.copy-35",
+            "Switch the folder to another git branch, or make one",
+        ),
         available: branchAvailable,
         run: (arg) => openSheet({ type: "branch", query: arg }),
     },
     {
         name: "pip",
-        args: "[message]",
-        description: "Open PiP, your assistant over every session, or ask it something",
+        args: t("builtin.command.pip-args", "[message]"),
+        description: t(
+            "builtin.command.pip-description",
+            "Open PiP, your assistant over every session, or ask it something",
+        ),
         available: pipAvailable,
         run: (arg) => (arg === "" ? openPip() : askPip(arg)),
     },
     {
         name: "peek",
-        description: "Show or hide peek tiles: other sessions' live work beside this one",
+        description: t(
+            "builtin.command.copy-36",
+            "Show or hide peek tiles: other sessions' live work beside this one",
+        ),
         available: () => store.state.server?.peeks === true,
         run: () => togglePeeks(),
     },
     {
         name: "artifacts",
-        description: "Show artifacts",
+        description: t("builtin.command.copy-37", "Show artifacts"),
         run: () => openSheet({ type: "artifacts" }),
     },
     {
         name: "login",
-        description: "Sign in to a model provider",
+        description: t("builtin.command.copy-38", "Sign in to a model provider"),
         run: () => openSheet({ type: "providers" }),
     },
-    { name: "settings", description: "Open the menu", run: () => openSheet({ type: "menu" }) },
+    {
+        name: "settings",
+        description: t("builtin.command.copy-39", "Open the menu"),
+        run: () => openSheet({ type: "menu" }),
+    },
     {
         name: "trust",
-        description: "Whether Pi trusts this project, for its own skills",
+        description: t(
+            "builtin.command.trust-description",
+            "Whether Pi trusts this project, for its own skills",
+        ),
         available: trustAvailable,
         run: () => openSheet({ type: "trust" }),
     },
     {
         name: "theme",
-        args: "[name]",
-        description:
+        args: t("builtin.command.copy-7", "[name]"),
+        description: t(
+            "builtin.command.copy-40",
             "Change the theme or the colors: a theme, an Omarchy palette, or desktop to follow yours",
+        ),
         run: setTheme,
     },
 ];
@@ -512,18 +582,34 @@ function extensionCommands() {
         .map((command) => ({
             ...command,
             extension: true,
+            description:
+                command.name === "design-open"
+                    ? t(
+                          "builtin.command.design-open-description",
+                          "Open the Design canvas (or the design system, with `system`)",
+                      )
+                    : command.description,
+            args:
+                command.name === "design-open"
+                    ? t("builtin.command.design-open-args", "[artifact | system]")
+                    : command.args,
             run: async (args, requestId) => {
                 const result = await actions.extensionCommand(command.id, args, requestId);
 
                 if (result?.type === "toast") {
-                    notify(result.level, result.message);
+                    notify(
+                        result.level,
+                        command.name === "design-open" && result.message === "Opening Design"
+                            ? t("builtin.design.opening", "Opening Design")
+                            : result.message,
+                    );
                 }
             },
         }));
 }
 
 const available = () => [
-    ...COMMANDS.filter((command) => command.available?.() ?? true),
+    ...commands().filter((command) => command.available?.() ?? true),
     ...extensionCommands(),
 ];
 

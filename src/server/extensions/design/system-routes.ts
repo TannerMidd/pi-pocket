@@ -892,7 +892,7 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
         async (request) => {
             const callId = `design-system-docs:${keyOf(request, "Publishing needs a key.")}`;
             const system = withoutErrors(existing(await load(folderOf(request))));
-            const doc = renderSystemDoc(system);
+            const doc = renderSystemDoc(system, request.locale);
             const prepared = new Map<string, Prepared>();
             let total = 0;
 

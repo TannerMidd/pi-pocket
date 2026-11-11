@@ -10,6 +10,7 @@ import { highlight, langOf } from "./highlight.js";
 import { blockMath, inlineMath } from "./math.js";
 import { fenceFor, markdownRevision, mathOn, mountMath } from "./markdown-ext.js";
 import { actions, filesShown, notify, openSheet, store } from "./store.js";
+import { t } from "./ui-locale.js";
 
 // `this[0] = 3` stops htm from keeping the elements a template makes: a kept element keeps the app's tree it was first
 // drawn in, and through the rows of the session list, every tree after it. Templates stay parsed once.
@@ -114,11 +115,14 @@ function imageSource(src, conversationId) {
 }
 
 /** A tappable image thumbnail that opens full screen, or a chip when the image cannot load. */
-export function Thumb({ src, alt = "image" }) {
+export function Thumb({ src, alt = t("web.ui.thumb.alt.image", "image") }) {
     const [broken, setBroken] = useState(false);
 
     if (broken) {
-        return html`<span class="chip" title="This image could not be loaded">🖼 ${alt}</span>`;
+        return html`<span class="chip" title=${t(
+            "web.ui.thumb.title.image-not-loaded",
+            "This image could not be loaded",
+        )}>🖼 ${alt}</span>`;
     }
 
     return html`<button
@@ -314,7 +318,7 @@ function codeBlock(pre, fold) {
     copy.className = "copy";
     copy.type = "button";
     copy.dataset.copy = "";
-    copy.textContent = "Copy";
+    copy.textContent = t("web.ui.code.copy", "Copy");
     pre.replaceWith(wrap);
 
     if (kind) {
@@ -341,7 +345,7 @@ function codeBlock(pre, fold) {
         more.className = "code-more";
         more.type = "button";
         more.dataset.more = "";
-        more.textContent = `Show all ${lines} lines`;
+        more.textContent = t("web.ui.code.show-lines", "Show all {count} lines", { count: lines });
         wrap.append(more);
     }
 }
@@ -539,6 +543,7 @@ function markdownParts(
     breaks = true,
 ) {
     const key = [
+        store.state.localeRevision,
         markdownRevision(),
         conversationId ?? "",
         base ?? "",
@@ -643,9 +648,13 @@ export function Markdown({
 
     // Growing text, block by block (`liveBlocks`); a whole page is fenced as one block (`fencePage`), as before.
     if (!cache && fencePage(text) === text) {
-        const settings = [markdownRevision(), conversationId ?? "", base ?? "", breaks].join(
-            "\u0000",
-        );
+        const settings = [
+            store.state.localeRevision,
+            markdownRevision(),
+            conversationId ?? "",
+            base ?? "",
+            breaks,
+        ].join("\u0000");
 
         if (live.current?.settings !== settings) {
             live.current = { settings, kept: new Map() };
@@ -905,7 +914,9 @@ document.addEventListener(
         const note = document.createElement("span");
 
         note.className = "image-missing";
-        note.textContent = `🖼 ${image.alt || "Image"} could not be loaded`;
+        note.textContent = t("web.ui.image.unavailable", "🖼 {image} could not be loaded", {
+            image: image.alt || t("web.ui.image.name", "Image"),
+        });
         image.after(note);
     },
     true,
@@ -923,10 +934,10 @@ document.addEventListener("click", (event) => {
 
     copyText(pre?.innerText ?? "").then(
         () => {
-            button.textContent = "Copied";
-            setTimeout(() => (button.textContent = "Copy"), 1200);
+            button.textContent = t("web.ui.code.copied", "Copied");
+            setTimeout(() => (button.textContent = t("web.ui.code.copy", "Copy")), 1200);
         },
-        () => notify("error", "Could not copy."),
+        () => notify("error", t("web.ui.code.copy-failed", "Could not copy.")),
     );
 });
 
@@ -942,8 +953,10 @@ document.addEventListener("click", (event) => {
     const open = block.classList.toggle("open");
 
     button.textContent = open
-        ? "Fold"
-        : `Show all ${block.querySelector("pre")?.textContent.split("\n").length ?? ""} lines`;
+        ? t("web.ui.code.fold", "Fold")
+        : t("web.ui.code.show-lines", "Show all {count} lines", {
+              count: block.querySelector("pre")?.textContent.split("\n").length ?? "",
+          });
 });
 
 /** Copy text, with a fallback for plain-http addresses, where the clipboard API does not exist. */
@@ -1314,7 +1327,7 @@ export function Icon({ name, path, size = 20, class: className = "", stroke = 2,
  * The app's loaders, after Omarchy's: a quadrant block that steps around a square like a terminal spinner, and a flat
  * bar that eases toward 70% the way Omarchy's boot screen does while it waits.
  */
-export function Spinner({ label = "Working", hidden = false }) {
+export function Spinner({ label = t("sessions.working", "Working"), hidden = false }) {
     // Hidden from screen readers beside words that say the same.
     return hidden
         ? html`<span class="spinner" aria-hidden="true"></span>`
@@ -1322,7 +1335,7 @@ export function Spinner({ label = "Working", hidden = false }) {
 }
 
 /** A spinner with a short line about what is loading, for sheets and panels. */
-export function Loader({ label = "Loading" }) {
+export function Loader({ label = t("web.ui.loader.text.loading", "Loading") }) {
     return html`<div class="loader" role="status">
         <${Spinner} label=${label} />
         <span>${label}…</span>
@@ -1330,7 +1343,7 @@ export function Loader({ label = "Loading" }) {
 }
 
 /** The full-screen loader: π over Omarchy's boot bar, and what is happening under it. */
-export function Boot({ caption = "starting", detail = "", inline = false }) {
+export function Boot({ caption = t("boot.starting", "starting"), detail = "", inline = false }) {
     return html`<div
         class=${`boot ${inline ? "inline" : ""}`}
         data-part="boot"
@@ -1802,7 +1815,7 @@ class DrawnFor extends Component {
  * does not count. Its own state draws it again as usual.
  */
 export function drawnFor(keys, component) {
-    const set = new Set(keys);
+    const set = new Set([...keys, "localeRevision"]);
     const Wrapped = (props) => h(DrawnFor, { component, props, keys: set, state: store.state });
 
     Wrapped.displayName = component.name;
@@ -1812,14 +1825,19 @@ export function drawnFor(keys, component) {
 
 /**
  * `component`, drawn again only when its props change (each compared with `Object.is`) or its own state does. It must
- * read nothing else as it draws, such as `store.state`: what it needs comes as props. `ignored` names props it reads
- * only as it mounts, whose change alone does not draw it again. One component around it, not two: the session list
+ * read nothing else as it draws, such as `store.state`: what it needs comes as props. The language is the exception:
+ * a new `localeRevision` draws its fixed words again. `ignored` names props it reads only as it mounts. One component
+ * around it, not two: the session list
  * makes one for each of its hundreds of rows.
  */
 export function memo(component, ignored = []) {
     class Memo extends Component {
         // Without making arrays: the session list asks this of each of its rows at every draw.
         shouldComponentUpdate(next) {
+            if (this.localeRevision !== store.state.localeRevision) {
+                return true;
+            }
+
             let count = 0;
 
             for (const key in next) {
@@ -1838,6 +1856,8 @@ export function memo(component, ignored = []) {
         }
 
         render(props) {
+            this.localeRevision = store.state.localeRevision;
+
             return h(component, props);
         }
     }
@@ -1940,13 +1960,16 @@ export function Sheet({ title, onClose, children, wide = false, actions = null, 
                 <div class="grip" aria-hidden="true"></div>
                 ${
                     onBack &&
-                    html`<button class="icon-button sheet-back" onClick=${onBack} aria-label="Back">
+                    html`<button class="icon-button sheet-back" onClick=${onBack} aria-label=${t(
+                        "web.ui.sheet.aria-label.back",
+                        "Back",
+                    )}>
                         <${Icon} name="back" size=${18} />
                     </button>`
                 }
                 <h2>${title}</h2>
                 ${actions}
-                <button class="icon-button" onClick=${onClose} aria-label="Close">
+                <button class="icon-button" onClick=${onClose} aria-label=${t("ui.close", "Close")}>
                     <${Icon} name="close" />
                 </button>
             </header>
@@ -2064,7 +2087,7 @@ export const anchorStyle = (anchor) =>
 /** The short name of a model for chips: "Claude Opus 5.5" stays, long ids lose their date suffix. */
 export function modelLabel(agent) {
     if (!agent?.model) {
-        return "No model";
+        return t("web.ui.model-label.text.no-model", "No model");
     }
 
     return agent.modelName ?? agent.model.modelId.replace(/-\d{8}$/, "");
@@ -2116,7 +2139,7 @@ export function PlaceTile({ place }) {
         type="button"
         class=${`place ${place.on ? "on" : ""}`}
         data-place=${place.id}
-        aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.badge ? `${place.label}, ${place.badge}` : place.dot ? `${place.label}, ${place.dotLabel ?? "a page open"}` : place.label}
+        aria-label=${place.count > 0 ? `${place.label}, ${place.count} ${place.counted ?? ""}`.trim() : place.badge ? `${place.label}, ${place.badge}` : place.dot ? `${place.label}, ${place.dotLabel ?? t("ui.page-open", "a page open")}` : place.label}
         aria-pressed=${place.on === undefined ? undefined : place.on ? "true" : "false"}
         onClick=${place.run}
     >

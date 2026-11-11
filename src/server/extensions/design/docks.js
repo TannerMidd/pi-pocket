@@ -7,6 +7,7 @@ import { commentsMessage, editsMessage, tweaksMessage } from "./messages.js";
 import { changed, coerce, show } from "./tweaks.js";
 
 export function createDocks(env) {
+    const t = env.pocket.t;
     const { pocket, store, data, parts } = env;
     const { html, useEffect, useRef, useState, Switch } = pocket;
     const { Ico, ago } = parts;
@@ -26,8 +27,8 @@ export function createDocks(env) {
             <button
                 type="button"
                 class="icon-button"
-                title="Close"
-                aria-label="Close"
+                title=${t("server.extensions.design.docks.create-docks.dock-head.title.close", "Close")}
+                aria-label=${t("server.extensions.design.docks.create-docks.dock-head.aria-label.close", "Close")}
                 onClick=${() => env.setDock(null)}
             >
                 <${Ico} name="close" size=${16} />
@@ -59,7 +60,10 @@ export function createDocks(env) {
             }
         };
 
-        return html`<${DockHead} title="Versions" count=${design.versions.length}>
+        return html`<${DockHead}
+                title=${t("server.extensions.design.docks.create-docks.versions-dock.title.versions", "Versions")}
+                count=${design.versions.length}
+            >
                 ${
                     list.length > 1 &&
                     html`<button
@@ -67,7 +71,8 @@ export function createDocks(env) {
                         class="dsn-link"
                         onClick=${() => env.compare(shown === latest ? latest - 1 : shown, latest)}
                     >
-                        <${Ico} name="compare" size=${14} /> Compare
+                        <${Ico} name="compare" size=${14} />
+                        ${t("server.extensions.design.docks.create-docks.versions-dock.text.compare", "Compare")}
                     </button>`
                 }
             <//>
@@ -99,7 +104,7 @@ export function createDocks(env) {
                                             class="dsn-link"
                                             onClick=${() => env.compare(version.version, latest)}
                                         >
-                                            Compare
+                                            ${t("server.extensions.design.docks.create-docks.versions-dock.button.compare", "Compare")}
                                         </button>`
                                     }
                                     ${
@@ -111,7 +116,7 @@ export function createDocks(env) {
                                             class="dsn-link"
                                             onClick=${() => setAsking(version.version)}
                                         >
-                                            Go back to this one
+                                            ${t("server.extensions.design.docks.create-docks.versions-dock.button.go-back-one", "Go back to this one")}
                                         </button>`
                                     }
                                 </div>
@@ -137,7 +142,7 @@ export function createDocks(env) {
                                                 disabled=${busy}
                                                 onClick=${() => setAsking(null)}
                                             >
-                                                Cancel
+                                                ${t("server.extensions.design.docks.create-docks.versions-dock.button.cancel", "Cancel")}
                                             </button>
                                         </span>
                                     </div>`
@@ -189,7 +194,7 @@ export function createDocks(env) {
             <textarea
                 ref=${box}
                 rows="3"
-                placeholder="What should change here?"
+                placeholder=${t("server.extensions.design.docks.create-docks.composer.placeholder.change", "What should change here?")}
                 maxlength="2000"
                 value=${text}
                 onInput=${(event) => setText(event.currentTarget.value)}
@@ -201,13 +206,18 @@ export function createDocks(env) {
                 }}
             ></textarea>
             <div class="dsn-composer-actions">
-                <button type="button" class="button small" onClick=${onDone}>Cancel</button>
+                <button type="button" class="button small" onClick=${onDone}>
+                    ${t(
+                        "server.extensions.design.docks.create-docks.composer.button.cancel",
+                        "Cancel",
+                    )}
+                </button>
                 <button
                     type="submit"
                     class="button small primary"
                     disabled=${busy || text.trim() === ""}
                 >
-                    Add comment
+                    ${t("server.extensions.design.docks.create-docks.composer.button.add-comment", "Add comment")}
                 </button>
             </div>
         </form>`;
@@ -282,8 +292,8 @@ export function createDocks(env) {
                             html`<button
                                 type="button"
                                 class="icon-button"
-                                title="Delete"
-                                aria-label="Delete"
+                                title=${t("server.extensions.design.docks.comments-dock.row.title.delete", "Delete")}
+                                aria-label=${t("server.extensions.design.docks.comments-dock.row.aria-label.delete", "Delete")}
                                 onClick=${() => data.removeComment(design.id, comment.id)}
                             >
                                 <${Ico} name="trash" size=${15} />
@@ -294,7 +304,10 @@ export function createDocks(env) {
             </li>`;
         };
 
-        return html`<${DockHead} title="Comments" count=${open.length}>
+        return html`<${DockHead}
+                title=${t("server.extensions.design.docks.create-docks.comments-dock.title.comments", "Comments")}
+                count=${open.length}
+            >
                 ${
                     canEdit &&
                     open.length > 0 &&
@@ -307,7 +320,7 @@ export function createDocks(env) {
                                 open.map((comment) => comment.id),
                             )}
                     >
-                        All done
+                        ${t("server.extensions.design.docks.create-docks.comments-dock.button.done", "All done")}
                     </button>`
                 }
             <//>
@@ -372,7 +385,7 @@ export function createDocks(env) {
                                     setSent(null);
                                 }}
                             >
-                                mark them done</button
+                                ${t("server.extensions.design.docks.create-docks.comments-dock.button.mark-them-done", "mark them done")}</button
                             >.
                         </span>`
                     }
@@ -402,10 +415,18 @@ export function createDocks(env) {
             env.reloadFrame();
         };
 
-        return html`<${DockHead} title="Text edits" count=${edits.length}>
+        return html`<${DockHead}
+                title=${t("server.extensions.design.docks.create-docks.edits-dock.title.text-edits", "Text edits")}
+                count=${edits.length}
+            >
                 ${
                     edits.length > 0 &&
-                    html`<button type="button" class="dsn-link" onClick=${discard}>Discard</button>`
+                    html`<button type="button" class="dsn-link" onClick=${discard}>
+                        ${t(
+                            "server.extensions.design.docks.create-docks.edits-dock.button.discard",
+                            "Discard",
+                        )}
+                    </button>`
                 }
             <//>
             <div class="dsn-dock-body">
@@ -425,8 +446,8 @@ export function createDocks(env) {
                                 <button
                                     type="button"
                                     class="icon-button"
-                                    title="Leave this one out of the message"
-                                    aria-label="Leave this one out of the message"
+                                    title=${t("server.extensions.design.docks.create-docks.edits-dock.title.leave-one-out-message", "Leave this one out of the message")}
+                                    aria-label=${t("server.extensions.design.docks.create-docks.edits-dock.aria-label.leave-one-out-message", "Leave this one out of the message")}
                                     onClick=${() =>
                                         store.set((now) => ({
                                             edits: {
@@ -537,7 +558,10 @@ export function createDocks(env) {
                 }),
             );
 
-        return html`<${DockHead} title="Tweaks" count=${moved.length}>
+        return html`<${DockHead}
+                title=${t("server.extensions.design.docks.create-docks.tweaks-dock.title.tweaks", "Tweaks")}
+                count=${moved.length}
+            >
                 ${
                     moved.length > 0 &&
                     canEdit &&
@@ -546,7 +570,7 @@ export function createDocks(env) {
                         class="dsn-link"
                         onClick=${() => env.resetTweaks(design.id)}
                     >
-                        Reset
+                        ${t("server.extensions.design.docks.create-docks.tweaks-dock.button.reset", "Reset")}
                     </button>`
                 }
             <//>
@@ -568,7 +592,7 @@ export function createDocks(env) {
                                         `Add tweaks to ${design.title} (artifact \`${design.id}\`): 3 to 8 knobs for the things I would want to adjust, such as the accent color, spacing, and type size, in the design's tweaks manifest.`,
                                     )}
                             >
-                                Ask Pi for tweaks
+                                ${t("server.extensions.design.docks.create-docks.tweaks-dock.button.ask-pi-tweaks", "Ask Pi for tweaks")}
                             </button>`
                         }
                     </div>`
@@ -577,7 +601,7 @@ export function createDocks(env) {
                     !canEdit &&
                     knobs.length > 0 &&
                     html`<p class="muted small dsn-note">
-                        Tweaks are for people who can steer the session.
+                        ${t("server.extensions.design.docks.create-docks.tweaks-dock.p.tweaks-people-who-steer", "Tweaks are for people who can steer the session.")}
                     </p>`
                 }
                 ${
@@ -652,7 +676,7 @@ export function createDocks(env) {
             class="dsy-sheet-handle"
             role="separator"
             aria-orientation="horizontal"
-            aria-label="Height of the findings. Drag, or press the arrow keys."
+            aria-label=${t("server.extensions.design.docks.create-docks.sheet-handle.aria-label.height-findings-drag-press", "Height of the findings. Drag, or press the arrow keys.")}
             aria-valuemin="0"
             aria-valuemax=${SHEET_SNAPS.length - 1}
             aria-valuenow=${index}

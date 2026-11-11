@@ -36,6 +36,7 @@ import { branchAvailable } from "./branch.js";
 import { memoryAvailable, memoryHint, useMemory } from "./memory.js";
 import { defaultLabel, defaultsKept } from "./model.js";
 import { copyText, html, Icon, item, PlaceTile, Sheet, shortPath } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
 const touch = matchMedia("(pointer: coarse)").matches;
@@ -45,8 +46,13 @@ function extensionsHint() {
     const { guard } = store.state;
 
     return [
-        safeMode() && "browser parts off here",
-        guard?.enabled ? "Lancet Guard on" : guard?.available ? "Lancet Guard off" : "",
+        safeMode() &&
+            t("web.sheets.menu.extensions-hint.text.browser-parts-off", "browser parts off here"),
+        guard?.enabled
+            ? t("web.sheets.menu.extensions-hint.text.lancet-guard", "Lancet Guard on")
+            : guard?.available
+              ? t("web.sheets.menu.extensions-hint.text.lancet-guard-off", "Lancet Guard off")
+              : "",
     ]
         .filter(Boolean)
         .join(" · ");
@@ -79,7 +85,7 @@ function PlacesWithChanges() {
 const PLACES = [
     {
         id: "core:files",
-        label: "Files",
+        label: () => t("app.files", "Files"),
         place: () =>
             filesAvailable() && {
                 icon: "folder",
@@ -89,7 +95,7 @@ const PLACES = [
     },
     {
         id: "core:changes",
-        label: "Changes",
+        label: () => t("app.changes", "Changes"),
         place({ changes }) {
             // Match the top bar: uncommitted files in a repository, Pi's edits elsewhere, plus any unlisted files.
             const count = changes
@@ -102,7 +108,10 @@ const PLACES = [
                 filesAvailable() && {
                     icon: "diff",
                     count,
-                    counted: count === 1 ? "changed file" : "changed files",
+                    counted:
+                        count === 1
+                            ? t("web.sheets.menu.place.counted.changed-file", "changed file")
+                            : t("web.sheets.menu.place.counted.changed-files", "changed files"),
                     on: store.state.filesOpen && store.state.filesTab === "changes",
                     run: () => setFilesOpen(true, "changes"),
                 }
@@ -111,7 +120,7 @@ const PLACES = [
     },
     {
         id: "core:browser",
-        label: "Browser",
+        label: () => t("app.browser", "Browser"),
         place() {
             const { browser, browserOpen } = store.state;
 
@@ -130,7 +139,7 @@ const PLACES = [
     },
     {
         id: "core:artifacts",
-        label: "Artifacts",
+        label: () => t("app.artifacts", "Artifacts"),
         place: () => ({
             icon: "artifact",
             count: store.state.view.artifacts.length,
@@ -139,24 +148,24 @@ const PLACES = [
     },
     {
         id: "core:chat",
-        label: "Chat",
+        label: () => t("menu.chat", "Chat"),
         place: () =>
             collab() && {
                 icon: "chat",
                 count: chatUnread(),
-                counted: "unread",
+                counted: t("web.sheets.menu.place.counted.unread", "unread"),
                 run: () => openSheet({ type: "chat" }),
             },
     },
     {
         id: "core:find",
-        label: "Find",
+        label: () => t("menu.find", "Find"),
         place: () => ({ icon: "search", run: () => openSheet({ type: "find" }) }),
     },
     {
         // Ctrl K's launcher, for touch screens that have no keyboard to open it.
         id: "core:launcher",
-        label: "Launcher",
+        label: () => t("menu.launcher", "Launcher"),
         place: () =>
             touch && {
                 icon: "command",
@@ -168,18 +177,18 @@ const PLACES = [
     },
     {
         id: "core:branch",
-        label: "Branch",
+        label: () => t("menu.branch", "Branch"),
         place: () =>
             branchAvailable() && { icon: "fork", run: () => openSheet({ type: "branch" }) },
     },
     {
         id: "core:pip",
-        label: "PiP",
+        label: () => t("menu.pip", "PiP"),
         place: () =>
             pipAvailable() && {
                 icon: "pip",
                 dot: pipUnread(),
-                dotLabel: "something new",
+                dotLabel: t("web.sheets.menu.place.dot-label.something-new", "something new"),
                 run: () => {
                     openPip();
                     closeSheet();
@@ -188,7 +197,7 @@ const PLACES = [
     },
     {
         id: "core:peeks",
-        label: "Peeks",
+        label: () => t("menu.peeks", "Peeks"),
         place: () =>
             store.state.server?.peeks === true && {
                 icon: "tiles",
@@ -208,18 +217,20 @@ PLACES.forEach(({ id, label, place }, index) =>
         order: (index + 1) * 100,
         render(context) {
             const shown = place(context);
+            // The label is read as the tile draws, so it follows the language now (`ui-locale.js`).
+            const name = label();
 
             // As before slots: `data-place="files"`, which tests and themes may select.
             return (
                 shown &&
-                html`<${PlaceTile} place=${{ id: id.replace(/^core:/, ""), label, ...shown }} />`
+                html`<${PlaceTile} place=${{ id: id.replace(/^core:/, ""), label: name, ...shown }} />`
             );
         },
     }),
 );
 
 function PlacesGrid({ changes = null }) {
-    return html`<nav class="places" aria-label="Places">
+    return html`<nav class="places" aria-label=${t("menu.places", "Places")}>
         ${slotItems("places", { changes }).map(({ node }) => node)}
     </nav>`;
 }
@@ -232,12 +243,19 @@ export function PlacesSheet() {
     const conversation = store.state.view.conversation;
 
     return html`<${Sheet}
-        title=${conversation?.title ?? "Open"}
+        title=${conversation?.title ?? t("menu.open", "Open")}
         onClose=${closeSheet}
         className="places-sheet"
     >
         <${Places} />
-        ${item("Session menu", () => openSheet({ type: "menu", fromPlaces: true }), "rename, context, settings")}
+        ${item(
+            t("app.session-menu", "Session menu"),
+            () => openSheet({ type: "menu", fromPlaces: true }),
+            t(
+                "web.sheets.menu.places-sheet.text.rename-context-settings",
+                "rename, context, settings",
+            ),
+        )}
     <//>`;
 }
 
@@ -247,7 +265,8 @@ function MenuFrame({ title, children }) {
 
     useLayoutEffect(() => {
         const element = host.current;
-        const button = document.querySelector('.topbar [aria-label="Menu"]');
+        // Not by its label: that is translated, and the button is the top bar's one dialog opener.
+        const button = document.querySelector('.topbar [aria-haspopup="dialog"]');
         const active = document.activeElement;
         const opener = active === document.body ? button : active;
 
@@ -384,7 +403,7 @@ function trustHint() {
     }
 
     if (info.ask) {
-        return "not decided";
+        return t("web.sheets.menu.trust-hint.text.not-decided", "not decided");
     }
 
     // No decision, and nothing waiting for one: there is nothing to say.
@@ -392,7 +411,9 @@ function trustHint() {
         return "";
     }
 
-    return info.trusted ? "trusted" : "not trusted";
+    return info.trusted
+        ? t("web.sheets.menu.trust-hint.text.trusted", "trusted")
+        : t("web.sheets.menu.trust-hint.text.not-trusted", "not trusted");
 }
 
 /** The menu; `places` is false when it opens from the places sheet, which just showed the tiles. */
@@ -410,7 +431,7 @@ export function MenuSheet({ places = true }) {
     // The embedder this page runs in adds its own group at the end, below App, under its own title (`embedder.js`).
     const embedder = hostMenu();
 
-    return html`<${MenuFrame} title=${conversation?.title ?? "Menu"}>
+    return html`<${MenuFrame} title=${conversation?.title ?? t("web.sheets.menu.menu-sheet.text.menu", "Menu")}>
         ${places && html`<${Places} />`}
         <div class="menu-session">
             ${
@@ -418,45 +439,61 @@ export function MenuSheet({ places = true }) {
                 collab() &&
                 canToggleTurns() &&
                 item(
-                    turns?.on ? "Turn off take turns" : "Take turns",
+                    turns?.on
+                        ? t(
+                              "web.sheets.menu.menu-sheet.text.turn-off-take-turns",
+                              "Turn off take turns",
+                          )
+                        : t("web.sheets.menu.menu-sheet.text.take-turns", "Take turns"),
                     () =>
                         attempt(async () => {
                             await actions.turns(turns?.on ? "off" : "on");
                             closeSheet();
                         }),
                     turns?.on
-                        ? "anyone here can send to Pi again"
-                        : "one person drives Pi at a time",
+                        ? t(
+                              "web.sheets.menu.menu-sheet.text.anyone-send-pi-again",
+                              "anyone here can send to Pi again",
+                          )
+                        : t(
+                              "web.sheets.menu.menu-sheet.text.one-person-drives-pi",
+                              "one person drives Pi at a time",
+                          ),
                 )
             }
-            ${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
+            ${session && steer && item(t("menu.rename", "Rename"), () => openSheet({ type: "rename" }))}
             ${
                 session &&
                 item(
-                    isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
+                    isPinned(conversation.id)
+                        ? t("web.sheets.menu.menu-sheet.text.unpin-top", "Unpin from the top")
+                        : t("web.sheets.menu.menu-sheet.text.pin-top", "Pin to the top"),
                     () => {
                         togglePin(conversation.id);
                         closeSheet();
                     },
-                    "this browser",
+                    t("web.sheets.menu.menu-sheet.text.browser", "this browser"),
                 )
             }
             ${
                 session &&
                 item(
-                    "Mark unread",
+                    t("web.sheets.menu.menu-sheet.text.mark-unread", "Mark unread"),
                     () => {
                         setUnread(conversation.id, true);
                         closeSheet();
                         navigate(null);
                     },
-                    "this browser; opening it again clears it",
+                    t(
+                        "web.sheets.menu.menu-sheet.text.browser-opening-again-clears",
+                        "this browser; opening it again clears it",
+                    ),
                 )
             }
             ${
                 conversation?.worktree && steer
                     ? item(
-                          "Worktree",
+                          t("web.sheets.menu.menu-sheet.text.worktree", "Worktree"),
                           () => openSheet({ type: "worktree" }),
                           conversation.worktree.branch,
                       )
@@ -465,7 +502,10 @@ export function MenuSheet({ places = true }) {
                       driving &&
                       !scoped() &&
                       item(
-                          "Working directory",
+                          t(
+                              "web.sheets.menu.menu-sheet.text.working-directory",
+                              "Working directory",
+                          ),
                           () => openSheet({ type: "cwd", mode: "change" }),
                           shortPath(view.agent?.cwd, server?.home),
                       )
@@ -475,7 +515,7 @@ export function MenuSheet({ places = true }) {
                 browserAvailable() &&
                 store.state.browserOpen &&
                 item(
-                    "Close the browser",
+                    t("web.sheets.menu.menu-sheet.text.close-browser", "Close the browser"),
                     () => {
                         setBrowserOpen(false);
                         closeSheet();
@@ -483,104 +523,244 @@ export function MenuSheet({ places = true }) {
                     store.state.browser?.open && displayUrl(store.state.browser.url),
                 )
             }
-            ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
+            ${conversation && trustAvailable() && item(t("menu.trust", "Project trust"), () => openSheet({ type: "trust" }), trustHint())}
             ${session && extensionMenuItems("session").map((each) => item(each.label, each.run, each.hint))}
-            ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
-            ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
-            ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
-            ${conversation && memoryAvailable() && item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory))}
-            ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
+            ${
+                session &&
+                steer &&
+                driving &&
+                item(
+                    t("menu.instructions", "Instructions for Pi"),
+                    () => openSheet({ type: "instructions" }),
+                    instructions
+                        ? t("web.sheets.menu.menu-sheet.text.content", "on")
+                        : t("web.sheets.menu.menu-sheet.text.none", "none"),
+                )
+            }
+            ${
+                conversation &&
+                steer &&
+                driving &&
+                item(
+                    t("menu.compact", "Compact context"),
+                    () => openSheet({ type: "compact" }),
+                    t(
+                        "web.sheets.menu.menu-sheet.text.summarize-older-messages",
+                        "summarize older messages",
+                    ),
+                )
+            }
+            ${
+                conversation &&
+                steer &&
+                driving &&
+                item(
+                    t("menu.new-context", "New context"),
+                    () => openSheet({ type: "reset" }),
+                    t(
+                        "web.sheets.menu.menu-sheet.text.pi-starts-fresh-history",
+                        "Pi starts fresh; history stays",
+                    ),
+                )
+            }
+            ${conversation && memoryAvailable() && item(t("menu.memory", "Memory"), () => openSheet({ type: "memory" }), memoryHint(memory))}
+            ${
+                schedulesAvailable() &&
+                item(
+                    t("menu.schedules", "Scheduled messages"),
+                    () => openSheet({ type: "schedules" }),
+                    view.schedules.length === 0
+                        ? t("web.sheets.menu.menu-sheet.text.none", "none")
+                        : t("web.sheets.menu.menu-sheet.text.coming", "{count} coming", {
+                              count: view.schedules.length,
+                          }),
+                )
+            }
             ${
                 watchAvailable() &&
                 steer &&
                 view.watch?.status !== "watching" &&
                 item(
-                    "Watch pull request",
+                    t("web.sheets.menu.menu-sheet.text.watch-pull-request", "Watch pull request"),
                     () => {
                         closeSheet();
                         attempt(() => watchPr());
                     },
-                    "fix CI, answer reviews",
+                    t(
+                        "web.sheets.menu.menu-sheet.text.fix-ci-answer-reviews",
+                        "fix CI, answer reviews",
+                    ),
                 )
             }
             ${
                 conversation &&
-                item("Copy link", () =>
+                item(t("menu.copy-link", "Copy link"), () =>
                     copyText(location.href).then(
-                        () => notify("info", "Link copied. Other signed-in devices can open it."),
-                        () => notify("error", "Could not copy."),
+                        () =>
+                            notify(
+                                "info",
+                                t(
+                                    "web.sheets.menu.menu-sheet.text.link-copied-other-signed",
+                                    "Link copied. Other signed-in devices can open it.",
+                                ),
+                            ),
+                        () =>
+                            notify(
+                                "error",
+                                t("web.sheets.menu.menu-sheet.text.not-copy", "Could not copy."),
+                            ),
                     ),
                 )
             }
             ${
                 conversation &&
                 html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
-                    <span>Export as Markdown</span>
-                    <span class="muted small">the whole history</span>
+                    <span>${t(
+                        "web.sheets.menu.menu-sheet.span.export-as-markdown",
+                        "Export as Markdown",
+                    )}</span>
+                    <span class="muted small">${t(
+                        "web.sheets.menu.menu-sheet.span.the-whole-history",
+                        "the whole history",
+                    )}</span>
                 </a>`
             }
             ${
                 session &&
                 steer &&
-                item(conversation.archived ? "Unarchive" : "Archive", () => {
-                    closeSheet();
-                    setArchived([conversation.id], !conversation.archived);
-                })
+                item(
+                    conversation.archived
+                        ? t("web.sheets.menu.menu-sheet.text.unarchive", "Unarchive")
+                        : t("web.sheets.menu.menu-sheet.text.archive", "Archive"),
+                    () => {
+                        closeSheet();
+                        setArchived([conversation.id], !conversation.archived);
+                    },
+                )
             }
         </div>
         ${
             view.subagents.length > 0 &&
             html`<div class="group">
-                <div class="group-title">Subagents</div>
+                <div class="group-title">${t(
+                    "web.sheets.menu.menu-sheet.div.subagents",
+                    "Subagents",
+                )}</div>
                 ${view.subagents.map((agent) =>
                     item(
                         html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
                         () => openSubagent(agent.conversationId),
-                        agent.busy ? "working" : "idle",
+                        agent.busy
+                            ? t("web.sheets.menu.menu-sheet.text.working", "working")
+                            : t("web.sheets.menu.menu-sheet.text.idle", "idle"),
                     ),
                 )}
             </div>`
         }
         <div class="group">
-            <div class="group-title">App</div>
-            ${item("Appearance", () => openSheet({ type: "appearance" }), lookLabel())}
-            ${!touch && item("Keyboard shortcuts", () => openSheet({ type: "shortcuts" }), "?")}
+            <div class="group-title">${t("web.sheets.menu.menu-sheet.div.app", "App")}</div>
+            ${item(t("menu.appearance", "Appearance"), () => openSheet({ type: "appearance" }), lookLabel())}
+            ${!touch && item(t("menu.shortcuts", "Keyboard shortcuts"), () => openSheet({ type: "shortcuts" }), "?")}
             ${
                 me?.role === "owner" &&
                 defaultsKept() &&
                 item(
-                    "Default model",
+                    t("web.sheets.menu.menu-sheet.text.default-model", "Default model"),
                     () => openSheet({ type: "model", id: "default", forDefault: true }),
                     defaultLabel(server?.defaultModel, store.state.models) ||
-                        "project, last picked, then Pi global",
+                        t(
+                            "web.sheets.menu.menu-sheet.text.project-last-picked-pi",
+                            "project, last picked, then Pi global",
+                        ),
                 )
             }
-            ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
-            ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
-            ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
-            ${item("Running now", openRunning, "everything Pi is doing")}
-            ${view.conversation && item("Background", () => openSheet({ type: "background" }), "what commands print as they run")}
-            ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
-            ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}
-            ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
+            ${item(t("menu.your-name", "Your name"), () => openSheet({ type: "name" }), me?.name)}
+            ${collab() ? item(t("app.people", "People"), () => openSheet({ type: "people" }), me?.role === "viewer" ? t("web.sheets.menu.menu-sheet.text.view", "you can view") : "") : item(t("menu.devices", "Sign in another device"), () => openSheet({ type: "invite" }))}
+            ${
+                collab() &&
+                item(
+                    t("menu.notifications", "Notifications"),
+                    () => openSheet({ type: "notifications" }),
+                    t(
+                        "web.sheets.menu.menu-sheet.text.pi-finished-approvals-chat",
+                        "Pi finished, approvals, chat",
+                    ),
+                )
+            }
+            ${item(
+                t("menu.running", "Running now"),
+                openRunning,
+                t("web.sheets.menu.menu-sheet.text.everything-pi-doing", "everything Pi is doing"),
+            )}
+            ${view.conversation && item(t("web.sheets.menu.background", "Background"), () => openSheet({ type: "background" }), t("web.sheets.menu.background-detail", "what commands print as they run"))}
+            ${item(
+                t("menu.spend", "Spend"),
+                () => openSheet({ type: "spend" }),
+                me?.role === "owner"
+                    ? t(
+                          "web.sheets.menu.menu-sheet.text.person-session-limits",
+                          "by person and session, limits",
+                      )
+                    : t("web.sheets.menu.menu-sheet.text.yours", "yours"),
+            )}
+            ${
+                triggersOn() &&
+                me?.role !== "viewer" &&
+                item(
+                    t("menu.webhooks", "Webhooks and watches"),
+                    () => openSheet({ type: "hooks" }),
+                    t(
+                        "web.sheets.menu.menu-sheet.text.git-hub-other-services",
+                        "GitHub, other services",
+                    ),
+                )
+            }
+            ${me?.role === "owner" && item(t("menu.providers", "Providers"), () => openSheet({ type: "providers" }))}
+            ${
+                modelRefreshAvailable() &&
+                item(
+                    t("menu.refresh-models", "Refresh models"),
+                    refreshModels,
+                    store.state.modelRefresh.loading
+                        ? t("web.sheets.menu.menu-sheet.text.refreshing", "refreshing…")
+                        : t(
+                              "web.sheets.menu.menu-sheet.text.models-json-providers",
+                              "models.json and providers",
+                          ),
+                )
+            }
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
-            ${item("Extensions", () => openSheet({ type: "extensions" }), extensionsHint())}
+            ${item(t("menu.extensions", "Extensions"), () => openSheet({ type: "extensions" }), extensionsHint())}
             ${
                 me?.role === "owner" &&
                 server?.supervised &&
                 item(
-                    "Restart server",
+                    t("web.sheets.menu.menu-sheet.text.restart-server", "Restart server"),
                     () =>
                         attempt(async () => {
                             await api("restart", {});
                             closeSheet();
-                            notify("info", "Restarting. Running work continues after the restart.");
+                            notify(
+                                "info",
+                                t(
+                                    "web.sheets.menu.menu-sheet.text.restarting-running-work-continues",
+                                    "Restarting. Running work continues after the restart.",
+                                ),
+                            );
                         }),
-                    "running work resumes",
+                    t(
+                        "web.sheets.menu.menu-sheet.text.running-work-resumes",
+                        "running work resumes",
+                    ),
                 )
             }
-            ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
+            ${item(
+                html`<span class="menu-signout">${t(
+                    "web.sheets.menu.menu-sheet.span.sign-out",
+                    "Sign out",
+                )}</span>`,
+                signOut,
+            )}
         </div>
         ${
             embedder.items.length > 0 &&

@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { useArtifactBridge } from "./artifact-bridge.js";
 import { html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 /**
  * The sandbox's permissions: those of the artifact viewer's frame (`sheets/viewers.js`). A frame gets only what both this
@@ -52,7 +53,8 @@ export function useFitHeight(initial, min, max) {
  */
 export function RunFrame({
     source,
-    title = "Preview",
+    // UI: looked up as the frame draws, so a change of language names it again.
+    title = t("web.run-frame.run-frame.text.preview", "Preview"),
     from = "the page in Pi's reply",
     artifact = null,
 }) {

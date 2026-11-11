@@ -23,6 +23,7 @@ import {
 } from "../store.js";
 import { BASE_LOOK, chooseLook, prefs, setPrefs } from "../theme.js";
 import { copyText, formatBytes, html, Icon, Loader, Sheet, SheetBack, timeAgo } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 /** The owner's, while its module is on. */
 export const galleryAvailable = () =>
@@ -50,27 +51,40 @@ function useRoute(path, setData, setProblem) {
 }
 
 const short = (commit) => (commit ?? "").slice(0, 7);
-const plural = (count, word) =>
-    `${count} ${count === 1 ? word : word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`}`;
+/** One form for a count of one, another for the rest: English's two, and a language's own. */
+const counted = (count, one, many) => (count === 1 ? one : many);
 const revocation = (entry, commit) => entry.revoked.find((each) => each.commit === commit)?.reason;
 
 /** Who a browser module or a route is for, in words. */
-export const ACCESS_WORDS = {
-    owner: "the owner",
-    steer: "people who can steer",
-    view: "everyone who sees every session",
-};
+export function accessWords(access) {
+    if (access === "owner") {
+        return t("web.sheets.gallery.owner.owner", "the owner");
+    }
+
+    if (access === "steer") {
+        return t("web.sheets.gallery.steer.people-who-steer", "people who can steer");
+    }
+
+    if (access === "view") {
+        return t(
+            "web.sheets.gallery.view.everyone-who-sees-every",
+            "everyone who sees every session",
+        );
+    }
+
+    return access;
+}
 
 /** What a module declares, by group, in the order the entry and the review list them. */
 const GROUPS = [
-    ["extensions", "Extensions"],
-    ["tools", "Tools"],
-    ["readOnlyTools", "Read-only tools"],
-    ["hooks", "Hooks"],
-    ["sections", "Prompt sections"],
-    ["wraps", "Wraps"],
-    ["routes", "Routes"],
-    ["commands", "Slash commands"],
+    ["extensions", () => t("web.sheets.gallery.groups.extensions.extensions", "Extensions")],
+    ["tools", () => t("web.sheets.gallery.groups.tools", "Tools")],
+    ["readOnlyTools", () => t("web.sheets.gallery.groups.read-tools", "Read-only tools")],
+    ["hooks", () => t("web.sheets.gallery.groups.hooks", "Hooks")],
+    ["sections", () => t("web.sheets.gallery.groups.prompt-sections", "Prompt sections")],
+    ["wraps", () => t("web.sheets.gallery.groups.wraps", "Wraps")],
+    ["routes", () => t("web.sheets.gallery.groups.routes", "Routes")],
+    ["commands", () => t("web.sheets.gallery.groups.slash-commands", "Slash commands")],
 ];
 
 /**
@@ -85,13 +99,12 @@ const declared = (declares, key) =>
 
         const [scope, name] = each.split(" ");
 
-        return `/${name} (${scope === "global" ? "owner" : "who can steer"})`;
+        return `/${name} (${
+            scope === "global"
+                ? t("web.sheets.gallery.declared.owner", "owner")
+                : t("web.sheets.gallery.declared.who-steer", "who can steer")
+        })`;
     });
-
-const RISK =
-    "It runs inside the server with your rights, in every session. Lancet Guard does not see what its code does.";
-const THEME_RISK =
-    "A theme is CSS, fonts, and images. It runs no code, and it loads nothing from other sites. But it can hide or relabel what people see, approvals too: install only themes you trust.";
 
 const isTheme = (item) => item?.kind === "theme";
 
@@ -166,15 +179,26 @@ export function Tile({ name, title, icon = null, large = false }) {
 }
 
 const sentence = (items) =>
-    items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : (items[0] ?? "");
+    items.length > 1
+        ? t("web.sheets.gallery.sentence.text.and", "{head} and {last}", {
+              head: items.slice(0, -1).join(", "),
+              last: items.at(-1),
+          })
+        : (items[0] ?? "");
 
 const HOOK_WORDS = {
-    beforeTool: "tool calls, before they run",
-    afterTool: "tool results",
-    beforeRequest: "what goes to the model",
-    afterResponse: "the model's replies",
-    onYield: "the end of each turn",
+    beforeTool: () =>
+        t("web.sheets.gallery.before-tool.tool-calls-before-they", "tool calls, before they run"),
+    afterTool: () => t("web.sheets.gallery.after-tool.tool-results", "tool results"),
+    beforeRequest: () =>
+        t("web.sheets.gallery.before-request.goes-model", "what goes to the model"),
+    afterResponse: () =>
+        t("web.sheets.gallery.after-response.model-s-replies", "the model's replies"),
+    onYield: () => t("web.sheets.gallery.on-yield.end-turn", "the end of each turn"),
 };
+
+/** What a hook sees, in words; one the index names and this does not know stays as it is. */
+const hookWords = (hook) => (Object.hasOwn(HOOK_WORDS, hook) ? HOOK_WORDS[hook]() : hook);
 
 let lastReach = null;
 
@@ -202,8 +226,15 @@ function useReach(data) {
                 !stop.signal.aborted &&
                 setProblem(
                     error.status === 404 || error.status === 503
-                        ? "What its code reaches shows after a server restart (menu → Restart server)."
-                        : `Its code could not be read: ${error.message}`,
+                        ? t(
+                              "web.sheets.gallery.use-reach.text.code-reaches-shows-after",
+                              "What its code reaches shows after a server restart (menu → Restart server).",
+                          )
+                        : t(
+                              "web.sheets.gallery.use-reach.text.code-not-read",
+                              "Its code could not be read: {error}",
+                              { error: error.message },
+                          ),
                 ),
         );
 
@@ -259,18 +290,56 @@ function reachRows(declares, found) {
 
     if (scanned) {
         for (const [key, glyph, words] of [
-            ["network", "globe", (items) => `Talks to ${sentence(items)}`],
+            [
+                "network",
+                "globe",
+                (items) =>
+                    t("web.sheets.gallery.reach-rows.text.talks", "Talks to {detail}", {
+                        detail: sentence(items),
+                    }),
+            ],
             [
                 "keys",
                 "key",
                 (items) =>
-                    `Uses ${sentence(items.map((item) => item.replace(/^(.+) key from Pi$/, "your $1 key, from Pi")))}`,
+                    t("web.sheets.gallery.reach-rows.text.uses", "Uses {detail}", {
+                        detail: sentence(
+                            items.map((item) =>
+                                item.replace(/^(.+) key from Pi$/, (_, name) =>
+                                    t(
+                                        "web.sheets.gallery.reach-rows.text.your-key-from-pi",
+                                        "your {name} key, from Pi",
+                                        { name },
+                                    ),
+                                ),
+                            ),
+                        ),
+                    }),
             ],
-            ["programs", "terminal", (items) => `Runs ${sentence(items)}`],
-            ["files", "folder", (items) => `Uses ${sentence(items)}`],
+            [
+                "programs",
+                "terminal",
+                (items) =>
+                    t("web.sheets.gallery.reach-rows.text.runs", "Runs {detail}", {
+                        detail: sentence(items),
+                    }),
+            ],
+            [
+                "files",
+                "folder",
+                (items) =>
+                    t("web.sheets.gallery.reach-rows.text.uses", "Uses {detail}", {
+                        detail: sentence(items),
+                    }),
+            ],
         ]) {
             if (scanned[key]?.length > 0) {
-                rows.push({ key, glyph, text: words(scanned[key]), from: "In its code" });
+                rows.push({
+                    key,
+                    glyph,
+                    text: words(scanned[key]),
+                    from: t("web.sheets.gallery.reach-rows.from.code", "In its code"),
+                });
             }
         }
     }
@@ -279,18 +348,33 @@ function reachRows(declares, found) {
         rows.push({
             key: "sees",
             glyph: "eye",
-            text: `Sees ${sentence(declares.hooks.map((hook) => HOOK_WORDS[hook] ?? hook))}`,
-            from: "Declared",
+            text: t("web.sheets.gallery.reach-rows.text.sees", "Sees {detail}", {
+                detail: sentence(declares.hooks.map(hookWords)),
+            }),
+            from: t("web.sheets.gallery.reach-rows.from.declared", "Declared"),
         });
     }
 
     const changes = [
-        (declares.sections ?? []).length > 0 && "Adds to Pi's instructions",
-        ...(declares.wraps ?? []).map((wrap) => `Wraps the ${wrap.replace(/^tool /, "")} tool`),
+        (declares.sections ?? []).length > 0 &&
+            t(
+                "web.sheets.gallery.reach-rows.changes.adds-pi-s-instructions",
+                "Adds to Pi's instructions",
+            ),
+        ...(declares.wraps ?? []).map((wrap) =>
+            t("web.sheets.gallery.reach-rows.changes.wraps-tool", "Wraps the {detail} tool", {
+                detail: wrap.replace(/^tool /, ""),
+            }),
+        ),
     ].filter(Boolean);
 
     if (changes.length > 0) {
-        rows.push({ key: "changes", glyph: "chat", text: changes.join("; "), from: "Declared" });
+        rows.push({
+            key: "changes",
+            glyph: "chat",
+            text: changes.join("; "),
+            from: t("web.sheets.gallery.reach-rows.from.declared", "Declared"),
+        });
     }
 
     return rows;
@@ -311,20 +395,44 @@ function rowFacts(entry, found) {
         s?.network.length > 0 && [
             "globe",
             s.network.length > 1
-                ? `${s.network.length} hosts`
+                ? t("web.sheets.gallery.row-facts.text.hosts", "{count} hosts", {
+                      count: s.network.length,
+                  })
                 : RUN_TIME.test(s.network[0])
-                  ? "network"
+                  ? t("web.sheets.gallery.row-facts.text.network", "network")
                   : s.network[0],
         ],
-        s?.keys.length > 0 && ["key", s.keys.length > 1 ? `${s.keys.length} keys` : "a key"],
+        s?.keys.length > 0 && [
+            "key",
+            s.keys.length > 1
+                ? t("web.sheets.gallery.row-facts.text.keys", "{count} keys", {
+                      count: s.keys.length,
+                  })
+                : t("web.sheets.gallery.row-facts.text.key", "a key"),
+        ],
         s?.programs.length > 0 && [
             "terminal",
-            RUN_TIME.test(s.programs.join()) ? "programs" : s.programs.join(", "),
+            RUN_TIME.test(s.programs.join())
+                ? t("web.sheets.gallery.row-facts.text.programs", "programs")
+                : s.programs.join(", "),
         ],
-        (d.hooks ?? []).length > 0 && ["eye", "sees turns"],
-        ((d.sections ?? []).length > 0 || (d.wraps ?? []).length > 0) && ["chat", "changes Pi"],
-        tools > 0 && ["sparkle", plural(tools, "tool")],
-        d.client !== null && ["tiles", "in the app"],
+        (d.hooks ?? []).length > 0 && [
+            "eye",
+            t("web.sheets.gallery.row-facts.text.sees-turns", "sees turns"),
+        ],
+        ((d.sections ?? []).length > 0 || (d.wraps ?? []).length > 0) && [
+            "chat",
+            t("web.sheets.gallery.row-facts.text.changes-pi", "changes Pi"),
+        ],
+        tools > 0 && [
+            "sparkle",
+            counted(
+                tools,
+                t("web.sheets.gallery.row-facts.text.tool", "1 tool"),
+                t("web.sheets.gallery.row-facts.text.tools", "{count} tools", { count: tools }),
+            ),
+        ],
+        d.client !== null && ["tiles", t("web.sheets.gallery.row-facts.text.app", "in the app")],
     ]
         .filter(Boolean)
         .slice(0, 3);
@@ -334,42 +442,92 @@ function newReach(before, after) {
     const added = (key) =>
         declared(after, key).filter((each) => !declared(before, key).includes(each));
     const tools = [...new Set([...added("tools"), ...added("readOnlyTools")])];
+    const commands = added("commands").length;
 
     return [
         added("hooks").length > 0 &&
-            `sees ${sentence(added("hooks").map((hook) => HOOK_WORDS[hook] ?? hook))}`,
-        added("sections").length > 0 && "adds to Pi's instructions",
-        ...added("wraps").map((wrap) => `wraps the ${wrap.replace(/^tool /, "")} tool`),
-        tools.length > 0 && plural(tools.length, "new tool"),
-        added("commands").length > 0 && plural(added("commands").length, "new command"),
+            t("web.sheets.gallery.new-reach.text.sees", "sees {detail}", {
+                detail: sentence(added("hooks").map(hookWords)),
+            }),
+        added("sections").length > 0 &&
+            t(
+                "web.sheets.gallery.new-reach.text.adds-pi-s-instructions",
+                "adds to Pi's instructions",
+            ),
+        ...added("wraps").map((wrap) =>
+            t("web.sheets.gallery.new-reach.text.wraps-tool", "wraps the {detail} tool", {
+                detail: wrap.replace(/^tool /, ""),
+            }),
+        ),
+        tools.length > 0 &&
+            counted(
+                tools.length,
+                t("web.sheets.gallery.new-reach.text.one-new-tool", "1 new tool", {
+                    count: tools.length,
+                }),
+                t("web.sheets.gallery.new-reach.text.new-tools", "{count} new tools", {
+                    count: tools.length,
+                }),
+            ),
+        commands > 0 &&
+            counted(
+                commands,
+                t("web.sheets.gallery.new-reach.text.one-new-command", "1 new command", {
+                    count: commands,
+                }),
+                t("web.sheets.gallery.new-reach.text.new-commands", "{count} new commands", {
+                    count: commands,
+                }),
+            ),
         (added("routes").length > 0 || (before.client === null && after.client !== null)) &&
-            "adds to the app",
-        before.access !== after.access && `now for ${ACCESS_WORDS[after.access] ?? after.access}`,
+            t("web.sheets.gallery.new-reach.text.adds-app", "adds to the app"),
+        before.access !== after.access &&
+            t("web.sheets.gallery.new-reach.text.content", "now for {access}", {
+                access: accessWords(after.access),
+            }),
     ].filter(Boolean);
 }
 
 function liveStatus(item, module, tab) {
     if (item.revoked !== null && item.revoked !== undefined) {
-        return { kind: "bad", text: "Revoked" };
+        return { kind: "bad", text: t("web.sheets.gallery.live-status.text.revoked", "Revoked") };
     }
 
     if (module?.error) {
-        return { kind: "bad", text: "Did not load" };
+        return {
+            kind: "bad",
+            text: t("web.sheets.gallery.live-status.text.not-load", "Did not load"),
+        };
     }
 
     if (module && browserModuleState(module.file.replace(/\.ts$/, ""))?.status === "failed") {
-        return { kind: "warn", text: "Off in this tab" };
+        return {
+            kind: "warn",
+            text: t("web.sheets.gallery.live-status.text.off-tab", "Off in this tab"),
+        };
     }
 
     if (item.changed?.length > 0) {
-        return { kind: "warn", text: "Edited since install" };
+        return {
+            kind: "warn",
+            text: t(
+                "web.sheets.gallery.live-status.text.edited-since-install",
+                "Edited since install",
+            ),
+        };
     }
 
     if (item.enabled) {
-        return { kind: "on", text: "On" };
+        return { kind: "on", text: t("web.sheets.gallery.live-status.text.content", "On") };
     }
 
-    return { kind: "off", text: tab === "discover" ? "Installed" : "Off" };
+    return {
+        kind: "off",
+        text:
+            tab === "discover"
+                ? t("web.sheets.gallery.live-status.text.installed", "Installed")
+                : t("web.sheets.gallery.live-status.text.off", "Off"),
+    };
 }
 
 const Status = ({ status }) =>
@@ -379,7 +537,12 @@ const Status = ({ status }) =>
 
 function statusWhy(item, module) {
     if (module?.error) {
-        return { kind: "bad", text: `Did not load: ${module.error}` };
+        return {
+            kind: "bad",
+            text: t("web.sheets.gallery.status-why.text.not-load", "Did not load: {error}", {
+                error: module.error,
+            }),
+        };
     }
 
     const here = module && browserModuleState(module.file.replace(/\.ts$/, ""));
@@ -387,12 +550,23 @@ function statusWhy(item, module) {
     if (here?.status === "failed") {
         return {
             kind: "warn",
-            text: `In this browser: ${here.error}. Reloading the page tries again.`,
+            text: t(
+                "web.sheets.gallery.status-why.text.browser-reloading-page-tries",
+                "In this browser: {error}. Reloading the page tries again.",
+                { error: here.error },
+            ),
         };
     }
 
     if (item?.revoked) {
-        return { kind: "bad", text: `The gallery revoked this version: ${item.revoked}` };
+        return {
+            kind: "bad",
+            text: t(
+                "web.sheets.gallery.status-why.text.gallery-revoked-version",
+                "The gallery revoked this version: {revoked}",
+                { revoked: item.revoked },
+            ),
+        };
     }
 
     return null;
@@ -429,17 +603,25 @@ function EntryRow({ entry, found, module, tab, selected, onOpen, onChanged }) {
 
     const end = !installed
         ? html`<button class="button small ext-get" disabled=${busy} onClick=${install}>
-              ${busy ? "Installing…" : "Install"}
+              ${
+                  busy
+                      ? t("web.sheets.gallery.entry-row.button.installing", "Installing…")
+                      : t("web.sheets.gallery.entry-row.button.install", "Install")
+              }
           </button>`
         : installed.update && tab !== "installed"
           ? html`<button
                 class=${`button small ${added?.length > 0 ? "" : "primary"}`}
                 onClick=${() => openGallerySheet("gallery-update", entry.name)}
             >
-                ${added?.length > 0 ? "Review" : "Update"}
+                ${
+                    added?.length > 0
+                        ? t("web.sheets.gallery.entry-row.button.review", "Review")
+                        : t("web.sheets.gallery.entry-row.button.update", "Update")
+                }
             </button>`
           : theme
-            ? html`<span class="ext-state on"><${Icon} name="check" size=${13} stroke=${2.5} />Installed</span>`
+            ? html`<span class="ext-state on"><${Icon} name="check" size=${13} stroke=${2.5} />${t("web.sheets.gallery.entry-row.text.installed", "Installed")}</span>`
             : html`<${Status} status=${liveStatus(installed, module, tab)} />`;
 
     return html`<div
@@ -462,9 +644,13 @@ function EntryRow({ entry, found, module, tab, selected, onOpen, onChanged }) {
                             ${
                                 added.length > 0
                                     ? html`<span class="ext-fact new">
-                                          <${Icon} name="eye" size=${12} /><span>Declares more: ${added.join("; ")}</span>
+                                          <${Icon} name="eye" size=${12} /><span>${t(
+                                              "web.sheets.gallery.entry-row.span.declares-more",
+                                              "Declares more: {detail}",
+                                              { detail: added.join("; ") },
+                                          )}</span>
                                       </span>`
-                                    : html`<span class="ext-fact"><${Icon} name="check" size=${12} /><span>Declares nothing new</span></span>`
+                                    : html`<span class="ext-fact"><${Icon} name="check" size=${12} /><span>${t("web.sheets.gallery.entry-row.span.declares-nothing-new", "Declares nothing new")}</span></span>`
                             }
                         </span>`
                       : facts.length > 0 &&
@@ -518,12 +704,12 @@ function paletteOf(entry, found) {
 
 const modeWords = (palette) =>
     !palette
-        ? "theme"
+        ? t("web.sheets.gallery.mode-words.theme", "theme")
         : palette.colorsLight
-          ? "dark and light"
+          ? t("web.sheets.gallery.mode-words.dark-light", "dark and light")
           : palette.colors.mode === "light"
-            ? "light"
-            : "dark";
+            ? t("web.sheets.gallery.mode-words.light", "light")
+            : t("web.sheets.gallery.mode-words.dark", "dark");
 
 const ThemeDesk = ({ colors, big = false }) =>
     html`<span
@@ -549,7 +735,7 @@ function ThemeCard({ entry, palette, selected, state = null, onOpen }) {
             <span>${entry.title ?? entry.name}</span>
             ${state && html`<small><${Icon} name="check" size=${11} stroke=${2.5} />${state}</small>`}
         </span>
-        <span class="ext-theme-meta">${modeWords(palette)} · ${entry.author?.name ?? entry.author ?? "yours"}</span>
+        <span class="ext-theme-meta">${modeWords(palette)} · ${entry.author?.name ?? entry.author ?? t("web.sheets.gallery.theme-card.text.yours", "yours")}</span>
         <span class="ext-theme-dots" style=${paletteStyle(palette?.colors)} aria-hidden="true">
             ${THEME_DOTS.map((color) => html`<i key=${color} style=${`background:var(--t-${color}, var(--hair-2))`}></i>`)}
         </span>
@@ -599,7 +785,7 @@ function IndexAddress({ address, onChanged }) {
     if (!editing) {
         return html`<div class="setting wrap">
             <div class="grow small">
-                <div class="muted">Index</div>
+                <div class="muted">${t("web.sheets.gallery.index-address.div.index", "Index")}</div>
                 <div class="mono gallery-address">${address}</div>
             </div>
             <button
@@ -609,7 +795,7 @@ function IndexAddress({ address, onChanged }) {
                     setEditing(true);
                 }}
             >
-                Change
+                ${t("web.sheets.gallery.index-address.button.change", "Change")}
             </button>
         </div>`;
     }
@@ -622,7 +808,10 @@ function IndexAddress({ address, onChanged }) {
         }}
     >
         <label class="label" for="gallery-index">
-            Index: a GitHub repository (owner/name), or the https address of an index.json
+            ${t(
+                "web.sheets.gallery.index-address.label.index-git-hub-repository-owner",
+                "Index: a GitHub repository (owner/name), or the https address of an index.json",
+            )}
         </label>
         <input
             id="gallery-index"
@@ -639,31 +828,71 @@ function IndexAddress({ address, onChanged }) {
                 fallback !== null &&
                 fallback !== address &&
                 html`<button type="button" class="button small ghost" disabled=${busy} onClick=${() => save("")}>
-                    Use the default (${fallback})
+                    ${t(
+                        "web.sheets.gallery.index-address.button.default",
+                        "Use the default ({fallback})",
+                        { fallback },
+                    )}
                 </button>`
             }
-            <button type="button" class="button small" onClick=${() => setEditing(false)}>Cancel</button>
-            <button class="button small primary" disabled=${busy}>Save</button>
+            <button type="button" class="button small" onClick=${() => setEditing(false)}>${t("web.sheets.gallery.index-address.button.cancel", "Cancel")}</button>
+            <button class="button small primary" disabled=${busy}>${t(
+                "web.sheets.gallery.index-address.button.save",
+                "Save",
+            )}</button>
         </div>
     </form>`;
 }
 
-const TABS = [
-    ["discover", "Discover"],
-    ["installed", "Installed"],
-    ["updates", "Updates"],
-];
+const TABS = ["discover", "installed", "updates"];
 
 const KINDS = [
-    ["all", "All", null],
-    ["extensions", "Extensions", null],
-    ["themes", "Themes", "palette"],
+    ["all", null],
+    ["extensions", null],
+    ["themes", "palette"],
 ];
 const WANTS = [
-    ["tools", "Tools for Pi", "sparkle"],
-    ["app", "In the app", "tiles"],
-    ["changes", "Changes Pi", "chat"],
+    ["tools", "sparkle"],
+    ["app", "tiles"],
+    ["changes", "chat"],
 ];
+
+/** The tab's name, and the filter's, as the sheet draws them. */
+const tabLabel = (value) => {
+    if (value === "installed") {
+        return t("web.sheets.gallery.tabs.installed.installed", "Installed");
+    }
+
+    if (value === "updates") {
+        return t("web.sheets.gallery.tabs.updates", "Updates");
+    }
+
+    return t("web.sheets.gallery.tabs.discover", "Discover");
+};
+
+const kindLabel = (value) => {
+    if (value === "extensions") {
+        return t("web.sheets.gallery.kinds.extensions.extensions", "Extensions");
+    }
+
+    if (value === "themes") {
+        return t("web.sheets.gallery.kinds.themes.themes", "Themes");
+    }
+
+    return t("web.sheets.gallery.kinds.content.kinds", "All");
+};
+
+const wantLabel = (value) => {
+    if (value === "tools") {
+        return t("web.sheets.gallery.wants.tools-pi", "Tools for Pi");
+    }
+
+    if (value === "app") {
+        return t("web.sheets.gallery.wants.app", "In the app");
+    }
+
+    return t("web.sheets.gallery.wants.changes-pi", "Changes Pi");
+};
 
 function wanted(entry, want) {
     const d = entry.declares;
@@ -783,24 +1012,38 @@ export function GallerySheet({
         entry=${entry}
         palette=${paletteOf(entry, foundOf(entry))}
         selected=${detailName === entry.name}
-        state=${tab === "discover" && entry.installed ? "Installed" : null}
+        state=${
+            tab === "discover" && entry.installed
+                ? t("web.sheets.gallery.entry-row.text.installed", "Installed")
+                : null
+        }
         onOpen=${() => select(entry.name)}
     />`;
 
-    const tabs = html`<div class="ext-tabs" role="tablist" aria-label="Extensions">
+    const tabs = html`<div class="ext-tabs" role="tablist" aria-label=${t(
+        "web.sheets.gallery.gallery-sheet.aria-label.extensions",
+        "Extensions",
+    )}>
         ${TABS.map(
-            ([value, label]) => html`<button
+            (value) => html`<button
                 key=${value}
                 class=${tab === value ? "on" : ""}
                 role="tab"
                 aria-selected=${tab === value}
                 onClick=${() => changeTab(value)}
             >
-                ${label}
+                ${tabLabel(value)}
                 ${
                     value === "updates" &&
                     updates > 0 &&
-                    html`<span class="ext-count" aria-label=${`${updates} available`}>${updates}</span>`
+                    html`<span
+                        class="ext-count"
+                        aria-label=${t(
+                            "web.sheets.gallery.gallery-sheet.aria-label.available",
+                            "{count} available",
+                            { count: updates },
+                        )}
+                    >${updates}</span>`
                 }
             </button>`,
         )}
@@ -812,7 +1055,10 @@ export function GallerySheet({
     ];
     const installedThemes =
         themesHere.length > 0 &&
-        html`<${Section} title="Themes" count=${themesHere.length}>
+        html`<${Section} title=${t(
+            "web.sheets.gallery.gallery-sheet.title.themes",
+            "Themes",
+        )} count=${themesHere.length}>
             <div class="ext-themes">
                 ${themesHere.map((entry) =>
                     entry.own
@@ -820,7 +1066,10 @@ export function GallerySheet({
                               key=${entry.name}
                               entry=${entry}
                               palette=${entry.colors ? { colors: entry.colors, colorsLight: entry.colorsLight ?? null } : null}
-                              state="Yours"
+                              state=${t(
+                                  "web.sheets.extensions.extensions-content.text.yours",
+                                  "Yours",
+                              )}
                               onOpen=${() => openSheet({ type: "appearance" })}
                           />`
                         : card(entry),
@@ -829,7 +1078,7 @@ export function GallerySheet({
         <//>`;
 
     return html`<${Sheet}
-        title="Extensions"
+        title=${t("web.sheets.gallery.gallery-sheet.title.extensions", "Extensions")}
         onClose=${closeSheet}
         wide=${true}
         className="extension-hub gallery"
@@ -845,15 +1094,30 @@ export function GallerySheet({
                                 type="search"
                                 placeholder=${
                                     tab === "installed"
-                                        ? "Search installed"
+                                        ? t(
+                                              "web.sheets.gallery.gallery-sheet.placeholder.search-installed",
+                                              "Search installed",
+                                          )
                                         : tab === "updates"
-                                          ? "Search updates"
-                                          : `Search ${offered.length || ""} extensions and themes`.replace(
-                                                "  ",
-                                                " ",
+                                          ? t(
+                                                "web.sheets.gallery.gallery-sheet.placeholder.search-updates",
+                                                "Search updates",
                                             )
+                                          : offered.length > 0
+                                            ? t(
+                                                  "web.sheets.gallery.gallery-sheet.placeholder.search-counted",
+                                                  "Search {count} extensions and themes",
+                                                  { count: offered.length },
+                                              )
+                                            : t(
+                                                  "web.sheets.gallery.gallery-sheet.aria-label.search-extensions-and-themes",
+                                                  "Search extensions and themes",
+                                              )
                                 }
-                                aria-label="Search extensions and themes"
+                                aria-label=${t(
+                                    "web.sheets.gallery.gallery-sheet.aria-label.search-extensions-and-themes",
+                                    "Search extensions and themes",
+                                )}
                                 value=${query}
                                 onInput=${(event) => setQuery(event.currentTarget.value)}
                             />
@@ -862,8 +1126,14 @@ export function GallerySheet({
                             tab !== "installed" &&
                             html`<button
                                 class="button small ext-icon-button"
-                                aria-label="Refresh"
-                                title="Read the index again"
+                                aria-label=${t(
+                                    "web.sheets.gallery.gallery-sheet.aria-label.refresh",
+                                    "Refresh",
+                                )}
+                                title=${t(
+                                    "web.sheets.gallery.gallery-sheet.title.read-the-index-again",
+                                    "Read the index again",
+                                )}
                                 disabled=${loading}
                                 onClick=${() => load(true)}
                             >
@@ -874,15 +1144,15 @@ export function GallerySheet({
                     ${
                         tab === "discover" &&
                         data &&
-                        html`<div class="gallery-tags ext-filters" role="group" aria-label="Filters">
-                            ${KINDS.map(([value, label, glyph]) =>
-                                chip(`kind-${value}`, label, glyph, kind === value, () =>
+                        html`<div class="gallery-tags ext-filters" role="group" aria-label=${t("web.sheets.gallery.gallery-sheet.aria-label.filters", "Filters")}>
+                            ${KINDS.map(([value, glyph]) =>
+                                chip(`kind-${value}`, kindLabel(value), glyph, kind === value, () =>
                                     setKind(value),
                                 ),
                             )}
                             <span class="ext-filters-gap"></span>
-                            ${WANTS.map(([value, label, glyph]) =>
-                                chip(value, label, glyph, want === value, () =>
+                            ${WANTS.map(([value, glyph]) =>
+                                chip(value, wantLabel(value), glyph, want === value, () =>
                                     setWant(want === value ? null : value),
                                 ),
                             )}
@@ -891,25 +1161,41 @@ export function GallerySheet({
                 </div>
                 ${problem && html`<div class="error-box small">${problem}</div>`}
                 ${data?.error && html`<div class="error-box small">${data.error}</div>`}
-                ${!data && !problem && html`<${Loader} label="Reading the index" />`}
+                ${
+                    !data &&
+                    !problem &&
+                    html`<${Loader} label=${t(
+                        "web.sheets.gallery.gallery-sheet.label.reading-the-index",
+                        "Reading the index",
+                    )} />`
+                }
                 ${
                     tab === "discover" &&
                     extensionMatches.length > 0 &&
-                    html`<${Section} title="Extensions" count=${extensionMatches.length}>
+                    html`<${Section} title=${t(
+                        "web.sheets.gallery.gallery-sheet.title.extensions",
+                        "Extensions",
+                    )} count=${extensionMatches.length}>
                         <div class="ext-list">${extensionMatches.map(row)}</div>
                     <//>`
                 }
                 ${
                     tab === "discover" &&
                     themeMatches.length > 0 &&
-                    html`<${Section} title="Themes" count=${themeMatches.length}>
+                    html`<${Section} title=${t(
+                        "web.sheets.gallery.gallery-sheet.title.themes",
+                        "Themes",
+                    )} count=${themeMatches.length}>
                         <div class="ext-themes">${themeMatches.map(card)}</div>
                     <//>`
                 }
                 ${
                     tab === "updates" &&
                     matches.length > 0 &&
-                    html`<${Section} title="Updates" count=${matches.length}>
+                    html`<${Section} title=${t(
+                        "web.sheets.gallery.gallery-sheet.title.updates",
+                        "Updates",
+                    )} count=${matches.length}>
                         <div class="ext-list">${matches.map(row)}</div>
                     <//>`
                 }
@@ -921,10 +1207,19 @@ export function GallerySheet({
                         ${
                             tab === "updates" && !needle
                                 ? html`<span class="ext-empty-mark"><${Icon} name="check" size=${20} /></span>
-                                      <span>Everything is up to date.</span>`
+                                      <span>${t(
+                                          "web.sheets.gallery.gallery-sheet.span.everything-up-date",
+                                          "Everything is up to date.",
+                                      )}</span>`
                                 : needle || kind !== "all" || want
-                                  ? "Nothing matches. Try other words, or All."
-                                  : "The index has nothing for this Pi Pocket yet."
+                                  ? t(
+                                        "web.sheets.gallery.gallery-sheet.text.nothing-matches-try-other",
+                                        "Nothing matches. Try other words, or All.",
+                                    )
+                                  : t(
+                                        "web.sheets.gallery.gallery-sheet.text.index-nothing-pi-pocket",
+                                        "The index has nothing for this Pi Pocket yet.",
+                                    )
                         }
                     </div>`
                 }
@@ -945,15 +1240,40 @@ export function GallerySheet({
                     tab === "discover" &&
                     data &&
                     html`<details class="gallery-technical ext-where">
-                        <summary>Where these come from</summary>
+                        <summary>${t(
+                            "web.sheets.gallery.gallery-sheet.summary.where-these-come-from",
+                            "Where these come from",
+                        )}</summary>
                         <${IndexAddress} address=${data.address} onChanged=${() => load(true)} />
                         <p class="muted small">
-                            ${data.fetchedAt ? `Read ${timeAgo(data.fetchedAt)}` : "Not read yet"}
+                            ${
+                                data.fetchedAt
+                                    ? t(
+                                          "web.sheets.gallery.gallery-sheet.p.read",
+                                          "Read {detail}",
+                                          { detail: timeAgo(data.fetchedAt) },
+                                      )
+                                    : t(
+                                          "web.sheets.gallery.gallery-sheet.p.not-read-yet",
+                                          "Not read yet",
+                                      )
+                            }
                         </p>
                         ${
                             hidden.incompatible > 0 &&
                             html`<p class="muted small">
-                                ${plural(hidden.incompatible, "entry")} need a newer Pi Pocket.
+                                ${counted(
+                                    hidden.incompatible,
+                                    t(
+                                        "web.sheets.gallery.gallery-sheet.p.one-entry-needs-newer",
+                                        "1 entry needs a newer Pi Pocket.",
+                                    ),
+                                    t(
+                                        "web.sheets.gallery.gallery-sheet.p.entries-need-newer",
+                                        "{count} entries need a newer Pi Pocket.",
+                                        { count: hidden.incompatible },
+                                    ),
+                                )}
                             </p>`
                         }
                         ${
@@ -969,7 +1289,10 @@ export function GallerySheet({
                         ${
                             data.repoUrl &&
                             html`<${Out} class="button small" href=${data.repoUrl}>
-                                Submit yours <${Icon} name="external" size=${14} />
+                                ${t(
+                                    "web.sheets.gallery.gallery-sheet.text.submit-yours",
+                                    "Submit yours",
+                                )} <${Icon} name="external" size=${14} />
                             <//>`
                         }
                     </details>`
@@ -981,7 +1304,13 @@ export function GallerySheet({
                         ? html`${
                               !sheetBack &&
                               html`<button class="ext-back" onClick=${() => openSheet({ type: origin, tab })}>
-                                  <${Icon} name="back" size=${16} /> Back to ${TABS.find(([value]) => value === tab)[1]}
+                                  <${Icon} name="back" size=${16} /> ${t(
+                                      "web.sheets.gallery.gallery-sheet.text.back",
+                                      "Back to {detail}",
+                                      {
+                                          detail: tabLabel(tab),
+                                      },
+                                  )}
                               </button>`
                           }
                           <${GalleryEntrySheet}
@@ -993,7 +1322,7 @@ export function GallerySheet({
                               module=${modules?.find((each) => each.file === `${detailName}.ts`) ?? null}
                               embedded=${true}
                           />`
-                        : html`<div class="extension-hub-empty">Choose one to see what it does.</div>`
+                        : html`<div class="extension-hub-empty">${t("web.sheets.gallery.gallery-sheet.div.choose-one-see", "Choose one to see what it does.")}</div>`
                 }
             </div>
         </div>
@@ -1005,25 +1334,33 @@ function Declares({ declares }) {
     return html`<dl class="pi-facts gallery-declares">
         ${GROUPS.map(
             ([key, label]) => html`<div key=${key}>
-                <dt>${label}</dt>
+                <dt>${label()}</dt>
                 ${
                     declared(declares, key).length > 0
                         ? html`<dd class="mono">${declared(declares, key).join(", ")}</dd>`
-                        : html`<dd class="muted">nothing</dd>`
+                        : html`<dd class="muted">${t(
+                              "web.sheets.gallery.declares.dd.nothing",
+                              "nothing",
+                          )}</dd>`
                 }
             </div>`,
         )}
         <div>
-            <dt>Browser module</dt>
+            <dt>${t("web.sheets.gallery.declares.dt.browser-module", "Browser module")}</dt>
             ${
                 declares.client === null
-                    ? html`<dd class="muted">nothing</dd>`
-                    : html`<dd>for ${ACCESS_WORDS[declares.client] ?? declares.client}</dd>`
+                    ? html`<dd class="muted">${t(
+                          "web.sheets.gallery.declares.dd.nothing",
+                          "nothing",
+                      )}</dd>`
+                    : html`<dd>${t("web.sheets.gallery.declares.dd.for-access", "for {who}", {
+                          who: accessWords(declares.client),
+                      })}</dd>`
             }
         </div>
         <div>
-            <dt>Widest access</dt>
-            <dd>${ACCESS_WORDS[declares.access] ?? declares.access}</dd>
+            <dt>${t("web.sheets.gallery.declares.dt.widest-access", "Widest access")}</dt>
+            <dd>${accessWords(declares.access)}</dd>
         </div>
     </dl>`;
 }
@@ -1036,7 +1373,10 @@ function Declares({ declares }) {
 async function askForReview(name) {
     if (!planAvailable()) {
         throw new Error(
-            "The review runs in plan mode, which is off: turn Plan mode on in Extensions first.",
+            t(
+                "web.sheets.gallery.ask-for-review.text.review-runs-plan-mode",
+                "The review runs in plan mode, which is off: turn Plan mode on in Extensions first.",
+            ),
         );
     }
 
@@ -1049,7 +1389,11 @@ async function askForReview(name) {
         navigate(id);
 
         throw new Error(
-            `Plan mode did not turn on (${error.message}), so the review was not sent.`,
+            t(
+                "web.sheets.gallery.ask-for-review.text.plan-mode-not-turn",
+                "Plan mode did not turn on ({error}), so the review was not sent.",
+                { error: error.message },
+            ),
         );
     }
 
@@ -1058,7 +1402,10 @@ async function askForReview(name) {
     navigate(id);
     notify(
         "info",
-        "Pi reviews it in plan mode: it reads the files, and plan mode keeps it from changing them.",
+        t(
+            "web.sheets.gallery.ask-for-review.text.pi-reviews-plan-mode",
+            "Pi reviews it in plan mode: it reads the files, and plan mode keeps it from changing them.",
+        ),
     );
 }
 
@@ -1088,13 +1435,17 @@ function EntryFrame({ embedded, title, children }) {
 const UpdateCallout = ({ installed, name, busy }) =>
     installed?.update &&
     html`<div class="ext-callout">
-        <span class="grow">Version ${installed.update.version} is ready. See what changes first.</span>
+        <span class="grow">${t(
+            "web.sheets.gallery.update-callout.span.version-ready-see-changes",
+            "Version {version} is ready. See what changes first.",
+            { version: installed.update.version },
+        )}</span>
         <button
             class="button small primary"
             disabled=${busy}
             onClick=${() => openGallerySheet("gallery-update", name)}
         >
-            Review update
+            ${t("web.sheets.gallery.update-callout.button.review-update", "Review update")}
         </button>
     </div>`;
 
@@ -1102,7 +1453,7 @@ const UpdateCallout = ({ installed, name, busy }) =>
 const Changed = ({ installed }) =>
     installed?.changed.length > 0 &&
     html`<div class="gallery-warn small">
-        Not as installed (edited since, or gone): <span class="mono">${installed.changed.join(", ")}</span>
+        ${t("web.sheets.gallery.changed.div.not-installed-edited-since", "Not as installed (edited since, or gone):")} <span class="mono">${installed.changed.join(", ")}</span>
     </div>`;
 
 /** Removing it, kept apart at the end and quiet, with what it does. */
@@ -1116,7 +1467,7 @@ const Remove = ({ label, text, busy, onClick }) =>
 const Files = ({ files }) =>
     files &&
     html`<div class="group">
-        <div class="group-title">Files</div>
+        <div class="group-title">${t("web.sheets.gallery.files.div.files", "Files")}</div>
         <div class="sheet-list gallery-files">
             ${files.map(
                 (file) => html`<div class="gallery-file" key=${file.name}>
@@ -1137,7 +1488,7 @@ function EntryFacts({ entry, installed, needs }) {
         ${
             entry &&
             html`<div>
-                <dt>Author</dt>
+                <dt>${t("web.sheets.gallery.entry-facts.dt.author", "Author")}</dt>
                 <dd>
                     ${entry.author.name}
                     ${
@@ -1148,13 +1499,21 @@ function EntryFacts({ entry, installed, needs }) {
             </div>`
         }
         <div>
-            <dt>Version</dt>
+            <dt>${t("web.sheets.gallery.entry-facts.dt.version", "Version")}</dt>
             <dd>
-                ${version}${installed?.update ? html`<span class="warn"> · ${installed.update.version} available</span>` : ""}
+                ${version}${
+                    installed?.update
+                        ? html`<span class="warn">${t(
+                              "web.sheets.gallery.entry-facts.span.available",
+                              "· {version} available",
+                              { version: installed.update.version },
+                          )}</span>`
+                        : ""
+                }
             </dd>
         </div>
         <div>
-            <dt>Source</dt>
+            <dt>${t("web.sheets.gallery.entry-facts.dt.source", "Source")}</dt>
             <dd class="mono">
                 <${Out} href=${installed?.sourceUrl ?? entry.sourceUrl}>${repo} @ ${short(commit)}<//>
             </dd>
@@ -1162,14 +1521,14 @@ function EntryFacts({ entry, installed, needs }) {
         ${
             entry &&
             html`<div>
-                <dt>Needs</dt>
+                <dt>${t("web.sheets.gallery.entry-facts.dt.needs", "Needs")}</dt>
                 <dd>${needs}</dd>
             </div>`
         }
         ${
             installed &&
             html`<div>
-                <dt>Installed</dt>
+                <dt>${t("web.sheets.gallery.entry-facts.dt.installed", "Installed")}</dt>
                 <dd>
                     ${timeAgo(installed.installedAt)}${installed.unlisted ? ` · ${installed.unlisted}` : ""}
                 </dd>
@@ -1178,6 +1537,23 @@ function EntryFacts({ entry, installed, needs }) {
     </dl>`;
 }
 
+/** What the scan reads, in words: the categories it reports finding nothing in. */
+const missingWords = (key) => {
+    if (key === "network") {
+        return t("web.sheets.gallery.reach-section.missing.network", "network");
+    }
+
+    if (key === "keys") {
+        return t("web.sheets.gallery.reach-section.missing.keys", "keys");
+    }
+
+    if (key === "programs") {
+        return t("web.sheets.gallery.reach-section.missing.programs", "programs");
+    }
+
+    return t("web.sheets.gallery.reach-section.missing.files", "files");
+};
+
 function ReachSection({ declares, found, problem, edited = false }) {
     const rows = reachRows(declares, found);
     const missing = found?.scanned
@@ -1185,12 +1561,17 @@ function ReachSection({ declares, found, problem, edited = false }) {
         : [];
 
     return html`<section class="ext-block">
-        <h4 class="ext-label">What it can reach</h4>
+        <h4 class="ext-label">${t(
+            "web.sheets.gallery.reach-section.h4.reach",
+            "What it can reach",
+        )}</h4>
         ${
             edited &&
             html`<p class="ext-why warn">
-                Its files were edited since it was installed: this is what the pinned version reaches, not what runs
-                here. Read its source.
+                ${t(
+                    "web.sheets.gallery.reach-section.p.files-edited-since-installed",
+                    "Its files were edited since it was installed: this is what the pinned version reaches, not what runs here. Read its source.",
+                )}
             </p>`
         }
         <ul class="ext-reach">
@@ -1203,21 +1584,36 @@ function ReachSection({ declares, found, problem, edited = false }) {
             )}
             <li class="always">
                 <${Icon} name="shield" size=${14} />
-                <span class="ext-reach-text">${RISK}</span>
-                <span class="ext-reach-from">Always</span>
+                <span class="ext-reach-text">${t(
+                    "web.sheets.gallery.risk.runs-inside-server-rights",
+                    "It runs inside the server with your rights, in every session. Lancet Guard does not see what its code does.",
+                )}</span>
+                <span class="ext-reach-from">${t(
+                    "web.sheets.gallery.reach-section.span.always",
+                    "Always",
+                )}</span>
             </li>
         </ul>
         ${
             missing.length > 0 &&
             html`<p class="ext-quiet">
-                The scan found nothing for ${sentence(missing)}. It reads the code's text for addresses, keys, programs,
-                and files, so the code can still reach more than it finds.
+                ${t(
+                    "web.sheets.gallery.reach-section.p.scan-found-nothing-reads",
+                    "The scan found nothing for {detail}. It reads the code's text for addresses, keys, programs, and files, so the code can still reach more than it finds.",
+                    { detail: sentence(missing.map(missingWords)) },
+                )}
             </p>`
         }
         ${
             !found &&
             html`<p class="ext-quiet">
-                ${problem ?? "Its code is not read yet for this version: what it reaches in its code shows here once it is."}
+                ${
+                    problem ??
+                    t(
+                        "web.sheets.gallery.reach-section.text.code-not-read-yet",
+                        "Its code is not read yet for this version: what it reaches in its code shows here once it is.",
+                    )
+                }
             </p>`
         }
     </section>`;
@@ -1229,28 +1625,57 @@ function AddsSection({ declares: d }) {
     const commands = (d.commands ?? []).map((each) => {
         const [scope, name] = each.split(" ");
 
-        return [`/${name}`, scope === "global" ? "owner" : "who can steer"];
+        return [
+            `/${name}`,
+            scope === "global"
+                ? t("web.sheets.gallery.adds-section.commands.owner", "owner")
+                : t("web.sheets.gallery.adds-section.commands.who-steer", "who can steer"),
+        ];
     });
+    const routes = (d.routes ?? []).length;
     const app = [
-        d.client !== null && "pages and buttons",
-        (d.routes ?? []).length > 0 && plural(d.routes.length, "server route"),
+        d.client !== null &&
+            t("web.sheets.gallery.adds-section.app.pages-buttons", "pages and buttons"),
+        routes > 0 &&
+            counted(
+                routes,
+                t("web.sheets.gallery.adds-section.app.one-server-route", "1 server route"),
+                t("web.sheets.gallery.adds-section.app.server-routes", "{count} server routes", {
+                    count: routes,
+                }),
+            ),
     ].filter(Boolean);
 
     if (tools.length + commands.length + app.length === 0) {
         return html`<section class="ext-block">
-            <h4 class="ext-label">What it adds</h4>
-            <p class="ext-quiet">No tools, commands, or pages.</p>
+            <h4 class="ext-label">${t(
+                "web.sheets.gallery.adds-section.h4.what-it-adds",
+                "What it adds",
+            )}</h4>
+            <p class="ext-quiet">${t(
+                "web.sheets.gallery.adds-section.p.no-tools-commands-pages",
+                "No tools, commands, or pages.",
+            )}</p>
         </section>`;
     }
 
     return html`<section class="ext-block">
-        <h4 class="ext-label">What it adds</h4>
+        <h4 class="ext-label">${t(
+            "web.sheets.gallery.adds-section.h4.what-it-adds",
+            "What it adds",
+        )}</h4>
         ${
             tools.length > 0 &&
             html`<div class="ext-codes">
                 ${tools.map(
                     (tool) => html`<code key=${tool}>
-                        ${tool}${readOnly.includes(tool) && html`<span>reads only</span>`}
+                        ${tool}${
+                            readOnly.includes(tool) &&
+                            html`<span>${t(
+                                "web.sheets.gallery.adds-section.span.reads",
+                                "reads only",
+                            )}</span>`
+                        }
                     </code>`,
                 )}
             </div>`
@@ -1265,7 +1690,15 @@ function AddsSection({ declares: d }) {
             app.length > 0 &&
             html`<p class="ext-quiet">
                 <${Icon} name="tiles" size=${13} />
-                ${`${sentence(app).charAt(0).toUpperCase()}${sentence(app).slice(1)} in the app, for ${ACCESS_WORDS[d.access] ?? d.access}`}
+                ${t(
+                    "web.sheets.gallery.adds-section.text.app",
+                    "{detail}{detail2} in the app, for {access}",
+                    {
+                        detail: `${sentence(app).charAt(0).toUpperCase()}${sentence(app).slice(1)}`,
+                        detail2: "",
+                        access: accessWords(d.access),
+                    },
+                )}
             </p>`
         }
     </section>`;
@@ -1323,13 +1756,28 @@ function TurnOnDialog({ title, declares, found, installed, busy, onCancel, onOff
             ref=${box}
             onKeyDown=${onKeyDown}
         >
-            <h3 id="ext-dialog-title">${installed ? "Turn on" : "Install and turn on"} ${title}?</h3>
-            <p>${RISK}</p>
+            <h3 id="ext-dialog-title">${
+                installed
+                    ? t("web.sheets.gallery.turn-on-dialog.h3.turn-title", "Turn on {title}?", {
+                          title,
+                      })
+                    : t(
+                          "web.sheets.gallery.turn-on-dialog.h3.install-turn-title",
+                          "Install and turn on {title}?",
+                          { title },
+                      )
+            }</h3>
+            <p>${t(
+                "web.sheets.gallery.risk.runs-inside-server-rights",
+                "It runs inside the server with your rights, in every session. Lancet Guard does not see what its code does.",
+            )}</p>
             ${
                 installed?.changed.length > 0 &&
                 html`<p class="ext-why warn">
-                    Its files were edited since it was installed: this is what the pinned version reaches, not what
-                    runs here.
+                    ${t(
+                        "web.sheets.gallery.turn-on-dialog.p.files-edited-since-installed",
+                        "Its files were edited since it was installed: this is what the pinned version reaches, not what runs here.",
+                    )}
                 </p>`
             }
             ${
@@ -1343,25 +1791,40 @@ function TurnOnDialog({ title, declares, found, installed, busy, onCancel, onOff
                           )}
                       </ul>
                       <p class="ext-quiet">
-                          The scan reads text, so the code can still reach more.
+                          ${t(
+                              "web.sheets.gallery.turn-on-dialog.p.scan-reads-text-code",
+                              "The scan reads text, so the code can still reach more.",
+                          )}
                       </p>`
                     : found
                       ? html`<p class="ext-quiet">
-                            The scan of its code found no address, key, program, or file, and it declares no hooks.
-                            The scan reads text, so the code can still reach more.
+                            ${t(
+                                "web.sheets.gallery.turn-on-dialog.p.scan-code-found-no",
+                                "The scan of its code found no address, key, program, or file, and it declares no hooks. The scan reads text, so the code can still reach more.",
+                            )}
                         </p>`
-                      : html`<p class="ext-quiet">Its code is not read yet: read it with View source first.</p>`
+                      : html`<p class="ext-quiet">${t("web.sheets.gallery.turn-on-dialog.p.code-not-read-yet", "Its code is not read yet: read it with View source first.")}</p>`
             }
             <div class="ext-dialog-actions">
-                <button class="button small" data-cancel disabled=${busy} onClick=${cancel}>Cancel</button>
+                <button class="button small" data-cancel disabled=${busy} onClick=${cancel}>${t("web.sheets.gallery.turn-on-dialog.button.cancel", "Cancel")}</button>
                 ${
                     !installed &&
                     html`<button class="button small" disabled=${busy} onClick=${onOff}>
-                        Install turned off
+                        ${t(
+                            "web.sheets.gallery.turn-on-dialog.button.install-turned-off",
+                            "Install turned off",
+                        )}
                     </button>`
                 }
                 <button class="button small primary" disabled=${busy} onClick=${onOn}>
-                    ${installed ? "Turn on" : "Install and turn on"}
+                    ${
+                        installed
+                            ? t("web.sheets.gallery.turn-on-dialog.button.turn", "Turn on")
+                            : t(
+                                  "web.sheets.gallery.turn-on-dialog.button.install-turn",
+                                  "Install and turn on",
+                              )
+                    }
                 </button>
             </div>
         </div>
@@ -1370,11 +1833,21 @@ function TurnOnDialog({ title, declares, found, installed, busy, onCancel, onOff
 
 function EntryHead({ name, title, entry, installed, theme, size }) {
     const meta = [
-        entry?.author?.name ?? (installed?.unlisted ? "not in the index" : null),
+        entry?.author?.name ??
+            (installed?.unlisted
+                ? t("web.sheets.gallery.entry-head.meta.not-index", "not in the index")
+                : null),
         `v${installed?.version ?? entry?.version}`,
-        entry && plural(entry.files.length, "file"),
+        entry &&
+            counted(
+                entry.files.length,
+                t("web.sheets.gallery.entry-head.meta.one-file", "1 file"),
+                t("web.sheets.gallery.entry-head.meta.files", "{count} files", {
+                    count: entry.files.length,
+                }),
+            ),
         size > 0 && formatBytes(size),
-        theme && "theme",
+        theme && t("web.sheets.gallery.entry-head.meta.theme", "theme"),
     ].filter(Boolean);
 
     return html`<header class="ext-detail-head">
@@ -1421,12 +1894,23 @@ export function GalleryEntrySheet({
     };
 
     if (!entry && !installed) {
-        return html`<${EntryFrame} title="Extension" embedded=${embedded}>
+        return html`<${EntryFrame} title=${t(
+            "web.sheets.gallery.gallery-entry-sheet.title.extension",
+            "Extension",
+        )} embedded=${embedded}>
             ${problem && html`<div class="error-box small">${problem}</div>`}
             ${
                 data === null
-                    ? !problem && html`<${Loader} label="Reading the index" />`
-                    : html`<p class="muted">The index does not list ${name}, and it is not installed.</p>`
+                    ? !problem &&
+                      html`<${Loader} label=${t(
+                          "web.sheets.gallery.gallery-entry-sheet.label.reading-the-index",
+                          "Reading the index",
+                      )} />`
+                    : html`<p class="muted">${t(
+                          "web.sheets.gallery.gallery-entry-sheet.p.index-not-list-installed",
+                          "The index does not list {name}, and it is not installed.",
+                          { name },
+                      )}</p>`
             }
         <//>`;
     }
@@ -1479,7 +1963,22 @@ export function GalleryEntrySheet({
     const uninstall = () => {
         if (
             confirm(
-                `Remove ${title}?\n\n${installed.enabled ? "It is turned off first, then its" : "Its"} files are deleted from the extensions folder.`,
+                t(
+                    "web.sheets.gallery.gallery-entry-sheet.uninstall.confirm.remove-files-deleted-extensions",
+                    "Remove {title}?\n\n{detail} files are deleted from the extensions folder.",
+                    {
+                        title,
+                        detail: installed.enabled
+                            ? t(
+                                  "web.sheets.gallery.gallery-entry-sheet.uninstall.confirm.turned-off-first",
+                                  "It is turned off first, then its",
+                              )
+                            : t(
+                                  "web.sheets.gallery.gallery-entry-sheet.uninstall.confirm.content",
+                                  "Its",
+                              ),
+                    },
+                ),
             )
         ) {
             run(() => galleryApi(`uninstall/${encodeURIComponent(name)}`, {}));
@@ -1491,10 +1990,13 @@ export function GalleryEntrySheet({
         disabled=${busy}
         onClick=${() => openGallerySheet("gallery-source", name)}
     >
-        View source
+        ${t("web.sheets.gallery.gallery-entry-sheet.button.view-source", "View source")}
     </button>`;
     const askPi = html`<button class="button small" disabled=${busy} onClick=${() => run(() => askForReview(name), false)}>
-        <${Icon} name="sparkle" size=${14} /> Ask Pi to review
+        <${Icon} name="sparkle" size=${14} /> ${t(
+            "web.sheets.gallery.gallery-entry-sheet.text.ask-pi-to-review",
+            "Ask Pi to review",
+        )}
     </button>`;
     const revoked = installed?.revoked ?? offeredRevoked;
 
@@ -1504,12 +2006,22 @@ export function GalleryEntrySheet({
             revoked !== null &&
             revoked !== undefined &&
             html`<div class="error-box gallery-revoked" role="alert">
-                <strong>The gallery revoked this version.</strong> Its reason: ${revoked}
+                <strong>${t(
+                    "web.sheets.gallery.gallery-entry-sheet.strong.gallery-revoked-version",
+                    "The gallery revoked this version.",
+                )}</strong> ${t(
+                    "web.sheets.gallery.gallery-entry-sheet.strong.reason",
+                    "Its reason: {revoked} {detail}",
+                    { revoked, detail: "" },
+                )}
                 ${
                     installed?.enabled &&
                     html`<div class="sheet-actions">
                         <button class="button small primary" disabled=${busy} onClick=${() => toggle(false)}>
-                            Turn it off
+                            ${t(
+                                "web.sheets.gallery.gallery-entry-sheet.button.turn-it-off",
+                                "Turn it off",
+                            )}
                         </button>
                     </div>`
                 }
@@ -1523,7 +2035,19 @@ export function GalleryEntrySheet({
             html`<div class="ext-standing">
                 <${Status} status=${status} />
                 <span class="muted small">
-                    ${on ? "Runs in every session." : installed.revoked === null ? "Installed, turned off: nothing runs." : ""}
+                    ${
+                        on
+                            ? t(
+                                  "web.sheets.gallery.gallery-entry-sheet.span.runs-every-session",
+                                  "Runs in every session.",
+                              )
+                            : installed.revoked === null
+                              ? t(
+                                    "web.sheets.gallery.gallery-entry-sheet.span.installed-turned-off-nothing",
+                                    "Installed, turned off: nothing runs.",
+                                )
+                              : ""
+                    }
                 </span>
             </div>`
         }
@@ -1536,19 +2060,28 @@ export function GalleryEntrySheet({
                               disabled=${busy || offeredRevoked !== undefined}
                               onClick=${() => setAsking(true)}
                           >
-                              Install and turn on
+                              ${t(
+                                  "web.sheets.gallery.gallery-entry-sheet.button.install-turn",
+                                  "Install and turn on",
+                              )}
                           </button>
                           <button
                               class="button small"
                               disabled=${busy || offeredRevoked !== undefined}
                               onClick=${() => install(false)}
                           >
-                              Install turned off
+                              ${t(
+                                  "web.sheets.gallery.turn-on-dialog.button.install-turned-off",
+                                  "Install turned off",
+                              )}
                           </button>
                           ${source}`
                     : on
                       ? html`<button class="button small" disabled=${busy} onClick=${() => toggle(false)}>
-                                Turn off
+                                ${t(
+                                    "web.sheets.gallery.gallery-entry-sheet.button.turn-off",
+                                    "Turn off",
+                                )}
                             </button>
                             <button
                                 class="button small"
@@ -1561,13 +2094,19 @@ export function GalleryEntrySheet({
                                         ),
                                     )}
                             >
-                                <${Icon} name="reload" size=${14} /> Reload
+                                <${Icon} name="reload" size=${14} /> ${t(
+                                    "web.sheets.gallery.gallery-entry-sheet.text.reload",
+                                    "Reload",
+                                )}
                             </button>
                             ${source} ${askPi}`
                       : html`${
                             installed.revoked === null &&
                             html`<button class="button small primary" disabled=${busy} onClick=${() => setAsking(true)}>
-                                Turn on
+                                ${t(
+                                    "web.sheets.gallery.gallery-entry-sheet.button.turn-on",
+                                    "Turn on",
+                                )}
                             </button>`
                         }
                         ${source} ${askPi}`
@@ -1586,23 +2125,46 @@ export function GalleryEntrySheet({
             html`<p class="ext-tags">${entry.tags.map((tag) => html`<span key=${tag}>#${tag}</span>`)}</p>`
         }
         <details class="gallery-technical">
-            <summary>Technical details</summary>
+            <summary>${t(
+                "web.sheets.gallery.gallery-entry-sheet.summary.technical-details",
+                "Technical details",
+            )}</summary>
             <${EntryFacts}
                 entry=${entry}
                 installed=${installed}
-                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · extension API ${entry.pocketApi}`}
+                needs=${
+                    entry &&
+                    t(
+                        "web.sheets.gallery.entry-facts.text.needs-extension-api",
+                        "Pi Pocket {pocket} or newer · extension API {api}",
+                        { pocket: entry.minPocket, api: entry.pocketApi },
+                    )
+                }
             />
             <${Files} files=${files} />
             <div class="group">
-                <div class="group-title">Everything it declares</div>
+                <div class="group-title">${t(
+                    "web.sheets.gallery.gallery-entry-sheet.div.everything-it-declares",
+                    "Everything it declares",
+                )}</div>
                 <${Declares} declares=${declares} />
             </div>
         </details>
         ${
             installed &&
             html`<${Remove}
-                label="Uninstall"
-                text=${installed.enabled ? "Turns it off and deletes its files." : "Deletes its files."}
+                label=${t("web.sheets.gallery.gallery-entry-sheet.label.uninstall", "Uninstall")}
+                text=${
+                    installed.enabled
+                        ? t(
+                              "web.sheets.gallery.gallery-entry-sheet.text.turns-off-deletes",
+                              "Turns it off and deletes its files.",
+                          )
+                        : t(
+                              "web.sheets.gallery.gallery-entry-sheet.text.deletes-files",
+                              "Deletes its files.",
+                          )
+                }
                 busy=${busy}
                 onClick=${uninstall}
             />`
@@ -1642,18 +2204,90 @@ function themeChanges(files, palette) {
     const images = names.filter((file) => /\.(png|jpe?g|webp|avif|gif|svg)$/i.test(file));
 
     return [
-        ["swatch", palette ? `Colors, ${modeWords(palette)}` : "Its own colors"],
+        [
+            "swatch",
+            palette
+                ? t("web.sheets.gallery.theme-changes.text.colors", "Colors, {detail}", {
+                      detail: modeWords(palette),
+                  })
+                : t("web.sheets.gallery.theme-changes.text.own-colors", "Its own colors"),
+        ],
         names.some((file) => file.endsWith("layout.css")) && [
             "tiles",
-            "A layout of its own: it moves and restyles parts of the app",
+            t(
+                "web.sheets.gallery.theme-changes.text.layout-own-moves-restyles",
+                "A layout of its own: it moves and restyles parts of the app",
+            ),
         ],
         fonts.length > 0 && [
             "file",
-            `Its own ${fonts.length === 1 ? "font" : "fonts"}: ${sentence(fonts)}`,
+            t("web.sheets.gallery.theme-changes.text.own", "Its own {count}: {detail}", {
+                count:
+                    fonts.length === 1
+                        ? t("web.sheets.gallery.theme-changes.text.font", "font")
+                        : t("web.sheets.gallery.theme-changes.text.fonts", "fonts"),
+                detail: sentence(fonts),
+            }),
         ],
-        images.length > 0 && ["artifact", plural(images.length, "image")],
+        images.length > 0 && [
+            "artifact",
+            counted(
+                images.length,
+                t("web.sheets.gallery.theme-changes.text.one-image", "1 image", {
+                    count: images.length,
+                }),
+                t("web.sheets.gallery.theme-changes.text.images", "{count} images", {
+                    count: images.length,
+                }),
+            ),
+        ],
     ].filter(Boolean);
 }
+
+/** A palette role's name as the sheet shows it; a role this does not know stays as the palette key. */
+const roleLabel = (key) => {
+    if (key === "background") {
+        return t("web.sheets.gallery.swatches.text.background", "background");
+    }
+
+    if (key === "foreground") {
+        return t("web.sheets.gallery.swatches.text.foreground", "foreground");
+    }
+
+    if (key === "accent") {
+        return t("web.sheets.gallery.swatches.text.accent", "accent");
+    }
+
+    if (key === "red") {
+        return t("web.sheets.gallery.swatches.text.red", "red");
+    }
+
+    if (key === "yellow") {
+        return t("web.sheets.gallery.swatches.text.yellow", "yellow");
+    }
+
+    if (key === "green") {
+        return t("web.sheets.gallery.swatches.text.green", "green");
+    }
+
+    if (key === "cyan") {
+        return t("web.sheets.gallery.swatches.text.cyan", "cyan");
+    }
+
+    if (key === "blue") {
+        return t("web.sheets.gallery.swatches.text.blue", "blue");
+    }
+
+    if (key === "magenta") {
+        return t("web.sheets.gallery.swatches.text.magenta", "magenta");
+    }
+
+    return key;
+};
+
+/** The mono line's word for a role: the same names, with "text" for the foreground. */
+const textLabel = (key) =>
+    key === "foreground" ? t("web.sheets.gallery.swatches.text.text", "text") : roleLabel(key);
 
 const Swatches = ({ colors }) =>
     html`<div class="ext-swatches">
@@ -1661,16 +2295,12 @@ const Swatches = ({ colors }) =>
             .filter((key) => HEX.test(colors[key] ?? ""))
             .map(
                 (key) =>
-                    html`<i key=${key} style=${`background:${colors[key]}`} title=${`${key} ${colors[key]}`}></i>`,
+                    html`<i key=${key} style=${`background:${colors[key]}`} title=${`${roleLabel(key)} ${colors[key]}`}></i>`,
             )}
         <span class="mono">
-            ${[
-                ["background", "background"],
-                ["foreground", "text"],
-                ["accent", "accent"],
-            ]
-                .filter(([key]) => HEX.test(colors[key] ?? ""))
-                .map(([key, label]) => `${label} ${colors[key]}`)
+            ${["background", "foreground", "accent"]
+                .filter((key) => HEX.test(colors[key] ?? ""))
+                .map((key) => `${textLabel(key)} ${colors[key]}`)
                 .join(" · ")}
         </span>
     </div>`;
@@ -1690,7 +2320,11 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
     const uninstall = () => {
         if (
             confirm(
-                `Remove the theme ${title}?\n\nIts folder moves to themes/.removed/ in the data folder. Browsers that use it go back to Pocket.`,
+                t(
+                    "web.sheets.gallery.theme-entry.uninstall.confirm.remove-theme-folder-moves",
+                    "Remove the theme {title}?\n\nIts folder moves to themes/.removed/ in the data folder. Browsers that use it go back to Pocket.",
+                    { title },
+                ),
             )
         ) {
             run(async () => {
@@ -1708,7 +2342,11 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
         ${
             (installed?.revoked ?? offeredRevoked) &&
             html`<div class="error-box gallery-revoked" role="alert">
-                <strong>The gallery revoked this version.</strong> Its reason: ${installed?.revoked ?? offeredRevoked}
+                <strong>${t("web.sheets.gallery.theme-entry.strong.gallery-revoked-version", "The gallery revoked this version.")}</strong> ${t(
+                    "web.sheets.gallery.theme-entry.strong.reason",
+                    "Its reason: {offeredRevoked}",
+                    { offeredRevoked: installed?.revoked ?? offeredRevoked },
+                )}
             </div>`
         }
         <${EntryHead}
@@ -1722,13 +2360,25 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
         <div class=${`ext-preview ${palette?.colorsLight ? "pair" : ""}`}>
             <figure>
                 <${ThemeDesk} colors=${palette?.colors ?? null} big=${true} />
-                <figcaption>${palette ? (palette.colorsLight || palette.colors.mode !== "light" ? "Dark" : "Light") : "Its colors show once the gallery reads them"}</figcaption>
+                <figcaption>${
+                    palette
+                        ? palette.colorsLight || palette.colors.mode !== "light"
+                            ? t("web.sheets.gallery.theme-entry.figcaption.dark", "Dark")
+                            : t("web.sheets.gallery.theme-entry.figcaption.light", "Light")
+                        : t(
+                              "web.sheets.gallery.theme-entry.figcaption.colors-show-once-gallery",
+                              "Its colors show once the gallery reads them",
+                          )
+                }</figcaption>
             </figure>
             ${
                 palette?.colorsLight &&
                 html`<figure>
                     <${ThemeDesk} colors=${palette.colorsLight} big=${true} />
-                    <figcaption>Light</figcaption>
+                    <figcaption>${t(
+                        "web.sheets.gallery.theme-entry.figcaption.light",
+                        "Light",
+                    )}</figcaption>
                 </figure>`
             }
         </div>
@@ -1742,17 +2392,30 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
                           disabled=${busy || offeredRevoked !== undefined}
                           onClick=${install}
                       >
-                          Install
+                          ${t("web.sheets.gallery.theme-entry.button.install", "Install")}
                       </button>`
                     : html`<button
                               class="button small primary"
                               disabled=${!usable || inUse}
                               onClick=${(event) => chooseLook(name, event)}
                           >
-                              ${inUse ? "In use in this browser" : "Use it in this browser"}
+                              ${
+                                  inUse
+                                      ? t(
+                                            "web.sheets.gallery.theme-entry.button.browser",
+                                            "In use in this browser",
+                                        )
+                                      : t(
+                                            "web.sheets.gallery.theme-entry.button.browser.browser",
+                                            "Use it in this browser",
+                                        )
+                              }
                           </button>
                           <button class="button small" onClick=${() => openSheet({ type: "appearance" })}>
-                              Open Appearance
+                              ${t(
+                                  "web.sheets.gallery.theme-entry.button.open-appearance",
+                                  "Open Appearance",
+                              )}
                           </button>`
             }
             <button
@@ -1760,38 +2423,67 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
                 disabled=${busy}
                 onClick=${() => openGallerySheet("gallery-source", name)}
             >
-                View source
+                ${t("web.sheets.gallery.theme-entry.button.view-source", "View source")}
             </button>
         </div>
         <p class="ext-quiet">
-            ${installed ? "Each person picks a theme for their own browser: using it here changes nothing for anyone else." : "Installing adds it to Appearance. Nothing changes until someone picks it."}
+            ${
+                installed
+                    ? t(
+                          "web.sheets.gallery.theme-entry.p.person-picks-theme-their",
+                          "Each person picks a theme for their own browser: using it here changes nothing for anyone else.",
+                      )
+                    : t(
+                          "web.sheets.gallery.theme-entry.p.installing-adds-appearance-nothing",
+                          "Installing adds it to Appearance. Nothing changes until someone picks it.",
+                      )
+            }
         </p>
         ${
             installed?.problem &&
-            html`<div class="gallery-warn small">Appearance does not offer it as it is: ${installed.problem}</div>`
+            html`<div class="gallery-warn small">${t(
+                "web.sheets.gallery.theme-entry.div.appearance-not-offer",
+                "Appearance does not offer it as it is: {problem}",
+                { problem: installed.problem },
+            )}</div>`
         }
         <${Changed} installed=${installed} />
         <section class="ext-block">
-            <h4 class="ext-label">What it changes</h4>
+            <h4 class="ext-label">${t(
+                "web.sheets.gallery.theme-entry.h4.changes",
+                "What it changes",
+            )}</h4>
             <ul class="ext-reach">
                 ${themeChanges(entry?.files, palette).map(
                     ([glyph, text]) => html`<li key=${glyph}>
                         <${Icon} name=${glyph} size=${14} />
                         <span class="ext-reach-text">${text}</span>
-                        <span class="ext-reach-from">In its files</span>
+                        <span class="ext-reach-from">${t(
+                            "web.sheets.gallery.theme-entry.span.files",
+                            "In its files",
+                        )}</span>
                     </li>`,
                 )}
                 <li class="always">
                     <${Icon} name="shield" size=${14} />
-                    <span class="ext-reach-text">${THEME_RISK}</span>
-                    <span class="ext-reach-from">Always</span>
+                    <span class="ext-reach-text">${t(
+                        "web.sheets.gallery.theme-risk.theme-css-fonts-images",
+                        "A theme is CSS, fonts, and images. It runs no code, and it loads nothing from other sites. But it can hide or relabel what people see, approvals too: install only themes you trust.",
+                    )}</span>
+                    <span class="ext-reach-from">${t(
+                        "web.sheets.gallery.theme-entry.span.always",
+                        "Always",
+                    )}</span>
                 </li>
             </ul>
         </section>
         ${
             palette &&
             html`<section class="ext-block">
-                <h4 class="ext-label">Palette</h4>
+                <h4 class="ext-label">${t(
+                    "web.sheets.gallery.theme-entry.h4.palette",
+                    "Palette",
+                )}</h4>
                 <${Swatches} colors=${palette.colors} />
                 ${palette.colorsLight && html`<${Swatches} colors=${palette.colorsLight} />`}
             </section>`
@@ -1801,19 +2493,32 @@ function ThemeEntry({ name, entry, installed, palette, problem, busy, run, embed
             html`<p class="ext-tags">${entry.tags.map((tag) => html`<span key=${tag}>#${tag}</span>`)}</p>`
         }
         <details class="gallery-technical">
-            <summary>Technical details</summary>
+            <summary>${t(
+                "web.sheets.gallery.theme-entry.summary.technical-details",
+                "Technical details",
+            )}</summary>
             <${EntryFacts}
                 entry=${entry}
                 installed=${installed}
-                needs=${entry && `Pi Pocket ${entry.minPocket} or newer · theme API ${entry.themeApi}`}
+                needs=${
+                    entry &&
+                    t(
+                        "web.sheets.gallery.entry-facts.text.needs-theme-api",
+                        "Pi Pocket {pocket} or newer · theme API {api}",
+                        { pocket: entry.minPocket, api: entry.themeApi },
+                    )
+                }
             />
             <${Files} files=${files} />
         </details>
         ${
             installed &&
             html`<${Remove}
-                label="Remove"
-                text="Moves it to themes/.removed/ in the data folder."
+                label=${t("web.sheets.gallery.theme-entry.label.remove", "Remove")}
+                text=${t(
+                    "web.sheets.gallery.theme-entry.text.moves-it-themes-removed",
+                    "Moves it to themes/.removed/ in the data folder.",
+                )}
                 busy=${busy}
                 onClick=${uninstall}
             />`
@@ -1829,17 +2534,40 @@ export function GallerySourceSheet({ name }) {
     useRoute(`source/${encodeURIComponent(name)}`, setData, setProblem);
 
     return html`<${Sheet}
-        title=${data ? `Source: ${data.title}` : "Source"}
+        title=${
+            data
+                ? t("web.sheets.gallery.gallery-source-sheet.title.source", "Source: {title}", {
+                      title: data.title,
+                  })
+                : t("web.sheets.gallery.gallery-source-sheet.title.source.source", "Source")
+        }
         onClose=${closeSheet}
         wide=${true}
         className="gallery extension-detail-sheet"
     >
         ${problem && html`<div class="error-box small">${problem}</div>`}
-        ${!data && !problem && html`<${Loader} label="Getting its files" />`}
+        ${
+            !data &&
+            !problem &&
+            html`<${Loader} label=${t(
+                "web.sheets.gallery.gallery-source-sheet.label.getting-its-files",
+                "Getting its files",
+            )} />`
+        }
         ${
             data &&
             html`<p class="muted small">
-                ${data.from === "installed" ? "The files as they are in your extensions folder." : "Downloaded from the commit the index pins, and checked against its hashes. Nothing is installed."}
+                ${
+                    data.from === "installed"
+                        ? t(
+                              "web.sheets.gallery.gallery-source-sheet.p.files-they-extensions-folder",
+                              "The files as they are in your extensions folder.",
+                          )
+                        : t(
+                              "web.sheets.gallery.gallery-source-sheet.p.downloaded-commit-index-pins",
+                              "Downloaded from the commit the index pins, and checked against its hashes. Nothing is installed.",
+                          )
+                }
             </p>`
         }
         ${data?.files.map(
@@ -1849,12 +2577,24 @@ export function GallerySourceSheet({ name }) {
                     <span class="muted small">${formatBytes(file.size)}</span>
                     ${
                         file.missing
-                            ? html`<span class="pi-tag gallery-bad">missing</span>`
+                            ? html`<span class="pi-tag gallery-bad">${t(
+                                  "web.sheets.gallery.gallery-source-sheet.span.missing",
+                                  "missing",
+                              )}</span>`
                             : file.pinned
-                              ? html`<span class="pi-tag gallery-on" title="Matches the hash the index pins">✓ pinned</span>`
-                              : html`<span class="pi-tag behind" title="Not the file the index pins">changed</span>`
+                              ? html`<span class="pi-tag gallery-on" title=${t("web.sheets.gallery.gallery-source-sheet.title.matches-hash-index-pins", "Matches the hash the index pins")}>${t(
+                                    "web.sheets.gallery.gallery-source-sheet.span.pinned",
+                                    "✓ pinned",
+                                )}</span>`
+                              : html`<span class="pi-tag behind" title=${t("web.sheets.gallery.gallery-source-sheet.title.not-file-index-pins", "Not the file the index pins")}>${t("web.sheets.gallery.gallery-source-sheet.span.changed", "changed")}</span>`
                     }
-                    ${file.binary && html`<span class="pi-tag gallery-plain">binary</span>`}
+                    ${
+                        file.binary &&
+                        html`<span class="pi-tag gallery-plain">${t(
+                            "web.sheets.gallery.gallery-source-sheet.span.binary",
+                            "binary",
+                        )}</span>`
+                    }
                 </div>
                 ${file.text !== null && html`<${Highlighted} class="gallery-code" text=${file.text} lang=${file.name} />`}
             </section>`,
@@ -1873,15 +2613,22 @@ function declarationChanges(before, after) {
         );
 
         if (added.length > 0 || removed.length > 0) {
-            lines.push({ label, added, removed });
+            lines.push({ key, label, added, removed });
         }
     }
 
-    const words = (client) => (client === null ? "none" : `for ${ACCESS_WORDS[client] ?? client}`);
+    const words = (client) =>
+        client === null
+            ? t("web.sheets.gallery.declaration-changes.words.none", "none")
+            : t("web.sheets.gallery.declaration-changes.words.content", "for {client}", {
+                  client: accessWords(client),
+              });
 
     if (before.client !== after.client) {
         lines.push({
-            label: "Browser module",
+            key: "client",
+            label: () =>
+                t("web.sheets.gallery.declaration-changes.label.browser-module", "Browser module"),
             from: words(before.client),
             to: words(after.client),
         });
@@ -1889,14 +2636,37 @@ function declarationChanges(before, after) {
 
     if (before.access !== after.access) {
         lines.push({
-            label: "Widest access",
-            from: ACCESS_WORDS[before.access] ?? before.access,
-            to: ACCESS_WORDS[after.access] ?? after.access,
+            key: "access",
+            label: () =>
+                t("web.sheets.gallery.declaration-changes.label.widest-access", "Widest access"),
+            from: accessWords(before.access),
+            to: accessWords(after.access),
         });
     }
 
     return lines;
 }
+
+/** A file's change in an update, in words; a kind this does not know stays as the server wrote it. */
+const changeLabel = (change) => {
+    if (change === "added") {
+        return t("web.sheets.gallery.gallery-update-sheet.span.change-added", "added");
+    }
+
+    if (change === "removed") {
+        return t("web.sheets.gallery.gallery-update-sheet.span.change-removed", "removed");
+    }
+
+    if (change === "changed") {
+        return t("web.sheets.gallery.gallery-update-sheet.span.change-changed", "changed");
+    }
+
+    if (change === "same") {
+        return t("web.sheets.gallery.gallery-update-sheet.span.change-same", "same");
+    }
+
+    return change;
+};
 
 /** An update the index offers: what changes, the diff, and applying it. */
 export function GalleryUpdateSheet({ name }) {
@@ -1926,7 +2696,11 @@ export function GalleryUpdateSheet({ name }) {
         if (
             data.enabled &&
             !confirm(
-                `Apply the update to ${data.title}?\n\nIt is on, so the new code runs as soon as it is in place.`,
+                t(
+                    "web.sheets.gallery.gallery-update-sheet.apply.confirm.apply-update-new-code",
+                    "Apply the update to {title}?\n\nIt is on, so the new code runs as soon as it is in place.",
+                    { title: data.title },
+                ),
             )
         ) {
             return;
@@ -1953,7 +2727,11 @@ export function GalleryUpdateSheet({ name }) {
             if (result.restart) {
                 notify(
                     "warning",
-                    `${data.title}'s helper files changed while it is on: restart the server (Menu → Restart server) to load them.`,
+                    t(
+                        "web.sheets.gallery.gallery-update-sheet.apply.s-helper-files-changed",
+                        "{title}'s helper files changed while it is on: restart the server (Menu → Restart server) to load them.",
+                        { title: data.title },
+                    ),
                 );
             }
 
@@ -1972,7 +2750,7 @@ export function GalleryUpdateSheet({ name }) {
 
     if (data === null) {
         return html`<${Sheet}
-            title="Update"
+            title=${t("web.sheets.gallery.gallery-update-sheet.title.update", "Update")}
             onClose=${closeSheet}
             wide=${true}
             className="gallery extension-detail-sheet"
@@ -1980,7 +2758,10 @@ export function GalleryUpdateSheet({ name }) {
             ${
                 problem
                     ? html`<div class="error-box small">${problem}</div>`
-                    : html`<${Loader} label="Getting the new version" />`
+                    : html`<${Loader} label=${t(
+                          "web.sheets.gallery.gallery-update-sheet.label.getting-the-new-version",
+                          "Getting the new version",
+                      )} />`
             }
         <//>`;
     }
@@ -1989,18 +2770,20 @@ export function GalleryUpdateSheet({ name }) {
         data.declares === null ? [] : declarationChanges(data.declares.before, data.declares.after);
 
     return html`<${Sheet}
-        title=${`Update ${data.title}`}
+        title=${t("web.sheets.gallery.gallery-update-sheet.title.update.update", "Update {title}", {
+            title: data.title,
+        })}
         onClose=${closeSheet}
         wide=${true}
         className="gallery extension-detail-sheet"
     >
         <dl class="pi-facts">
             <div>
-                <dt>From</dt>
+                <dt>${t("web.sheets.gallery.gallery-update-sheet.dt.from", "From")}</dt>
                 <dd class="mono">${data.from.version} · ${short(data.from.commit)}</dd>
             </div>
             <div>
-                <dt>To</dt>
+                <dt>${t("web.sheets.gallery.gallery-update-sheet.dt.to", "To")}</dt>
                 <dd class="mono">
                     ${data.to.version} · <${Out} href=${data.sourceUrl}>${short(data.to.commit)}<//>
                 </dd>
@@ -2009,29 +2792,41 @@ export function GalleryUpdateSheet({ name }) {
         ${
             data.from.repo !== data.to.repo &&
             html`<div class="gallery-warn small" role="alert">
-                It now comes from another repository: <span class="mono">${data.from.repo}</span> → <span class="mono">${data.to.repo}</span>. Make sure you trust the new one.
+                ${t("web.sheets.gallery.gallery-update-sheet.div.comes-another-repository", "It now comes from another repository:")} <span class="mono">${data.from.repo}</span> → <span class="mono">${data.to.repo}</span>. ${t(
+                    "web.sheets.gallery.gallery-update-sheet.text.make-sure-trust-new",
+                    "Make sure you trust the new one.",
+                )}
             </div>`
         }
         ${
             data.edited.length > 0 &&
             html`<div class="gallery-warn small" role="alert">
-                Yours here, edited since it was installed or never part of it: <span class="mono">${data.edited.join(", ")}</span>. The diff is against your files, and the update replaces them.
+                ${t("web.sheets.gallery.gallery-update-sheet.div.yours-edited-since-installed", "Yours here, edited since it was installed or never part of it:")} <span class="mono">${data.edited.join(", ")}</span>. ${t(
+                    "web.sheets.gallery.gallery-update-sheet.text.diff-against-your-files",
+                    "The diff is against your files, and the update replaces them.",
+                )}
             </div>`
         }
         ${
             data.declares === null
                 ? html`<p class="muted small">
-                      It is checked as every theme is before it is in place. The version you have now goes to themes/.removed/ in the data folder.
+                      ${t("web.sheets.gallery.gallery-update-sheet.p.checked-every-theme-before", "It is checked as every theme is before it is in place. The version you have now goes to themes/.removed/ in the data folder.")}
                   </p>`
                 : html`<div class="group">
-                      <div class="group-title">What it declares</div>
+                      <div class="group-title">${t(
+                          "web.sheets.gallery.gallery-update-sheet.div.what-it-declares",
+                          "What it declares",
+                      )}</div>
                       ${
                           changes.length === 0
-                              ? html`<p class="muted small">The same as before.</p>`
+                              ? html`<p class="muted small">${t(
+                                    "web.sheets.gallery.gallery-update-sheet.p.the-same-as-before",
+                                    "The same as before.",
+                                )}</p>`
                               : html`<dl class="pi-facts gallery-declares">
                                     ${changes.map(
-                                        (change) => html`<div key=${change.label}>
-                                            <dt>${change.label}</dt>
+                                        (change) => html`<div key=${change.key}>
+                                            <dt>${change.label()}</dt>
                                             <dd>
                                                 ${change.added?.length > 0 && html`<div class="mono gallery-added">+ ${change.added.join(", ")}</div>`}
                                                 ${change.removed?.length > 0 && html`<div class="mono gallery-removed">− ${change.removed.join(", ")}</div>`}
@@ -2044,12 +2839,15 @@ export function GalleryUpdateSheet({ name }) {
                   </div>`
         }
         <div class="group">
-            <div class="group-title">Files</div>
+            <div class="group-title">${t(
+                "web.sheets.gallery.gallery-update-sheet.div.files",
+                "Files",
+            )}</div>
             <div class="sheet-list gallery-files">
                 ${data.files.map(
                     (file) => html`<div class="gallery-file" key=${file.name}>
                         <span class="mono">${file.name}</span>
-                        <span class=${`small gallery-change ${file.change}`}>${file.change}</span>
+                        <span class=${`small gallery-change ${file.change}`}>${changeLabel(file.change)}</span>
                     </div>`,
                 )}
             </div>
@@ -2057,10 +2855,13 @@ export function GalleryUpdateSheet({ name }) {
         ${data.diff && html`<${DiffBlock} text=${data.diff} />`}
         ${
             data.enabled &&
-            html`<p class="gallery-warn small">It is on: the new code runs as soon as it is in place.</p>`
+            html`<p class="gallery-warn small">${t("web.sheets.gallery.gallery-update-sheet.p.new-code-runs-soon", "It is on: the new code runs as soon as it is in place.")}</p>`
         }
         <div class="gallery-actions">
-            <button class="button primary" disabled=${busy} onClick=${apply}>Apply update</button>
+            <button class="button primary" disabled=${busy} onClick=${apply}>${t(
+                "web.sheets.gallery.gallery-update-sheet.button.apply-update",
+                "Apply update",
+            )}</button>
         </div>
     <//>`;
 }
@@ -2081,30 +2882,60 @@ function fieldProblems({ repo, commit, path, tags, github, name }) {
     return {
         repo:
             repo === ""
-                ? "Give the GitHub repository with its files."
+                ? t(
+                      "web.sheets.gallery.field-problems.repo.give-git-hub-repository-files",
+                      "Give the GitHub repository with its files.",
+                  )
                 : rest.length > 0 ||
                     !OWNER.test(owner ?? "") ||
                     !REPO_NAME.test(repository ?? "") ||
                     repository === "." ||
                     repository === ".."
-                  ? "Write it as owner/name, such as tannermidd/pocket-clock."
+                  ? t(
+                        "web.sheets.gallery.field-problems.repo.write-owner-name-such",
+                        "Write it as owner/name, such as tannermidd/pocket-clock.",
+                    )
                   : null,
         commit:
             commit === ""
-                ? "Give the commit with its files."
+                ? t(
+                      "web.sheets.gallery.field-problems.commit.give-commit-files",
+                      "Give the commit with its files.",
+                  )
                 : /^[0-9a-f]{40}$/.test(commit)
                   ? null
-                  : "Write the full commit ID: 40 letters and digits, from a to f and 0 to 9.",
+                  : t(
+                        "web.sheets.gallery.field-problems.commit.write-full-commit-id",
+                        "Write the full commit ID: 40 letters and digits, from a to f and 0 to 9.",
+                    ),
         path:
             parts.length > 4 || parts.some((part) => !PART.test(part))
-                ? "Write a folder of the repository, such as extension, four deep at most."
+                ? t(
+                      "web.sheets.gallery.field-problems.path.write-folder-repository-such",
+                      "Write a folder of the repository, such as extension, four deep at most.",
+                  )
                 : null,
         tags:
             tags.length > 10 || tags.some((tag) => !TAG.test(tag))
-                ? "Use up to 10 tags of lowercase letters, digits, and -."
+                ? t(
+                      "web.sheets.gallery.field-problems.tags.up-tags-lowercase-letters",
+                      "Use up to 10 tags of lowercase letters, digits, and -.",
+                  )
                 : null,
-        github: github === "" || OWNER.test(github) ? null : "Write your GitHub name only.",
-        name: name === "" || name.length > 60 ? "Give your name, 60 characters at most." : null,
+        github:
+            github === "" || OWNER.test(github)
+                ? null
+                : t(
+                      "web.sheets.gallery.field-problems.github.write-git-hub-name",
+                      "Write your GitHub name only.",
+                  ),
+        name:
+            name === "" || name.length > 60
+                ? t(
+                      "web.sheets.gallery.field-problems.name.give-name-characters-most",
+                      "Give your name, 60 characters at most.",
+                  )
+                : null,
     };
 }
 
@@ -2155,8 +2986,22 @@ export function GalleryShareSheet({ file, theme = false }) {
         : file;
 
     if (!data) {
-        return html`<${Sheet} title=${`Share ${shareName}`} onClose=${closeSheet} wide=${true} className="gallery">
-            ${problem ? html`<div class="error-box small">${problem}</div>` : html`<${Loader} label="Checking it" />`}
+        return html`<${Sheet}
+            title=${t("web.sheets.gallery.gallery-share-sheet.title.share", "Share {name}", {
+                name: shareName,
+            })}
+            onClose=${closeSheet}
+            wide=${true}
+            className="gallery"
+        >
+            ${
+                problem
+                    ? html`<div class="error-box small">${problem}</div>`
+                    : html`<${Loader} label=${t(
+                          "web.sheets.gallery.gallery-share-sheet.label.checking-it",
+                          "Checking it",
+                      )} />`
+            }
         <//>`;
     }
 
@@ -2190,27 +3035,46 @@ export function GalleryShareSheet({ file, theme = false }) {
     // What keeps the pull request closed, first to last: the drop-in itself, then what is still to fill in.
     const blocked =
         data.problems.length > 0
-            ? "Fix the problems above first."
+            ? t(
+                  "web.sheets.gallery.gallery-share-sheet.blocked.fix-problems-above-first",
+                  "Fix the problems above first.",
+              )
             : !data.declaresKnown
-              ? "Turn it on once, so what it declares is known, then look again."
+              ? t(
+                    "web.sheets.gallery.gallery-share-sheet.blocked.turn-once-declares-known",
+                    "Turn it on once, so what it declares is known, then look again.",
+                )
               : (Object.values(wrong).find((each) => each !== null) ?? null);
     const filled = data.newEntryPage && `${data.newEntryPage}&value=${encodeURIComponent(text)}`;
     const link = filled && filled.length <= LINK_LIMIT ? filled : data.newEntryPage;
 
-    return html`<${Sheet} title=${`Share ${shareName}`} onClose=${closeSheet} wide=${true} className="gallery">
+    return html`<${Sheet}
+        title=${t("web.sheets.gallery.gallery-share-sheet.title.share", "Share {name}", {
+            name: shareName,
+        })}
+        onClose=${closeSheet}
+        wide=${true}
+        className="gallery"
+    >
         <p class="muted small">
-            To share it, add its entry to the gallery's index with a pull request. Pi Pocket makes no GitHub calls: you put its files on GitHub and open the pull request yourself.
+            ${t("web.sheets.gallery.gallery-share-sheet.p.share-add-entry-gallery", "To share it, add its entry to the gallery's index with a pull request. Pi Pocket makes no GitHub calls: you put its files on GitHub and open the pull request yourself.")}
         </p>
         ${
             data.problems.length > 0
                 ? html`<div class="gallery-warn small" role="alert">
-                      <strong>Fix these first:</strong>
+                      <strong>${t(
+                          "web.sheets.gallery.gallery-share-sheet.strong.fix-these-first",
+                          "Fix these first:",
+                      )}</strong>
                       <ul>
                           ${data.problems.map((each, index) => html`<li key=${index}>${each}</li>`)}
                       </ul>
                   </div>`
                 : html`<p class="ok small">
-                      <${Icon} name="check" size=${14} /> It stands on its own.
+                      <${Icon} name="check" size=${14} /> ${t(
+                          "web.sheets.gallery.gallery-share-sheet.text.stands-own",
+                          "It stands on its own.",
+                      )}
                   </p>`
         }
         ${
@@ -2220,9 +3084,12 @@ export function GalleryShareSheet({ file, theme = false }) {
             </ul>`
         }
         <div class="group">
-            <div class="group-title">1. Put its files on GitHub</div>
+            <div class="group-title">${t(
+                "web.sheets.gallery.gallery-share-sheet.div.put-files-git-hub",
+                "1. Put its files on GitHub",
+            )}</div>
             <p class="small">
-                Make a public GitHub repository, and commit these files to it with the same names, at its top or in one folder:
+                ${t("web.sheets.gallery.gallery-share-sheet.p.make-public-git-hub-repository", "Make a public GitHub repository, and commit these files to it with the same names, at its top or in one folder:")}
             </p>
             <div class="sheet-list gallery-files">
                 ${data.entry.files.map(
@@ -2234,11 +3101,14 @@ export function GalleryShareSheet({ file, theme = false }) {
             </div>
         </div>
         <div class="group">
-            <div class="group-title">2. Say where they are</div>
+            <div class="group-title">${t(
+                "web.sheets.gallery.gallery-share-sheet.div.say-where-they",
+                "2. Say where they are",
+            )}</div>
             <div class="gallery-form">
                 <${Field}
                     id="share-repo"
-                    label="Repository"
+                    label=${t("web.sheets.gallery.gallery-share-sheet.label.repository", "Repository")}
                     placeholder="owner/name"
                     value=${form.repo}
                     onInput=${set("repo")}
@@ -2246,34 +3116,77 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-commit"
-                    label="Commit"
-                    hint="The full ID of the commit with these files (git rev-parse HEAD)."
-                    placeholder="40 letters and digits"
+                    label=${t("web.sheets.gallery.gallery-share-sheet.label.commit", "Commit")}
+                    hint=${t(
+                        "web.sheets.gallery.gallery-share-sheet.hint.full-id-commit-files",
+                        "The full ID of the commit with these files (git rev-parse HEAD).",
+                    )}
+                    placeholder=${t(
+                        "web.sheets.gallery.gallery-share-sheet.placeholder.letters-digits",
+                        "40 letters and digits",
+                    )}
                     value=${form.commit}
                     onInput=${set("commit")}
                     problem=${wrong.commit}
                 />
                 <${Field}
                     id="share-path"
-                    label="Folder (optional)"
-                    hint="Only when the files are not at the top of the repository."
-                    placeholder=${theme ? "theme" : "extension"}
+                    label=${t(
+                        "web.sheets.gallery.gallery-share-sheet.label.folder-optional",
+                        "Folder (optional)",
+                    )}
+                    hint=${t(
+                        "web.sheets.gallery.gallery-share-sheet.hint.only-files-not-top",
+                        "Only when the files are not at the top of the repository.",
+                    )}
+                    placeholder=${
+                        theme
+                            ? t("web.sheets.gallery.gallery-share-sheet.placeholder.theme", "theme")
+                            : t(
+                                  "web.sheets.gallery.gallery-share-sheet.placeholder.extension",
+                                  "extension",
+                              )
+                    }
                     value=${form.path}
                     onInput=${set("path")}
                     problem=${wrong.path}
                 />
                 <${Field}
                     id="share-tags"
-                    label="Tags"
-                    hint=${`A few words people search for, such as ${theme ? "dark, calm" : "usage, time"}.`}
-                    placeholder=${theme ? "dark, minimal" : "usage, limits"}
+                    label=${t("web.sheets.gallery.gallery-share-sheet.label.tags", "Tags")}
+                    hint=${t(
+                        "web.sheets.gallery.gallery-share-sheet.hint.few-words-people-search",
+                        "A few words people search for, such as {words}.",
+                        {
+                            words: theme
+                                ? t(
+                                      "web.sheets.gallery.gallery-share-sheet.hint.dark-calm",
+                                      "dark, calm",
+                                  )
+                                : t(
+                                      "web.sheets.gallery.gallery-share-sheet.hint.usage-time",
+                                      "usage, time",
+                                  ),
+                        },
+                    )}
+                    placeholder=${
+                        theme
+                            ? t(
+                                  "web.sheets.gallery.gallery-share-sheet.placeholder.dark-minimal",
+                                  "dark, minimal",
+                              )
+                            : t(
+                                  "web.sheets.gallery.gallery-share-sheet.placeholder.usage-limits",
+                                  "usage, limits",
+                              )
+                    }
                     value=${form.tags}
                     onInput=${set("tags")}
                     problem=${wrong.tags}
                 />
                 <${Field}
                     id="share-name"
-                    label="Your name"
+                    label=${t("web.sheets.gallery.gallery-share-sheet.label.your-name", "Your name")}
                     value=${form.name ?? data.entry.author.name}
                     onInput=${set("name")}
                     problem=${wrong.name}
@@ -2281,8 +3194,14 @@ export function GalleryShareSheet({ file, theme = false }) {
                 />
                 <${Field}
                     id="share-github"
-                    label="Your GitHub name (optional)"
-                    placeholder="octocat"
+                    label=${t(
+                        "web.sheets.gallery.gallery-share-sheet.label.your-git-hub-name-optional",
+                        "Your GitHub name (optional)",
+                    )}
+                    placeholder=${t(
+                        "web.sheets.gallery.gallery-share-sheet.placeholder.octocat",
+                        "octocat",
+                    )}
                     value=${form.github}
                     onInput=${set("github")}
                     problem=${wrong.github}
@@ -2292,14 +3211,30 @@ export function GalleryShareSheet({ file, theme = false }) {
         <div class="group">
             <div class="gallery-entry-head">
                 <div class="group-title">
-                    3. Its entry, <span class="mono">entries/${data.name}.json</span>
+                    ${t(
+                        "web.sheets.gallery.gallery-share-sheet.div.entry",
+                        "3. Its entry,",
+                    )} <span class="mono">entries/${data.name}.json</span>
                 </div>
                 <button
                     class="button small"
                     onClick=${() =>
-                        attempt(() => copyText(text).then(() => notify("info", "Entry copied.")))}
+                        attempt(() =>
+                            copyText(text).then(() =>
+                                notify(
+                                    "info",
+                                    t(
+                                        "web.sheets.gallery.gallery-share-sheet.text.entry-copied",
+                                        "Entry copied.",
+                                    ),
+                                ),
+                            ),
+                        )}
                 >
-                    <${Icon} name="copy" size=${14} /> Copy
+                    <${Icon} name="copy" size=${14} /> ${t(
+                        "web.sheets.gallery.gallery-share-sheet.text.copy",
+                        "Copy",
+                    )}
                 </button>
             </div>
             <${Highlighted} class="gallery-code" text=${text} lang="json" />
@@ -2309,14 +3244,20 @@ export function GalleryShareSheet({ file, theme = false }) {
                 link &&
                 (blocked === null
                     ? html`<${Out} class="button primary" href=${link}>
-                          Open a pull request <${Icon} name="external" size=${14} />
+                          ${t(
+                              "web.sheets.gallery.gallery-share-sheet.text.open-a-pull-request",
+                              "Open a pull request",
+                          )} <${Icon} name="external" size=${14} />
                       <//>`
-                    : html`<button class="button primary" disabled=${true}>Open a pull request</button>`)
+                    : html`<button class="button primary" disabled=${true}>${t("web.sheets.gallery.gallery-share-sheet.button.open-a-pull-request", "Open a pull request")}</button>`)
             }
             ${
                 data.contributingUrl &&
                 html`<${Out} class="button" href=${data.contributingUrl}>
-                    How to submit <${Icon} name="external" size=${14} />
+                    ${t(
+                        "web.sheets.gallery.gallery-share-sheet.text.how-to-submit",
+                        "How to submit",
+                    )} <${Icon} name="external" size=${14} />
                 <//>`
             }
         </div>
@@ -2325,13 +3266,19 @@ export function GalleryShareSheet({ file, theme = false }) {
             blocked === null &&
             link !== filled &&
             html`<p class="muted small">
-                Its entry is too long for the link: copy it, and paste it on GitHub's page.
+                ${t(
+                    "web.sheets.gallery.gallery-share-sheet.p.entry-too-long-link",
+                    "Its entry is too long for the link: copy it, and paste it on GitHub's page.",
+                )}
             </p>`
         }
         ${
             !data.repoUrl &&
             html`<p class="muted small">
-                This index does not say where to submit: ask whoever keeps it.
+                ${t(
+                    "web.sheets.gallery.gallery-share-sheet.p.index-not-say-where",
+                    "This index does not say where to submit: ask whoever keeps it.",
+                )}
             </p>`
         }
     <//>`;

@@ -113,7 +113,7 @@ function sourceBlock(h, source, label, error = false) {
         "pre",
         {
             className: error ? "pocket-diagrams-error" : "pocket-diagrams-source",
-            "aria-label": `${label} source`,
+            "aria-label": label,
             ...(error ? { role: "status" } : {}),
         },
         h("code", null, source),
@@ -142,7 +142,7 @@ function renderMath(katex, source, display) {
 }
 
 export default function (pocket) {
-    const { h, useEffect, useRef, useState } = pocket;
+    const { h, useEffect, useRef, useState, t } = pocket;
     const runtime = { active: true, pele: null, katex: null, katexStyle: false };
     const loadPele = () => (runtime.pele ??= import("/vendor/pele.mjs"));
     const loadKatex = () =>
@@ -158,6 +158,10 @@ export default function (pocket) {
     function Mermaid({ source, lang, streaming }) {
         const text = typeof source === "string" ? source : "";
         const label = typeof lang === "string" ? lang : "Mermaid";
+        const sourceLabel = t("server.extensions.diagrams.source", "{label} source", { label });
+        const [, redraw] = useState(0);
+
+        useEffect(() => pocket.onLocaleChange(() => redraw((value) => value + 1)), []);
         const [result, setResult] = useState(null);
         const lastRenderAt = useRef(0);
         const timer = useRef(null);
@@ -220,7 +224,7 @@ export default function (pocket) {
             return h("div", {
                 className: "pocket-diagrams-output",
                 role: "img",
-                "aria-label": `${label} diagram`,
+                "aria-label": t("server.extensions.diagrams.diagram", "{label} diagram", { label }),
                 dangerouslySetInnerHTML: { __html: result.html },
             });
         }
@@ -229,12 +233,17 @@ export default function (pocket) {
             text.length > MAX_DIAGRAM_SOURCE_LENGTH ||
             (!streaming && result?.source === text && result.error);
 
-        return sourceBlock(h, text, label, error);
+        return sourceBlock(h, text, sourceLabel, error);
     }
 
     function MathFence({ source, lang, streaming }) {
         const text = typeof source === "string" ? source : "";
-        const label = typeof lang === "string" ? lang : "Math";
+        const label =
+            typeof lang === "string" ? lang : t("server.extensions.diagrams.math", "Math");
+        const sourceLabel = t("server.extensions.diagrams.source", "{label} source", { label });
+        const [, redraw] = useState(0);
+
+        useEffect(() => pocket.onLocaleChange(() => redraw((value) => value + 1)), []);
         const [result, setResult] = useState(null);
 
         useEffect(() => {
@@ -272,21 +281,23 @@ export default function (pocket) {
         }, [text, streaming]);
 
         if (streaming || text.length > MAX_TEX_LENGTH) {
-            return sourceBlock(h, text, label, text.length > MAX_TEX_LENGTH);
+            return sourceBlock(h, text, sourceLabel, text.length > MAX_TEX_LENGTH);
         }
 
         if (result?.source !== text) {
-            return sourceBlock(h, text, label);
+            return sourceBlock(h, text, sourceLabel);
         }
 
         if (result.error) {
-            return sourceBlock(h, text, label, true);
+            return sourceBlock(h, text, sourceLabel, true);
         }
 
         return h("div", {
             className: "pocket-diagrams-math-fence",
             role: "math",
-            "aria-label": `${label} expression`,
+            "aria-label": t("server.extensions.diagrams.expression", "{label} expression", {
+                label,
+            }),
             "data-tex": result.source,
             "data-lang": "math-display",
             dangerouslySetInnerHTML: { __html: result.html },

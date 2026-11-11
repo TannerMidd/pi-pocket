@@ -2,6 +2,7 @@
 // into one line that opens into a timeline), then Pi's reply, any approval, and the live line while Pi works.
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { askTitle } from "./builtin-locales.js";
 import { activityOpen } from "./activity-fold.js";
 import {
     noteRevealed,
@@ -47,7 +48,6 @@ import {
     itemsOf,
     lineCount,
     matchCount,
-    plural,
     rowsBefore,
     says,
     short,
@@ -75,6 +75,7 @@ import {
     Thumb,
 } from "./ui.js";
 import { LessonCall, memoryAvailable } from "./sheets/memory.js";
+import { t } from "./ui-locale.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
@@ -107,7 +108,11 @@ const VIA = /^\[via ([^\]\n]{1,300})\] /;
 /** What came from outside in such a message, fenced as data for Pi: a check's log, a webhook's post, GitHub's events. */
 const FENCED =
     /<(ci-log|webhook-payload|github-event)((?: [a-z]+="[^"\n]*")*)>\n([\s\S]*?)\n<\/\1>/g;
-const FENCE_LABELS = { "webhook-payload": "What was posted", "github-event": "On GitHub" };
+/** The name a fence without one goes by, read as it draws: the app's language is not fixed at load. */
+const FENCE_LABELS = {
+    "webhook-payload": () => t("web.transcript.webhook-payload.posted", "What was posted"),
+    "github-event": () => t("web.transcript.github-event.git-hub", "On GitHub"),
+};
 
 /** A message from the app with what it fenced for Pi shown as blocks of its own, named after what each is. */
 function FencedText({ text }) {
@@ -118,10 +123,18 @@ function FencedText({ text }) {
         const name = /"([^"]*)"/.exec(match[2])?.[1];
         const label =
             match[1] === "ci-log"
-                ? `Log of ${name ?? "a check"}`
+                ? t("web.transcript.fenced-text.label.log", "Log of {name}", {
+                      name:
+                          name ??
+                          t("web.transcript.fenced-text.label.log.fallback.a-check", "a check"),
+                  })
                 : match[1] === "github-event"
-                  ? `On GitHub${name ? `: ${name}` : ""}`
-                  : (name ?? FENCE_LABELS[match[1]]);
+                  ? name
+                      ? t("web.transcript.fenced-text.label.git-hub", "On GitHub{name}", {
+                            name: `: ${name}`,
+                        })
+                      : t("web.transcript.github-event.git-hub", "On GitHub")
+                  : (name ?? FENCE_LABELS[match[1]]());
 
         parts.push(
             html`<${MentionedText} text=${text.slice(last, match.index).replace(/\n$/, "")} />`,
@@ -176,7 +189,10 @@ function EntryImages({ entryId, count, label }) {
             { length: count },
             (_, index) => html`<${Thumb}
                 src=${entryImageUrl(entryId, index)}
-                alt=${`${label} ${index + 1}`}
+                alt=${t("web.transcript.entry-images.alt.image-number", "{label} {number}", {
+                    label,
+                    number: index + 1,
+                })}
             />`,
         )}
     </div>`;
@@ -203,7 +219,7 @@ function MessageExtras({ entry, attachments }) {
                     (path) =>
                         html`<button
                             class="chip"
-                            title=${`Sent with the message: ${path}`}
+                            title=${t("web.transcript.user-entry.title.sent-message", "Sent with the message: {path}", { path })}
                             onClick=${() => openFile(path)}
                         >
                             📄 ${path.split("/").pop()}
@@ -226,7 +242,7 @@ function MessageExtras({ entry, attachments }) {
         ${
             entry.images > 0 &&
             !attachments &&
-            html`<${EntryImages} entryId=${entry.id} count=${entry.images} label="Image" />`
+            html`<${EntryImages} entryId=${entry.id} count=${entry.images} label=${t("web.transcript.user-entry.label.image", "Image")} />`
         }
     `;
 }
@@ -237,7 +253,7 @@ function authorName(entryId, view, users) {
     if (userId) {
         const user = users.find((each) => each.id === userId);
 
-        return user ? user.name : "Someone";
+        return user ? user.name : t("web.transcript.author-name.text.someone", "Someone");
     }
 
     return undefined;
@@ -278,7 +294,9 @@ function MentionedText({ text }) {
         parts.push(
             html`<button
                 class="file-mention"
-                title=${`Open ${path}`}
+                title=${t("web.transcript.mentioned-text.title.open", "Open {path}", {
+                    path,
+                })}
                 onClick=${() => openFile(path)}
             >
                 ${written}
@@ -344,11 +362,15 @@ function Report({ report, view, fresh }) {
         class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
     >
         <div class="report-head">
-            <span class="report-name">${name}</span> ${verb}
+            <span class="report-name">${name}</span> ${
+                verb === "failed"
+                    ? t("web.transcript.error.failed", "failed")
+                    : t("web.transcript.report.span.answered", "answered")
+            }
             ${
                 child &&
                 html`<button class="link" onClick=${() => openSubagent(child.conversationId)}>
-                    Open →
+                    ${t("web.transcript.report.button.open", "Open →")}
                 </button>`
             }
         </div>
@@ -369,7 +391,10 @@ function BackgroundReport({ match }) {
         ${command !== undefined && html`<div class="background-command muted small mono">${command}</div>`}
         ${
             output === undefined
-                ? html`<div class="muted small">It printed nothing.</div>`
+                ? html`<div class="muted small">${t(
+                      "web.transcript.background-report.div.it-printed-nothing",
+                      "It printed nothing.",
+                  )}</div>`
                 : html`<${BackgroundOutput}
                       text=${output}
                       clipped=${rest.startsWith("The end of its output")}
@@ -389,12 +414,26 @@ function BackgroundOutput({ text, clipped }) {
     const shown = folds && !open ? lines.slice(-OUTPUT_LINES).join("\n") : text;
 
     return html`<div class="background-output">
-        ${clipped && html`<div class="muted small">The end of its output:</div>`}
+        ${
+            clipped &&
+            html`<div class="muted small">${t(
+                "web.transcript.background-output.div.end-output",
+                "The end of its output:",
+            )}</div>`
+        }
         <pre>${shown}</pre>
         ${
             folds &&
             html`<button class="link" onClick=${() => setOpen(!open)}>
-                ${open ? "Show less" : `Show all ${lines.length} lines`}
+                ${
+                    open
+                        ? t("web.transcript.background-output.button.show-less", "Show less")
+                        : t(
+                              "web.transcript.background-output.button.show-lines",
+                              "Show all {count} lines",
+                              { count: lines.length },
+                          )
+                }
             </button>`
         }
     </div>`;
@@ -405,14 +444,20 @@ function span(ms) {
     const seconds = Math.max(0, Math.round(ms / 1000));
 
     if (seconds < 60) {
-        return `${seconds}s`;
+        return t("web.transcript.span.text.seconds", "{seconds}s", { seconds });
     }
 
     if (seconds < 3600) {
-        return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+        return t("web.transcript.span.text.minutes-seconds", "{minutes}m {seconds}s", {
+            minutes: Math.floor(seconds / 60),
+            seconds: String(seconds % 60).padStart(2, "0"),
+        });
     }
 
-    return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
+    return t("web.transcript.span.text.hours-minutes", "{hours}h {minutes}m", {
+        hours: Math.floor(seconds / 3600),
+        minutes: String(Math.floor(seconds / 60) % 60).padStart(2, "0"),
+    });
 }
 
 /** Who a wait for a limit is for: the provider by the name people know it by, and the model when only it waits. */
@@ -426,7 +471,12 @@ function limitWho({ provider, modelId, scope }) {
     };
     const name = names[provider] ?? provider;
 
-    return scope === "model" && modelId ? `${name} ${modelId}'s limit` : `${name}'s limit`;
+    return scope === "model" && modelId
+        ? t("web.transcript.limit-who.text.s-limit", "{name} {model}'s limit", {
+              name,
+              model: modelId,
+          })
+        : t("web.transcript.limit-who.text.s-limit.s", "{name}'s limit", { name });
 }
 
 /** When a message was sent, from the server's time: "10:42" today, "Oct 3 10:42" before. */
@@ -555,8 +605,8 @@ function PresentedUser({ entry, view, users }) {
                     class="presented-more"
                     data-part="presented-more"
                     type="button"
-                    aria-label=${`${label}: show, fold, or hide, copy, and more`}
-                    title="Show, fold, or hide inputs like this; copy, and more"
+                    aria-label=${t("web.transcript.presented.more", "{label}: show, fold, or hide, copy, and more", { label })}
+                    title=${t("web.transcript.presented.more-title", "Show, fold, or hide inputs like this; copy, and more")}
                     onClick=${() => openSheet({ type: "message", entryId: entry.id })}
                 >
                     <${Icon} name="more" size=${16} />
@@ -604,7 +654,7 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
     const id = view.linkedPeers?.[address];
     const session =
         id === undefined ? undefined : store.state.sessions.find((each) => each.id === id);
-    const name = session ? (session.title ?? "New session") : undefined;
+    const name = session ? (session.title ?? t("sessions.new", "New session")) : undefined;
     const lines = text.split("\n").length;
     const folds = lines > LINKED_FOLD_LINES || text.length > LINKED_FOLD_CHARS;
 
@@ -618,7 +668,7 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
             class=${`prompt linked-message tappable ${folds ? "folds" : ""} ${open ? "open" : ""}`}
             data-part="prompt"
             data-from="linked"
-            title="Edit, send again, or copy"
+            title=${t("web.transcript.linked.actions", "Edit, send again, or copy")}
             tabindex="0"
             onClick=${(event) => openMessage(event, entry.id)}
             onKeyDown=${(event) => {
@@ -637,14 +687,14 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
                 </span>
                 <span class="linked-who">
                     <span class="linked-kicker">
-                        <span class="linked-tag">Linked session</span>
+                        <span class="linked-tag">${t("web.transcript.linked.label", "Linked session")}</span>
                         ${entry.at && html`<span>· ${clock(entry.at)}</span>`}
                     </span>
                     <span
                         class=${`linked-name ${name ? "" : "unknown"}`}
                         data-part="linked-name"
                     >
-                        ${name ?? "A session you cannot open"}
+                        ${name ?? t("web.transcript.linked.unavailable", "A session you cannot open")}
                     </span>
                 </span>
                 ${
@@ -652,10 +702,10 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
                     html`<button
                         class="linked-open"
                         data-part="linked-open"
-                        aria-label=${`Open ${name}`}
+                        aria-label=${t("web.transcript.linked.open", "Open {name}", { name })}
                         onClick=${() => navigate(session.id)}
                     >
-                        Open
+                        ${t("menu.open", "Open")}
                         <${Icon} path="M5 12h14M13 6l6 6-6 6" size=${14} />
                     </button>`
                 }
@@ -673,7 +723,7 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
                     aria-controls=${`linked-body-${entry.id}`}
                     onClick=${() => setOpen(!open)}
                 >
-                    ${open ? "Show less" : `Show all · ${lines} lines`}
+                    ${open ? t("web.transcript.collapsible.button.show-less", "Show less") : t("web.transcript.linked.show-all", "Show all · {count} lines", { count: lines })}
                 </button>`
             }
         </div>
@@ -750,7 +800,9 @@ function UserMessage({ entry, view, users }) {
     const author =
         authorName(entry.id, view, users) ??
         entry.from ??
-        (view.conversation?.kind === "subagent" ? "Main agent" : undefined);
+        (view.conversation?.kind === "subagent"
+            ? t("web.transcript.user-entry.author.main-agent", "Main agent")
+            : undefined);
     const [written, attachments] = splitAttachments(entry.text);
     // Set up earlier to go out now: by a person (who shows as its author) or by Pi.
     // Only a message nobody typed: someone writing "[via …]" themselves gets no label.
@@ -805,7 +857,10 @@ function UserMessage({ entry, view, users }) {
             class="prompt tappable"
             data-part="prompt"
             data-from=${from}
-            title="Edit, send again, or copy"
+            title=${t(
+                "web.transcript.user-entry.title.edit-send-again-copy",
+                "Edit, send again, or copy",
+            )}
             tabindex="0"
             onClick=${(event) => openMessage(event, entry.id)}
             onKeyDown=${(event) => {
@@ -835,8 +890,29 @@ function UserMessage({ entry, view, users }) {
                     </span>`
                 }
                 ${entry.at && html`<span class="prompt-time">${clock(entry.at)}</span>`}
-                ${scheduled && html`<span class="prompt-time">· scheduled</span>`}
-                ${via && html`<span class="prompt-time">· via ${via[1]}</span>`}
+                ${
+                    scheduled &&
+                    html`<span class="prompt-time">· ${t(
+                        "web.transcript.user-entry.span.scheduled",
+                        "scheduled",
+                    )}</span>`
+                }
+                ${
+                    via &&
+                    html`<span class="prompt-time">${t(
+                        "web.transcript.user-entry.span.via",
+                        "· via {detail}",
+                        {
+                            detail:
+                                peerText === undefined
+                                    ? via[1]
+                                    : t(
+                                          "web.transcript.user-entry.span.linked-session",
+                                          "a linked session",
+                                      ),
+                        },
+                    )}</span>`
+                }
             </span>
             <div class="prompt-body" data-part="prompt-text">
                 ${
@@ -886,7 +962,11 @@ function Collapsible({ text, limit = 600 }) {
     return html`<div class=${`collapsible ${open ? "open" : ""}`}>
         <${Markdown} text=${open ? text : `${text.slice(0, limit)}…`} />
         <button class="link" onClick=${() => setOpen(!open)}>
-            ${open ? "Show less" : "Show more"}
+            ${
+                open
+                    ? t("web.transcript.collapsible.button.show-less", "Show less")
+                    : t("web.transcript.collapsible.button.show-more", "Show more")
+            }
         </button>
     </div>`;
 }
@@ -923,10 +1003,25 @@ function StepMark({ status, kind }) {
 
 /** What Pi did with its memory tool, as a step's label. */
 const MEMORY_WORDS = {
-    add: "saved a lesson",
-    update: "changed a lesson",
-    remove: "forgot a lesson",
-    list: "read its lessons",
+    add: () => t("web.transcript.memory-words.add", "saved a lesson"),
+    update: () => t("web.transcript.memory-words.update", "changed a lesson"),
+    remove: () => t("web.transcript.memory-words.remove", "forgot a lesson"),
+    list: () => t("web.transcript.list.read-lessons", "read its lessons"),
+};
+
+/**
+ * A count with its noun as a whole sentence in both numbers ("1 line", "3 lines"): a translated noun cannot take
+ * an English plural, so the one and the many are two messages, never a word with an s added.
+ */
+const countedText = (count, [oneKey, oneWords], [manyKey, manyWords]) =>
+    count === 1 ? t(oneKey, oneWords, { count }) : t(manyKey, manyWords, { count });
+
+/** What a subagent's state says on its line, read as it draws: `stateOf` names the four. */
+const AGENT_STATES = {
+    working: () => t("web.transcript.agent-state.text.working", "working"),
+    stopped: () => t("web.transcript.agent-state.text.stopped", "stopped"),
+    failed: () => t("web.transcript.agent-state.text.failed", "failed"),
+    done: () => t("web.transcript.agent-state.text.done", "done"),
 };
 
 /** A call's line: its label (the tool, or a subagent's name) and what it acts on. */
@@ -942,21 +1037,26 @@ function stepWords(call) {
             };
         case "subagent":
             return {
-                label: args.name ?? "subagent",
+                label: args.name ?? t("web.transcript.step-words.label.subagent", "subagent"),
                 subject: args.message ? short(args.message) : (args.action ?? ""),
             };
         case "browser":
             return {
-                label: "browser",
+                label: t("web.transcript.step-words.label.browser", "browser"),
                 subject: `${args.action ?? ""} ${describeCall(call).subject}`.trim(),
             };
         case "memory":
             return {
-                label: MEMORY_WORDS[args.action] ?? "memory",
+                label: MEMORY_WORDS[args.action]
+                    ? MEMORY_WORDS[args.action]()
+                    : t("web.transcript.step-words.label.memory", "memory"),
                 subject: args.text ? short(args.text) : (args.id ?? ""),
             };
         case "watch_pr":
-            return { label: "watch PR", subject: [args.action, args.pr].filter(Boolean).join(" ") };
+            return {
+                label: t("web.transcript.step-words.label.watch-pr", "watch PR"),
+                subject: [args.action, args.pr].filter(Boolean).join(" "),
+            };
 
         default: {
             const described = describeCall(call);
@@ -976,12 +1076,19 @@ function stepWords(call) {
  */
 function outcome({ call, result, details, status }) {
     if (status === "approval") {
-        return { text: "needs approval", tone: "warn" };
+        return {
+            text: t("web.transcript.outcome.text.needs-approval", "needs approval"),
+            tone: "warn",
+        };
     }
 
     if (status === "denied" || status === "stopped") {
         return {
-            text: /was interrupted/.test(result?.text ?? "") ? "cut off by a restart" : status,
+            text: /was interrupted/.test(result?.text ?? "")
+                ? t("web.transcript.outcome.text.cut-off-restart", "cut off by a restart")
+                : status === "denied"
+                  ? t("web.transcript.outcome.text.denied", "denied")
+                  : t("web.transcript.stopped.stopped", "stopped"),
             tone: "",
         };
     }
@@ -1019,34 +1126,49 @@ function outcome({ call, result, details, status }) {
             );
 
             return result.images > 0
-                ? { text: "image", tone: "" }
-                : !result.clipped && { text: plural(lineCount(read), "line"), tone: "" };
+                ? { text: t("web.transcript.outcome.text.image", "image"), tone: "" }
+                : !result.clipped && {
+                      text: countedText(
+                          lineCount(read),
+                          ["web.transcript.outcome.text.line", "{count} line"],
+                          ["web.transcript.outcome.text.lines", "{count} lines"],
+                      ),
+                      tone: "",
+                  };
         }
 
         // A long result reaches the browser cut short (its start and end): its lines cannot be counted.
         case "grep":
             return /^No matches/.test(text)
-                ? { text: "no matches", tone: "" }
+                ? { text: t("web.transcript.outcome.text.no-matches", "no matches"), tone: "" }
                 : {
                       text: result.clipped
-                          ? "many matches"
-                          : plural(matchCount(withoutNotes(text)), "match").replace(
-                                "matchs",
-                                "matches",
+                          ? t("web.transcript.outcome.text.many-matches", "many matches")
+                          : countedText(
+                                matchCount(withoutNotes(text)),
+                                ["web.transcript.outcome.text.match", "{count} match"],
+                                ["web.transcript.outcome.text.matches", "{count} matches"],
                             ),
                       tone: "",
                   };
         case "find":
         case "ls":
             return /^(?:No files|\(empty directory\))/.test(text)
-                ? { text: "none", tone: "" }
+                ? { text: t("web.transcript.outcome.text.none", "none"), tone: "" }
                 : {
                       text: result.clipped
-                          ? "many"
-                          : plural(
-                                lineCount(withoutNotes(text)),
-                                call.name === "ls" ? "entry" : "file",
-                            ).replace("entrys", "entries"),
+                          ? t("web.transcript.outcome.text.many", "many")
+                          : call.name === "ls"
+                            ? countedText(
+                                  lineCount(withoutNotes(text)),
+                                  ["web.transcript.outcome.text.count-entry", "{count} entry"],
+                                  ["web.transcript.outcome.text.count-entries", "{count} entries"],
+                              )
+                            : countedText(
+                                  lineCount(withoutNotes(text)),
+                                  ["web.transcript.outcome.text.count-file", "{count} file"],
+                                  ["web.transcript.outcome.text.count-files", "{count} files"],
+                              ),
                       tone: "",
                   };
 
@@ -1061,10 +1183,14 @@ function outcome({ call, result, details, status }) {
 
             return {
                 text: result.clipped
-                    ? "long output"
+                    ? t("web.transcript.outcome.text.long-output", "long output")
                     : lines === 0
-                      ? "no output"
-                      : plural(lines, "line"),
+                      ? t("web.transcript.outcome.text.no-output", "no output")
+                      : countedText(
+                            lines,
+                            ["web.transcript.outcome.text.line", "{count} line"],
+                            ["web.transcript.outcome.text.lines", "{count} lines"],
+                        ),
                 tone: "",
             };
         }
@@ -1072,11 +1198,23 @@ function outcome({ call, result, details, status }) {
         case "artifact":
         case "artifact_inline":
             return details?.version !== undefined
-                ? { text: `v${details.version}`, tone: "" }
+                ? {
+                      text: t("web.transcript.outcome.text.version", "v{version}", {
+                          version: details.version,
+                      }),
+                      tone: "",
+                  }
                 : null;
         case "codemode":
             return Array.isArray(details?.calls)
-                ? { text: plural(details.calls.length, "call"), tone: "" }
+                ? {
+                      text: countedText(
+                          details.calls.length,
+                          ["web.transcript.outcome.text.call", "{count} call"],
+                          ["web.transcript.outcome.text.calls", "{count} calls"],
+                      ),
+                      tone: "",
+                  }
                 : null;
 
         case "subagent": {
@@ -1094,8 +1232,9 @@ function outcome({ call, result, details, status }) {
                 state !== "working" && agent.askedAt && agent.answeredAt
                     ? ` ${span(agent.answeredAt - agent.askedAt)}`
                     : "";
+            const words = AGENT_STATES[state] ? AGENT_STATES[state]() : state;
 
-            return { text: `${state}${took}`, tone: state === "failed" ? "err" : "" };
+            return { text: `${words}${took}`, tone: state === "failed" ? "err" : "" };
         }
 
         default:
@@ -1197,10 +1336,24 @@ function ThoughtStep({ block, streaming, reading }) {
             >
                 <${StepMark} status=${streaming ? "running" : "done"} kind="thought" />
                 <span class="step-label" data-part="step-label">
-                    ${streaming ? "Thinking" : block.redacted ? "Thought (redacted)" : "Thought"}
+                    ${
+                        streaming
+                            ? t("web.transcript.thought-step.span.thinking", "Thinking")
+                            : block.redacted
+                              ? t(
+                                    "web.transcript.thought-step.span.thought-redacted",
+                                    "Thought (redacted)",
+                                )
+                              : t("web.transcript.thought-step.span.thought", "Thought")
+                    }
                 </span>
                 <span class="step-subject"></span>
-                ${streaming && html`<${Spinner} label="Thinking" />`}
+                ${
+                    streaming &&
+                    html`<${Spinner}
+                    label=${t("web.transcript.thought-step.label.thinking", "Thinking")}
+                />`
+                }
             </button>
         </div>
         ${
@@ -1289,7 +1442,9 @@ function ToolStep({
                     class="link small tool-open"
                     onClick=${() => openFile(`${args.path}${at}`)}
                 >
-                    Open ${args.path.split("/").pop()} →
+                    ${t("web.transcript.tool-step.button.open.open", "Open {path} →", {
+                        path: args.path.split("/").pop(),
+                    })}
                 </button>`,
             );
         }
@@ -1299,7 +1454,9 @@ function ToolStep({
                 html`<${EntryImages}
                     entryId=${result.id}
                     count=${result.images}
-                    label=${`${call.name} image`}
+                    label=${t("web.transcript.entry-images.text.tool-image", "{tool} image", {
+                        tool: call.name,
+                    })}
                 />`,
             );
         }
@@ -1412,7 +1569,12 @@ function ToolStep({
 
         // A call still streaming has no stored entry to load yet.
         if (clipped && entryId !== undefined) {
-            parts.push(html`<button class="link" onClick=${loadFull}>Load everything</button>`);
+            parts.push(
+                html`<button class="link" onClick=${loadFull}>${t(
+                    "web.transcript.tool-step.button.load-everything",
+                    "Load everything",
+                )}</button>`,
+            );
         }
 
         body = html`<div class=${`step-body ${unrolling(unrolled)}`} data-part="step-detail">
@@ -1490,10 +1652,17 @@ function ToolStep({
                 child !== undefined &&
                 html`<button
                     class="step-open"
-                    title=${`Open ${args.name ?? "the subagent"}`}
+                    title=${t("web.transcript.tool-step.title.open", "Open {name}", {
+                        name:
+                            args.name ??
+                            t(
+                                "web.transcript.tool-step.title.open.fallback.the-subagent",
+                                "the subagent",
+                            ),
+                    })}
                     onClick=${() => openSubagent(child)}
                 >
-                    Open →
+                    ${t("web.transcript.tool-step.button.open", "Open →")}
                 </button>`
             }
         </div>
@@ -1503,7 +1672,11 @@ function ToolStep({
                 class=${`step-decision ${decision.allow ? "allowed" : "denied"}`}
                 title=${new Date(decision.at).toLocaleString()}
             >
-                <${Icon} name="shield" size=${13} /> ${decided(decision)} by ${decision.by}
+                <${Icon} name="shield" size=${13} /> ${t(
+                    "web.transcript.tool-step.text.content",
+                    "{detail} by {by}",
+                    { detail: decided(decision), by: decision.by },
+                )}
             </div>`
         }
         ${
@@ -1519,7 +1692,9 @@ function ToolStep({
                     html`<${EntryImages}
                         entryId=${result.id}
                         count=${result.images}
-                        label=${`${call.name} image`}
+                        label=${t("web.transcript.entry-images.text.tool-image", "{tool} image", {
+                            tool: call.name,
+                        })}
                     />`
                 }
                 ${
@@ -1543,13 +1718,21 @@ function ToolStep({
                         class="artifact-link"
                         onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: artifact.version })}
                     >
-                        Open ${artifact.title} · version ${artifact.version} →
+                        ${t(
+                            "web.transcript.tool-step.button.open-version",
+                            "Open {title} · version {version} →",
+                            { title: artifact.title, version: artifact.version },
+                        )}
                     </button>`
                 }
                 ${
                     watch &&
                     html`<button class="artifact-link" onClick=${() => setBrowserOpen(true)}>
-                        Watch in the browser${details?.address ? ` · ${details.address}` : ""} →
+                        ${t(
+                            "web.transcript.tool-step.button.watch-browser",
+                            "Watch in the browser{detail} →",
+                            { detail: details?.address ? ` · ${details.address}` : "" },
+                        )}
                     </button>`
                 }
             </div>`
@@ -1765,7 +1948,14 @@ function ActivityGroup({
         >
             <${Icon} name="chevron" size=${14} class="chev" part="activity-chevron" />
             <span class="activity-summary">${summarize(all, thinking)}</span>
-            ${failed > 0 && html`<span class="activity-failed">${failed} failed</span>`}
+            ${
+                failed > 0 &&
+                html`<span class="activity-failed">${t(
+                    "web.transcript.activity-group.span.failed",
+                    "{failed} failed",
+                    { failed },
+                )}</span>`
+            }
             <${GroupTime} id=${id} start=${start} end=${end} live=${live} />
         </button>
         ${
@@ -1792,7 +1982,17 @@ function ActivityGroup({
                             redraw((n) => n + 1);
                         }}
                     >
-                        Show ${hidden} earlier ${hidden === 1 ? "step" : "steps"}
+                        ${t(
+                            "web.transcript.activity-group.button.show-earlier",
+                            "Show {hidden} earlier {detail}",
+                            {
+                                hidden,
+                                detail:
+                                    hidden === 1
+                                        ? t("web.transcript.activity-group.button.step", "step")
+                                        : t("web.transcript.activity-group.button.steps", "steps"),
+                            },
+                        )}
                     </button>`
                 }
                 ${item.steps.map(({ block, entry, streaming, canRun }, index) => {
@@ -1933,7 +2133,7 @@ function stepLive(step, results, slots, approvals, busy) {
     return status === "running" || status === "approval";
 }
 
-function AskChoices({ field, chosen, busy, onChange }) {
+function AskChoices({ field, chosen, busy, onChange, builtin = false }) {
     const { picked, other } = chosen;
 
     const pick = (label) => {
@@ -1951,7 +2151,13 @@ function AskChoices({ field, chosen, busy, onChange }) {
         <legend class="ask-question">
             ${field.header && html`<span class="ask-header">${field.header}</span>`}
             <span>${field.label}</span>
-            ${field.multiple && html`<span class="ask-hint">Choose one or more</span>`}
+            ${
+                field.multiple &&
+                html`<span class="ask-hint">${t(
+                    "web.transcript.ask-choices.span.choose-one-more",
+                    "Choose one or more",
+                )}</span>`
+            }
         </legend>
         <div class="ask-options">
             ${field.choices.map(
@@ -1972,8 +2178,20 @@ function AskChoices({ field, chosen, busy, onChange }) {
             html`<input
                 class="ask-other"
                 type="text"
-                aria-label=${`Your own answer to: ${field.label}`}
-                placeholder=${field.placeholder ?? "Or type your own answer"}
+                aria-label=${t(
+                    "web.transcript.ask-choices.aria-label.own-answer",
+                    "Your own answer to: {label}",
+                    { label: field.label },
+                )}
+                placeholder=${
+                    field.placeholder === undefined ||
+                    (builtin && field.placeholder === "Or type your own answer")
+                        ? t(
+                              "web.transcript.ask-choices.text.type-own-answer",
+                              "Or type your own answer",
+                          )
+                        : field.placeholder
+                }
                 value=${other}
                 onInput=${(event) => onChange({ picked: [], other: event.currentTarget.value })}
             />`
@@ -2109,7 +2327,7 @@ function AskCard({ approval }) {
     const [busy, setBusy] = useState(false);
     const who =
         users?.find?.((each) => each.id === approval.requestedBy)?.name ??
-        "the person Pi works for";
+        t("web.transcript.ask-card.who.person-pi-works", "the person Pi works for");
     const typed = Object.fromEntries(
         form.fields.map((field) => [
             field.name,
@@ -2181,7 +2399,7 @@ function AskCard({ approval }) {
         <div class="approval-head">
             <span class="approval-shield" aria-hidden="true"><${Icon} name="shield" size=${16} /></span>
             <div class="approval-title">
-                <span class="approval-ask">${form.title}</span>
+                <span class="approval-ask">${askTitle(approval)}</span>
                 ${form.text && html`<span class="approval-reason">${form.text}</span>`}
             </div>
         </div>
@@ -2192,6 +2410,7 @@ function AskCard({ approval }) {
                           ? html`<${AskChoices}
                                 key=${field.name}
                                 field=${field}
+                                builtin=${approval.tool === "ask" && form.title === "Pi asks"}
                                 chosen=${values[field.name]}
                                 busy=${busy}
                                 onChange=${(chosen) => change({ ...values, [field.name]: chosen })}
@@ -2218,21 +2437,32 @@ function AskCard({ approval }) {
                   ${
                       plain &&
                       html`<div class="muted small">
-                          What you type goes to the page or tool that asked. Pi does not see it.
+                          ${t(
+                              "web.transcript.ask-card.div.type-goes-page-tool",
+                              "What you type goes to the page or tool that asked. Pi does not see it.",
+                          )}
                       </div>`
                   }`
-                : html`<div class="muted small">Waiting for ${who} to answer.</div>`
+                : html`<div class="muted small">
+                      ${t(
+                          "web.transcript.ask-card.div.waiting-answer",
+                          "Waiting for {who} to answer.",
+                          {
+                              who,
+                          },
+                      )}
+                  </div>`
         }
         ${
             canSteer() &&
             html`<div class="approval-actions">
                 <button type="button" class="button deny" disabled=${busy} onClick=${() => answer(false)}>
-                    Decline
+                    ${t("web.transcript.ask-card.button.decline", "Decline")}
                 </button>
                 ${
                     mine &&
                     html`<button type="submit" class="button primary" disabled=${busy || !ready}>
-                        ${form.submit}
+                        ${approval.tool === "ask" && form.title === "Pi asks" && form.submit === "Send" ? t("web.ask.send", "Send") : form.submit}
                     </button>`
                 }
             </div>`
@@ -2257,10 +2487,14 @@ function AskAnswers({ answers }) {
 /** What someone did with a call that waited for them: an ask (`host.ask`) is answered or declined. */
 function decided(decision) {
     if (decision.ask) {
-        return decision.allow ? "Answered" : "Declined";
+        return decision.allow
+            ? t("web.transcript.decided.text.answered", "Answered")
+            : t("web.transcript.decided.text.declined", "Declined");
     }
 
-    return decision.allow ? "Allowed" : "Denied";
+    return decision.allow
+        ? t("web.transcript.decided.text.allowed", "Allowed")
+        : t("web.transcript.decided.text.denied", "Denied");
 }
 
 function ApprovalCard({ approval }) {
@@ -2287,23 +2521,30 @@ function ApprovalCard({ approval }) {
         <div class="approval-head">
             <span class="approval-shield" aria-hidden="true"><${Icon} name="shield" size=${16} /></span>
             <div class="approval-title">
-                <span class="approval-ask">Lancet Guard asks before this ${approval.tool} call</span>
+                <span class="approval-ask">${t(
+                    "web.transcript.approval-card.span.lancet-guard-asks-before",
+                    "Lancet Guard asks before this {tool} call",
+                    { tool: approval.tool },
+                )}</span>
                 <span class="approval-reason">${approval.reason}</span>
             </div>
         </div>
         <pre class="cmd">${approval.tool === "bash" && html`<span class="cmd-sign">$ </span>`}${approval.subject}</pre>
         ${
             !canSteer()
-                ? html`<div class="muted small">Waiting for someone who can steer to answer.</div>`
+                ? html`<div class="muted small">${t(
+                      "web.transcript.approval-card.div.waiting-someone-who-steer",
+                      "Waiting for someone who can steer to answer.",
+                  )}</div>`
                 : html`${
                       ownCall &&
                       html`<div class="muted small">
-                          Someone else has to allow this: it came from your message. You can deny it.
+                          ${t("web.transcript.approval-card.div.someone-else-allow-came", "Someone else has to allow this: it came from your message. You can deny it.")}
                       </div>`
                   }
                 <div class="approval-actions">
                     <button class="button deny" disabled=${busy} onClick=${() => answer(false)}>
-                        Deny
+                        ${t("web.transcript.approval-card.button.deny", "Deny")}
                     </button>
                     ${
                         !ownCall &&
@@ -2312,7 +2553,7 @@ function ApprovalCard({ approval }) {
                             disabled=${busy}
                             onClick=${() => answer(true)}
                         >
-                            Allow
+                            ${t("web.transcript.approval-card.button.allow", "Allow")}
                         </button>`
                     }
                 </div>`
@@ -2327,7 +2568,7 @@ function ApprovalCard({ approval }) {
 // (`entry`, its `text`), whether it is pinned, and the reaction picker's state.
 defineItem("reply", {
     id: "core:time",
-    label: "Message time",
+    label: () => t("web.transcript.label.message-time", "Message time"),
     order: 0,
     render: ({ entry }) => {
         if (!entry.at) {
@@ -2343,14 +2584,14 @@ defineItem("reply", {
 });
 defineItem("reply", {
     id: "core:react",
-    label: "React",
+    label: () => t("web.transcript.label.react", "React"),
     order: 100,
     render: ({ picking, setPicking, react }) =>
         html`<span class="reaction-host answer-tool">
             <button
                 class="reaction add"
-                aria-label="React"
-                title="React"
+                aria-label=${t("web.transcript.render.aria-label.react", "React")}
+                title=${t("web.transcript.render.title.react", "React")}
                 onClick=${() => setPicking(!picking)}
             >
                 ☺+
@@ -2367,56 +2608,63 @@ defineItem("reply", {
 });
 defineItem("reply", {
     id: "core:discuss",
-    label: "Discuss",
+    label: () => t("web.transcript.label.discuss", "Discuss"),
     order: 200,
     render: ({ entry, text }) =>
         html`<button
             class="answer-tool"
             onClick=${() => discuss(entry.id, plainText(text).replace(/\s+/g, " ").slice(0, 280))}
         >
-            Discuss
+            ${t("web.transcript.render.button.discuss", "Discuss")}
         </button>`,
 });
 defineItem("reply", {
     id: "core:pin",
-    label: "Pin",
+    label: () => t("web.transcript.label.pin", "Pin"),
     order: 300,
     render: ({ entry, pinned }) =>
         html`<button
             class="answer-tool"
             onClick=${() => attempt(() => actions.pin({ entryId: entry.id }))}
         >
-            ${pinned ? html`<${Icon} name="pin" size=${12} /> Pinned` : "Pin"}
+            ${
+                pinned
+                    ? html`<${Icon} name="pin" size=${12} /> ${t(
+                          "web.transcript.render.text.pinned",
+                          "Pinned",
+                      )}`
+                    : t("web.transcript.render.pin", "Pin")
+            }
         </button>`,
 });
 defineItem("reply", {
     id: "core:copy",
-    label: "Copy",
+    label: () => t("web.transcript.label.copy", "Copy"),
     order: 400,
     render: ({ text }) =>
         html`<button
             class="answer-tool"
             onClick=${() =>
                 copyText(text).then(
-                    () => notify("info", "Copied."),
-                    () => notify("error", "Could not copy."),
+                    () => notify("info", t("web.transcript.render.text.copied", "Copied.")),
+                    () => notify("error", t("web.transcript.render.not-copy", "Could not copy.")),
                 )}
         >
-            Copy
+            ${t("web.transcript.render.button.copy", "Copy")}
         </button>`,
 });
 defineItem("reply", {
     id: "core:more",
-    label: "More",
+    label: () => t("web.transcript.label.more", "More"),
     order: 1000,
     fixed: true,
     render: ({ entry }) =>
         html`<button
             class="answer-tool"
-            title="Fork, retry"
+            title=${t("web.transcript.render.title.fork-retry", "Fork, retry")}
             onClick=${() => openSheet({ type: "message", entryId: entry.id })}
         >
-            More
+            ${t("web.transcript.render.button.more", "More")}
         </button>`,
 });
 
@@ -2430,7 +2678,10 @@ function AnswerActions({ entry }) {
     const names = (ids) =>
         ids
             .map((id) =>
-                id === me?.id ? "you" : (users.find((user) => user.id === id)?.name ?? "someone"),
+                id === me?.id
+                    ? t("web.transcript.answer-actions.names.content", "you")
+                    : (users.find((user) => user.id === id)?.name ??
+                      t("web.transcript.answer-actions.names.someone", "someone")),
             )
             .join(", ");
 
@@ -2461,9 +2712,18 @@ function AnswerEnd({ entry }) {
 
     return html`${
         entry.stopReason === "error" &&
-        html`<div class="error-box">${entry.error ?? "The model request failed."}</div>`
+        html`<div class="error-box">${
+            entry.error ??
+            t("web.transcript.answer-end.text.model-request-failed", "The model request failed.")
+        }</div>`
     }
-    ${entry.stopReason === "aborted" && html`<div class="muted small">Stopped.</div>`}
+    ${
+        entry.stopReason === "aborted" &&
+        html`<div class="muted small">${t(
+            "web.transcript.answer-end.div.stopped",
+            "Stopped.",
+        )}</div>`
+    }
     ${answer && html`<${AnswerActions} entry=${entry} />`}`;
 }
 
@@ -2496,21 +2756,26 @@ function Divider({ entry }) {
     // A session continued from Pi in the terminal: what is above is Pi's, from that session's file.
     if (entry.kind === "fromPi") {
         return html`<div class="divider">
-            <span>Continued from Pi in the terminal</span>
+            <span>${t(
+                "web.transcript.divider.span.continued-pi-terminal",
+                "Continued from Pi in the terminal",
+            )}</span>
             <div class="muted small mono">${entry.file}</div>
         </div>`;
     }
 
     if (entry.kind === "reset") {
         return html`<div class="divider">
-            <span>New context</span>
+            <span>${t("web.transcript.divider.span.new-context", "New context")}</span>
             ${entry.text && html`<div class="divider-body"><${Markdown} text=${entry.text} /></div>`}
         </div>`;
     }
 
     return html`<div class="divider">
         <button class="link" onClick=${() => setOpen(!open)}>
-            Context compacted ${open ? "▾" : "▸"}
+            ${t("web.transcript.divider.button.context-compacted", "Context compacted {detail}", {
+                detail: open ? "▾" : "▸",
+            })}
         </button>
         ${open && html`<div class="divider-body"><${Markdown} text=${entry.summary} /></div>`}
     </div>`;
@@ -2554,7 +2819,7 @@ function History({ firstId, results, keepPlace, conversationId }) {
                         store.set({ history: earlier });
                     })}
             >
-                Show earlier messages
+                ${t("web.transcript.history.button.show-earlier-messages", "Show earlier messages")}
             </button>
         </div>`;
     }
@@ -2574,10 +2839,10 @@ function History({ firstId, results, keepPlace, conversationId }) {
 
 /** How a command someone ran ended, when that is worth saying. */
 const SHELL_ENDS = {
-    timeout: "timed out",
-    failed: "could not run",
-    interrupted: "cut off by a restart",
-    stopped: "stopped",
+    timeout: () => t("web.transcript.timeout.timed-out", "timed out"),
+    failed: () => t("web.transcript.failed.not-run", "could not run"),
+    interrupted: () => t("web.transcript.interrupted.cut-off-restart", "cut off by a restart"),
+    stopped: () => t("web.transcript.stopped.stopped", "stopped"),
 };
 
 /** How many of a command's last lines show before "Show all". */
@@ -2611,7 +2876,17 @@ function OutputCard({ entry, command, meta, failed = false, longCommand = false,
             ${
                 (long || longCommand) &&
                 html`<button class="link small" onClick=${() => setOpen(!open)}>
-                    ${open ? "Show less" : long ? `Show all ${lines.length} lines` : "Show all"}
+                    ${
+                        open
+                            ? t("web.transcript.output-card.button.show-less", "Show less")
+                            : long
+                              ? t(
+                                    "web.transcript.output-card.button.show-lines",
+                                    "Show all {count} lines",
+                                    { count: lines.length },
+                                )
+                              : t("web.transcript.output-card.button.show", "Show all")
+                    }
                 </button>`
             }
             ${
@@ -2625,7 +2900,7 @@ function OutputCard({ entry, command, meta, failed = false, longCommand = false,
                             setOpen(true);
                         })}
                 >
-                    Load everything
+                    ${t("web.transcript.output-card.button.load-everything", "Load everything")}
                 </button>`
             }
             ${
@@ -2638,10 +2913,16 @@ function OutputCard({ entry, command, meta, failed = false, longCommand = false,
 
                             setFull(text);
                             await copyText(text);
-                            notify("info", "Copied the output.");
+                            notify(
+                                "info",
+                                t(
+                                    "web.transcript.output-card.text.copied-output",
+                                    "Copied the output.",
+                                ),
+                            );
                         })}
                 >
-                    Copy output
+                    ${t("web.transcript.output-card.button.copy-output", "Copy output")}
                 </button>`
             }
         </div>
@@ -2653,7 +2934,7 @@ function CommandEntry({ entry }) {
     return html`<${OutputCard}
         entry=${entry}
         command=${`/${entry.command}`}
-        meta=${`${entry.name} · not shown to Pi${entry.clipped ? " · only the end is kept" : ""}`}
+        meta=${`${entry.name} · ${t("web.transcript.command-entry.span.not-shown-to-pi", "not shown to Pi")}${entry.clipped ? ` · ${t("web.transcript.command-entry.span.only-the-end", "only the end is kept")}` : ""}`}
         copy=${true}
     />`;
 }
@@ -2666,13 +2947,15 @@ function ShellEntry({ entry }) {
         entry.status === "done"
             ? entry.code === 0
                 ? ""
-                : `exit ${entry.code}`
-            : SHELL_ENDS[entry.status];
+                : t("web.transcript.shell-entry.text.exit", "exit {code}", {
+                      code: entry.code,
+                  })
+            : SHELL_ENDS[entry.status]?.();
 
     return html`<${OutputCard}
         entry=${entry}
         command=${`$ ${entry.command}`}
-        meta=${`${entry.name}${end ? ` · ${end}` : ""}${entry.context ? "" : " · not shown to Pi"}`}
+        meta=${`${entry.name}${end ? ` · ${end}` : ""}${entry.context ? "" : ` · ${t("web.transcript.command-entry.span.not-shown-to-pi", "not shown to Pi")}`}`}
         failed=${Boolean(end)}
         longCommand=${longCommand}
     />`;
@@ -2681,7 +2964,10 @@ function ShellEntry({ entry }) {
 /** Something a person did that Pi was told about, such as undoing a file. */
 function NoteEntry({ entry }) {
     return html`<div class="note-line" id=${`entry-${entry.id}`}>
-        ${entry.name} ${entry.text}. <span class="muted">Pi was told.</span>
+        ${entry.name} ${entry.text}. <span class="muted">${t(
+            "web.transcript.note-entry.span.pi-was-told",
+            "Pi was told.",
+        )}</span>
     </div>`;
 }
 
@@ -2733,12 +3019,15 @@ function PendingShells({ conversationId, rows }) {
             <div class="shell-card">
                 <div class="shell-head">
                     <span class="mono shell-command">$ ${each.command}</span>
-                    <span class="muted small"><${Spinner} /> running</span>
+                    <span class="muted small"><${Spinner} /> ${t(
+                        "web.transcript.pending-shells.text.running",
+                        "running",
+                    )}</span>
                     <button
                         class="link small"
                         onClick=${() => attempt(() => actions.stopShell(each.taskId))}
                     >
-                        Stop
+                        ${t("web.transcript.pending-shells.button.stop", "Stop")}
                     </button>
                 </div>
             </div>
@@ -2902,6 +3191,13 @@ class Memo extends Component {
         const before = this.props.deps;
         const after = next.deps;
 
+        // A change of language draws it again: its words were read when it last drew.
+        if (this.locale !== store.state.localeRevision) {
+            this.locale = store.state.localeRevision;
+
+            return true;
+        }
+
         return (
             before.length !== after.length ||
             before.some((value, index) => !Object.is(value, after[index]))
@@ -2909,6 +3205,9 @@ class Memo extends Component {
     }
 
     render({ children }) {
+        // Read here too, so the comparison above is against the language this item last drew with.
+        this.locale = store.state.localeRevision;
+
         return children;
     }
 }
@@ -3058,7 +3357,10 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
         return [
             group,
             html`<div key=${`${item.key}:stopped`} class="reply" data-part="reply">
-                <div class="muted small">Stopped.</div>
+                <div class="muted small">${t(
+                    "web.transcript.answer-end.div.stopped",
+                    "Stopped.",
+                )}</div>
             </div>`,
         ];
     });
@@ -3238,16 +3540,32 @@ function LiveThought({ generation, entries, id }) {
 
     const empty = text === "";
     const streaming = thought?.streaming && !empty;
-    const label = empty ? "Thinking" : thought.writing ? "Current thought" : "Latest thought";
+    const label = empty
+        ? t("web.transcript.live-thought.label.thinking", "Thinking")
+        : thought.writing
+          ? t("web.transcript.live-thought.label.current-thought", "Current thought")
+          : t("web.transcript.live-thought.label.latest-thought", "Latest thought");
     const shown = !empty
         ? text
         : thought?.block.redacted
-          ? "The model has hidden its thinking."
+          ? t(
+                "web.transcript.live-thought.shown.model-hidden-thinking",
+                "The model has hidden its thinking.",
+            )
           : generation !== undefined && generation.message === undefined
-            ? "Waiting for thinking text…"
-            : "No thinking text shared for this response.";
+            ? t(
+                  "web.transcript.live-thought.shown.waiting-thinking-text",
+                  "Waiting for thinking text…",
+              )
+            : t(
+                  "web.transcript.live-thought.shown.no-thinking-text-shared",
+                  "No thinking text shared for this response.",
+              );
 
-    return html`<section class="live-thought" id=${id} aria-label="Pi's thinking">
+    return html`<section class="live-thought" id=${id} aria-label=${t(
+        "web.transcript.live-thought.aria-label.pi-s-thinking",
+        "Pi's thinking",
+    )}>
         <div class="live-thought-label">${label}</div>
         <div
             class=${`live-thought-text ${empty ? "is-empty" : ""} ${streaming ? "streaming" : ""}`}
@@ -3325,21 +3643,23 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
 
         state = canAnswer(approvals)
             ? asks
-                ? "Waiting for your answer"
-                : "Waiting for your approval"
+                ? t("web.transcript.live-line.text.waiting-answer", "Waiting for your answer")
+                : t("web.transcript.live-line.text.waiting-approval", "Waiting for your approval")
             : asks
-              ? "Waiting for an answer"
-              : "Waiting for approval";
+              ? t("web.transcript.live-line.text.waiting-answer.waiting", "Waiting for an answer")
+              : t("web.transcript.live-line.text.waiting-approval.waiting", "Waiting for approval");
     } else if (limit) {
-        state = `Waiting for ${limitWho(limit)}`;
+        state = t("web.transcript.live-line.text.waiting", "Waiting for {count}", {
+            count: limitWho(limit),
+        });
     } else if (retry) {
-        state = "Retrying";
+        state = t("web.transcript.live-line.text.retrying", "Retrying");
     } else if ((live.compactions ?? []).length > 0) {
-        state = "Compacting context";
+        state = t("web.transcript.live-line.text.compacting-context", "Compacting context");
     } else if (working || (partial.length > 0 && partial.at(-1).type !== "thinking")) {
-        state = "Working";
+        state = t("web.transcript.live-line.text.working", "Working");
     } else {
-        state = "Thinking";
+        state = t("web.transcript.live-line.text.thinking", "Thinking");
     }
 
     const thoughtId = `live-thought-${conversationId}`;
@@ -3357,21 +3677,60 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
                 class=${`live-fold ${open ? "open" : ""}`}
                 aria-expanded=${open}
                 aria-controls=${thoughtId}
-                aria-label=${open ? "Hide Pi's thinking" : "Show Pi's thinking"}
-                title=${open ? "Hide Pi's thinking" : "Show Pi's thinking"}
+                aria-label=${
+                    open
+                        ? t(
+                              "web.transcript.live-line.aria-label.hide-pi-s-thinking",
+                              "Hide Pi's thinking",
+                          )
+                        : t(
+                              "web.transcript.live-line.aria-label.show-pi-s-thinking",
+                              "Show Pi's thinking",
+                          )
+                }
+                title=${
+                    open
+                        ? t(
+                              "web.transcript.live-line.title.hide-pi-s-thinking",
+                              "Hide Pi's thinking",
+                          )
+                        : t(
+                              "web.transcript.live-line.title.show-pi-s-thinking",
+                              "Show Pi's thinking",
+                          )
+                }
                 onClick=${fold}
             ><${Icon} name="chevron" size=${14} class="chev" /></button>`
         }
         <span class="live-dot" data-part="live-mark" aria-hidden="true"></span>
         <span class="live-state" role="status">
-            ${state}${retry && !waiting && seconds > 0 && html`<span aria-hidden="true"> in ${seconds}s</span>`}
+            ${state}${
+                retry &&
+                !waiting &&
+                seconds > 0 &&
+                html`<span aria-hidden="true">${" "}${t(
+                    "web.transcript.live-line.span.s",
+                    "in {seconds}s",
+                    { seconds },
+                )}</span>`
+            }
         </span>
         ${
             limit &&
             !waiting &&
             html`<span class="live-limit" data-part="live-limit">
-                ${limit.probing ? "trying now" : `next try in ${span(fromServer(limit.until) - Date.now())}`}${
-                    limit.resetAt !== undefined && ` · resets ${clock(limit.resetAt)}`
+                ${
+                    limit.probing
+                        ? t("web.transcript.live-line.span.trying", "trying now")
+                        : t("web.transcript.live-line.span.next-try", "next try in {count}", {
+                              count: span(fromServer(limit.until) - Date.now()),
+                          })
+                }${
+                    limit.resetAt !== undefined
+                        ? t("web.transcript.live-line.text.resets", " · resets {count}", {
+                              count: clock(limit.resetAt),
+                          })
+                        : ""
                 }
             </span>`
         }
@@ -3391,15 +3750,24 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
             html`<button
                 class="live-retry"
                 data-part="live-retry"
-                title="Send the request now. Stop ends the wait."
+                title=${t(
+                    "web.transcript.live-line.title.send-request-stop-ends",
+                    "Send the request now. Stop ends the wait.",
+                )}
                 onClick=${() =>
                     attempt(async () => {
                         // The gate takes one try each 30 seconds: a press it ignores says so.
                         if ((await actions.retryLimit(conversationId))?.ok === false) {
-                            notify("info", "Already trying: wait a moment.");
+                            notify(
+                                "info",
+                                t(
+                                    "web.transcript.live-line.text.already-trying-wait-moment",
+                                    "Already trying: wait a moment.",
+                                ),
+                            );
                         }
                     })}
-            >Retry now</button>`
+            >${t("web.transcript.live-line.button.retry-now", "Retry now")}</button>`
         }
         ${
             limit &&
@@ -3409,14 +3777,18 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
                 class="live-retry live-stop"
                 data-part="live-stop"
                 onClick=${() => attempt(actions.abort)}
-            >Stop</button>`
+            >${t("web.composer.stop-button.aria-label.stop", "Stop")}</button>`
         }
         ${
             retry &&
             !waiting &&
             html`<span
                 class="live-why"
-                title=${`Attempt ${live.generation.attempt + 1}, after: ${retry.error}`}
+                title=${t(
+                    "web.transcript.live-line.title.attempt-after",
+                    "Attempt {detail}, after: {error}",
+                    { detail: live.generation.attempt + 1, error: retry.error },
+                )}
             >
                 ${retry.error}
             </span>`
@@ -3425,7 +3797,10 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
             live.busy &&
             canSteer() &&
             !COARSE.matches &&
-            html`<span class="live-esc" title="Press Esc twice">Esc stops</span>`
+            html`<span class="live-esc" title=${t(
+                "web.transcript.live-line.title.press-esc-twice",
+                "Press Esc twice",
+            )}>${t("web.transcript.live-line.span.esc-stops", "Esc stops")}</span>`
         }
     </div>`;
 }
@@ -3997,7 +4372,10 @@ export function Transcript() {
         return html`<main class="scroller">
             <div class="empty">
                 <p>${missing}</p>
-                <button class="button" onClick=${() => navigate(null)}>All sessions</button>
+                <button class="button" onClick=${() => navigate(null)}>${t(
+                    "web.transcript.transcript.button.all-sessions",
+                    "All sessions",
+                )}</button>
             </div>
         </main>`;
     }
@@ -4007,10 +4385,10 @@ export function Transcript() {
         const title = sessions.find((session) => session.id === conversationId)?.title;
         const caption =
             connection === "connecting"
-                ? "connecting"
+                ? t("web.transcript.transcript.caption.connecting", "connecting")
                 : connection === "open"
-                  ? "loading session"
-                  : "reconnecting";
+                  ? t("web.transcript.transcript.caption.loading-session", "loading session")
+                  : t("web.transcript.transcript.caption.reconnecting", "reconnecting");
 
         return html`<main class="scroller">
             <${Boot} inline caption=${caption} detail=${title ?? ""} />
@@ -4096,17 +4474,31 @@ export function Transcript() {
                 sessionsLoaded &&
                 (source
                     ? html`<button class="breadcrumb" onClick=${() => navigate(source.id)}>
-                        <${Icon} name="fork" size=${14} /> Forked from ${source.title ?? "New session"}
+                        <${Icon} name="fork" size=${14} /> ${t(
+                            "web.transcript.transcript.text.forked",
+                            "Forked from {title}",
+                            {
+                                title:
+                                    source.title ??
+                                    t(
+                                        "web.transcript.transcript.text.forked.fallback.new-session",
+                                        "New session",
+                                    ),
+                            },
+                        )}
                     </button>`
                     : html`<p class="muted small">
-                        <${Icon} name="fork" size=${14} /> Forked from another session
+                        <${Icon} name="fork" size=${14} /> ${t(
+                            "web.transcript.transcript.text.forked-from-another-session",
+                            "Forked from another session",
+                        )}
                     </p>`)
             }
             ${
                 start > 0 || unloaded > 0
                     ? html`<div class="divider">
                         <button class="link" disabled=${fetching} onClick=${showEarlier}>
-                            ${fetching ? html`<${Spinner} /> Loading earlier messages` : "Show earlier messages"}
+                            ${fetching ? html`<${Spinner} /> ${t("web.transcript.transcript.text.loading-earlier-messages", "Loading earlier messages")}` : t("web.transcript.transcript.text.show-earlier-messages", "Show earlier messages")}
                         </button>
                     </div>`
                     : first &&
@@ -4124,7 +4516,17 @@ export function Transcript() {
                 html`<div class="empty hint">
                     <div class="pi">π</div>
                     <p>
-                        ${conversation.kind === "subagent" ? "This subagent has no messages yet." : "Ask anything. Pi works in this session's folder, and keeps working if the server restarts."}
+                        ${
+                            conversation.kind === "subagent"
+                                ? t(
+                                      "web.transcript.transcript.p.subagent-no-messages-yet",
+                                      "This subagent has no messages yet.",
+                                  )
+                                : t(
+                                      "web.transcript.transcript.p.ask-anything-pi-works",
+                                      "Ask anything. Pi works in this session's folder, and keeps working if the server restarts.",
+                                  )
+                        }
                     </p>
                 </div>`
             }
@@ -4143,7 +4545,7 @@ export function Transcript() {
             ${
                 failure &&
                 html`<div class="error-box run-failure" data-part="run-failure" role="alert">
-                    Run failed: ${failure}
+                    ${t("web.sessions.session-row.text.run-failed-why", "Run failed: {failure}", { failure })}
                 </div>`
             }
             ${
@@ -4161,7 +4563,10 @@ export function Transcript() {
             showJump &&
             html`<button
                 class="jump"
-                aria-label="To the bottom"
+                aria-label=${t(
+                    "web.transcript.transcript.aria-label.to-the-bottom",
+                    "To the bottom",
+                )}
                 onClick=${() => {
                     stick.current = true;
                     toBottom(scroller.current);

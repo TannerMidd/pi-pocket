@@ -1,6 +1,5 @@
 // The canvas: a design's page in the artifact sandbox frame (the same frame and bridge as the artifact viewer), scaled to
 // fit, with the page's side of Design mode (inspect, edit text, tweaks, pins, slides) spoken through the bridge.
-import { useArtifactBridge } from "/artifact-bridge.js";
 import { nextZoom, percent, scaleOf, stepZoom, zoomOf, zoomWord } from "./devices.js";
 import { checkOptions, pinsOfReport } from "./check.js";
 import { pinsOf } from "./comments.js";
@@ -28,6 +27,8 @@ const BATCH = 100;
 const num = (value) => typeof value === "number" && Number.isFinite(value);
 
 export function createCanvas(env) {
+    const { useArtifactBridge } = env;
+    const t = env.pocket.t;
     const { pocket, store, data, parts } = env;
     const { html, useEffect, useRef, useState } = pocket;
     const { Ico, useSize } = parts;
@@ -71,11 +72,15 @@ export function createCanvas(env) {
         const zoom = zoomOf(s.zoom, narrow);
         const following = zoom === "width" || zoom === "fit";
 
-        return html`<div class="dsn-zoom" role="group" aria-label="Zoom">
+        return html`<div
+            class="dsn-zoom"
+            role="group"
+            aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom", "Zoom")}
+        >
             <button
                 type="button"
-                title="Zoom out"
-                aria-label="Zoom out"
+                title=${t("server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom-out", "Zoom out")}
+                aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom-out", "Zoom out")}
                 onClick=${() => env.setZoom(stepZoom(scale, -1))}
             >
                 <${Ico} name="minus" size=${14} />
@@ -96,8 +101,8 @@ export function createCanvas(env) {
             </button>
             <button
                 type="button"
-                title="Zoom in"
-                aria-label="Zoom in"
+                title=${t("server.extensions.design.canvas.create-canvas.zoom-bar.title.zoom", "Zoom in")}
+                aria-label=${t("server.extensions.design.canvas.create-canvas.zoom-bar.aria-label.zoom.zoom", "Zoom in")}
                 onClick=${() => env.setZoom(stepZoom(scale, 1))}
             >
                 <${Ico} name="plus" size=${14} />
