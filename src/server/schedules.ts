@@ -18,6 +18,7 @@ import {
     defineTask,
     type Task,
     type TaskRuntime,
+    type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { addActivity } from "./collab.ts";
@@ -54,7 +55,11 @@ export const DEFAULT_SCHEDULE_LIMITS: Readonly<ScheduleLimits> = {
     aheadDays: 366,
 };
 
-type ScheduleInput = { scheduleId: string };
+/**
+ * `last`: given by an edit or a pause that handed the schedule to this task, the request id of the message it sent last
+ * (while it has sent `runs` in all), so the check for a message that still waits finds that one too.
+ */
+type ScheduleInput = { scheduleId: string; last?: { runs: number; request: string } };
 type ScheduleState = { phase: "wait" } | { phase: "send" };
 type Runtime = TaskRuntime<ScheduleInput, ScheduleState, null, object>;
 
@@ -130,6 +135,15 @@ function sendingRequest(schedule: Schedule, run: number): string {
           : `schedule:${sending}`;
 }
 
+/** The request id of the message a schedule sent last, from the task that sends it now; undefined before the first. */
+function lastSending(schedule: Schedule, input: ScheduleInput | undefined): string | undefined {
+    if (input?.last !== undefined && input.last.runs === schedule.runs) {
+        return input.last.request;
+    }
+
+    return schedule.runs > 0 ? sendingRequest(schedule, schedule.runs - 1) : undefined;
+}
+
 export type ScheduleRequest = {
     /** When it goes out (`in 30m`, `every weekday 8:00`, …), followed by the message unless `text` is given. */
     when: string;
@@ -183,8 +197,7 @@ export class Schedules {
 
                     return runtime.sleepUntil(schedule.next, { phase: "send" }, context);
                 },
-                send: (task, runtime, context) =>
-                    this.#send(task.input.scheduleId, runtime, context),
+                send: (task, runtime, context) => this.#send(task.input, runtime, context),
             },
             abort: (task, runtime, context) =>
                 runtime.commit(async (tx) => {
@@ -201,7 +214,8 @@ export class Schedules {
     }
 
     /** Send a schedule's message, unless it may not go out anymore; then wait for the next time, or finish. */
-    async #send(id: string, runtime: Runtime, context: Context): Promise<void> {
+    async #send(input: ScheduleInput, runtime: Runtime, context: Context): Promise<void> {
+        const id = input.scheduleId;
         const conversationId = runtime.conversationId;
         const schedule = await stored(runtime, id, context);
         const conversation = await runtime.conversation(conversationId, context);
@@ -228,11 +242,12 @@ export class Schedules {
 
         const requestId = sendingRequest(schedule, schedule.runs);
         const stopped = this.#stopped(conversationId, schedule);
+        const last = lastSending(schedule, input);
         // Its last message, not yet in the transcript: the session has not taken it, so another would only wait too.
         const waiting =
             stopped === undefined &&
-            schedule.runs > 0 &&
-            (await this.#queued(runtime, sendingRequest(schedule, schedule.runs - 1), context)) &&
+            last !== undefined &&
+            (await this.#queued(runtime, last, context)) &&
             // Run again after a crash, this phase may find its own message sent already: that one counts as sent.
             !(await this.#queued(runtime, requestId, context, true));
 
@@ -572,11 +587,7 @@ export class Schedules {
             }
 
             replaced = item.taskId;
-            item.taskId = await tx.createTask(
-                this.task,
-                { scheduleId },
-                { ownership: { kind: "conversation" }, background: true, conversationId },
-            );
+            item.taskId = await this.#handOff(tx, conversationId, item);
             item.revision = (item.revision ?? 0) + 1;
             item.text = text;
             item.content = content;
@@ -600,6 +611,28 @@ export class Schedules {
         }
 
         return updated;
+    }
+
+    /**
+     * A new task for a schedule an edit or a pause changes, before it changes who it is by: the new task keeps the
+     * request id of the message the old one sent last, so a message that still waits is found.
+     */
+    async #handOff(
+        tx: Tx,
+        conversationId: ConversationId,
+        item: Schedule,
+    ): Promise<Schedule["taskId"]> {
+        const old = (await tx.task(item.taskId))?.input as ScheduleInput | undefined;
+        const request = lastSending(item, old);
+
+        return tx.createTask(
+            this.task,
+            {
+                scheduleId: item.id,
+                ...(request === undefined ? {} : { last: { runs: item.runs, request } }),
+            },
+            { ownership: { kind: "conversation" }, background: true, conversationId },
+        );
     }
 
     /**
@@ -656,11 +689,7 @@ export class Schedules {
             }
 
             replaced = item.taskId;
-            item.taskId = await tx.createTask(
-                this.task,
-                { scheduleId },
-                { ownership: { kind: "conversation" }, background: true, conversationId },
-            );
+            item.taskId = await this.#handOff(tx, conversationId, item);
 
             if (paused) {
                 item.paused = { at: app.now(), by: by.id };

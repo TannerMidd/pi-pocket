@@ -125,3 +125,49 @@ test("a repeat skips its time while its last message waits in the queue, and say
         rmSync(flag, { force: true });
     }
 });
+
+test("an edit or a pause hands a repeat to a new task, which still finds its waiting message", async () => {
+    await app?.close();
+    app = await openApp(
+        scriptedModel(route),
+        join(root, "schedules-queue-edit"),
+        () => Date.now() + offset,
+    );
+    const id = await newSession(app);
+    const flag = join(work, "hold.flag");
+
+    writeFileSync(flag, "");
+
+    try {
+        await app.commands.submit(id, owner(app), { text: "hold", requestId: crypto.randomUUID() });
+        await until(() => app!.isBusy(id), "Pi to be at work");
+        const repeat = await app.commands.schedule(id, owner(app), {
+            when: "every 10m ping",
+            zone: "UTC",
+        });
+        const item = async () =>
+            (await app!.harness.snapshot(ScheduleDoc, id, context))?.items[repeat.id];
+
+        later(11);
+        await until(async () => (await item())?.runs === 1, "the first time to go out");
+        await app.commands.updateSchedule(id, owner(app), repeat.id, {
+            text: "ping again",
+            every: { minutes: 10 },
+        });
+        later(11);
+        await until(
+            async () => (await item())?.skipped === 1,
+            "the time after the edit to be skipped",
+        );
+        await app.commands.pauseSchedule(id, owner(app), repeat.id, true);
+        await app.commands.pauseSchedule(id, owner(app), repeat.id, false);
+        later(11);
+        await until(
+            async () => (await item())?.skipped === 2,
+            "the time after the pause to be skipped",
+        );
+        assert.equal((await item())?.runs, 1, "no other message went out");
+    } finally {
+        rmSync(flag, { force: true });
+    }
+});
