@@ -403,6 +403,9 @@ test("a glob of every file, a name as text, and a write to .env are not reads of
         "echo $(cat .env)",
         "wc -l < .env",
         "grep -r --include=.env KEY .",
+        "sort -m .env",
+        "sed -e p .env",
+        "bash <<EOF\ncat .env\nEOF",
     ]) {
         assert.ok(app.secrets.blocked("bash", { command }, work) !== undefined, command);
     }
