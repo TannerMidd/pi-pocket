@@ -101,6 +101,8 @@ const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
 const BACKOFF_MIN = 5_000;
 const BACKOFF_MAX = 15 * 60_000;
+/** A stream that ran this long before it ended was well: its backoff starts again. */
+const STABLE = 60_000;
 const DELIVERY_RETRY_MIN = 15_000;
 const DELIVERY_RETRY_MAX = 10 * 60_000;
 const KIND = /^[a-z][a-z0-9-]{0,39}$/;
@@ -337,6 +339,8 @@ class Runner {
         let failures = 0;
 
         while (!this.signal.aborted) {
+            const started = Date.now();
+
             try {
                 if (connector.shape === "poll") {
                     if (this.state !== "running") {
@@ -354,7 +358,13 @@ class Runner {
                 } else {
                     this.#set("running", "connecting");
                     await connector.run!(context);
-                    // A stream that ends by itself connects again soon; one that keeps ending backs off.
+
+                    // A stream that ends by itself connects again soon; one that keeps ending backs off. One that ran
+                    // a while was well: its next drop starts the backoff again.
+                    if (Date.now() - started > STABLE) {
+                        failures = 0;
+                    }
+
                     failures += 1;
                     await sleep(backoff(failures, 1000, BACKOFF_MAX), this.signal);
                 }
@@ -372,6 +382,10 @@ class Runner {
                     this.#set("stopped", "stopped: edit the connector to try again");
 
                     return;
+                }
+
+                if (Date.now() - started > STABLE) {
+                    failures = 0;
                 }
 
                 failures += 1;
