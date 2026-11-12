@@ -1,4 +1,3 @@
-/* The Relay sheets: cards in the app's colors, with targets a thumb can hit, and nothing wider than a phone. */
 .relay-sheet {
     display: flex;
     flex-direction: column;
@@ -201,7 +200,6 @@
     background: var(--err-soft);
 }
 
-/* The form. */
 .relay-form {
     gap: 16px;
 }
