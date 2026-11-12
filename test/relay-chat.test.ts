@@ -379,6 +379,18 @@ test("Matrix maps token and rate-limit errors", { timeout: 3000 }, async (t) => 
     await assert.rejects(matrix.run!(fake.context), rate(456));
 });
 
+test("Matrix fails on a sync it cannot read, and does not loop", { timeout: 3000 }, async (t) => {
+    const mock = await mockServer((request) =>
+        request.url!.includes("whoami") ? { json: { user_id: "@pi:x" } } : { text: "{not json" },
+    );
+
+    cleanup(t, mock);
+    await assert.rejects(
+        matrix.run!(context({ homeserver: mock.url, token: "fake" }).context),
+        /not JSON/,
+    );
+});
+
 test(
     "Slack acknowledges every envelope, filters, reconnects, and closes on stop",
     { timeout: 3000 },

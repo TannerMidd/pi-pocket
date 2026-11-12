@@ -44,9 +44,20 @@ async function request<T>(
                 AbortSignal.timeout(longPoll ? 40_000 : 20_000),
             ]),
         });
-        data = (await response.json().catch(() => ({}))) as typeof data;
+        data = (await response.json().catch(() => undefined)) as typeof data;
     } catch {
         throw new Error("Matrix request failed. Check the homeserver and connection.");
+    }
+
+    // A good status with a body that is not JSON (a proxy's page, a cut body) is no answer: taken as one, it loops.
+    if (data === null || typeof data !== "object") {
+        if (response.ok) {
+            throw new Error(
+                "Matrix sent an answer that is not JSON. Check the homeserver address.",
+            );
+        }
+
+        data = {} as typeof data;
     }
 
     if (response.status === 401 || response.status === 403 || data.errcode === "M_UNKNOWN_TOKEN") {
@@ -66,6 +77,14 @@ async function request<T>(
     }
 
     return data;
+}
+
+function batchOf(sync: Sync): string {
+    if (typeof sync.next_batch !== "string" || sync.next_batch === "") {
+        throw new Error("Matrix sent a sync without a next batch token.");
+    }
+
+    return sync.next_batch;
 }
 
 function eventOf(event: MatrixEvent, room: string, user: string): RelayEvent {
@@ -114,6 +133,11 @@ const matrix: RelayConnector = {
     ],
     async run(context) {
         const { user_id: user } = await request<{ user_id: string }>(context, "account/whoami");
+
+        if (typeof user !== "string") {
+            throw new Error("Matrix did not say who the access token belongs to.");
+        }
+
         const rooms = String(context.values.rooms ?? "")
             .split(",")
             .map((id) => id.trim())
@@ -125,9 +149,8 @@ const matrix: RelayConnector = {
                 timeout: "0",
                 filter: JSON.stringify({ room: { timeline: { limit: 1 } } }),
             });
-            const baseline = await request<Sync>(context, `sync?${query}`);
 
-            since = baseline.next_batch;
+            since = batchOf(await request<Sync>(context, `sync?${query}`));
             context.save({ since });
         }
 
@@ -151,7 +174,7 @@ const matrix: RelayConnector = {
             }
 
             await context.emit(events);
-            since = sync.next_batch;
+            since = batchOf(sync);
             context.save({ since });
         }
     },
