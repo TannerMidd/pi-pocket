@@ -10,6 +10,7 @@ import { actions, canSteer, closeSheet, insertIntoComposer, notify, store } from
 import {
     APPLE,
     copyText,
+    downloadUrl,
     fileUrl,
     formatBytes,
     html,
@@ -243,7 +244,7 @@ function FileLines({ lines, colored, all, line }) {
 
 /**
  * The viewer's buttons: Preview or Source for Markdown and pages, Run for a previewed page (`running` is null where it
- * does not apply), Copy, and @ Mention.
+ * does not apply), Download for regular files, Copy, and @ Mention.
  */
 function FileActions({ file, shown, previewable, preview, onPreview, running, onRun }) {
     return html`${
@@ -274,6 +275,18 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         >
             <${Icon} name="copy" size=${16} />
         </button>`
+    }
+    ${
+        ["text", "image", "binary"].includes(file?.kind) &&
+        html`<a
+            class="icon-button"
+            href=${downloadUrl(file.path)}
+            download
+            title="Download"
+            aria-label="Download"
+        >
+            <${Icon} name="download" size=${16} />
+        </a>`
     }
     ${
         file &&

@@ -494,6 +494,9 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
+        // As the viewer's own route (`view`): reading a file whole takes the right to steer, not only to see.
+        app.requireSteer(user);
+
         const file = app.workspace.readableFile(user, id, requested);
         let handle: FileHandle;
 

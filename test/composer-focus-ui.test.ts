@@ -220,6 +220,34 @@ test("a chosen Queue stays chosen for the next run", real, async () => {
     await setBusy(false);
 });
 
+test("on a phone while Pi works, the model stays and the mode menu picks Queue", real, async () => {
+    await home(VIEWPORTS.mobile);
+    await page.navigate(`${base}/s/${Number(one)}`);
+    await opened(one);
+    await setBusy(true);
+    const shown = (selector: string) =>
+        inPage<boolean>(
+            `return JSON.stringify((document.querySelector(${JSON.stringify(selector)})?.offsetWidth ?? 0) > 0)`,
+        );
+
+    assert.equal(await shown(".composer .model-chip"), true, "the model chip shows");
+    assert.equal(await shown(".composer .mode-switch"), false, "one mode button, not three");
+    await page.click({ selector: ".mode-pick-button" });
+    await until(() => shown(".mode-menu"), "the mode menu");
+    // A tap right after a layer opens is let go (`back.js`, SETTLING_MS).
+    await page.evaluate(`await new Promise((resolve) => setTimeout(resolve, 300))`);
+    await page.click({ selector: '.mode-menu [role="menuitemradio"]:nth-child(2)' });
+    await until(async () => !(await shown(".mode-menu")), "the menu closed");
+    assert.equal(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".mode-pick-button").textContent.trim())`,
+        ),
+        "Queue",
+    );
+    assert.equal((await modes()).Queue, "true", "the same mode as the three buttons");
+    await setBusy(false);
+});
+
 test(
     "at 320 px and 350 px wide, Stop stays inside the message box while Pi works",
     real,

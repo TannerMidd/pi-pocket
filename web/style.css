@@ -4289,13 +4289,6 @@ pre.diff .del {
     }
 }
 
-/* Steer, Queue, and Interrupt leave no room for the model on a narrow box while Pi works: it shows again after. */
-@container composer (max-width: 480px) {
-    .composer.busy .composer-row .model-chip {
-        display: none;
-    }
-}
-
 /* The buttons that extensions add to the row: any number of them can come. Where they would push Send (or Stop) out of a
  * narrow box (two or more up to 480 px, one up to 340 px), they take a line of their own under the row, where they stay
  * while Pi works. The break is the row's `::after`: a line of no height, so only the buttons' margin parts the lines. A
@@ -4359,16 +4352,11 @@ pre.diff .del {
     }
 }
 
-/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px, and the row needs 335), Steer,
- * Queue, and Interrupt would push Stop out of the box: while Pi works, Attach goes and the three get closer. Attach
- * comes back when Pi stops. */
+/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px), Attach goes while Pi works,
+ * so the model keeps room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
 @container composer (max-width: 340px) {
     .composer.busy .composer-row .attach-button {
         display: none;
-    }
-
-    .composer.busy .mode-switch button {
-        padding-inline: 6px;
     }
 }
 
@@ -4499,6 +4487,71 @@ pre.diff .del {
 
 .mode-switch button.interrupt.on {
     color: var(--err);
+}
+
+/* On a narrow box the three are one button with a menu (`ModePick`): the model keeps its place beside it. */
+.mode-pick {
+    display: none;
+    position: relative;
+    flex: none;
+}
+
+@container composer (max-width: 480px) {
+    .composer.busy .mode-switch {
+        display: none;
+    }
+
+    .composer.busy .mode-pick {
+        display: block;
+    }
+}
+
+.mode-pick-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-in);
+    height: 30px;
+    padding: 0 8px 0 12px;
+    border-radius: var(--r-pill);
+    background: var(--hover);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.mode-pick-button[aria-expanded="true"] {
+    background: var(--raised);
+}
+
+.mode-pick-button.interrupt,
+.mode-menu .session-menu-item.interrupt {
+    color: var(--err);
+}
+
+/* The chevron points down, as the model's: the menu opens up from it, over the conversation. */
+.mode-pick-caret {
+    color: var(--faint);
+    transform: rotate(90deg);
+}
+
+/* Up from the button, at its right edge (`.pop-menu` alone is fixed in place). */
+.mode-pick .mode-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--gap-out));
+    z-index: 2;
+    min-width: 160px;
+}
+
+.mode-menu .session-menu-item {
+    align-items: center;
+}
+
+.mode-menu .session-menu-item .icon {
+    margin-left: auto;
+    color: var(--accent);
 }
 
 .stop-button,
@@ -10827,6 +10880,16 @@ textarea.notes {
     flex: 1;
 }
 
+/* The window's two times: where the row is too narrow for both whole ("11:00 PM" and the clock), "and" and To go on a
+ * line of their own. */
+.sched-row[data-part="schedule-window"] {
+    flex-wrap: wrap;
+}
+
+.sched-row[data-part="schedule-window"] input[type="time"] {
+    flex-basis: 8.5em;
+}
+
 .sched-amount {
     width: 5.5em;
     flex: none;
@@ -11084,6 +11147,21 @@ textarea.notes {
 
 .memory-scope button.on .memory-scope-count {
     color: var(--muted);
+}
+
+/* Three scopes on a phone: "Project" and "Session" leave room for their counts. */
+.memory-scope-short {
+    display: none;
+}
+
+@media (max-width: 430px) {
+    .memory-scope-long {
+        display: none;
+    }
+
+    .memory-scope-short {
+        display: inline;
+    }
 }
 
 /* Done when: a goal met, or one Pi gave up on. */
@@ -17041,6 +17119,7 @@ textarea.notes {
             .attach-button,
             .model-chip,
             .plan-chip,
+            .mode-pick-button,
             .composer-mic,
             .stop-button,
             .send-button
@@ -17053,6 +17132,7 @@ textarea.notes {
             .attach-button,
             .model-chip,
             .plan-chip,
+            .mode-pick-button,
             .composer-mic,
             .stop-button,
             .send-button
@@ -17062,8 +17142,12 @@ textarea.notes {
         inset: -4px -2px;
     }
     /* The chips are shorter: their layers reach further up and down. */
-    .composer-row :is(.model-chip, .plan-chip)::before {
+    .composer-row :is(.model-chip, .plan-chip, .mode-pick-button)::before {
         inset: -5px -2px;
+    }
+    /* The modes in its menu, a thumb's height each. */
+    .mode-menu .session-menu-item {
+        min-height: 40px;
     }
     /* Where the row has room, the icon buttons are as wide as a thumb's tap (their look is the icon alone). */
     @container composer (min-width: 360px) {

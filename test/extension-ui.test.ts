@@ -802,14 +802,14 @@ test(
                 assert.equal(working.shown, 3, "the extension's buttons stay, on their own line");
                 assert.ok(working.below, `the buttons are on a line under Stop at ${width} px`);
 
-                // A touch screen's taller tap layer on each mode still takes a tap above and below it: the cut that
-                // keeps Stop in is sideways only.
+                // A touch screen's taller tap layer on each mode (on a phone, the one mode button) still takes a tap
+                // above and below it: the cut that keeps Stop in is sideways only.
                 const taps = await inPage<{ above: boolean; below: boolean }[]>(`
                     const touch = new CSSStyleSheet();
 
-                    touch.replaceSync(".mode-switch button { position: relative } .mode-switch button::before { content: ''; position: absolute; inset: -6px 0 }");
+                    touch.replaceSync(":is(.mode-switch button, .mode-pick-button) { position: relative } :is(.mode-switch button, .mode-pick-button)::before { content: ''; position: absolute; inset: -6px 0 }");
                     document.adoptedStyleSheets = [...document.adoptedStyleSheets, touch];
-                    const hits = [...document.querySelectorAll(".composer .mode-switch button")].map((each) => {
+                    const hits = [...document.querySelectorAll(".composer :is(.mode-switch button, .mode-pick-button)")].filter((each) => each.offsetWidth > 0).map((each) => {
                         const box = each.getBoundingClientRect();
                         const x = box.left + box.width / 2;
 
@@ -825,7 +825,7 @@ test(
                 `);
 
                 assert.ok(
-                    taps.length === 3 && taps.every((each) => each.above && each.below),
+                    taps.length > 0 && taps.every((each) => each.above && each.below),
                     `the modes' tap layer is cut at ${width} px: ${JSON.stringify(taps)}`,
                 );
 
@@ -833,7 +833,7 @@ test(
                 // three modes grow, and Stop still stays in.
                 await page.evaluate(`
                     const sheet = new CSSStyleSheet();
-                    sheet.replaceSync(".composer .mode-switch button { font-size: 18px !important; }");
+                    sheet.replaceSync(".composer :is(.mode-switch button, .mode-pick-button) { font-size: 18px !important; }");
                     window.__bigText = sheet;
                     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
                 `);

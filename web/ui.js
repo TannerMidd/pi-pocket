@@ -27,6 +27,10 @@ const currentConversation = () => store.state.view.conversation?.id;
 export const fileUrl = (path, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/file?path=${encodeURIComponent(path)}`;
 
+/** A regular file saved to this device, with the same access checks as the file viewer. */
+export const downloadUrl = (path, conversationId = currentConversation()) =>
+    `/api/c/${conversationId}/download?path=${encodeURIComponent(path)}`;
+
 /** The `index`th image stored in a message: a pasted image or one a tool returned. */
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
@@ -1227,6 +1231,7 @@ const ICONS = {
     chevron: "M9 6l6 6-6 6",
     down: "M6 9l6 6 6-6",
     up: "M12 19V5M5 12l7-7 7 7",
+    download: "M12 4v11M7 10l5 5 5-5M5 20h14",
     eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 100-6 3 3 0 000 6z",
     search: "M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3",
     shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",

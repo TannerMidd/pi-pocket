@@ -27,7 +27,7 @@ import { describe, HttpError } from "./errors.ts";
 import { FROM_PREFIX } from "./entry-format.ts";
 import { snippet } from "./projection.ts";
 import { ownRequest, requestFor } from "./requests.ts";
-import { checkMoment, nextRepeat, parseWhen, type Repeat } from "./when.ts";
+import { checkMoment, nextRepeat, outsideWindow, parseWhen, type Repeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -224,6 +224,26 @@ export class Schedules {
             return runtime.commit(() => finished, context);
         }
 
+        // Due in its window but late past its end (the server was down, or PiP held it): it waits for the next run.
+        if (
+            schedule.every !== undefined &&
+            outsideWindow(schedule.every, runtime.now(), schedule.zone)
+        ) {
+            return runtime.commit(async (tx) => {
+                const item = (await tx.doc(ScheduleDoc, conversationId)).items[id];
+
+                if (!ownedBy(item, runtime)) {
+                    return finished;
+                }
+
+                if (item.paused === undefined && item.every !== undefined) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+                }
+
+                return { status: "running", checkpoint: { phase: "wait" } } as const;
+            }, context);
+        }
+
         // PiP's conversation while PiP is off would run without PiP's rules: its schedule waits, and goes out once PiP
         // is back. Its `runs` stays, so a sending this replaces keeps its request id.
         if (this.#waitsForPip(conversationId)) {
@@ -272,6 +292,16 @@ export class Schedules {
             }
 
             if (stopped === undefined) {
+                // A queue lookup or commit wait can pass the window's end after the first check.
+                if (
+                    item.every !== undefined &&
+                    outsideWindow(item.every, runtime.now(), item.zone)
+                ) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+
+                    return { status: "running", checkpoint: { phase: "wait" } };
+                }
+
                 await conversation.submit(tx, {
                     type: "input",
                     content: item.content,
@@ -639,7 +669,8 @@ export class Schedules {
 
     /**
      * When a schedule given as data goes out first: `next` for one that goes out once, or for a repeat every so many
-     * minutes when given; else the repeat's next time. Throws with a short explanation when `next` will not do.
+     * minutes without a window when given; else the repeat's next time. Throws with a short explanation when `next`
+     * will not do.
      */
     #timeOf(at: { next?: number; every?: Repeat }, zone: string): { next: number; every?: Repeat } {
         const now = this.#app.now();
@@ -650,7 +681,7 @@ export class Schedules {
         }
 
         const next =
-            at.next !== undefined && "minutes" in at.every
+            at.next !== undefined && "minutes" in at.every && at.every.window === undefined
                 ? checkMoment(at.next, now, { aheadMs })
                 : nextRepeat(at.every, now, zone);
 

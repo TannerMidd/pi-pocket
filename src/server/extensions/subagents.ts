@@ -28,7 +28,9 @@ import {
     defineTool,
     type Extension,
     InboxDoc,
+    type InboxState,
     LiveDoc,
+    type LiveState,
     type ModelRef,
     section,
     type SubmissionId,
@@ -37,7 +39,14 @@ import {
     type ToolRegistration,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { type PendingReport, PlanDoc, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
+import {
+    type PendingReport,
+    PlanDoc,
+    REPORT_PREFIX,
+    STOPPED,
+    type SubagentRecord,
+    SubagentsDoc,
+} from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
@@ -808,9 +817,150 @@ async function chosenModel(
     return ref;
 }
 
+const STALLED_MINUTES = 30;
+
+const ACTIVITY_ENTRIES = 20;
+
+function span(ms: number): string {
+    const seconds = Math.max(0, Math.round(ms / 1000));
+
+    if (seconds < 60) {
+        return `${seconds} s`;
+    }
+
+    const minutes = Math.round(seconds / 60);
+
+    if (minutes < 60) {
+        return `${minutes} min`;
+    }
+
+    const hours = Math.round(minutes / 60);
+
+    return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
+}
+
+/** The time of the newest message in a transcript: output that a running tool call streams does not count. */
+async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<number | undefined> {
+    const page = await tx.scanEntries({ conversationId, order: "descending" }, ACTIVITY_ENTRIES);
+
+    for (const entry of page.items) {
+        const times = (entry.model ?? [])
+            .map((message) => message.timestamp)
+            .filter((at) => typeof at === "number" && Number.isFinite(at));
+
+        if (times.length > 0) {
+            return Math.max(...times);
+        }
+    }
+
+    return undefined;
+}
+
+function ending(record: SubagentRecord): "done" | "failed" | "stopped" | "idle" {
+    if (record.failed === true) {
+        return record.error === STOPPED ? "stopped" : "failed";
+    }
+
+    return record.answeredAt === undefined ? "idle" : "done";
+}
+
+function statusLine(
+    name: string,
+    record: SubagentRecord,
+    live: LiveState | undefined,
+    asking: readonly string[],
+    lastAt: number | undefined,
+    now: number,
+    stalledMs: number,
+): string {
+    if (live?.run === undefined) {
+        const how = ending(record);
+        const at = record.answeredAt ?? record.askedAt;
+        const why = how === "failed" && record.error !== undefined ? `: ${record.error}` : "";
+
+        return `${name}: ${how}${at === undefined ? "" : ` ${span(now - at)} ago`}${why}`;
+    }
+
+    const parts = [
+        asking.length > 0 ? `waiting for a person to allow ${asking.join(", ")}` : "working",
+    ];
+    const running = (live.tools ?? [])
+        .filter((tool) => tool.status === "running")
+        .map((tool) => tool.name);
+
+    if (running.length > 0) {
+        parts.push(`running ${running.join(", ")}`);
+    }
+
+    if (live.generation?.retry !== undefined) {
+        parts.push(`retrying its model request (${live.generation.retry.error.slice(0, 120)})`);
+    }
+
+    if (lastAt !== undefined) {
+        const quiet = now - lastAt;
+        const stalled = asking.length === 0 && quiet >= stalledMs;
+
+        parts.push(
+            `last activity ${span(quiet)} ago${stalled ? `: stalled, nothing new for ${span(stalledMs)} or more` : ""}`,
+        );
+    }
+
+    return `${name}: ${parts.join("; ")}`;
+}
+
+function opening(content: unknown): string {
+    const text =
+        typeof content === "string"
+            ? content
+            : (Array.isArray(content) ? content : [])
+                  .map((part: { type?: string; text?: string }) =>
+                      part.type === "text" ? (part.text ?? "") : "",
+                  )
+                  .join(" ");
+    const flat = text.replace(/\s+/g, " ").trim();
+
+    return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
+}
+
+function waitingNote(inbox: Readonly<InboxState> | undefined): string {
+    // Writes wait there too (a compaction's summary, say): they are no messages.
+    const each = (inbox?.items ?? []).flatMap((item) =>
+        item.mode === "write"
+            ? []
+            : [
+                  `${item.mode === "followUp" ? "a follow-up, taken when its current run ends" : "a steer, taken at its next pause"}: “${opening(item.content)}”`,
+              ],
+    );
+
+    if (each.length === 0) {
+        return "";
+    }
+
+    return `; ${each.length === 1 ? "1 message waits" : `${each.length} messages wait`} in its queue (${each.join("; ")})`;
+}
+
 export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
     // The guide, for tool search to show where this section never does: when Pi calls subagent through codemode.
     web?.provide({ guide: (model: ModelRef | undefined) => guide(host, model) });
+
+    web?.settings([
+        {
+            name: "stalledMinutes",
+            label: "Stalled after (minutes)",
+            description:
+                "A subagent at work with no new message, tool call, or tool result for this long is called stalled when Pi asks for the status of its subagents.",
+            type: "number",
+            default: STALLED_MINUTES,
+            min: 1,
+            max: 10080,
+        },
+    ]);
+
+    const stalledMs = () => {
+        const value = web?.setting("stalledMinutes");
+
+        return (typeof value === "number" ? value : STALLED_MINUTES) * 60_000;
+    };
 
     const Courier = courierFor(host);
     const Reporter = reporterFor(Courier, host);
@@ -865,7 +1015,8 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             "thinking, tools" +
             (choosing ? "" : "; it runs on your model") +
             "), send (name, message; followUp: true queues it after the current answer, else steers), stop (name), " +
-            "status (name, or all). Reports come back by themselves; do not poll.",
+            "status (name; all for every one; none for those at work, each with its last activity, and a count of the rest). " +
+            "Reports come back by themselves; do not poll.",
         parameters,
         // Not rerun after a crash: repeating stop could stop newer work. The model sees the interruption and can check
         // with status.
@@ -893,7 +1044,14 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             if (action === "status") {
                 const names =
                     name === undefined || name === "all" ? Object.keys(registry.agents) : [name];
-                const lines: string[] = [];
+                const shown: {
+                    name: string;
+                    record: SubagentRecord;
+                    waiting: string;
+                    live?: LiveState;
+                }[] = [];
+                // Without a name, only those at work: a session's finished subagents can be many.
+                const rest: Partial<Record<ReturnType<typeof ending>, number>> = {};
 
                 for (const each of names) {
                     const found = Object.hasOwn(registry.agents, each)
@@ -904,11 +1062,58 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                         continue;
                     }
 
-                    const busy =
-                        (await api.snapshot(LiveDoc, found.conversationId, context))?.run !==
-                        undefined;
+                    const live = await api.snapshot(LiveDoc, found.conversationId, context);
+                    const waiting = waitingNote(
+                        await api.snapshot(InboxDoc, found.conversationId, context),
+                    );
 
-                    lines.push(`${each}: ${busy ? "working" : "idle"}`);
+                    if (name === undefined && live?.run === undefined && waiting === "") {
+                        rest[ending(found)] = (rest[ending(found)] ?? 0) + 1;
+                        continue;
+                    }
+
+                    shown.push({ name: each, record: found, waiting, ...(live ? { live } : {}) });
+                }
+
+                if (name !== undefined && name !== "all" && shown.length === 0) {
+                    return reply(`No subagent named ${name}.`);
+                }
+
+                const lastAt = await api.commit(async (tx) => {
+                    const found = new Map<string, number | undefined>();
+
+                    for (const each of shown) {
+                        if (each.live?.run !== undefined) {
+                            found.set(
+                                each.name,
+                                await lastActivity(tx, each.record.conversationId),
+                            );
+                        }
+                    }
+
+                    return found;
+                }, context);
+                const now = api.now();
+                const lines = shown.map(
+                    (each) =>
+                        statusLine(
+                            each.name,
+                            each.record,
+                            each.live,
+                            host.approvals
+                                .forConversation(each.record.conversationId)
+                                .map((call) => call.tool),
+                            lastAt.get(each.name),
+                            now,
+                            stalledMs(),
+                        ) + each.waiting,
+                );
+                const counted = Object.entries(rest).map(([how, count]) => `${count} ${how}`);
+
+                if (counted.length > 0) {
+                    lines.push(
+                        `${lines.length === 0 ? "None at work" : "Not at work"}: ${counted.join(", ")}. status with name "all" lists them.`,
+                    );
                 }
 
                 return reply(lines.length === 0 ? "No subagents." : lines.join("\n"));
@@ -1058,6 +1263,11 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 }
             }
 
+            // A subagent at work takes a message only at its next boundary: Pi is told when, so it does not take the
+            // message as read.
+            const atWork =
+                action === "send" &&
+                (await api.snapshot(LiveDoc, agent!.conversationId, context))?.run !== undefined;
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
 
@@ -1129,7 +1339,13 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 
                 if (action === "send") {
-                    return `Sent to ${name}.`;
+                    if (!atWork) {
+                        return `Sent to ${name}.`;
+                    }
+
+                    return followUp === true
+                        ? `Queued for ${name}: it is at work, and gets the message only when its current run ends. Until then it works on what it had; status shows what waits.`
+                        : `Queued for ${name}: it is at work, and gets the message at its next pause, after its current tool call or when its run ends. status shows what waits.`;
                 }
 
                 const runs = model ?? parent.model;

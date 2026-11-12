@@ -432,3 +432,55 @@ test("the Schedules sheet says how often a repeat skipped its time", real, async
         /Skipped 2 times, last .*: its last message still waits in the queue/,
     );
 });
+
+test("the editor keeps a window, previews the server's next run, removes it", real, async () => {
+    const id = await newSession(app);
+
+    await app.commands.schedule(id, owner(app), {
+        when: "every 1h between 9:00 and 17:00 on weekdays windowed",
+        zone: "UTC",
+    });
+    await page.setViewport(VIEWPORTS.desktop);
+    await page.navigate(`${base}/s/${id}`);
+    const read = (script: string) => inPage<string>(`return JSON.stringify(${script})`);
+    const cardNext = () =>
+        read(`/next (.*?) ·/.exec(document.querySelector(".sched-card")?.textContent)?.[1] ?? ""`);
+
+    await until(
+        async () => {
+            await inPage(
+                `(await import("/store.js")).openSheet({ type: "schedules" }); return "0";`,
+            );
+
+            return (await cardNext()) !== "";
+        },
+        "the sheet",
+        20_000,
+    );
+    const next = await cardNext();
+
+    await inPage(`document.querySelector(".sched-card").click(); return "0";`);
+    await until(
+        async () =>
+            (await read(`document.querySelector('[aria-label="From"]')?.value`)) === "09:00",
+        "the editor with its window",
+    );
+    assert.match(
+        await read(`document.querySelector(".sched-preview").textContent`),
+        new RegExp(`Weekdays, 09:00 to 17:00 · Next ${next}`),
+    );
+    await inPage(
+        `const from = document.querySelector('[aria-label="From"]'); from.value = ""; from.dispatchEvent(new Event("input", { bubbles: true })); return "0";`,
+    );
+    await until(
+        async () =>
+            (await read(`document.querySelector(".sched-editor")?.textContent ?? ""`)).includes(
+                "Pick when the window starts and ends.",
+            ),
+        "the window's message",
+    );
+    await page.click({ selector: ".sched-editor .switch" });
+    await page.click({ label: "Save" });
+    await until(async () => !("window" in ((await items(id))[0]?.every ?? {})), "no window");
+    assert.deepEqual((await items(id))[0]?.every, { minutes: 60 });
+});

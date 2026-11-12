@@ -298,6 +298,24 @@ test("a scheduled message goes out at its time, also after a restart, once; a re
     assert.deepEqual(await items(id), []);
 });
 
+test("a windowed repeat whose window passed while the server was down waits for its next window", async () => {
+    const id = await newSession(app);
+    const hhmm = (at: number) => new Date(at).toISOString().slice(11, 16);
+    const from = Math.ceil((Date.now() + ahead) / 60_000) * 60_000 + 60_000;
+    const repeat = await app.commands.schedule(id, owner(app), {
+        when: `every 10m between ${hhmm(from)} and ${hhmm(from + 30 * 60_000)} missed`,
+        zone: "UTC",
+    });
+
+    assert.equal(repeat.next, from);
+    const startsAt = await restartLater(60);
+
+    await until(async () => (await items(id))[0]!.next > startsAt, "the next window");
+    assert.equal((await items(id))[0]?.runs, 0);
+    assert.ok(!(await userTexts(id)).some((text) => text.includes("missed")));
+    await app.commands.cancelSchedule(id, owner(app), repeat.id);
+});
+
 test("Pi schedules, lists, and cancels its own messages with its tool", async () => {
     const id = await newSession(app);
 
