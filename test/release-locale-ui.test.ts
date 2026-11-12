@@ -146,11 +146,13 @@ async function capture(
     assert.equal(actual.overflow, false, "the page fits its viewport");
     let screenshot: string | undefined;
 
+    // Let passive event handlers mount even when no screenshot is requested.
+    await page.evaluate(
+        "await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))",
+    );
+
     if (evidence) {
         mkdirSync(evidence, { recursive: true });
-        await page.evaluate(
-            "await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))",
-        );
         screenshot = `${viewport}-${name}.jpg`;
         writeFileSync(join(evidence, screenshot), (await page.screenshot()).data);
     }
