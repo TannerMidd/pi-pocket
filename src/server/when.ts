@@ -1,7 +1,8 @@
 /**
  * When a scheduled message goes out, in the words people type: `in 30m`, `7:00`, `tomorrow 9am`, `fri 17:30`,
- * `every 2h`, `every day 8:00`, `every weekday 8:00`, `every mon,thu 9:00`, `every 30m between 9:00 and 17:00 on weekdays`.
- * Clock times are wall-clock times in a time zone, so `every day 8:00` stays at 8:00 across daylight saving changes.
+ * `every 2h`, `every day 8:00`, `every weekday 8:00`, `every mon,thu 9:00`,
+ * `every 30m between 9:00 and 17:00 on weekdays`. Clock times are wall-clock times in a time zone, so `every day 8:00`
+ * stays at 8:00 across daylight saving changes.
  */
 
 /** How often a schedule may repeat, at most: a runaway loop of model calls costs money. */
