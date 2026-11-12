@@ -134,6 +134,38 @@ export interface SessionsApi {
     ): Promise<{ session: ConversationId }>;
 }
 
+/** What `host.inbox.deliver` delivers. */
+export interface InboxDelivery {
+    /** The id of the person Pi works for on it: they must be able to steer in the session. */
+    by: string;
+    /** One short line: the message shows as `[via <via>]`. */
+    via: string;
+    /** What came, as text: core makes it safe between tags and cuts it to 8,000 characters. */
+    payload: string;
+    /** Delivers once: a delivery again with the same key, also after a restart, sends nothing. */
+    key: string;
+    /** The person's own instructions, first and outside the fence. Default: say what it is, and whether to act. */
+    instructions?: string;
+    /** The fence's tag: a lowercase word with `-`, such as `chat-message`. Default `outside-data`. */
+    tag?: string;
+    /** Attributes of the fence's opening tag, up to 8, each made one line without quotes. */
+    attributes?: Readonly<Record<string, string>>;
+    /** Who sent it, outside the fence: `trusted` says that the id is one the owner marked, as guidance, not a boundary. */
+    sender?: { name: string; id?: string; trusted?: boolean };
+    /** A cap of messages an hour for one source (`bucket`), counted in memory across every caller; at most 600. */
+    limit?: { bucket: string; perHour: number };
+}
+
+/**
+ * Outside data delivered to sessions (`inbox.ts`). Throws an error whose `status` says why it did not go: 400 a delivery
+ * that cannot be right, 410 the session is gone or its person cannot see it, 503 PiP is off, 429 the bucket's limit,
+ * 409 the session does not take messages now (try again later).
+ */
+export interface InboxApi {
+    /** Deliver to `target`. `sent: false`: its key delivered it before. */
+    deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+}
+
 /** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
 export interface HumanLinkedSession extends LinkedSession {
     conversationId: ConversationId;
@@ -521,6 +553,13 @@ export interface PocketHost {
     heldBack(conversationId: ConversationId): string | undefined;
     /** Call `listener` whenever the owner changes a spend limit; returns how to stop. */
     onLimitsChanged(listener: () => void): () => void;
+    /**
+     * Data from outside (a chat message, a feed's item, a service's event) delivered to an existing session, or to PiP,
+     * as a message from a person, the path webhooks use (`inbox.ts`). Undefined on a server started before 0.29.0.
+     *
+     * @experimental In 0.29: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    readonly inbox?: InboxApi;
     /**
      * Sessions that a session starts and messages (`linked-sessions.ts`): each one is an ordinary session, linked to the
      * one that started it. The checks of the person Pi works for apply, and a call repeated with its key acts once.

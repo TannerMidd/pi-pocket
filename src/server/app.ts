@@ -107,6 +107,7 @@ import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
+import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
@@ -427,6 +428,8 @@ export class PocketApp {
     readonly repoWatches = new RepoWatches(this);
     /** Webhooks: addresses other services post to, each a message to a session or PiP (`hooks.ts`). */
     readonly hooks = new Hooks(this);
+    /** Outside data delivered to a session as a person's message: webhooks, and extensions (`inbox.ts`). */
+    readonly inbox = new Inbox(this);
     /** Lessons Pi keeps across sessions, for a project or everywhere. */
     readonly memory = new Memory(this);
     /** Each person's favorite working folders, shared by their devices. */
@@ -926,6 +929,10 @@ export class PocketApp {
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
+            inbox: Object.freeze({
+                deliver: (target: ConversationId, delivery: InboxDelivery) =>
+                    this.inbox.deliver(target, delivery),
+            }),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
             sessions: this.extensionSessions,
