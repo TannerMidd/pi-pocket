@@ -1752,6 +1752,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 if (!watched) {
                     state.stallWatch = await tx.createTask(StallWatch, null, BACKGROUND);
                 }
+
                 const input = {
                     name,
                     conversationId,

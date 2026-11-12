@@ -21,6 +21,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { SubagentsDoc } from "../src/server/docs.ts";
+import { runningNow } from "../src/server/running.ts";
 import { STALL_LOOK } from "../src/server/stall-facts.ts";
 
 /** A command that prints nothing and never ends by itself. */
@@ -168,6 +169,13 @@ test("helpers past the soft limit cost the parent one message, with what each wa
     );
     assert.match(told[0]!, /soft-b stalled/);
     assert.ok((await call(id, "soft-a")) !== undefined, "nothing is stopped at the soft limit");
+
+    const board = (await runningNow(app, owner(app))).flatMap((each) => each.tasks);
+
+    assert.ok(
+        board.some((task) => task.subagent === "soft-a" && task.kind === "pi.tool" && task.stalled),
+        "Running now marks its call stalled",
+    );
 
     for (const name of ["soft-a", "soft-b"]) {
         await (await app.harness.conversation(
