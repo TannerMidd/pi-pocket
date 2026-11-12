@@ -428,7 +428,8 @@ function ModePick({ mode, onPick }) {
         }
 
         const outside = (event) => !wrap.current?.contains(event.target) && setOpen(false);
-        const shut = () => setOpen(false);
+        // A wider box (a panel closing, the window growing) hides the button: the menu goes with it.
+        const hidden = new ResizeObserver(() => wrap.current?.offsetWidth === 0 && setOpen(false));
 
         // Esc closes the menu, and does not count as the first of the two presses that stop Pi (`app.js`).
         const onKey = (event) => {
@@ -441,12 +442,12 @@ function ModePick({ mode, onPick }) {
 
         addEventListener("pointerdown", outside, true);
         addEventListener("keydown", onKey, true);
-        addEventListener("resize", shut);
+        hidden.observe(wrap.current);
 
         return () => {
             removeEventListener("pointerdown", outside, true);
             removeEventListener("keydown", onKey, true);
-            removeEventListener("resize", shut);
+            hidden.disconnect();
         };
     }, [open]);
 
