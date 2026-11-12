@@ -279,6 +279,18 @@ test("an event with a date out of range, or attachments not in a list, holds up 
     await relay.stop();
 });
 
+test("a connector with authorLimit false (a feed) has only the connector's limit", async () => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const mock = scripted();
+
+    relay.register({ ...mock.connector, authorLimit: false });
+    await relay.put(config("mock", { perAuthor: 1 }));
+    mock.push(...["1", "2", "3"].map((id) => event(id, "feed")));
+    await until(() => delivered.length === 3, "the deliveries");
+    await relay.stop();
+});
+
 test("a connector that throws backs off and goes on; a fatal error stops it until an edit; the server never sees either", async () => {
     const rejections: unknown[] = [];
     const onRejection = (error: unknown) => rejections.push(error);

@@ -833,7 +833,7 @@ export class Relay {
 
             const trusted = config.ownerIds.includes(event.author.id);
 
-            if (!trusted) {
+            if (!trusted && runner.connector.authorLimit !== false) {
                 const previous = Object.hasOwn(state.authors, event.author.id)
                     ? state.authors[event.author.id]!
                     : [];
