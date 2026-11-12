@@ -99,6 +99,10 @@ const MAX_RECENT = 200;
 const MAX_REPLIES = 2000;
 const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
+/** setTimeout's longest wait: a longer one fires at once. */
+const TIMER_MAX = 2_147_483_647;
+/** The longest a service's retry-after is waited: a day. */
+const RETRY_AFTER_MAX = 24 * HOUR;
 const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
 const BACKOFF_MAX = 15 * 60_000;
@@ -286,7 +290,7 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
             resolve();
         };
 
-        const timer = setTimeout(done, Math.max(0, ms));
+        const timer = setTimeout(done, Math.min(TIMER_MAX, Math.max(0, ms || 0)));
 
         signal.addEventListener("abort", done, { once: true });
     });
@@ -441,7 +445,18 @@ class Runner {
                 }
 
                 failures += 1;
-                const wait = retryAfter ?? backoff(failures, BACKOFF_MIN, BACKOFF_MAX);
+                // A service's retry-after is a floor, not the wait: one of 0, or 1 s each time, still backs off.
+                const wait = Math.min(
+                    RETRY_AFTER_MAX,
+                    Math.max(
+                        retryAfter ?? 0,
+                        backoff(
+                            failures,
+                            retryAfter === undefined ? BACKOFF_MIN : 1000,
+                            BACKOFF_MAX,
+                        ),
+                    ),
+                );
 
                 this.#set("waiting", `retrying in ${Math.ceil(wait / 1000)} s`);
                 await sleep(wait, this.signal);

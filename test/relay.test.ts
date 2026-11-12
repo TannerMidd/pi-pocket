@@ -304,6 +304,31 @@ test("a connector that throws backs off and goes on; a fatal error stops it unti
     assert.deepEqual(rejections, []);
 });
 
+test("a retry-after of 0, or past setTimeout's limit, still backs off", async () => {
+    const relay = open(folder(), fakeInbox().inbox);
+    const runs: number[] = [];
+
+    for (const [index, retryAfter] of [0, 30 * 24 * 3_600_000].entries()) {
+        runs[index] = 0;
+        relay.register({
+            kind: `wait${index}`,
+            label: "Wait",
+            shape: "stream",
+            fields: [],
+            run: async () => {
+                runs[index]! += 1;
+
+                throw new RelayError("slow down", { retryAfter });
+            },
+        });
+        await relay.put(config(`wait${index}`));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await relay.stop();
+    assert.deepEqual(runs, [1, 1]);
+});
+
 test("a stop closes a stream's socket and timers, and a removed kind stops its connectors", async () => {
     const mock = await mockServer(() => ({ json: {} }));
     const { inbox } = fakeInbox();
