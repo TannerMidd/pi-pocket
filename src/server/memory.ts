@@ -32,7 +32,6 @@ export const MAX_LESSON = 300;
 /** Lessons a project keeps, and lessons for everywhere, approved ones: pending ones do not take their room. */
 export const MAX_PROJECT_LESSONS = 40;
 export const MAX_EVERYWHERE_LESSONS = 30;
-/** Lessons one session keeps for itself, approved ones, in a room of their own. */
 export const MAX_SESSION_LESSONS = 20;
 /** Lessons waiting for approval that one person (or Pi for them) may have, so nobody fills the owner's list. */
 export const MAX_PENDING = 20;
@@ -45,16 +44,13 @@ export type Project = { key: string; name: string };
 export type LessonScope = "project" | "everywhere" | "session";
 
 /**
- * A session's lessons are stored as a project whose key no folder has: a project key is an absolute path or a
- * `scheme://` address, never `pocket-session:12`. A server from before session lessons reads one as some other
- * project's, so it puts it in no prompt and no session's sheet, rather than taking it for one for everywhere.
+ * No project key (an absolute path or a `scheme://` address) has this form, so a server from before session lessons
+ * reads one as another project's and uses it nowhere, not everywhere.
  */
 const SESSION_KEY = "pocket-session:";
 
-/** The key of a session's own lessons, for its root conversation. */
 export const sessionKey = (root: ConversationId | number) => `${SESSION_KEY}${String(root)}`;
 
-/** The session a lesson is for, or undefined for a project's or everywhere's. */
 export function sessionOf(lesson: Pick<Lesson, "project">): number | undefined {
     if (lesson.project?.startsWith(SESSION_KEY) !== true) {
         return undefined;
@@ -72,7 +68,6 @@ export const scopeOf = (lesson: Pick<Lesson, "project">): LessonScope =>
           ? "project"
           : "session";
 
-/** Where a conversation is: its project (none for PiP), and the key of its session's own lessons. */
 type Here = { project: Project | undefined; session: string };
 
 /** Who writes: a person, or Pi working for one (`userId` undefined when nobody is known). */
@@ -127,10 +122,7 @@ export const flat = (text: string) =>
 // Cut by code points, so an emoji at the 80th is kept whole, not halved into a lone surrogate.
 const cut = (text: string) => Array.from(text).slice(0, 80).join("");
 const named = (name: string, key: string) => cut(flat(name)) || cut(flat(key));
-/**
- * A session's lessons as a project's name: what a server from before them shows in the owner's pending queue, "for
- * session “Fix the login”", and this one too, with the title as it is now.
- */
+/** A server from before session lessons shows this name in the owner's pending queue. */
 const sessionName = (title: string | undefined) => `session “${named(title ?? "", "Untitled")}”`;
 const ordered = (lessons: Lesson[]) =>
     lessons.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
@@ -203,7 +195,6 @@ export class Memory {
         return Object.values(doc?.items ?? {});
     }
 
-    /** Where a conversation is: its project, and its session's own lessons, by its root (a subagent's is its session's). */
     async #here(conversationId: ConversationId, cwd: string | undefined): Promise<Here> {
         return {
             project: await this.project(conversationId, cwd),
@@ -219,10 +210,7 @@ export class Memory {
         );
     }
 
-    /**
-     * The lessons that apply in a project (and everywhere's), and in conversation `conversationId`'s session when given,
-     * oldest first, pending ones included.
-     */
+    /** Oldest first, pending ones included. */
     async applying(
         project: Project | undefined,
         conversationId?: ConversationId,
@@ -262,7 +250,6 @@ export class Memory {
         return writer.byPi || !this.#isOwner(writer.userId);
     }
 
-    /** A 409 when a project's (or everywhere's, or a session's) approved lessons are full: each has a room of its own. */
     #roomFor(
         doc: { items: Record<string, Lesson> },
         lesson: Pick<Lesson, "project" | "projectName">,
@@ -373,7 +360,6 @@ export class Memory {
         const text = this.#text(request.text);
         const root = app.rootOf(conversationId);
         const meta = app.sessionMeta(root);
-        // A session's own lessons are a project no folder is (`sessionKey`), named for the session.
         const project =
             request.scope === "session"
                 ? { key: sessionKey(root), name: sessionName(meta?.title) }
@@ -678,10 +664,7 @@ export class Memory {
         }, context);
     }
 
-    /**
-     * A fork goes on with its parent session's lessons in force, as lessons of its own, in the commit that makes it.
-     * What waits for the owner stays with the parent: the owner approves it once, there.
-     */
+    /** What waits for the owner stays with the parent: the owner approves it once, there. */
     async forked(tx: Tx, from: ConversationId, to: ConversationId, title: string): Promise<void> {
         const doc = await tx.doc(MemoryDoc);
         const parent = sessionKey(this.#app.rootOf(from));
@@ -745,7 +728,6 @@ export class Memory {
                 const seen = source !== undefined && app.sessionMeta(source) !== undefined;
                 const scope = scopeOf(lesson);
                 const session = sessionOf(lesson);
-                // The queue names a session by its title now; one no longer here, as it was saved.
                 const meta =
                     session === undefined
                         ? undefined

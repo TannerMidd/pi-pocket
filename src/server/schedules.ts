@@ -659,7 +659,8 @@ export class Schedules {
 
     /**
      * When a schedule given as data goes out first: `next` for one that goes out once, or for a repeat every so many
-     * minutes without a window when given; else the repeat's next time. Throws with a short explanation when `next` will not do.
+     * minutes without a window when given; else the repeat's next time. Throws with a short explanation when `next`
+     * will not do.
      */
     #timeOf(at: { next?: number; every?: Repeat }, zone: string): { next: number; every?: Repeat } {
         const now = this.#app.now();

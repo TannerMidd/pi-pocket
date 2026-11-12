@@ -817,13 +817,10 @@ async function chosenModel(
     return ref;
 }
 
-/** How long a subagent at work may go with nothing new in its transcript before status calls it stalled, by default. */
 const STALLED_MINUTES = 30;
 
-/** How many of a transcript's newest entries status reads to find its last message. */
 const ACTIVITY_ENTRIES = 20;
 
-/** A time span, short: "40 s", "12 min", "3 h", "2 d". */
 function span(ms: number): string {
     const seconds = Math.max(0, Math.round(ms / 1000));
 
@@ -842,10 +839,7 @@ function span(ms: number): string {
     return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
 }
 
-/**
- * When a subagent last did something: the time of the newest message in its transcript (its brief, an answer, a tool
- * call, or a tool result). Output that a tool call streams while it runs does not count.
- */
+/** The time of the newest message in a transcript: output that a running tool call streams does not count. */
 async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<number | undefined> {
     const page = await tx.scanEntries({ conversationId, order: "descending" }, ACTIVITY_ENTRIES);
 
@@ -862,7 +856,6 @@ async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<num
     return undefined;
 }
 
-/** How a subagent that does not work now ended, by its record: done, failed (and why), stopped, or never answered. */
 function ending(record: SubagentRecord): "done" | "failed" | "stopped" | "idle" {
     if (record.failed === true) {
         return record.error === STOPPED ? "stopped" : "failed";
@@ -871,11 +864,6 @@ function ending(record: SubagentRecord): "done" | "failed" | "stopped" | "idle" 
     return record.answeredAt === undefined ? "idle" : "done";
 }
 
-/**
- * One subagent's line for status. At work: whether it waits for a person to allow a call, the calls it runs, a model
- * request it retries, and how long ago it last did something, called stalled past `stalledMs`. Otherwise: how it ended,
- * and when.
- */
 function statusLine(
     name: string,
     record: SubagentRecord,
@@ -920,7 +908,6 @@ function statusLine(
     return `${name}: ${parts.join("; ")}`;
 }
 
-/** The start of a message that waits, on one line. */
 function opening(content: unknown): string {
     const text =
         typeof content === "string"
@@ -935,12 +922,6 @@ function opening(content: unknown): string {
     return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
 }
 
-/**
- * What waits in a subagent's queue, for status: each message's start, and when the subagent gets it. A steer goes in
- * at its next pause (after its current tool call, or when its run ends), a follow-up only once its current run ends. A
- * message no longer listed was taken, or, when its run failed, given back with a report that says so. Empty when none
- * waits.
- */
 function waitingNote(inbox: Readonly<InboxState> | undefined): string {
     // Writes wait there too (a compaction's summary, say): they are no messages.
     const each = (inbox?.items ?? []).flatMap((item) =>
@@ -1098,7 +1079,6 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                     return reply(`No subagent named ${name}.`);
                 }
 
-                // Only for those at work: a finished one's record says when it ended.
                 const lastAt = await api.commit(async (tx) => {
                     const found = new Map<string, number | undefined>();
 

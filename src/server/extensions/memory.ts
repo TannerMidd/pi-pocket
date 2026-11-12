@@ -121,7 +121,6 @@ export default function createMemory(host: PocketHost) {
                 }
 
                 const project = await memory.project(api.conversationId, cwd);
-                // PiP has no project: its lessons are for everywhere, or for PiP's own session.
                 const scope =
                     args.scope === "session"
                         ? "session"
