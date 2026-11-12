@@ -157,7 +157,7 @@ interface RelayContext {
 }
 ```
 
-- `emit(events)` hands events to the relay. It resolves when the relay has filtered them and written the ones it keeps to disk: they will reach the session. It rejects only when the connector has stopped. Save your cursor **after** `emit` resolves: a restart between the two then gives the events again, and the ids stop a repeat.
+- `emit(events)` hands events to the relay. It resolves when the relay has filtered them and written the ones it keeps to disk: they will reach the session. It rejects when the connector has stopped, or when the relay could not write its files (then the events are not stored: do not save your cursor). Save your cursor **after** `emit` resolves: a restart between the two then gives the events again, and the ids stop a repeat.
 - `state` is what you saved last. It lasts across reloads and restarts, and it is `{}` at first. `save(state)` replaces it. It must be JSON of 64 KB or less. A larger one is not kept, and the relay logs it. Keep a cursor or a session id in it, not the events.
 - `status(text)` sets one short line in the connector's status (120 characters at most), such as `connected`. `log(text)` writes a line in the server's log with the connector's name. Neither may have a secret in it, and the relay takes out the secrets it knows.
 - `sleep(ms)` waits, and ends early when the connector stops. It never rejects.

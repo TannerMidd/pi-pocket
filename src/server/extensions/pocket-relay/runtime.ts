@@ -7,7 +7,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { InboxApi } from "../../host.ts";
@@ -262,8 +262,15 @@ function aliveIn(folder: string): Set<Promise<void>> {
 async function save(path: string, data: unknown): Promise<void> {
     const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
 
-    await writeFile(temporary, `${JSON.stringify(data)}\n`, { mode: 0o600 });
-    await rename(temporary, path);
+    try {
+        await writeFile(temporary, `${JSON.stringify(data)}\n`, { mode: 0o600 });
+        await rename(temporary, path);
+    } catch (error) {
+        await unlink(temporary).catch(() => {});
+
+        throw error;
+    }
+
     await chmod(path, 0o600).catch(() => {});
 }
 
@@ -849,10 +856,15 @@ export class Relay {
             }
         }
 
-        if (changed) {
+        // A write that failed before is tried again: what it held is not stored until one works.
+        if (changed || !this.#written) {
             await this.persist();
             runner.wake();
             this.changed(config.id);
+        }
+
+        if (!this.#written) {
+            throw new Error("The relay could not write its files, so the events are not stored.");
         }
     }
 
@@ -1150,6 +1162,12 @@ export class Relay {
         await this.persist();
         this.#start(config.id);
         this.changed(config.id);
+
+        if (!this.#written) {
+            throw new Error(
+                "The relay could not write its files: the change is lost at a restart.",
+            );
+        }
     }
 
     async remove(id: string): Promise<boolean> {
