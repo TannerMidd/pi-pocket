@@ -1,4 +1,3 @@
-/** The relay's generic HTTP connector: polls a JSON address for new items, and can reply with a request. */
 import { createHash } from "node:crypto";
 import { keyOf, readCapped } from "./rss.ts";
 import {
@@ -135,7 +134,7 @@ function text(values: RelayValues, name: string): string {
     return typeof value === "string" ? value.trim() : "";
 }
 
-/** Parse "Name: value" lines. Returns the headers, or a problem in words (it never repeats a value). */
+// A problem never repeats a header value: it could be a secret.
 function parseHeaders(raw: string, label: string): Record<string, string> | string {
     const headers: Record<string, string> = {};
     const lines = raw.split(/\r?\n/);
@@ -245,7 +244,7 @@ function retryAfterOf(response: Response): number {
     return Number.isFinite(date) ? Math.max(1000, date - Date.now()) : 60_000;
 }
 
-/** Throws the right error for a bad answer. The message never holds a header value or the address. */
+// The message never holds a header value or the address.
 function failOn(response: Response, what: string): never {
     if (response.status === 401 || response.status === 403) {
         throw new RelayError(

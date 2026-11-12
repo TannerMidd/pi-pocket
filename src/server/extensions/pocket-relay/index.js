@@ -1,10 +1,6 @@
-// The relay's browser module, for the owner: a menu row and a launcher action that open the Relay sheet (each
-// connector with its session, its status, and an on and off switch), a sheet to choose the kind of a new connector,
-// and a form to add or edit one. It uses only `pocket`. Secrets never come to the browser: the form says only whether
-// each one is set.
+// Secrets never come to the browser: the form says only whether each one is set.
 export const pocketApi = 1;
 
-/** Lucide's radio-tower icon. */
 const ICON =
     "M4.9 16.1C1 12.2 1 5.8 4.9 1.9 M7.8 4.7a6.14 6.14 0 0 0-.8 7.5 M10 9a2 2 0 1 0 4 0 2 2 0 1 0-4 0 M16.2 4.8c2 2 2.26 5.11.8 7.47 M19.1 1.9a9.96 9.96 0 0 1 0 14.1 M9.5 18h5 M8 22l4-11 4 11";
 
@@ -17,7 +13,6 @@ const LIMITS = {
     perAuthor: [1, 120],
 };
 
-/** Each state of a connector, in words, and its tone. */
 const STATES = {
     off: { label: "Off", tone: "muted" },
     starting: { label: "Starting", tone: "busy" },
@@ -28,13 +23,11 @@ const STATES = {
     "no-connector": { label: "Not available", tone: "err" },
 };
 
-/** What a state means, for the states that need it. */
 const MEANS = {
     stopped: "It stopped on an error, such as a wrong token. Edit it to start it again.",
     "no-connector": "The part of Pi Pocket for this kind is not loaded.",
 };
 
-/** "5 minutes ago", "3 hours ago", "2 days ago". */
 function ago(at) {
     const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
 
@@ -57,14 +50,12 @@ function ago(at) {
 
 const when = (at) => new Date(at).toLocaleString();
 
-/** The IDs in a text: one on each line, or comma separated. */
 const idsOf = (text) =>
     text
         .split(/[\n,]/)
         .map((each) => each.trim())
         .filter((each) => each !== "");
 
-/** The body to save a connector again: its view, with `patch` over it. Secrets stay as they are. */
 const bodyOf = (connector, patch = {}) => ({
     name: connector.name,
     kind: connector.kind,
@@ -79,7 +70,6 @@ const bodyOf = (connector, patch = {}) => ({
     ...patch,
 });
 
-/** A field's first value in the form: what the connector has, else the field's default. */
 function startValue(field, values) {
     const value = values?.[field.name] ?? field.default;
 
@@ -97,7 +87,6 @@ function startValue(field, values) {
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
 
-    /** `{ kinds, connectors, sessions }` from the server, or null before it comes. */
     let data = null;
     let failure = null;
     let gone = false;
@@ -120,7 +109,6 @@ export default function setup(pocket) {
         }
     };
 
-    /** Show `next`: the menu row's hint follows it. */
     const publish = (next) => {
         if (gone) {
             return;
@@ -139,7 +127,6 @@ export default function setup(pocket) {
         told();
     };
 
-    /** Put one connector, as the server answered, in the list. */
     const upsert = (connector) => {
         if (data === null) {
             return;
@@ -202,7 +189,6 @@ export default function setup(pocket) {
         document.removeEventListener("visibilitychange", back);
     });
 
-    /** Draw again when the list changes, and each half minute, so "5 minutes ago" stays true. */
     function useData() {
         const [, bump] = useState(0);
 
@@ -233,8 +219,6 @@ export default function setup(pocket) {
         return session.archived ? `${session.title} (archived)` : session.title;
     }
 
-    // ─── Pieces ─────────────────────────────────────────────────────────────
-
     function Chip({ status }) {
         const state = STATES[status.state] ?? { label: status.state, tone: "muted" };
 
@@ -244,7 +228,6 @@ export default function setup(pocket) {
         </span>`;
     }
 
-    /** The status of a connector: its chip and words, its last error, and its counts. */
     function Status({ connector }) {
         const status = connector.status;
         const counts = [
@@ -284,8 +267,6 @@ export default function setup(pocket) {
             </div>
         </div>`;
     }
-
-    // ─── The list ───────────────────────────────────────────────────────────
 
     function Row({ connector }) {
         const [busy, setBusy] = useState(false);
@@ -372,8 +353,6 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    // ─── A new connector's kind ─────────────────────────────────────────────
-
     function Kinds() {
         const current = useData();
 
@@ -412,9 +391,6 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    // ─── The form ───────────────────────────────────────────────────────────
-
-    /** A secret field: "Set" or "Not set", with Replace and Clear. Its value never shows. */
     function Secret({ field, set, state, onChange }) {
         const id = `relay-field-${field.name}`;
 
@@ -494,7 +470,6 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    /** One of the kind's fields. */
     function Field({ field, value, set, onChange }) {
         const id = `relay-field-${field.name}`;
         const optional = !field.required && ["text", "textarea", "number"].includes(field.type);
@@ -566,7 +541,6 @@ export default function setup(pocket) {
         return html`<div class="relay-field">${label}${control}${about}</div>`;
     }
 
-    /** The first problem with the form, in words, or null. */
     function problem(form, kind, connector) {
         const name = form.name.trim();
 
@@ -640,7 +614,6 @@ export default function setup(pocket) {
         return null;
     }
 
-    /** What the form sends: secrets only when they change. */
     function bodyOfForm(form, kind) {
         const values = {};
 
@@ -688,7 +661,6 @@ export default function setup(pocket) {
                     : startValue(field, connector?.values);
         }
 
-        // A new connector goes to the session this tab shows, else the first one not archived.
         const here = pocket.conversationId();
         const open = sessions.filter((each) => !each.archived);
         const target =
@@ -958,7 +930,6 @@ export default function setup(pocket) {
         </form>`;
     }
 
-    /** The form for a new connector (`kind`) or one there is (`id`), once the list has come. */
     function FormSheet({ kind: kindName, id }) {
         const current = useData();
 

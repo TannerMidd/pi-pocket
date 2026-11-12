@@ -29,7 +29,6 @@ after(() => {
     }
 });
 
-/** A fake context: `state` follows `save`, so the next poll sees it. */
 function fake(values: RelayValues) {
     const controller = new AbortController();
     const events: RelayEvent[] = [];
