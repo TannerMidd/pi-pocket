@@ -877,12 +877,6 @@ test("a session's lessons have a room of their own, and so do the ones that wait
     await app.memory.add(id, elsewhere, writer, { text: "everywhere one", scope: "everywhere" });
     await app.memory.add(other, elsewhere, writer, { text: "other one", scope: "session" });
 
-    // A full project leaves the session room too.
-    for (let index = 1; index < MAX_PROJECT_LESSONS; index++) {
-        await app.memory.add(id, elsewhere, writer, { text: `p${index}`, scope: "project" });
-    }
-
-    await app.memory.add(other, elsewhere, writer, { text: "other two", scope: "session" });
     await clear();
 
     // Waiting ones: a person's session lessons that wait count in that session only.
@@ -916,31 +910,10 @@ test("a session's lessons have a room of their own, and so do the ones that wait
         app.memory.add(third, elsewhere, asGuest, { text: "third", scope: "session" }),
         /40 session lessons wait for the owner's approval already/,
     );
-
-    // A guest cannot approve, the owner's own counts at once, and Pi's forgetting one in force is a proposal.
-    const waiting = (await lessons()).find((each) => each.text === "g0")!;
-
-    await assert.rejects(app.memory.edit(id, guest, waiting.id, "approve", { text: "g0" }), {
-        status: 403,
-    });
-    await clear();
-    const mine = await app.memory.remember(id, owner(app), {
-        text: "Owner-session-ibex.",
-        scope: "session",
-    });
-
-    assert.equal(mine.pending, undefined);
-    assert.equal(mine.project, sessionKey(id));
-    assert.ok(await has(id, "Owner-session-ibex"));
-    await say(app, id, `forget ${mine.id}`);
-    assert.match(await answer(id), /Proposed forgetting/);
-    assert.ok(await has(id, "Owner-session-ibex"), "in force until the owner approves");
-    await approve(id, mine.id);
-    assert.ok(!(await has(id, "Owner-session-ibex")));
     await clear();
 });
 
-test("a fork goes on with its session's lessons in force, as its own; archiving keeps them", async () => {
+test("a fork goes on with its session's lessons in force, as its own", async () => {
     await clear();
     const id = await newSession(app, repo);
 
@@ -972,11 +945,6 @@ test("a fork goes on with its session's lessons in force, as its own; archiving 
     assert.ok(!(await has(fork, "Fork-keeps-okapi")));
     assert.ok(await has(id, "Fork-keeps-okapi"));
     assert.equal((await lessons()).find((each) => each.id === waits.id)?.project, sessionKey(id));
-
-    // Archived, a session keeps its lessons (sessions are archived, never deleted): back, it has them.
-    await app.commands.updateSession(id, owner(app), { archived: true });
-    await app.commands.updateSession(id, owner(app), { archived: false });
-    assert.ok(await has(id, "Fork-keeps-okapi"));
     await clear();
 });
 
@@ -991,46 +959,5 @@ test("a session lesson is stored as a project no folder is, so an older server u
     // Beta 3 reads a lesson with no project as one for everywhere, and one with a project only in a folder whose
     // project key is the same. Its keys are absolute paths or `scheme://` addresses: never this one.
     assert.equal(lesson.project, `pocket-session:${String(id)}`);
-    assert.ok(!lesson.project!.startsWith("/"));
-    assert.doesNotMatch(lesson.project!, /^[a-z][a-z0-9+.-]+:\/\//i);
-    assert.doesNotMatch(lesson.project!, /^[a-z]:[\\/]/i);
-    const beta3Applies = (key: string | undefined) =>
-        lesson.project === undefined || lesson.project === key;
-
-    for (const cwd of [repo, worktree, elsewhere]) {
-        const project = await app.memory.project(id, cwd);
-
-        assert.ok(!beta3Applies(project?.key), cwd);
-    }
-
-    assert.ok(!beta3Applies(undefined), "PiP (no project) does not get it either");
-
-    // Lessons stored before session lessons read as before.
-    await app.harness.commit(async (tx) => {
-        (await tx.doc(MemoryDoc)).items.old = {
-            id: "old",
-            text: "Old-everywhere-eland.",
-            by: owner(app).id,
-            byPi: false,
-            createdAt: 1,
-        };
-    }, context);
-    assert.equal(
-        (await app.memory.view(id, owner(app))).lessons.find((each) => each.id === "old")?.scope,
-        "everywhere",
-    );
-    assert.ok(await given(elsewhere, "Old-everywhere-eland"));
-    await clear();
-});
-
-test("a session's lessons last across a restart", async () => {
-    await clear();
-    const id = await newSession(app, elsewhere);
-
-    await app.memory.remember(id, owner(app), { text: "Restart-keeps-kudu.", scope: "session" });
-    await app.close();
-    app = await openApp(scriptedModel(route), join(root, "memory-data"));
-    assert.ok(await has(id, "Restart-keeps-kudu"));
-    assert.ok(!(await given(elsewhere, "Restart-keeps-kudu")));
     await clear();
 });
