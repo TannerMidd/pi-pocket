@@ -1,0 +1,291 @@
+/* The Relay sheets: cards in the app's colors, with targets a thumb can hit, and nothing wider than a phone. */
+.relay-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.relay-sheet p {
+    margin: 0;
+}
+
+.relay-empty {
+    align-items: flex-start;
+}
+
+.relay-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.relay-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.relay-card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.relay-open,
+.relay-kind {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    text-align: left;
+    color: var(--text);
+    border-radius: var(--r-row);
+}
+
+.relay-kind {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--card);
+    transition: border-color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .relay-kind:hover {
+        border-color: var(--accent-line);
+    }
+
+    .relay-open:hover .relay-name {
+        color: var(--accent);
+    }
+}
+
+.relay-name {
+    max-width: 100%;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.relay-meta {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.relay-status {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.relay-status-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    min-width: 0;
+}
+
+.relay-status-text {
+    min-width: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.relay-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-pill);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.relay-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--r-pill);
+    background: currentColor;
+}
+
+.relay-chip.ok {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.relay-chip.busy {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.relay-chip.warn {
+    border-color: var(--warn-line);
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.relay-chip.err {
+    border-color: var(--err-line);
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+.relay-error {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--err-line);
+    color: var(--err);
+}
+
+.relay-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.relay-buttons .button {
+    min-height: 40px;
+}
+
+.relay-remove {
+    margin-right: auto;
+}
+
+.relay-danger {
+    border-color: var(--err-line);
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+@media (hover: hover) {
+    .relay-remove:hover,
+    .relay-danger:hover {
+        color: var(--err);
+        border-color: var(--err);
+    }
+}
+
+.relay-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--err-line);
+    border-radius: var(--r-card);
+    background: var(--err-soft);
+}
+
+/* The form. */
+.relay-form {
+    gap: 16px;
+}
+
+.relay-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.relay-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.relay-label .muted {
+    font-weight: 400;
+}
+
+.relay-form input,
+.relay-form select {
+    min-height: 40px;
+}
+
+.relay-form textarea {
+    resize: vertical;
+    min-height: 64px;
+}
+
+.relay-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+}
+
+.relay-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.relay-secret,
+.relay-secret-edit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.relay-secret .button,
+.relay-secret-edit .button {
+    min-height: 40px;
+    flex: none;
+}
+
+.relay-secret-edit input {
+    flex: 1;
+    min-width: 0;
+}
+
+.relay-secret-word {
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.relay-secret-word.ok {
+    color: var(--ok);
+}
+
+.relay-secret-word.warn {
+    color: var(--warn);
+}
+
+@media (pointer: coarse) {
+    .relay-buttons .button,
+    .relay-secret .button,
+    .relay-secret-edit .button,
+    .relay-form input,
+    .relay-form select {
+        min-height: 44px;
+    }
+}
