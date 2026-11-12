@@ -470,6 +470,17 @@ test("the editor keeps a window, previews the server's next run, removes it", re
         await read(`document.querySelector(".sched-preview").textContent`),
         new RegExp(`Weekdays, 09:00 to 17:00 · Next ${next}`),
     );
+    // A cleared time says so, and the editor stays.
+    await inPage(
+        `const from = document.querySelector('[aria-label="From"]'); from.value = ""; from.dispatchEvent(new Event("input", { bubbles: true })); return "0";`,
+    );
+    await until(
+        async () =>
+            (await read(`document.querySelector(".sched-editor")?.textContent ?? ""`)).includes(
+                "Pick when the window starts and ends.",
+            ),
+        "the window's message",
+    );
     await page.click({ selector: ".sched-editor .switch" });
     await page.click({ label: "Save" });
     await until(async () => !("window" in ((await items(id))[0]?.every ?? {})), "no window");

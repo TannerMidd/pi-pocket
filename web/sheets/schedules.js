@@ -72,6 +72,11 @@ function wallOf(zone) {
 
 /** The moment `wall`'s clock shows a date (month from 0) and a time: its offset read twice, to find a change of clocks. */
 function zoned(wall, year, month, date, time) {
+    // A time field the person cleared is "": no moment, not an error (`Intl` throws on an invalid time).
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+        return Number.NaN;
+    }
+
     const [hour, minute] = time.split(":").map(Number);
     const target = Date.UTC(year, month, date, hour, minute);
     const at = target - (wall(target).utc - target);
