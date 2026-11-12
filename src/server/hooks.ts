@@ -655,7 +655,7 @@ export class Hooks {
                 instructions: hook.instructions,
                 tag: PAYLOAD_TAG,
                 ...(what === "" ? {} : { attributes: { event: what } }),
-                // Raw: the inbox makes it safe between the tags and cuts it, as `payloadText` does.
+                // Raw: the inbox makes it safe between the tags and cuts it.
                 payload: payloadRaw(content),
                 key,
                 limit: { bucket: `hook:${hook.id}`, perHour: POSTS_PER_HOUR },
