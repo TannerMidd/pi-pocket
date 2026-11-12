@@ -10880,6 +10880,16 @@ textarea.notes {
     flex: 1;
 }
 
+/* The window's two times: where the row is too narrow for both whole ("11:00 PM" and the clock), "and" and To go on a
+ * line of their own. */
+.sched-row[data-part="schedule-window"] {
+    flex-wrap: wrap;
+}
+
+.sched-row[data-part="schedule-window"] input[type="time"] {
+    flex-basis: 8.5em;
+}
+
 .sched-amount {
     width: 5.5em;
     flex: none;
