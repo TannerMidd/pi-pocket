@@ -1998,9 +1998,19 @@ test(
             );
 
         await shows(["Project lesson one."], "this project's lessons only");
-        assert.deepEqual((await listed()).counts, ["1", "1"]);
+        assert.deepEqual((await listed()).counts, ["1", "1", "0"]);
         assert.match((await listed()).on, /^This project: 1 lesson$/);
-        await tap(".memory-scope button:not(.on)");
+        // On a phone the three scopes take their short names, and each keeps its count in view.
+        const labels = await inPage<string[]>(`
+            return JSON.stringify([...document.querySelectorAll(".memory-scope button")].map((each) => {
+                const fits = each.scrollWidth <= each.clientWidth;
+
+                return each.innerText.split("\\n")[0] + (fits ? "" : " (cut)");
+            }));
+        `);
+
+        assert.deepEqual(labels, ["Project", "Everywhere", "Session"]);
+        await tap(".memory-scope button:nth-child(2)");
         await shows(["Everywhere lesson one."], "everywhere's lessons only");
         // Added now, it goes where the switch points.
         await page.evaluate(`
@@ -2020,6 +2030,23 @@ test(
         assert.equal(
             view.lessons.find((lesson) => lesson.text === "Everywhere lesson two.")?.scope,
             "everywhere",
+        );
+        // This session's own: listed alone, and a lesson added there is for this session only.
+        await tap(".memory-scope button:nth-child(3)");
+        await shows([], "this session's lessons only");
+        await page.evaluate(`
+        const box = document.querySelector(".lesson-add textarea");
+
+        box.value = "Session lesson one.";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+    `);
+        await tap(".lesson-add .button.primary:not([disabled])");
+        await shows(["Session lesson one."], "the session's new lesson");
+        assert.equal(
+            (await app.memory.view(first, owner(app))).lessons.find(
+                (lesson) => lesson.text === "Session lesson one.",
+            )?.scope,
+            "session",
         );
         // On a wide screen the sheet takes the wide sheets' room.
         await page.setViewport(VIEWPORTS.desktop);
