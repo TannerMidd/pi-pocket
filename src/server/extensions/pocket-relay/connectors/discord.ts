@@ -1,7 +1,4 @@
-/**
- * Discord: a bot that hears messages over the gateway (v10) and replies over REST. It resumes its gateway session
- * across reloads, keeps Discord's identify limit, and fills a gap over REST when a session is lost.
- */
+/** Discord: a bot that hears messages over the gateway (v10) and replies over REST. */
 import { createHash } from "node:crypto";
 import {
     RelayError,
@@ -191,7 +188,7 @@ function readState(saved: Readonly<Record<string, unknown>>): State {
     return state;
 }
 
-/** Discord's REST API. `soft`: a channel the bot cannot read (403, 404) gives undefined, not an error. */
+/** `soft`: a channel the bot cannot read (403, 404) gives undefined, not an error. */
 async function api(
     values: RelayValues,
     signal: AbortSignal,
@@ -550,8 +547,7 @@ async function run(context: RelayContext): Promise<void> {
         }
     };
 
-    // Waits until Discord's identify limit allows one more: 30 s apart, 900 a day. The gap doubles after each
-    // identify that does not reach READY (up to 10 min), so a gateway that keeps closing does not use up the day.
+    // Discord's identify limit is 30 s apart and 900 a day: a gateway that keeps closing must not use up the day.
     const identifyGate = async (): Promise<boolean> => {
         const now = Date.now();
 
