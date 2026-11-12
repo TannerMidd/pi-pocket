@@ -260,14 +260,20 @@ const slack: RelayConnector = {
 
         context.save({});
 
+        let delay = 1000;
+
         while (!context.signal.aborted) {
             const { url } = await request<{ url: string }>(context, "apps.connections.open", true);
+            const started = Date.now();
 
             await socketRun(context, url, user, channels);
 
             if (!context.signal.aborted) {
+                // A socket that closes at once is retried less often each time; one that lived a while starts over.
+                delay = Date.now() - started >= 30_000 ? 1000 : delay;
                 context.status("Reconnecting");
-                await context.sleep(1000);
+                await context.sleep(delay);
+                delay = Math.min(delay * 2, 60_000);
             }
         }
     },
@@ -281,7 +287,11 @@ const slack: RelayConnector = {
 
         const result = await request<{ ts: string }>(context, "chat.postMessage", false, {
             channel,
-            text: reply.text.slice(0, 4000),
+            text: reply.text
+                .slice(0, 4000)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;"),
             ...(thread ? { thread_ts: thread } : {}),
             unfurl_links: false,
             parse: "none",
