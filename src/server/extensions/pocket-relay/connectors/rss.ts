@@ -1,4 +1,3 @@
-/** The relay's RSS and Atom connector: polls a feed address and delivers the items it has not seen. */
 import { createHash } from "node:crypto";
 import {
     RelayError,
@@ -37,12 +36,11 @@ function decode(value: string): string {
     });
 }
 
-/** The text of an element's content: CDATA as it is, the rest with entities decoded. */
 function plain(raw: string): string {
     return raw.includes("<![CDATA[") ? unwrap(raw) : decode(raw);
 }
 
-/** Every scan below walks the text once, so no input can make it quadratic. */
+// One pass, so no input can make it quadratic.
 function unwrap(raw: string): string {
     let out = "";
     let from = 0;
@@ -81,14 +79,12 @@ function stripTags(value: string): string {
     return out + value.slice(from);
 }
 
-/** A title: markup inside CDATA is removed, and escaped text stays as it is. */
 function heading(raw: string): string {
     return (raw.includes("<![CDATA[") ? stripTags(plain(raw)) : plain(raw))
         .replace(/\s+/g, " ")
         .trim();
 }
 
-/** The text of an HTML element's content, without tags. */
 function html(raw: string): string {
     const stripped = stripTags(plain(raw));
 
@@ -106,10 +102,6 @@ interface Link {
     text: string;
 }
 
-/**
- * The raw content of the first `<name>` for each wanted name (lower case), and every `<link>`, in one pass over
- * the tags. An element with no end tag is left out.
- */
 function scan(block: string, wanted: ReadonlySet<string>) {
     const tag = new RegExp(TAG.source, "g");
     const starts = new Map<string, number>();
@@ -158,7 +150,6 @@ function scan(block: string, wanted: ReadonlySet<string>) {
     return { found, links: pending === undefined ? links : [...links, ...inner] };
 }
 
-/** The raw content of the first `<name>`, or undefined. */
 function element(block: string, name: string): string | undefined {
     const lower = name.toLowerCase();
 
@@ -260,7 +251,6 @@ function parseItem(block: string): FeedItem {
 const CLOSE_ITEM = /<\/item\s*>/gi;
 const CLOSE_ENTRY = /<\/entry\s*>/gi;
 
-/** The items of an RSS or Atom document, in the order they come, and the feed's own title. */
 export function parseFeed(xml: string): { title: string | undefined; items: FeedItem[] } {
     // One pass: an item that never closes ends the scan, so the work stays linear.
     const open = /<(item|entry)\b[^<>]*>/gi;
@@ -300,7 +290,7 @@ export function parseFeed(xml: string): { title: string | undefined; items: Feed
     };
 }
 
-/** Reads an answer's text, and refuses one larger than `max` bytes, so one answer cannot fill the memory. */
+// Refuse an answer over `max` bytes: one answer cannot fill the memory.
 export async function readCapped(response: Response, max = MAX_BODY): Promise<string> {
     const declared = Number(response.headers.get("content-length"));
 
