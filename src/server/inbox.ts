@@ -50,6 +50,10 @@ export const viaLabel = (text: string): string =>
         .trim()
         .slice(0, 80);
 
+/** An attribute's value as one line: line breaks of every kind become spaces, and bidi and format characters go. */
+const oneLine = (text: string): string =>
+    text.replace(/\p{Cf}/gu, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ");
+
 /** A key a request id can hold as it is (`clientKey`'s alphabet, 64 at most), else a hash of it. */
 export function requestKey(key: string): string {
     return /^[A-Za-z0-9_-]{1,64}$/.test(key)
@@ -75,7 +79,7 @@ export function inboxText(delivery: InboxDelivery): string {
               ]),
     ];
     const attributes = fields
-        .map(([name, value]) => ` ${name}="${attribute(value).slice(0, 120)}"`)
+        .map(([name, value]) => ` ${name}="${attribute(oneLine(value)).slice(0, 120)}"`)
         .join("");
     const trust =
         sender === undefined

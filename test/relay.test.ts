@@ -185,6 +185,8 @@ test("what came is delivered once, also after a restart in the middle", async ()
     state.refuse = true;
     mock.push(event("2"));
     await until(() => first.stateOf("c-mock").pending.length === 1, "the event to wait");
+    // `pending` grows before the write ends: the cursor is saved only after it, once `emit` resolves.
+    await until(() => first.stateOf("c-mock").own.cursor === "2", "the cursor");
     await first.stop();
     assert.equal(first.running(), 0);
     assert.equal(statSync(join(where, "state.json")).mode & 0o777, 0o600);
@@ -246,6 +248,49 @@ test("bots, messages without a mention, and authors past their limit are not del
     assert.equal(relay.stateOf("c-mock").dropped, 1);
 });
 
+test("an author named as an object's key (constructor, __proto__) has a limit and holds up nothing", async () => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const mock = scripted();
+    const names = ["constructor", "__proto__", "toString"];
+
+    relay.register(mock.connector);
+    await relay.put(config("mock", { perAuthor: 1 }));
+    mock.push(...names.flatMap((name) => [event(`${name}1`, name), event(`${name}2`, name)]));
+    mock.push(event("last"));
+    await until(() => delivered.length === 4, "the deliveries");
+    await relay.stop();
+    assert.deepEqual(
+        delivered.map((each) => each.key.replace("relay-c-mock-", "")),
+        [...names.map((name) => `${name}1`), "last"],
+    );
+});
+
+test("an event with a date out of range, or attachments not in a list, holds up nothing", async () => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const mock = scripted();
+    const odd = { attachments: "a.png" as unknown as string[] };
+
+    relay.register(mock.connector);
+    await relay.put(config("mock"));
+    mock.push(event("late", "x", { at: 9e15 }), event("odd", "x", odd), event("good"));
+    await until(() => delivered.length === 3, "the deliveries");
+    await relay.stop();
+});
+
+test("a connector with authorLimit false (a feed) has only the connector's limit", async () => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const mock = scripted();
+
+    relay.register({ ...mock.connector, authorLimit: false });
+    await relay.put(config("mock", { perAuthor: 1 }));
+    mock.push(...["1", "2", "3"].map((id) => event(id, "feed")));
+    await until(() => delivered.length === 3, "the deliveries");
+    await relay.stop();
+});
+
 test("a connector that throws backs off and goes on; a fatal error stops it until an edit; the server never sees either", async () => {
     const rejections: unknown[] = [];
     const onRejection = (error: unknown) => rejections.push(error);
@@ -284,6 +329,31 @@ test("a connector that throws backs off and goes on; a fatal error stops it unti
     await relay.stop();
     process.off("unhandledRejection", onRejection);
     assert.deepEqual(rejections, []);
+});
+
+test("a retry-after of 0, or past setTimeout's limit, still backs off", async () => {
+    const relay = open(folder(), fakeInbox().inbox);
+    const runs: number[] = [];
+
+    for (const [index, retryAfter] of [0, 30 * 24 * 3_600_000].entries()) {
+        runs[index] = 0;
+        relay.register({
+            kind: `wait${index}`,
+            label: "Wait",
+            shape: "stream",
+            fields: [],
+            run: async () => {
+                runs[index]! += 1;
+
+                throw new RelayError("slow down", { retryAfter });
+            },
+        });
+        await relay.put(config(`wait${index}`));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await relay.stop();
+    assert.deepEqual(runs, [1, 1]);
 });
 
 test("a stop closes a stream's socket and timers, and a removed kind stops its connectors", async () => {

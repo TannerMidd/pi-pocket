@@ -7,7 +7,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { InboxApi } from "../../host.ts";
@@ -99,6 +99,10 @@ const MAX_RECENT = 200;
 const MAX_REPLIES = 2000;
 const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
+/** setTimeout's longest wait: a longer one fires at once. */
+const TIMER_MAX = 2_147_483_647;
+/** The longest a service's retry-after is waited: a day. */
+const RETRY_AFTER_MAX = 24 * HOUR;
 const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
 const BACKOFF_MAX = 15 * 60_000;
@@ -189,6 +193,8 @@ const SCHEME = /^(bearer|basic|bot|token|digest)$/i;
 
 /** The longest secret value: what `host.hide` takes at most. */
 export const MAX_SECRET = 4096;
+/** The shortest value hidden: a shorter one would hide ordinary words. */
+const MIN_SECRET = 4;
 
 /**
  * The secret fields' values of a connector: what is hidden, and scrubbed out of errors. A value of lines (headers, one
@@ -223,7 +229,20 @@ export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]
         }
     }
 
-    return [...found].filter((value) => value.length >= 4 && value.length <= MAX_SECRET);
+    return [...found].filter((value) => value.length >= MIN_SECRET && value.length <= MAX_SECRET);
+}
+
+/** Whether a secret value holds a credential too short to hide: a line's value, or its last word (see `secretsOf`). */
+export function tooShort(value: string): boolean {
+    return value.split(/\r?\n/).some((line) => {
+        const part = (line.includes(":") ? line.slice(line.indexOf(":") + 1) : line).trim();
+        const last = part.split(/\s+/).at(-1) ?? "";
+
+        return (
+            part !== "" &&
+            (part.length < MIN_SECRET || (last.length < MIN_SECRET && !SCHEME.test(last)))
+        );
+    });
 }
 
 /** A field's value as the connector reads it: the owner's, else its default. */
@@ -258,8 +277,15 @@ function aliveIn(folder: string): Set<Promise<void>> {
 async function save(path: string, data: unknown): Promise<void> {
     const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
 
-    await writeFile(temporary, `${JSON.stringify(data)}\n`, { mode: 0o600 });
-    await rename(temporary, path);
+    try {
+        await writeFile(temporary, `${JSON.stringify(data)}\n`, { mode: 0o600 });
+        await rename(temporary, path);
+    } catch (error) {
+        await unlink(temporary).catch(() => {});
+
+        throw error;
+    }
+
     await chmod(path, 0o600).catch(() => {});
 }
 
@@ -286,10 +312,18 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
             resolve();
         };
 
-        const timer = setTimeout(done, Math.max(0, ms));
+        const timer = setTimeout(done, Math.min(TIMER_MAX, Math.max(0, ms || 0)));
 
         signal.addEventListener("abort", done, { once: true });
     });
+}
+
+/** Waits for `promise`, `ms` at most, and leaves no timer. Never rejects. */
+async function within(promise: Promise<unknown>, ms: number): Promise<void> {
+    const waited = new AbortController();
+
+    await Promise.race([promise.catch(() => {}), sleep(ms, waited.signal)]);
+    waited.abort();
 }
 
 const backoff = (failures: number, min: number, max: number): number =>
@@ -441,7 +475,18 @@ class Runner {
                 }
 
                 failures += 1;
-                const wait = retryAfter ?? backoff(failures, BACKOFF_MIN, BACKOFF_MAX);
+                // A service's retry-after is a floor, not the wait: one of 0, or 1 s each time, still backs off.
+                const wait = Math.min(
+                    RETRY_AFTER_MAX,
+                    Math.max(
+                        retryAfter ?? 0,
+                        backoff(
+                            failures,
+                            retryAfter === undefined ? BACKOFF_MIN : 1000,
+                            BACKOFF_MAX,
+                        ),
+                    ),
+                );
 
                 this.#set("waiting", `retrying in ${Math.ceil(wait / 1000)} s`);
                 await sleep(wait, this.signal);
@@ -774,7 +819,7 @@ export class Relay {
 
             if (
                 (typeof event.text !== "string" || event.text.trim() === "") &&
-                (event.attachments ?? []).length === 0
+                (Array.isArray(event.attachments) ? event.attachments : []).length === 0
             ) {
                 continue;
             }
@@ -788,10 +833,11 @@ export class Relay {
 
             const trusted = config.ownerIds.includes(event.author.id);
 
-            if (!trusted) {
-                const times = (state.authors[event.author.id] ?? []).filter(
-                    (at) => now - at < HOUR,
-                );
+            if (!trusted && runner.connector.authorLimit !== false) {
+                const previous = Object.hasOwn(state.authors, event.author.id)
+                    ? state.authors[event.author.id]!
+                    : [];
+                const times = previous.filter((at) => now - at < HOUR);
 
                 if (times.length >= config.perAuthor) {
                     state.dropped += 1;
@@ -801,7 +847,12 @@ export class Relay {
                     continue;
                 }
 
-                state.authors[event.author.id] = [...times, now];
+                Object.defineProperty(state.authors, event.author.id, {
+                    value: [...times, now],
+                    enumerable: true,
+                    configurable: true,
+                    writable: true,
+                });
             }
 
             if (state.pending.length >= MAX_PENDING) {
@@ -820,10 +871,15 @@ export class Relay {
             }
         }
 
-        if (changed) {
+        // A write that failed before is tried again: what it held is not stored until one works.
+        if (changed || !this.#written) {
             await this.persist();
             runner.wake();
             this.changed(config.id);
+        }
+
+        if (!this.#written) {
+            throw new Error("The relay could not write its files, so the events are not stored.");
         }
     }
 
@@ -866,6 +922,21 @@ export class Relay {
             return "done" as const;
         };
 
+        let payload: string;
+
+        // An event it cannot render (a connector's odd field) is dropped: tried again, it would hold up the queue.
+        try {
+            payload = payloadOf(event);
+        } catch (error) {
+            this.failed(
+                config.id,
+                `A message was dropped: ${this.scrub(config, message(error))}`,
+                false,
+            );
+
+            return finish("dropped");
+        }
+
         if (inbox === undefined) {
             this.failed(
                 config.id,
@@ -888,7 +959,7 @@ export class Relay {
                     id: event.author.id,
                     trusted: config.ownerIds.includes(event.author.id),
                 },
-                payload: payloadOf(event),
+                payload,
                 key: `relay-${config.id}-${event.id}`,
                 limit: { bucket: `relay:${config.id}`, perHour: config.perHour },
             });
@@ -1106,6 +1177,12 @@ export class Relay {
         await this.persist();
         this.#start(config.id);
         this.changed(config.id);
+
+        if (!this.#written) {
+            throw new Error(
+                "The relay could not write its files: the change is lost at a restart.",
+            );
+        }
     }
 
     async remove(id: string): Promise<boolean> {
@@ -1183,10 +1260,7 @@ export class Relay {
         this.#runners.delete(id);
         runner.abort.abort();
         // A connector that does not stop when asked is not waited for long.
-        await Promise.race([
-            runner.done.catch(() => {}),
-            sleep(3000, new AbortController().signal),
-        ]);
+        await within(runner.done, 3000);
     }
 
     /** Stop everything: the module goes. */
@@ -1195,7 +1269,8 @@ export class Relay {
 
         try {
             this.#replies.abort();
-            await Promise.allSettled([...this.#replying.values()]);
+            // A drop-in's reply that ignores its abort is not waited for long: the connectors stop all the same.
+            await within(Promise.allSettled([...this.#replying.values()]), 3000);
             await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
             // A runner past its deadline may still deliver: its delivery ends before the secrets and the files go.
             await Promise.allSettled([...this.#delivering]);
@@ -1214,6 +1289,9 @@ export class Relay {
     }
 }
 
+/** The latest time a Date holds, in ms. */
+const MAX_DATE = 8.64e15;
+
 /** What Pi reads between the fence's tags: where it came from, then the text. */
 export function payloadOf(event: RelayEvent): string {
     const lines = [
@@ -1224,11 +1302,11 @@ export function payloadOf(event: RelayEvent): string {
               ]
             : []),
         ...(event.thread === undefined ? [] : [`thread: ${event.thread}`]),
-        ...(typeof event.at === "number" && Number.isFinite(event.at)
+        ...(typeof event.at === "number" && Math.abs(event.at) <= MAX_DATE
             ? [`sent: ${new Date(event.at).toISOString()}`]
             : []),
         ...(event.url === undefined ? [] : [`link: ${event.url}`]),
-        ...(event.attachments === undefined || event.attachments.length === 0
+        ...(!Array.isArray(event.attachments) || event.attachments.length === 0
             ? []
             : [
                   `attachments: ${event.attachments
