@@ -881,18 +881,21 @@ export default function setup(pocket) {
                         onInput=${(event) => set("perHour", event.currentTarget.value)}
                     />
                 </div>
-                <div class="relay-field">
-                    <label class="relay-label" for="relay-per-author">Per author, per hour</label>
-                    <input
-                        id="relay-per-author"
-                        type="number"
-                        inputmode="numeric"
-                        min=${LIMITS.perAuthor[0]}
-                        max=${LIMITS.perAuthor[1]}
-                        value=${form.perAuthor}
-                        onInput=${(event) => set("perAuthor", event.currentTarget.value)}
-                    />
-                </div>
+                ${
+                    kind.authorLimit &&
+                    html`<div class="relay-field">
+                        <label class="relay-label" for="relay-author">Per author, per hour</label>
+                        <input
+                            id="relay-author"
+                            type="number"
+                            inputmode="numeric"
+                            min=${LIMITS.perAuthor[0]}
+                            max=${LIMITS.perAuthor[1]}
+                            value=${form.perAuthor}
+                            onInput=${(event) => set("perAuthor", event.currentTarget.value)}
+                        />
+                    </div>`
+                }
             </div>
             <div class="muted small">Messages past these limits are dropped.</div>
             <div class="relay-toggle">

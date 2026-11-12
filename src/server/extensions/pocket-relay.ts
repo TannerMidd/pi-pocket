@@ -175,6 +175,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         ...(connector.description === undefined ? {} : { description: connector.description }),
         shape: connector.shape,
         mentions: connector.mentions === true,
+        authorLimit: connector.authorLimit !== false,
         reply: typeof connector.reply === "function",
         fields: connector.fields,
     });
