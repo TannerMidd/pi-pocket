@@ -16,6 +16,12 @@ const API = "https://discord.com/api/v10";
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 const DAY = 86_400_000;
 const IDENTIFY_GAP = 30_000;
+/** The gap doubles after each identify that does not reach READY, up to this. */
+const IDENTIFY_GAP_MAX = 600_000;
+/** How long a closed socket waits for the gateway's answer: a dead connection never gives one. */
+const CLOSE_WAIT = 2_000;
+/** Discord says Hello at once: a connection with no Hello in this time is closed. */
+const HELLO_WAIT = 30_000;
 const IDENTIFY_MAX = 900;
 const CURSOR_MAX = 100;
 const BACKFILL_CHANNELS = 25;
@@ -51,6 +57,8 @@ interface State {
     session?: Session;
     user?: string;
     identifies: number[];
+    /** Identifies since the last READY. */
+    misses?: number;
     cursors: Record<string, Cursor>;
     backfill?: boolean;
 }
@@ -158,6 +166,10 @@ function readState(saved: Readonly<Record<string, unknown>>): State {
 
     if (Array.isArray(saved.identifies)) {
         state.identifies = saved.identifies.filter((at): at is number => typeof at === "number");
+    }
+
+    if (typeof saved.misses === "number" && saved.misses > 0) {
+        state.misses = saved.misses;
     }
 
     if (saved.cursors !== null && typeof saved.cursors === "object") {
@@ -486,6 +498,8 @@ async function run(context: RelayContext): Promise<void> {
                     user?: User;
                 };
 
+                delete state.misses;
+
                 if (typeof ready.session_id === "string") {
                     state.session = {
                         id: ready.session_id,
@@ -536,15 +550,17 @@ async function run(context: RelayContext): Promise<void> {
         }
     };
 
-    // Waits until Discord's identify limit allows one more: 30 s apart, 900 a day.
+    // Waits until Discord's identify limit allows one more: 30 s apart, 900 a day. The gap doubles after each
+    // identify that does not reach READY (up to 10 min), so a gateway that keeps closing does not use up the day.
     const identifyGate = async (): Promise<boolean> => {
         const now = Date.now();
 
         state.identifies = state.identifies.filter((at) => now - at < DAY).sort((a, b) => a - b);
         const last = state.identifies.at(-1);
         const count = state.identifies.length;
+        const gap = Math.min(IDENTIFY_GAP * 2 ** Math.min(state.misses ?? 0, 5), IDENTIFY_GAP_MAX);
         const wait = Math.max(
-            last === undefined ? 0 : last + IDENTIFY_GAP - now,
+            last === undefined ? 0 : last + gap - now,
             count >= IDENTIFY_MAX ? state.identifies[count - IDENTIFY_MAX]! + DAY - now : 0,
         );
 
@@ -602,6 +618,8 @@ async function run(context: RelayContext): Promise<void> {
             let ready = false;
             let invalid = false;
             let seq = session?.seq ?? null;
+            let closing: ReturnType<typeof setTimeout> | undefined;
+            let settled = false;
 
             const send = (data: unknown): void => {
                 try {
@@ -621,6 +639,10 @@ async function run(context: RelayContext): Promise<void> {
                 } catch {
                     // Already closed.
                 }
+
+                // Node's WebSocket waits for the gateway to answer the close frame, and a dead connection (the reason
+                // for a missed ACK) never does: the connection ends here all the same.
+                closing ??= setTimeout(() => finish(undefined), CLOSE_WAIT);
             };
 
             const beat = (): void => {
@@ -660,6 +682,7 @@ async function run(context: RelayContext): Promise<void> {
                             });
                         } else {
                             state.identifies.push(Date.now());
+                            state.misses = (state.misses ?? 0) + 1;
                             save();
                             send({
                                 op: 2,
@@ -717,16 +740,28 @@ async function run(context: RelayContext): Promise<void> {
                 }
             };
 
-            const onAbort = (): void => close();
+            // A stop does not wait for the gateway's answer: the close frame went, and the session stays resumable.
+            const onAbort = (): void => {
+                close();
+                finish(undefined);
+            };
 
             closeCurrent = close;
             signal.addEventListener("abort", onAbort, { once: true });
+            timer = setTimeout(() => {
+                context.log("Discord sent no Hello: reconnecting.");
+                close();
+            }, HELLO_WAIT);
 
             if (signal.aborted) {
                 close();
             }
 
             socket.addEventListener("message", (message) => {
+                if (settled) {
+                    return;
+                }
+
                 try {
                     handle(JSON.parse(String(message.data)) as Payload);
                 } catch (error) {
@@ -739,19 +774,26 @@ async function run(context: RelayContext): Promise<void> {
             socket.addEventListener("error", () => {
                 // The close event follows and says what happened.
             });
-            socket.addEventListener("close", (event) => {
+
+            const finish = (code: number | undefined): void => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
                 clearTimeout(timer);
+                clearTimeout(closing);
                 signal.removeEventListener("abort", onAbort);
 
                 closeCurrent = () => {};
 
-                const fatal = FATAL_CLOSES[event.code];
+                const fatal = code === undefined ? undefined : FATAL_CLOSES[code];
 
                 if (fatal !== undefined && failure === undefined) {
                     failure = new RelayError(fatal, { fatal: true });
                 }
 
-                if (event.code === 4007 || event.code === 4009) {
+                if (code === 4007 || code === 4009) {
                     delete state.session;
                 }
 
@@ -762,9 +804,11 @@ async function run(context: RelayContext): Promise<void> {
                         failure ??= error;
                     }
 
-                    resolve({ ready, invalid, code: event.code });
+                    resolve({ ready, invalid, ...(code === undefined ? {} : { code }) });
                 });
-            });
+            };
+
+            socket.addEventListener("close", (event) => finish(event.code));
         });
     };
 

@@ -11,6 +11,8 @@ export interface MockSocket {
     readonly received: unknown[];
     onMessage(listener: (data: unknown) => void): void;
     readonly closed: Promise<void>;
+    /** From now on, a dead connection: it never answers the client's close frame. */
+    ignoreClose(): void;
 }
 
 function frame(opcode: number, payload: Buffer): Buffer {
@@ -46,6 +48,7 @@ function accept(request: IncomingMessage, socket: Duplex): MockSocket {
     const received: unknown[] = [];
     const listeners: ((data: unknown) => void)[] = [];
     let buffer = Buffer.alloc(0);
+    let dead = false;
 
     let done: () => void = () => {};
 
@@ -88,7 +91,10 @@ function accept(request: IncomingMessage, socket: Duplex): MockSocket {
             buffer = buffer.subarray(end);
 
             if (opcode === 8) {
-                socket.end(frame(8, payload.subarray(0, 2)));
+                if (!dead) {
+                    socket.end(frame(8, payload.subarray(0, 2)));
+                }
+
                 continue;
             }
 
@@ -136,6 +142,9 @@ function accept(request: IncomingMessage, socket: Duplex): MockSocket {
         },
         onMessage: (listener) => {
             listeners.push(listener);
+        },
+        ignoreClose: () => {
+            dead = true;
         },
     };
 }
