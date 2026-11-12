@@ -503,6 +503,10 @@ export class Relay {
     readonly #unhides: (() => void)[] = [];
     /** Whether every secret is hidden: until it is, no connector runs and no reply goes. */
     #safe = true;
+    /** Deliveries under way: a stop waits for them, so none outlives the relay. */
+    readonly #delivering = new Set<Promise<unknown>>();
+    /** After the last write at a stop: nothing writes the files again. */
+    #closed = false;
     readonly #replying = new Map<string, Promise<string>>();
     /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
     readonly #ended: Promise<void>;
@@ -669,7 +673,7 @@ export class Relay {
     /** Keep both files soon; writes run one at a time, and the last state wins. */
     persist(): Promise<void> {
         // Before its files are read, a relay has nothing of its own to keep, and must not write over them.
-        if (!this.#loaded) {
+        if (!this.#loaded || this.#closed) {
             return this.#writing;
         }
 
@@ -824,7 +828,16 @@ export class Relay {
     }
 
     /** Deliver one pending event: `retry` when the session cannot take it now (it stays first in the queue). */
-    async deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
+    deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
+        const delivering = this.#deliver(config, event);
+
+        this.#delivering.add(delivering);
+        void delivering.finally(() => this.#delivering.delete(delivering)).catch(() => {});
+
+        return delivering;
+    }
+
+    async #deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
         const state = this.stateOf(config.id);
         const inbox = this.#options.inbox();
 
@@ -1080,7 +1093,11 @@ export class Relay {
         }
 
         this.#configs[config.id] = config;
-        this.#safe ||= this.#hide();
+
+        if (!this.#safe && this.#hide()) {
+            this.#safe = true;
+            this.start();
+        }
 
         await this.#stop(config.id);
 
@@ -1180,9 +1197,12 @@ export class Relay {
             this.#replies.abort();
             await Promise.allSettled([...this.#replying.values()]);
             await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
+            // A runner past its deadline may still deliver: its delivery ends before the secrets and the files go.
+            await Promise.allSettled([...this.#delivering]);
             await this.persist();
             await this.#writing;
         } finally {
+            this.#closed = true;
             this.#unhides.splice(0).forEach((unhide) => unhide());
             this.#hidden.clear();
             this.#end();
