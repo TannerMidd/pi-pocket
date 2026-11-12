@@ -1,4 +1,3 @@
-// A repeat every so many minutes that runs only inside a time window: `every 30m between 9:00 and 17:00 on weekdays`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkRepeat, describeRepeat, nextRepeat, parseWhen } from "../src/server/when.ts";
@@ -15,7 +14,6 @@ const clock = new Intl.DateTimeFormat("en-US", {
     minute: "2-digit",
 });
 
-/** The next `count` runs after `after`, on New York's wall clock: "Fri 16:30, Mon 09:00". */
 function runs(every: Repeat, after: number, count: number): string {
     const times: string[] = [];
 

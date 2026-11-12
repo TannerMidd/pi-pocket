@@ -774,8 +774,6 @@ test("the routes: viewers read, guests add (pending) and cannot remove the owner
     }
 });
 
-// ─── Session lessons ──────────────────────────────────────────────────────
-
 /** Whether conversation `id` (a session, or a subagent) has `word` in its system prompt now. */
 async function has(id: ConversationId, word: string): Promise<boolean> {
     await say(app, id, `prompt ${word}`);
@@ -798,7 +796,6 @@ test("a session's own lessons reach it and its subagents, no other session, and 
     assert.equal(lesson?.project, sessionKey(id));
     assert.equal(lesson?.pending, true);
     assert.ok(!(await has(id, "Serve-on-port-4173-yak")), "not before the owner approves");
-    // The owner's queue in PiP lists it, named for its session.
     const pip = await app.pip.ensure(owner(app));
     const queued = (await app.memory.view(pip, owner(app), true)).lessons.find(
         (each) => each.id === lesson!.id,
@@ -811,7 +808,6 @@ test("a session's own lessons reach it and its subagents, no other session, and 
     assert.ok(!(await has(other, "Serve-on-port-4173-yak")), "another session in the project not");
     assert.ok(!(await given(repo, "Serve-on-port-4173-yak")), "a new session not");
 
-    // The sheet lists it as the session's, here only; elsewhere it is not found.
     assert.equal(
         (await app.memory.view(id, owner(app))).lessons.find((each) => each.id === lesson!.id)
             ?.scope,
@@ -824,7 +820,6 @@ test("a session's own lessons reach it and its subagents, no other session, and 
         status: 404,
     });
 
-    // A subagent works for its session: it has the session's lessons, and its own go to the session.
     await loadTools(app, id, "subagent");
     await say(app, id, "start-helper");
     await until(
@@ -973,7 +968,6 @@ test("a fork goes on with its session's lessons in force, as its own; archiving 
     assert.notEqual(copies[0]!.id, kept.id);
     assert.equal(copies[0]!.key, undefined);
 
-    // The two go their own ways: forgetting the fork's leaves the parent's.
     await app.memory.edit(fork, owner(app), copies[0]!.id, "remove");
     assert.ok(!(await has(fork, "Fork-keeps-okapi")));
     assert.ok(await has(id, "Fork-keeps-okapi"));

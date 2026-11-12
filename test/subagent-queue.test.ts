@@ -1,5 +1,3 @@
-// A message to a subagent at work waits in its queue until its next pause (a steer) or the end of its run (a
-// follow-up): the subagent tool says so when it sends one, and its status lists what waits.
 import {
     type App,
     cleanUp,
@@ -114,7 +112,7 @@ test("a follow-up to a subagent at work is said to wait for the end of its run, 
             ((await app.harness.snapshot(InboxDoc, child, context))?.items.length ?? 0) === 1,
         "the follow-up in the subagent's queue",
     );
-    // The rest of the line (its calls, its last activity) is #320's, and tested there.
+    // The rest of the line is tested in subagent-status.test.ts.
     const status = await ask("status");
 
     assert.ok(status.startsWith("busy: working; "), status);

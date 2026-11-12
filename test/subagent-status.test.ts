@@ -1,5 +1,3 @@
-// The subagent tool's status: a subagent at work says when it last did something, and one quiet for too long is called
-// stalled; without a name, status lists only those at work and counts the rest.
 import {
     type App,
     cleanUp,
