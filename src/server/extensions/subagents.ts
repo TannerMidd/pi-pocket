@@ -55,6 +55,7 @@ import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
+import { clock, progressOf, span, STALL_LOOK, waitingOn } from "../stall-facts.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
 
 /** Pi Pocket's options on a tool definition, beside Pi Durable's own. */
@@ -962,24 +963,6 @@ const STALLED_MINUTES = 30;
 
 const ACTIVITY_ENTRIES = 20;
 
-function span(ms: number): string {
-    const seconds = Math.max(0, Math.round(ms / 1000));
-
-    if (seconds < 60) {
-        return `${seconds} s`;
-    }
-
-    const minutes = Math.round(seconds / 60);
-
-    if (minutes < 60) {
-        return `${minutes} min`;
-    }
-
-    const hours = Math.round(minutes / 60);
-
-    return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
-}
-
 /** The time of the newest message in a transcript: output that a running tool call streams does not count. */
 async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<number | undefined> {
     return (await recentOf(tx, conversationId)).at;
@@ -1025,9 +1008,6 @@ async function recentOf(
     return { ...(at === undefined ? {} : { at }), ...(words === undefined ? {} : { words }) };
 }
 
-/** How often the stall watch looks at the subagents at work; tests make it quick. */
-export const STALL_LOOK = { ms: 60_000 };
-
 /** The default hard limit: past it with no progress, the stuck call is stopped. Twice the soft one, as a margin. */
 const STOP_MINUTES = 60;
 
@@ -1047,49 +1027,6 @@ type StallState =
           actions: StallAction[];
           alerts: string[];
       };
-
-/** What changes while a subagent makes progress: its run, its answer as it streams, its calls and their output. */
-function progressOf(live: LiveState): string {
-    const calls = (
-        slots: readonly {
-            callId: string;
-            status: string;
-            output?: string;
-            droppedBytes?: number;
-        }[],
-    ) =>
-        slots.map((slot) => [
-            slot.callId,
-            slot.status,
-            (slot.output?.length ?? 0) + (slot.droppedBytes ?? 0),
-        ]);
-
-    return JSON.stringify([
-        live.run?.taskId,
-        live.run?.turns,
-        live.generation?.attempt,
-        JSON.stringify(live.generation?.message ?? null).length,
-        calls(live.tools ?? []),
-        calls(live.nestedTools ?? []),
-        (live.compactions ?? []).length,
-    ]);
-}
-
-/** What a subagent at work waits on: its running call, a retry of its model request, or its model. */
-function waitingOn(live: LiveState): { what: string; callId?: string } {
-    const call = (live.tools ?? []).find((tool) => tool.status === "running");
-
-    if (call !== undefined) {
-        return { what: `its ${call.name} call`, callId: call.callId };
-    }
-
-    return {
-        what: live.generation?.retry === undefined ? "its model" : "a retry of its model request",
-    };
-}
-
-/** A time of day, for messages to Pi: in UTC, as servers and people's zones differ. */
-const clock = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
 
 /**
  * Looks at a parent's subagents at work, once a minute, without a model call. One with no progress past the soft limit

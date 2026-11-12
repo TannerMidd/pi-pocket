@@ -11,12 +11,18 @@ import {
     type AgentState,
     AssistantEntry,
     type ConversationId,
+    LiveDoc,
     type ModelRef,
     type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
-import type { HumanLinkedSessions, LinkedSession, LinkedSessionsApi } from "./host.ts";
+import type {
+    HumanLinkedSessions,
+    LinkedActivity,
+    LinkedSession,
+    LinkedSessionsApi,
+} from "./host.ts";
 import type { RequestActor } from "./extension-request.ts";
 import {
     LinkedSessionCallsDoc,
@@ -29,6 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
+import { progressOf, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -496,6 +503,70 @@ export class LinkedSessions implements LinkedSessionsApi {
 
     async #address(source: ConversationId, target: number, actor?: RequestActor): Promise<string> {
         return (await this.#addresses(source, [target], actor)).get(target)!;
+    }
+
+    /**
+     * The sessions `source` started and takes the answers of, while they are at work, for a stall watch: how far each
+     * got (`progress` changes while it makes any), when its newest message came, and what it waits on. By address only.
+     */
+    async activity(source: ConversationId): Promise<LinkedActivity[]> {
+        const app = this.#app;
+        const led = this.#family(source, this.#person(source)).filter(
+            (each) =>
+                each.busy === true && this.#leads(source, each.id as unknown as ConversationId),
+        );
+        const addresses = await this.#addresses(
+            source,
+            led.map((each) => each.id),
+        );
+        const found: LinkedActivity[] = [];
+
+        for (const each of led) {
+            const id = each.id as unknown as ConversationId;
+            const live = await app.harness.snapshot(LiveDoc, id, context);
+
+            if (live?.run === undefined) {
+                continue;
+            }
+
+            const at = await app.harness.commit(async (tx) => {
+                const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
+                const times = page.items.flatMap((entry) =>
+                    (entry.model ?? [])
+                        .map((message) => message.timestamp)
+                        .filter((time) => typeof time === "number" && Number.isFinite(time)),
+                );
+
+                return times.length === 0 ? undefined : Math.max(...times);
+            }, context);
+            const on = waitingOn(live);
+
+            found.push({
+                address: addresses.get(each.id)!,
+                progress: progressOf(live),
+                ...(at === undefined ? {} : { at }),
+                waiting: on.what,
+                ...(on.callId === undefined ? {} : { callId: on.callId }),
+            });
+        }
+
+        return found;
+    }
+
+    /** Stop one stuck call of a session `source` leads, by its address; its run goes on. False: no such call runs. */
+    async stopCall(
+        source: ConversationId,
+        request: { to: string; callId: string },
+    ): Promise<boolean> {
+        const peers =
+            (await this.#app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
+        const target = Object.hasOwn(peers, request.to) ? peers[request.to] : undefined;
+
+        if (target === undefined || !this.#leads(source, target as unknown as ConversationId)) {
+            return false;
+        }
+
+        return this.#app.stopToolCall(target as unknown as ConversationId, request.callId);
     }
 
     /** Only visible sessions connect a family. Names show only when the source's whole audience sees them. */

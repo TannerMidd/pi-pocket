@@ -21,7 +21,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { SubagentsDoc } from "../src/server/docs.ts";
-import { STALL_LOOK } from "../src/server/extensions/subagents.ts";
+import { STALL_LOOK } from "../src/server/stall-facts.ts";
 
 /** A command that prints nothing and never ends by itself. */
 const HANG = "exec tail -f /dev/null";
