@@ -1,6 +1,3 @@
-// The relay in the app: a drop-in's own connector, added over the owner's routes, delivers through core's inbox (fenced,
-// the owner's ids marked outside the fence, once), only the bound session is offered relay_reply, and no secret
-// reaches the browser.
 import {
     cleanUp,
     modelTexts,
@@ -98,7 +95,6 @@ async function call(method: string, path: string, body?: unknown) {
     return { status: response.status, data: (await response.json()) as Record<string, any> };
 }
 
-/** What people (and the relay, for them) sent Pi in a session. */
 async function userTexts(id: ConversationId): Promise<string[]> {
     const view = await (await app.harness.conversation(id, BACKGROUND_CONTEXT))!.context(
         BACKGROUND_CONTEXT,
@@ -179,7 +175,6 @@ test("a custom connector delivers to its session, fenced and once; only that ses
     assert.equal(await offered(bound), true);
     assert.equal(await offered(other), false);
 
-    // Removed: the session is offered the tool no more.
     assert.equal((await call("DELETE", `connectors/${added.data.id}`)).status, 200);
     assert.equal(await offered(bound), false);
 });

@@ -149,10 +149,7 @@ function accept(request: IncomingMessage, socket: Duplex): MockSocket {
     };
 }
 
-/**
- * An HTTP server on 127.0.0.1 that also takes WebSocket connections: `onSocket` hears each one. HTTP requests go to
- * `handle`. Close it with `server.close()` and `server.closeAllConnections()`.
- */
+/** On 127.0.0.1. Close it with `server.close()` and `server.closeAllConnections()`. */
 export async function mockServer(
     handle: (
         request: IncomingMessage,
