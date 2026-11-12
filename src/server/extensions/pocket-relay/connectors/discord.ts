@@ -16,6 +16,8 @@ const API = "https://discord.com/api/v10";
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 const DAY = 86_400_000;
 const IDENTIFY_GAP = 30_000;
+/** How long a closed socket waits for the gateway's answer: a dead connection never gives one. */
+const CLOSE_WAIT = 2_000;
 const IDENTIFY_MAX = 900;
 const CURSOR_MAX = 100;
 const BACKFILL_CHANNELS = 25;
@@ -602,6 +604,8 @@ async function run(context: RelayContext): Promise<void> {
             let ready = false;
             let invalid = false;
             let seq = session?.seq ?? null;
+            let closing: ReturnType<typeof setTimeout> | undefined;
+            let settled = false;
 
             const send = (data: unknown): void => {
                 try {
@@ -621,6 +625,10 @@ async function run(context: RelayContext): Promise<void> {
                 } catch {
                     // Already closed.
                 }
+
+                // Node's WebSocket waits for the gateway to answer the close frame, and a dead connection (the reason
+                // for a missed ACK) never does: the connection ends here all the same.
+                closing ??= setTimeout(() => finish(undefined), CLOSE_WAIT);
             };
 
             const beat = (): void => {
@@ -717,7 +725,11 @@ async function run(context: RelayContext): Promise<void> {
                 }
             };
 
-            const onAbort = (): void => close();
+            // A stop does not wait for the gateway's answer: the close frame went, and the session stays resumable.
+            const onAbort = (): void => {
+                close();
+                finish(undefined);
+            };
 
             closeCurrent = close;
             signal.addEventListener("abort", onAbort, { once: true });
@@ -727,6 +739,10 @@ async function run(context: RelayContext): Promise<void> {
             }
 
             socket.addEventListener("message", (message) => {
+                if (settled) {
+                    return;
+                }
+
                 try {
                     handle(JSON.parse(String(message.data)) as Payload);
                 } catch (error) {
@@ -739,19 +755,26 @@ async function run(context: RelayContext): Promise<void> {
             socket.addEventListener("error", () => {
                 // The close event follows and says what happened.
             });
-            socket.addEventListener("close", (event) => {
+
+            const finish = (code: number | undefined): void => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
                 clearTimeout(timer);
+                clearTimeout(closing);
                 signal.removeEventListener("abort", onAbort);
 
                 closeCurrent = () => {};
 
-                const fatal = FATAL_CLOSES[event.code];
+                const fatal = code === undefined ? undefined : FATAL_CLOSES[code];
 
                 if (fatal !== undefined && failure === undefined) {
                     failure = new RelayError(fatal, { fatal: true });
                 }
 
-                if (event.code === 4007 || event.code === 4009) {
+                if (code === 4007 || code === 4009) {
                     delete state.session;
                 }
 
@@ -762,9 +785,11 @@ async function run(context: RelayContext): Promise<void> {
                         failure ??= error;
                     }
 
-                    resolve({ ready, invalid, code: event.code });
+                    resolve({ ready, invalid, ...(code === undefined ? {} : { code }) });
                 });
-            });
+            };
+
+            socket.addEventListener("close", (event) => finish(event.code));
         });
     };
 

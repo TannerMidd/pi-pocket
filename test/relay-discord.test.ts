@@ -87,9 +87,9 @@ function fakeContext(
     return { context, controller, events, waits, statuses, state: () => saved };
 }
 
-async function until(check: () => boolean): Promise<void> {
+async function until(check: () => boolean, limit = 400): Promise<void> {
     for (let tries = 0; !check(); tries++) {
-        assert.ok(tries < 400, "timed out");
+        assert.ok(tries < limit, "timed out");
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
 }
@@ -484,3 +484,39 @@ test("a stop closes with 4000, keeps the session, and leaves no timer", async ()
     });
     assert.ok(!process.getActiveResourcesInfo().includes("Timeout"));
 });
+
+test(
+    "a dead connection: a missed ACK resumes, and a stop ends run()",
+    { timeout: 5000 },
+    async () => {
+        const mock: Mock = await mockServer(
+            () => ({ status: 404 }),
+            (socket) => {
+                // No socket answers a close frame, and the first one never ACKs a heartbeat.
+                socket.ignoreClose();
+                hello(socket, mock.sockets.length === 1 ? 30 : 60_000);
+                socket.onMessage((data) => {
+                    const op = (data as Packet).op;
+                    const d = { session_id: "S", resume_gateway_url: mock.ws, user: { id: BOT } };
+
+                    if (op === 2 || op === 6) {
+                        socket.send({ op: 0, t: op === 2 ? "READY" : "RESUMED", s: 1, d });
+                    }
+                });
+            },
+        );
+
+        mocks.push(mock);
+
+        const fake = fakeContext({ gatewayUrl: mock.ws });
+        const running = discord.run!(fake.context);
+
+        await until(() => sent(mock.sockets, 6).length === 1, 800);
+        const stopped = Date.now();
+
+        fake.controller.abort();
+        await running;
+        assert.ok(Date.now() - stopped < 1000, "a stop does not wait for the dead socket");
+        mock.sockets.forEach((socket) => socket.close());
+    },
+);
