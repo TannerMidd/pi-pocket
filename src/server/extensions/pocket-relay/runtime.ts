@@ -231,6 +231,7 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
             signal.removeEventListener("abort", done);
             resolve();
         };
+
         const timer = setTimeout(done, Math.max(0, ms));
 
         signal.addEventListener("abort", done, { once: true });
@@ -694,6 +695,7 @@ export class Relay {
     async deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
         const state = this.stateOf(config.id);
         const inbox = this.#options.inbox();
+
         const finish = (outcome: "delivered" | "dropped") => {
             state.pending = state.pending.filter((each) => each.id !== event.id);
 
