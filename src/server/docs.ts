@@ -348,6 +348,12 @@ export type SubagentRecord = {
      * a later time, so it needs them again.
      */
     dealtAt?: number;
+    /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
+    stall?: { since: number; told?: true; stopped?: true };
+    /** How often the stall watch stopped its work on the message it was last sent (by `askedAt`): 2 at most. */
+    stops?: { askedAt: number; count: number };
+    /** Who stopped its run: a person, its parent (`subagent stop`), or the stall watch. A new message clears it. */
+    stoppedBy?: "person" | "parent" | "deadline";
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
@@ -372,6 +378,8 @@ export const SubagentsDoc = defineDoc<{
     outbox?: PendingReport[];
     /** The task sending them, while there is one. */
     courier?: TaskId;
+    /** The task that looks for subagents at work that make no progress, while any is at work. */
+    stallWatch?: TaskId;
     /**
      * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
      * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.

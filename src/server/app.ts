@@ -926,6 +926,9 @@ export class PocketApp {
                     options?.open === true,
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
+            stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
+            alertOwner: (conversationId, title, body) =>
+                this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
@@ -1678,6 +1681,22 @@ export class PocketApp {
                 client.send("notice", { level, message });
             }
         }
+    }
+
+    /** Stop one running tool call, alone: its task is aborted, and its run goes on with the result that says so. */
+    async stopToolCall(id: ConversationId, callId: string): Promise<boolean> {
+        const live = await this.harness.snapshot(LiveDoc, id, context);
+        const slot = [...(live?.tools ?? []), ...(live?.nestedTools ?? [])].find(
+            (each) => each.callId === callId && each.status === "running",
+        );
+
+        if (slot?.taskId === undefined) {
+            return false;
+        }
+
+        await this.harness.abortTask(slot.taskId, context);
+
+        return true;
     }
 
     /** A notice for the owner's tabs alone: about what only they may change. */

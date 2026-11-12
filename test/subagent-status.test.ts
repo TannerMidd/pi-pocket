@@ -135,13 +135,13 @@ after(async () => {
 test("a subagent at work with nothing new in its transcript for longer than the setting is called stalled", async () => {
     assert.match(
         await ask("status hang"),
-        /^hang: working; running bash; last activity \d+ s ago$/,
+        /^hang: working; waiting on bash since \d\d:\d\d UTC; last activity \d+ s ago$/,
     );
 
     offset += 2 * 60 * 60_000;
     assert.match(
         await ask("status hang"),
-        /^hang: working; running bash; last activity 2 h ago: stalled, nothing new for 30 min or more$/,
+        /^hang: working; waiting on bash since \d\d:\d\d UTC; last activity 2 h ago: stalled, nothing new for 30 min or more$/,
     );
 });
 

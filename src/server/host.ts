@@ -515,6 +515,13 @@ export interface PocketHost {
         conversationId?: ConversationId,
     ): void;
     /**
+     * Stop one running tool call of a conversation, by its call id: its result says it was aborted, with what it
+     * printed, and the run goes on. False when no such call runs.
+     */
+    stopToolCall(conversationId: ConversationId, callId: string): Promise<boolean>;
+    /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
+    alertOwner(conversationId: ConversationId, title: string, body: string): void;
+    /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.
      */

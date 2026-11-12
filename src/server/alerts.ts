@@ -205,6 +205,30 @@ export class Alerts {
         })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
     }
 
+    /** Work passed a hard limit: a notice in the owner's tabs, and one push to the owner, who decides what follows. */
+    ownerAlert(conversationId: ConversationId, title: string, body: string): void {
+        const app = this.#app;
+        const root = app.rootOf(conversationId);
+        const ownerId = app.config.users.find((user) => user.role === "owner")?.id;
+
+        app.ownerNotice("warning", `${title}: ${body}`);
+
+        if (ownerId === undefined || this.#quiet() || app.sessionMeta(root) === undefined) {
+            return;
+        }
+
+        void (async () => {
+            const message: PushMessage = {
+                title: `${title} · ${await app.conversationTitle(root)}`,
+                body: snippet(body, 400),
+                url: `/s/${String(root)}`,
+                tag: `stalled-${String(root)}`,
+            };
+
+            await this.push(ownerId, root, "stalled", message);
+        })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
+    }
+
     /** New approvals go out to everyone in the session who can answer them. */
     announceApprovals(): void {
         const app = this.#app;
