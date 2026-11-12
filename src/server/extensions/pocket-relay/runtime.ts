@@ -789,9 +789,10 @@ export class Relay {
             const trusted = config.ownerIds.includes(event.author.id);
 
             if (!trusted) {
-                const times = (state.authors[event.author.id] ?? []).filter(
-                    (at) => now - at < HOUR,
-                );
+                const previous = Object.hasOwn(state.authors, event.author.id)
+                    ? state.authors[event.author.id]!
+                    : [];
+                const times = previous.filter((at) => now - at < HOUR);
 
                 if (times.length >= config.perAuthor) {
                     state.dropped += 1;
@@ -801,7 +802,12 @@ export class Relay {
                     continue;
                 }
 
-                state.authors[event.author.id] = [...times, now];
+                Object.defineProperty(state.authors, event.author.id, {
+                    value: [...times, now],
+                    enumerable: true,
+                    configurable: true,
+                    writable: true,
+                });
             }
 
             if (state.pending.length >= MAX_PENDING) {

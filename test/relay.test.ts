@@ -246,6 +246,24 @@ test("bots, messages without a mention, and authors past their limit are not del
     assert.equal(relay.stateOf("c-mock").dropped, 1);
 });
 
+test("an author named as an object's key (constructor, __proto__) has a limit and holds up nothing", async () => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const mock = scripted();
+    const names = ["constructor", "__proto__", "toString"];
+
+    relay.register(mock.connector);
+    await relay.put(config("mock", { perAuthor: 1 }));
+    mock.push(...names.flatMap((name) => [event(`${name}1`, name), event(`${name}2`, name)]));
+    mock.push(event("last"));
+    await until(() => delivered.length === 4, "the deliveries");
+    await relay.stop();
+    assert.deepEqual(
+        delivered.map((each) => each.key.replace("relay-c-mock-", "")),
+        [...names.map((name) => `${name}1`), "last"],
+    );
+});
+
 test("a connector that throws backs off and goes on; a fatal error stops it until an edit; the server never sees either", async () => {
     const rejections: unknown[] = [];
     const onRejection = (error: unknown) => rejections.push(error);
