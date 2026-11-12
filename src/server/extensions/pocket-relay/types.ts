@@ -112,8 +112,11 @@ export interface RelayConnector {
      * send, the relay sends it again. Without it, the relay does not, so a reply is never shown twice.
      */
     idempotentReply?: boolean;
-    /** false: its items do not come from people (a feed's), so only the connector's limit applies, not the author's. */
-    authorLimit?: false;
+    /**
+     * false: its items do not come from people (a feed's), so only the connector's limit applies, not the author's. The
+     * name of one of its fields: the author's limit applies only when the owner gave that field a value.
+     */
+    authorLimit?: false | string;
     /** Send a reply. Without it, the connector only listens. Returns the id the service gave it, if any. */
     reply?(
         context: Pick<RelayContext, "values" | "signal" | "log">,

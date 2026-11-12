@@ -559,7 +559,7 @@ const connector: RelayConnector = {
     label: "HTTP (JSON)",
     description: "Polls any JSON address for new items, and can send a reply with a request.",
     shape: "poll",
-    authorLimit: false,
+    authorLimit: "authorIdField",
     interval: 60,
     fields,
     check,

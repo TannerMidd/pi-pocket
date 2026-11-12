@@ -8,6 +8,7 @@ import {
     type ConnectorConfig,
     Relay,
     secretsOf,
+    tooShort,
 } from "../src/server/extensions/pocket-relay/runtime.ts";
 import {
     type RelayConnector,
@@ -277,16 +278,32 @@ test("an event with a date out of range, or attachments not in a list, holds up 
     await relay.stop();
 });
 
-test("a connector with authorLimit false (a feed) has only the connector's limit", async () => {
+test("a feed (authorLimit false, or its author field empty) has only the connector's limit", async () => {
     const { inbox, delivered } = fakeInbox();
     const relay = open(folder(), inbox);
-    const mock = scripted();
+    const [feed, chat, empty] = [scripted(), scripted("chat"), scripted("empty")];
 
-    relay.register({ ...mock.connector, authorLimit: false });
+    relay.register({ ...feed.connector, authorLimit: false });
+    relay.register({ ...chat.connector, authorLimit: "token" });
+    relay.register({ ...empty.connector, authorLimit: "token" });
     await relay.put(config("mock", { perAuthor: 1 }));
-    mock.push(...["1", "2", "3"].map((id) => event(id, "feed")));
-    await until(() => delivered.length === 3, "the deliveries");
+    await relay.put(config("chat", { perAuthor: 1 }));
+    await relay.put(config("empty", { perAuthor: 1, values: {} }));
+    feed.push(...["1", "2", "3"].map((id) => event(id, "feed")));
+    chat.push(...["4", "5", "6"].map((id) => event(id, "stranger")));
+    empty.push(...["7", "8", "9"].map((id) => event(id, "feed")));
+    await until(
+        () => delivered.length === 7 && relay.stateOf("c-chat").dropped === 2,
+        "the deliveries",
+    );
     await relay.stop();
+});
+
+test("a short header value is refused only for a credential header", () => {
+    assert.equal(tooShort("Accept: */*\nX-Version: 2", true), false);
+    assert.equal(tooShort("X-Api-Key: abc", true), true);
+    assert.equal(tooShort("Authorization: Bearer abc", true), true);
+    assert.equal(tooShort("abc"), true);
 });
 
 test("a connector that throws backs off and goes on; a fatal error stops it until an edit; the server never sees either", async () => {

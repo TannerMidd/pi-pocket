@@ -36,7 +36,7 @@ Each event goes through these checks, in this order. An event that fails the fir
 2. `author.bot` is `true`: dropped. This is how a connector never hears itself. Set `bot` for the service's bots and for the connector's own account.
 3. **Mention only** is on, the connector says `mentions: true`, and `mentioned` is not `true`: dropped.
 4. The text is empty and there are no attachments: dropped. An id that is waiting or was delivered lately is dropped as a repeat.
-5. The author is not an owner ID, the connector does not say `authorLimit: false`, and the author sent the author limit already in the last hour: dropped and counted.
+5. The author is not an owner ID, the connector's `authorLimit` does not turn the limit off (see below), and the author sent the author limit already in the last hour: dropped and counted.
 6. More than 200 events wait: the oldest is dropped and counted.
 7. The connector's limit in an hour is reached when the event is delivered (the inbox says 429): dropped and counted.
 
@@ -65,7 +65,7 @@ interface RelayConnector {
     interval?: number;
     mentions?: boolean;
     idempotentReply?: boolean;
-    authorLimit?: false;
+    authorLimit?: false | string;
     check?(values: RelayValues): string | undefined;
     poll?(context: RelayContext): Promise<void>;
     run?(context: RelayContext): Promise<void>;
@@ -80,7 +80,7 @@ interface RelayConnector {
 - `label`, `description`: what the owner reads when they add a connector.
 - `shape: "poll"` needs `poll`. `shape: "stream"` needs `run`. Registering a connector that does not fit throws, so you see the mistake when the module loads.
 - `mentions: true` says the connector sets `RelayEvent.mentioned`. The owner can then take only the messages that name the account.
-- `authorLimit: false` says that the connector's items do not come from people, such as a feed's items. The limit for each author does not apply to them: only the connector's limit does. A chat connector does not set it.
+- `authorLimit: false` says that the connector's items do not come from people, such as a feed's items. The limit for each author does not apply to them: only the connector's limit does. A chat connector does not set it. The name of one of the connector's fields says that the limit for each author applies only when the owner gave that field a value: the `http` connector names `authorIdField`, so an address of chat messages with an author id keeps the limit, and a feed without one does not.
 - `check(values)` runs before the owner's values are saved. Return a problem in words for the owner (it shows as an error, and nothing is saved), or nothing. It gets the values the owner typed, without defaults. A problem has no secret in it: the relay takes any secret value out of a problem.
 - `reply` is optional. Without it, the connector only listens.
 
@@ -114,7 +114,7 @@ type RelayValues = Readonly<Record<string, string | number | boolean | undefined
 
 - `name`: a letter, then letters, digits, and `_`, 40 characters at most, and each name once. A name that is wrong throws when the connector registers.
 - `text` is one line, 8,192 characters at most. `textarea` has more lines, 8,192 characters at most. `number` follows `min` and `max`. `choice` is one of the `choices`. `boolean` is `true` or `false`.
-- `secret` is a text of 8,192 characters at most for a token or a key. It never goes to the owner's browser: the sheet shows only whether it is set, and the owner keeps, replaces, or clears it. The server hides the values with `host.hide`, so Pi and people cannot read them in a transcript, and the relay takes them out of every error and status. The relay refuses to save a secret, or a header line's value, of fewer than 4 characters: it cannot hide one that short. A secret never goes in a `description` or a default.
+- `secret` is a text of 8,192 characters at most for a token or a key. It never goes to the owner's browser: the sheet shows only whether it is set, and the owner keeps, replaces, or clears it. The server hides the values with `host.hide`, so Pi and people cannot read them in a transcript, and the relay takes them out of every error and status. The relay refuses to save a secret of fewer than 4 characters: it cannot hide one that short. In a `multiline` field of headers, this applies only to a credential header (`Authorization`, `Cookie`, or a name with `key`, `token`, `secret`, `auth`, `pass`, `session`, or `signature`): a short value of another header (`Accept: */*`) is saved, and not hidden. A secret never goes in a `description` or a default.
 - `multiline: true` on a `secret` field: the sheet draws it as a masked text area of more lines (the `http` connector's headers, one `Name: value` on each line). A password input would join the lines.
 - `required: true`: the owner must give a value, or the field must have a `default`.
 - `context.values` has each field's value as the owner set it, else the `default`, else `undefined`. The object is frozen.
@@ -143,7 +143,7 @@ interface RelayEvent {
 ```
 
 - `id` is unique in this connector, and the same each time the event comes. Use the service's own id. The relay delivers an id once, so an id that is not stable sends the same message again, and an id that is reused loses messages.
-- `author.id` is what the owner lists as trusted. Use the service's stable id for the account, never a name that a person can change. When a source has no people (a feed), use one id for the whole source, and set `authorLimit: false` so that only the connector's limit applies (the `rss` and `http` connectors do this). Without it, the limit for each author limits the source.
+- `author.id` is what the owner lists as trusted. Use the service's stable id for the account, never a name that a person can change. When a source has no people (a feed), use one id for the whole source, and set `authorLimit: false` so that only the connector's limit applies (the `rss` connector does this, and the `http` connector when its author id field is empty). Without it, the limit for each author limits the source.
 - `channel` is where the event came from, and where a reply goes (a channel, a chat, a room). `thread` is a thread in it. `channelName` is for Pi to read.
 - `mentioned` is `true` when the event names the connector's own account, or came in a direct message.
 - `at` is in milliseconds since 1970. `url` is a link. `attachments` are one-line descriptions (a name, a type, a size), never content.

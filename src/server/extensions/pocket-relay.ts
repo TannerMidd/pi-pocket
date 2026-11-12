@@ -170,7 +170,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         ...(connector.description === undefined ? {} : { description: connector.description }),
         shape: connector.shape,
         mentions: connector.mentions === true,
-        authorLimit: connector.authorLimit !== false,
+        authorLimit: connector.authorLimit ?? true,
         reply: typeof connector.reply === "function",
         fields: connector.fields,
     });
@@ -253,7 +253,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
                     }
 
                     // `secretsOf` does not hide a value that short: Pi would see it where the service echoes it.
-                    if (tooShort(value)) {
+                    if (tooShort(value, field.multiline === true)) {
                         fail(
                             `${field.label} has a value under 4 characters: one that short cannot be hidden from Pi.`,
                         );

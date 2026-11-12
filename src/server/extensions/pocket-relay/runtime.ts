@@ -175,6 +175,18 @@ function checkConnector(connector: RelayConnector): RelayConnector {
         names.add(field.name);
     }
 
+    const limit = connector.authorLimit;
+
+    if (
+        limit !== undefined &&
+        limit !== false &&
+        !(typeof limit === "string" && names.has(limit))
+    ) {
+        throw new Error(
+            `relay: connector ${connector.kind}'s authorLimit is false, or the name of one of its fields`,
+        );
+    }
+
     return connector;
 }
 
@@ -218,9 +230,19 @@ export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]
     return [...found].filter((value) => value.length >= MIN_SECRET && value.length <= MAX_SECRET);
 }
 
-export function tooShort(value: string): boolean {
+/** A header whose value is a credential: only such a value is refused when it is too short to hide. */
+const CREDENTIAL_HEADER = /authorization|cookie|key|token|secret|auth|pass|session|signature/i;
+
+/** A secret too short to hide. In `headers` (one `Name: value` on each line), only a credential header's value counts. */
+export function tooShort(value: string, headers = false): boolean {
     return value.split(/\r?\n/).some((line) => {
-        const part = (line.includes(":") ? line.slice(line.indexOf(":") + 1) : line).trim();
+        const colon = line.indexOf(":");
+
+        if (headers && colon !== -1 && !CREDENTIAL_HEADER.test(line.slice(0, colon))) {
+            return false;
+        }
+
+        const part = (colon === -1 ? line : line.slice(colon + 1)).trim();
         const last = part.split(/\s+/).at(-1) ?? "";
 
         return (
@@ -760,6 +782,11 @@ export class Relay {
         const config = runner.config;
         const state = this.stateOf(config.id);
         const now = this.now();
+        const limit = runner.connector.authorLimit;
+        const authorLimited =
+            limit === undefined ||
+            (typeof limit === "string" &&
+                String(valuesOf(config, runner.connector.fields)[limit] ?? "").trim() !== "");
         let changed = false;
 
         for (const event of Array.isArray(events) ? events : []) {
@@ -803,7 +830,7 @@ export class Relay {
 
             const trusted = config.ownerIds.includes(event.author.id);
 
-            if (!trusted && runner.connector.authorLimit !== false) {
+            if (!trusted && authorLimited) {
                 const previous = Object.hasOwn(state.authors, event.author.id)
                     ? state.authors[event.author.id]!
                     : [];

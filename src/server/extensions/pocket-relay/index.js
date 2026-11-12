@@ -854,7 +854,9 @@ export default function setup(pocket) {
                     />
                 </div>
                 ${
-                    kind.authorLimit &&
+                    (kind.authorLimit === true ||
+                        (typeof kind.authorLimit === "string" &&
+                            String(form.values[kind.authorLimit] ?? "").trim() !== "")) &&
                     html`<div class="relay-field">
                         <label class="relay-label" for="relay-author">Per author, per hour</label>
                         <input
