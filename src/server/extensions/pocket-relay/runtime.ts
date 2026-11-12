@@ -498,7 +498,11 @@ export class Relay {
     /** Aborts the replies under way when the relay stops. */
     readonly #replies = new AbortController();
     #stopped = false;
-    #unhide: () => void = () => {};
+    /** The values hidden so far, and how to stop: an old value stays hidden until the relay stops, as core's do. */
+    readonly #hidden = new Set<string>();
+    readonly #unhides: (() => void)[] = [];
+    /** Whether every secret is hidden: until it is, no connector runs and no reply goes. */
+    #safe = true;
     readonly #replying = new Map<string, Promise<string>>();
     /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
     readonly #ended: Promise<void>;
@@ -531,7 +535,7 @@ export class Relay {
             this.#configs = load(this.#connectorsFile, { connectors: {} }).connectors ?? {};
             this.#states = load(this.#stateFile, { connectors: {} }).connectors ?? {};
             this.#loaded = true;
-            this.#hide();
+            this.#safe = this.#hide();
             this.start();
         });
     }
@@ -553,7 +557,7 @@ export class Relay {
         }
 
         this.#kinds.set(checked.kind, checked);
-        this.#hide();
+        this.#safe = this.#hide() && this.#safe;
         this.#startKind(checked.kind);
 
         return () => {
@@ -610,6 +614,10 @@ export class Relay {
 
         if (config === undefined || !config.enabled) {
             return { state: "off", ...counts };
+        }
+
+        if (!this.#safe) {
+            return { state: "failed", text: "its secrets cannot be hidden from Pi", ...counts };
         }
 
         if (!this.#kinds.has(config.kind)) {
@@ -687,34 +695,43 @@ export class Relay {
         return this.#writing;
     }
 
-    /** Hide every connector's secrets, then stop hiding the old set. False, and the old set kept, when it failed. */
-    #hide(): boolean {
-        const values = Object.values(this.#configs).flatMap((config) => {
-            // A kind not loaded yet: hide every text value that looks like a key, to be safe.
-            const fields =
-                this.#kinds.get(config.kind)?.fields ??
-                Object.keys(config.values).map((name) => ({
-                    name,
-                    label: name,
-                    type: "secret" as const,
-                }));
+    /**
+     * Hide every connector's secrets not hidden yet. False when it failed: what was hidden before stays hidden. Values
+     * stay hidden until the relay stops, so an old token is still hidden while work that used it ends.
+     */
+    #hide(configs: readonly ConnectorConfig[] = Object.values(this.#configs)): boolean {
+        const values = configs.flatMap((config) => {
+            const fields = this.#kinds.get(config.kind)?.fields;
 
-            return secretsOf(config, fields).map((value) => ({ value, label: "secret relay" }));
+            // A kind not loaded yet: hide each value that looks like a key, to be safe.
+            return fields === undefined
+                ? Object.values(config.values).filter(
+                      (value): value is string =>
+                          typeof value === "string" &&
+                          value.length >= 12 &&
+                          value.length <= MAX_SECRET &&
+                          !/\s/.test(value) &&
+                          !/^https?:/i.test(value),
+                  )
+                : secretsOf(config, fields);
         });
-        let unhide: () => void;
+        const fresh = [...new Set(values)].filter((value) => !this.#hidden.has(value));
+
+        if (fresh.length === 0) {
+            return true;
+        }
 
         try {
-            unhide = this.#options.hide(values);
+            this.#unhides.push(
+                this.#options.hide(fresh.map((value) => ({ value, label: "secret relay" }))),
+            );
         } catch (error) {
             this.log(`its secrets could not be hidden: ${message(error)}`);
 
             return false;
         }
 
-        const before = this.#unhide;
-
-        this.#unhide = unhide;
-        before();
+        fresh.forEach((value) => this.#hidden.add(value));
 
         return true;
     }
@@ -927,6 +944,10 @@ export class Relay {
             throw new Error("The relay is stopping. Try again in a moment.");
         }
 
+        if (!this.#safe) {
+            throw new Error("The relay could not hide its secrets from Pi, so it sends nothing.");
+        }
+
         const running = this.#replying.get(request.key);
 
         if (running !== undefined) {
@@ -1054,17 +1075,12 @@ export class Relay {
         }
 
         // A secret that cannot be hidden is not kept: Pi would see it in what the service echoes.
-        this.#configs[config.id] = config;
-
-        if (!this.#hide()) {
-            if (before === undefined) {
-                delete this.#configs[config.id];
-            } else {
-                this.#configs[config.id] = before;
-            }
-
+        if (!this.#hide([config])) {
             throw new Error("Its secrets cannot be hidden from Pi, so it was not saved.");
         }
+
+        this.#configs[config.id] = config;
+        this.#safe ||= this.#hide();
 
         await this.#stop(config.id);
 
@@ -1085,7 +1101,6 @@ export class Relay {
         await this.#stop(id);
         delete this.#configs[id];
         delete this.#states[id];
-        this.#hide();
         await this.persist();
 
         return true;
@@ -1114,6 +1129,7 @@ export class Relay {
         if (
             this.#stopped ||
             !this.#loaded ||
+            !this.#safe ||
             config === undefined ||
             connector === undefined ||
             !config.enabled ||
@@ -1167,7 +1183,8 @@ export class Relay {
             await this.persist();
             await this.#writing;
         } finally {
-            this.#unhide();
+            this.#unhides.splice(0).forEach((unhide) => unhide());
+            this.#hidden.clear();
             this.#end();
         }
     }
