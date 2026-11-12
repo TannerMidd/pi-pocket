@@ -1,9 +1,6 @@
 /**
- * The relay's runtime: the owner's connectors and what each has heard, kept in two 0600 files of the module's data
- * folder (`x.pocket-relay`, which Lancet Guard keeps Pi out of); a runner for each connector that is on, which polls or
- * keeps a stream, and backs off when it fails; and a queue for each, kept on disk, that delivers what came to the bound
- * session through `host.inbox`, once for each event id. Nothing here throws into the server: a connector's error is its
- * status.
+ * The relay's runtime. Its files are 0600, in `x.pocket-relay`, which Lancet Guard keeps Pi out of. Nothing here throws
+ * into the server: a connector's error is its status.
  */
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -26,9 +23,7 @@ export interface ConnectorConfig {
     name: string;
     kind: string;
     enabled: boolean;
-    /** The session it delivers to. */
     target: number;
-    /** The person Pi works for on what it delivers: the owner who saved it. */
     by: string;
     instructions: string;
     /** The ids of the owner's own accounts on the service: Pi reads them as trusted. */
@@ -50,13 +45,12 @@ interface Heard {
     at: number;
 }
 
-/** What one connector has heard and done, across restarts. */
 interface ConnectorState {
-    /** The connector's own (`RelayContext.state`): a cursor, a session. */
+    /** `RelayContext.state`. */
     own: Record<string, unknown>;
-    /** Events stored and not delivered yet, oldest first. */
+    /** Oldest first. */
     pending: RelayEvent[];
-    /** The latest events delivered, newest last: a reply finds its event here. */
+    /** Newest last: a reply finds its event here. */
     recent: Heard[];
     /** Replies sent, by key: a call that runs again does not send twice. */
     replies: Record<string, { at: number; id?: string; sending?: boolean }>;
@@ -101,7 +95,6 @@ const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
 /** setTimeout's longest wait: a longer one fires at once. */
 const TIMER_MAX = 2_147_483_647;
-/** The longest a service's retry-after is waited: a day. */
 const RETRY_AFTER_MAX = 24 * HOUR;
 const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
@@ -113,7 +106,6 @@ const DELIVERY_RETRY_MAX = 10 * 60_000;
 const KIND = /^[a-z][a-z0-9-]{0,39}$/;
 const FIELD = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
-/** What Pi does with a message when the owner gave no instructions. */
 export const RELAY_INSTRUCTIONS =
     "A message came through the relay. Read it. Answer it when it asks something of you, or when the owner's instructions say so.";
 
@@ -130,7 +122,6 @@ const fresh = (): ConnectorState => ({
 const message = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
-/** Errors as the owner reads them: one line, short, with every secret value of the connector taken out. */
 export function scrub(text: string, secrets: readonly string[]): string {
     let out = text;
 
@@ -143,7 +134,6 @@ export function scrub(text: string, secrets: readonly string[]): string {
     return out.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
-/** A connector checked as it registers: a mistake throws at once, where its author sees it. */
 export function checkConnector(connector: RelayConnector): RelayConnector {
     if (connector === null || typeof connector !== "object") {
         throw new Error("relay: a connector is an object");
@@ -196,11 +186,7 @@ export const MAX_SECRET = 4096;
 /** The shortest value hidden: a shorter one would hide ordinary words. */
 const MIN_SECRET = 4;
 
-/**
- * The secret fields' values of a connector: what is hidden, and scrubbed out of errors. A value of lines (headers, one
- * `Name: value` each) gives each line's value too, and each long word in it (the token after `Bearer`), so a service
- * that echoes one header, or one token, does not show it.
- */
+/** A value of lines (headers) gives each line's value and each long word too: a service may echo a header or token. */
 export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]): string[] {
     const found = new Set<string>();
 
@@ -232,7 +218,6 @@ export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]
     return [...found].filter((value) => value.length >= MIN_SECRET && value.length <= MAX_SECRET);
 }
 
-/** Whether a secret value holds a credential too short to hide: a line's value, or its last word (see `secretsOf`). */
 export function tooShort(value: string): boolean {
     return value.split(/\r?\n/).some((line) => {
         const part = (line.includes(":") ? line.slice(line.indexOf(":") + 1) : line).trim();
@@ -245,7 +230,6 @@ export function tooShort(value: string): boolean {
     });
 }
 
-/** A field's value as the connector reads it: the owner's, else its default. */
 function valuesOf(config: ConnectorConfig, fields: readonly RelayField[]): RelayValues {
     const values: Record<string, string | number | boolean | undefined> = {};
 
@@ -273,7 +257,6 @@ function aliveIn(folder: string): Set<Promise<void>> {
     return alive;
 }
 
-/** A file written whole or not at all, readable by its user alone. */
 async function save(path: string, data: unknown): Promise<void> {
     const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
 
@@ -297,7 +280,7 @@ function load<T>(path: string, empty: T): T {
     }
 }
 
-/** Waits `ms`, or less when `signal` aborts. Never rejects. */
+/** Never rejects. */
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
         if (signal.aborted) {
@@ -318,7 +301,7 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
     });
 }
 
-/** Waits for `promise`, `ms` at most, and leaves no timer. Never rejects. */
+/** Never rejects, and leaves no timer. */
 async function within(promise: Promise<unknown>, ms: number): Promise<void> {
     const waited = new AbortController();
 
@@ -330,18 +313,14 @@ const backoff = (failures: number, min: number, max: number): number =>
     Math.min(max, min * 2 ** Math.max(0, failures - 1)) * (1 + Math.random() * 0.2);
 
 export interface RelayOptions {
-    /** The module's data folder: `<dataDir>/x.pocket-relay`. */
     folder: string;
     inbox: () => InboxApi | undefined;
     log: (line: string) => void;
-    /** A connector's status changed. */
     onStatus: (id: string, status: Status) => void;
-    /** Secret values to hide from what Pi and people read. Returns how to stop hiding them. */
     hide: (values: { value: string; label: string }[]) => () => void;
     now?: () => number;
 }
 
-/** One connector that is on: its loop, its delivery queue, and how to stop both. */
 class Runner {
     readonly abort = new AbortController();
     readonly done: Promise<void>;
@@ -363,7 +342,6 @@ class Runner {
         return this.abort.signal;
     }
 
-    /** Wake the delivery queue: something came. */
     wake(): void {
         this.#wake?.();
     }
@@ -526,7 +504,6 @@ class Runner {
     }
 }
 
-/** The relay: connectors registered by kind, the owner's connectors, and a runner for each that is on. */
 export class Relay {
     readonly #options: RelayOptions;
     readonly #kinds = new Map<string, RelayConnector>();
@@ -537,10 +514,8 @@ export class Relay {
     #states: Record<string, ConnectorState> = {};
     #writing: Promise<void> = Promise.resolve();
     #dirty = false;
-    /** Whether the last write of the files worked. */
     #written = true;
     #loaded = false;
-    /** Aborts the replies under way when the relay stops. */
     readonly #replies = new AbortController();
     #stopped = false;
     /** The values hidden so far, and how to stop: an old value stays hidden until the relay stops, as core's do. */
@@ -597,7 +572,6 @@ export class Relay {
         this.#options.log(`relay: ${line}`);
     }
 
-    /** Add a kind of connector. Returns how to remove it, which stops its connectors. */
     register(connector: RelayConnector): () => void {
         const checked = checkConnector(connector);
 
@@ -744,10 +718,7 @@ export class Relay {
         return this.#writing;
     }
 
-    /**
-     * Hide every connector's secrets not hidden yet. False when it failed: what was hidden before stays hidden. Values
-     * stay hidden until the relay stops, so an old token is still hidden while work that used it ends.
-     */
+    /** False when it failed: what was hidden before stays hidden. */
     #hide(configs: readonly ConnectorConfig[] = Object.values(this.#configs)): boolean {
         const values = configs.flatMap((config) => {
             const fields = this.#kinds.get(config.kind)?.fields;
@@ -785,7 +756,6 @@ export class Relay {
         return true;
     }
 
-    /** Store events a connector heard, filtered: when this resolves, they will be delivered. */
     async take(runner: Runner, events: readonly RelayEvent[]): Promise<void> {
         const config = runner.config;
         const state = this.stateOf(config.id);
@@ -883,7 +853,7 @@ export class Relay {
         }
     }
 
-    /** Deliver one pending event: `retry` when the session cannot take it now (it stays first in the queue). */
+    /** `retry`: the session cannot take it now, and it stays first in the queue. */
     deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
         const delivering = this.#deliver(config, event);
 
@@ -991,7 +961,6 @@ export class Relay {
         }
     }
 
-    /** The owner's instructions, then how to reply, which the relay writes (outside the fence). */
     instructions(config: ConnectorConfig): string {
         const kind = this.#kinds.get(config.kind);
         const own = config.instructions.trim() || RELAY_INSTRUCTIONS;
@@ -1001,12 +970,10 @@ export class Relay {
             : `${own}\n\nThis connector only listens: there is no way to answer there.`;
     }
 
-    /** The connectors that deliver to a session. */
     boundTo(target: number): ConnectorConfig[] {
         return this.configs().filter((config) => config.target === target);
     }
 
-    /** Send a reply through a connector, once for `key`. Returns what to tell Pi. */
     async reply(
         config: ConnectorConfig,
         request: { text: string; replyTo?: string; key: string },
@@ -1148,7 +1115,6 @@ export class Relay {
         return "Sent.";
     }
 
-    /** Save a connector (new or edited) and start or stop it to match. */
     async put(config: ConnectorConfig): Promise<void> {
         await this.ready;
 
@@ -1200,7 +1166,6 @@ export class Relay {
         return true;
     }
 
-    /** Start every connector that is on and has its kind. */
     start(): void {
         for (const config of this.configs()) {
             this.#start(config.id);
@@ -1263,7 +1228,6 @@ export class Relay {
         await within(runner.done, 3000);
     }
 
-    /** Stop everything: the module goes. */
     async stop(): Promise<void> {
         this.#stopped = true;
 
@@ -1292,7 +1256,6 @@ export class Relay {
 /** The latest time a Date holds, in ms. */
 const MAX_DATE = 8.64e15;
 
-/** What Pi reads between the fence's tags: where it came from, then the text. */
 export function payloadOf(event: RelayEvent): string {
     const lines = [
         `event: ${event.id}`,
