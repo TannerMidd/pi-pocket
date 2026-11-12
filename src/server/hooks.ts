@@ -142,7 +142,6 @@ export function contentOf(post: Post): { raw: string; json?: unknown } {
     }
 }
 
-/** A post's content as Pi gets it, before it is made safe: JSON trimmed and compact, anything else as text. */
 function payloadRaw(content: { raw: string; json?: unknown }): string {
     return content.json === undefined ? content.raw : JSON.stringify(trimPayload(content.json));
 }
