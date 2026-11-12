@@ -205,6 +205,15 @@ function fillReply(
     );
 }
 
+/** A value in the reply address: `.` and `..` would change the path, and a URL reads `%2E` the same way. */
+const encodePart = (value: string): string => {
+    if (value === "." || value === "..") {
+        throw new Error("The reply address cannot take a value of . or ..");
+    }
+
+    return encodeURIComponent(value);
+};
+
 const SAMPLE = { text: "x", channel: "x", thread: "x", replyTo: "x", key: "x" };
 
 function checkUrl(value: string, label: string): string | undefined {
@@ -252,13 +261,61 @@ function failOn(response: Response, what: string): never {
     throw new Error(`${what} failed with status ${response.status}.`);
 }
 
+const MAX_REDIRECTS = 5;
+
+/** Follows a redirect to the same origin only: another origin would get the custom headers. */
+async function fetchSameOrigin(
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal,
+): Promise<Response> {
+    let target = url;
+    let next = init;
+
+    for (let hops = 0; ; hops += 1) {
+        const response = await fetch(target, { ...next, redirect: "manual", signal });
+        const location = response.headers.get("location");
+
+        if (response.status < 300 || response.status >= 400 || location === null) {
+            return response;
+        }
+
+        const to = new URL(location, target);
+
+        if (to.origin !== new URL(target).origin) {
+            throw new RelayError(
+                "The server redirected to another address, which is not followed.",
+            );
+        }
+
+        if (hops >= MAX_REDIRECTS) {
+            throw new RelayError("The server redirected too many times.");
+        }
+
+        void response.body?.cancel();
+        target = to.toString();
+
+        if (
+            response.status === 303 ||
+            ((response.status === 301 || response.status === 302) && next.method === "POST")
+        ) {
+            next = { ...next, method: "GET", body: undefined };
+        }
+    }
+}
+
 async function send(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
     try {
-        return await fetch(url, {
-            ...init,
-            signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
-        });
+        return await fetchSameOrigin(
+            url,
+            init,
+            AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+        );
     } catch (error) {
+        if (error instanceof RelayError) {
+            throw error;
+        }
+
         if (signal.aborted) {
             throw error;
         }
@@ -461,7 +518,7 @@ async function reply(
         replyTo: message.to?.id ?? "",
         key: message.key,
     };
-    const url = fillReply(replyUrl, data, encodeURIComponent);
+    const url = fillReply(replyUrl, data, encodePart);
     const body = fillReply(text(values, "replyBody") || DEFAULT_REPLY_BODY, data, JSON.stringify);
     const response = await send(
         url,
