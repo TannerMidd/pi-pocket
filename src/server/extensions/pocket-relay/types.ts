@@ -13,7 +13,7 @@ export interface RelayField {
     placeholder?: string;
     default?: string | number | boolean;
     required?: boolean;
-    /** A secret of several lines (headers): the form shows a masked text area. */
+    /** A secret of headers, one `Name: value` on each line: the form shows a masked text area. */
     multiline?: boolean;
     min?: number;
     max?: number;
@@ -114,7 +114,7 @@ export interface RelayConnector {
     idempotentReply?: boolean;
     /**
      * false: its items do not come from people (a feed's), so only the connector's limit applies, not the author's. The
-     * name of one of its fields: the author's limit applies only when the owner gave that field a value.
+     * name of one of its fields: the author's limit applies only when that field has a value (or a default).
      */
     authorLimit?: false | string;
     /** Send a reply. Without it, the connector only listens. Returns the id the service gave it, if any. */
