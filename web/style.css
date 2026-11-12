@@ -11086,6 +11086,21 @@ textarea.notes {
     color: var(--muted);
 }
 
+/* Three scopes on a phone: "Project" and "Session" leave room for their counts. */
+.memory-scope-short {
+    display: none;
+}
+
+@media (max-width: 430px) {
+    .memory-scope-long {
+        display: none;
+    }
+
+    .memory-scope-short {
+        display: inline;
+    }
+}
+
 /* Done when: a goal met, or one Pi gave up on. */
 .goal-bar.met {
     --tone: var(--ok);

@@ -2838,6 +2838,8 @@ export class Commands {
                 forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
                 ...(place.worktree === undefined ? {} : { worktree: place.worktree }),
             };
+            // The fork goes on with the session's own lessons in force (`memory.ts`).
+            await app.memory.forked(tx, id, forked, title);
 
             if (fork.resend !== undefined) {
                 await tx.createTask(ResendTask, fork.resend, {

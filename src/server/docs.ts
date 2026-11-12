@@ -672,9 +672,12 @@ export type Lesson = {
     /** Short and stable: what Pi and people use to change or remove it. */
     id: string;
     text: string;
-    /** The project it is for (`memory.ts`: the repository's shared git folder, or the folder); absent: everywhere. */
+    /**
+     * The project it is for (`memory.ts`: the repository's shared git folder, or the folder); absent: everywhere.
+     * `pocket-session:<root id>` (`sessionKey`): that session's own lessons, a key no folder has.
+     */
     project?: string;
-    /** The project's folder name, for people to read. */
+    /** The project's folder name, or the session's title, for people to read. */
     projectName?: string;
     /** The session it came from: a subagent's lesson is its session's. */
     from?: { conversationId: number; title: string };
@@ -695,8 +698,8 @@ export type Lesson = {
 };
 
 /**
- * Memory: short lessons Pi keeps across sessions, by id, for one project or everywhere. Pi gets those that apply in
- * its system prompt (`extensions/memory.ts`).
+ * Memory: short lessons Pi keeps across sessions, by id, for one project, everywhere, or one session. Pi gets those
+ * that apply in its system prompt (`extensions/memory.ts`).
  */
 export const MemoryDoc = defineDoc<{ items: Record<string, Lesson> }>({
     kind: "pocket.memory",
