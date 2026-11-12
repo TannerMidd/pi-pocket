@@ -27,7 +27,7 @@ import { describe, HttpError } from "./errors.ts";
 import { FROM_PREFIX } from "./entry-format.ts";
 import { snippet } from "./projection.ts";
 import { ownRequest, requestFor } from "./requests.ts";
-import { checkMoment, nextRepeat, parseWhen, type Repeat } from "./when.ts";
+import { checkMoment, nextRepeat, outsideWindow, parseWhen, type Repeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -222,6 +222,26 @@ export class Schedules {
 
         if (schedule === undefined || conversation === undefined) {
             return runtime.commit(() => finished, context);
+        }
+
+        // Due in its window but late past its end (the server was down, or PiP held it): it waits for the next run.
+        if (
+            schedule.every !== undefined &&
+            outsideWindow(schedule.every, runtime.now(), schedule.zone)
+        ) {
+            return runtime.commit(async (tx) => {
+                const item = (await tx.doc(ScheduleDoc, conversationId)).items[id];
+
+                if (!ownedBy(item, runtime)) {
+                    return finished;
+                }
+
+                if (item.paused === undefined && item.every !== undefined) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+                }
+
+                return { status: "running", checkpoint: { phase: "wait" } } as const;
+            }, context);
         }
 
         // PiP's conversation while PiP is off would run without PiP's rules: its schedule waits, and goes out once PiP

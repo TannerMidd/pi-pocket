@@ -169,44 +169,60 @@ export function nextClockTime(
 }
 
 /**
+ * When a window that opens on a wall-clock day (days past the month's end roll over) opens and closes; undefined on a
+ * day it stays shut.
+ */
+function windowOn(
+    window: RepeatWindow,
+    year: number,
+    month: number,
+    day: number,
+    zone: string,
+): { start: number; end: number } | undefined {
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+
+    if (window.days !== undefined && !window.days.includes(weekday)) {
+        return undefined;
+    }
+
+    const [fromHour = 0, fromMinute = 0] = window.from.split(":").map(Number);
+    const [toHour = 0, toMinute = 0] = window.to.split(":").map(Number);
+    const overnight = window.to <= window.from;
+
+    return {
+        start: zonedMoment(year, month, day, fromHour, fromMinute, zone),
+        end: zonedMoment(year, month, day + (overnight ? 1 : 0), toHour, toMinute, zone),
+    };
+}
+
+/**
  * The first run of a windowed repeat after `after`: at the window's start, then every `minutes` while before its end.
  * The start and the end are wall-clock times; the runs between are `minutes` of real time apart, so a window that holds
  * a daylight saving change is an hour shorter or longer and has a run less or more.
  */
 function nextInWindow(minutes: number, window: RepeatWindow, after: number, zone: string): number {
-    const [fromHour = 0, fromMinute = 0] = window.from.split(":").map(Number);
-    const [toHour = 0, toMinute = 0] = window.to.split(":").map(Number);
-    const overnight = window.to <= window.from;
     const today = wallClock(after, zone);
+    const step = minutes * 60_000;
     let best: number | undefined;
 
     // From yesterday, whose window may run into today, to eight days ahead, which always reaches an open day.
     for (let ahead = -1; ahead <= 8; ahead++) {
-        const day = today.day + ahead;
-        const weekday = new Date(Date.UTC(today.year, today.month - 1, day)).getUTCDay();
+        const open = windowOn(window, today.year, today.month, today.day + ahead, zone);
 
-        if (window.days !== undefined && !window.days.includes(weekday)) {
+        if (open === undefined) {
             continue;
         }
 
-        const start = zonedMoment(today.year, today.month, day, fromHour, fromMinute, zone);
-
-        if (best !== undefined && start >= best) {
+        if (best !== undefined && open.start >= best) {
             break;
         }
 
-        const end = zonedMoment(
-            today.year,
-            today.month,
-            day + (overnight ? 1 : 0),
-            toHour,
-            toMinute,
-            zone,
-        );
-        const step = minutes * 60_000;
-        const run = start > after ? start : start + (Math.floor((after - start) / step) + 1) * step;
+        const run =
+            open.start > after
+                ? open.start
+                : open.start + (Math.floor((after - open.start) / step) + 1) * step;
 
-        if (run < end && (best === undefined || run < best)) {
+        if (run < open.end && (best === undefined || run < best)) {
             best = run;
         }
     }
@@ -216,6 +232,22 @@ function nextInWindow(minutes: number, window: RepeatWindow, after: number, zone
     }
 
     return best;
+}
+
+/** Whether a repeat has a window that is shut at `at`: a run due earlier, sent late, then waits for its next run. */
+export function outsideWindow(repeat: Repeat, at: number, zone: string): boolean {
+    if (!("minutes" in repeat) || repeat.window === undefined) {
+        return false;
+    }
+
+    const window = repeat.window;
+    const today = wallClock(at, zone);
+
+    return ![-1, 0].some((ahead) => {
+        const open = windowOn(window, today.year, today.month, today.day + ahead, zone);
+
+        return open !== undefined && at >= open.start && at < open.end;
+    });
 }
 
 /** The next time a repeat goes out after `after`. */
@@ -382,7 +414,10 @@ export function parseWhen(
             }
 
             const window =
-                next === "between" ? windowOf(lower.slice(1 + interval.used)) : undefined;
+                // `every 30m between us` is a message, as before windows.
+                next === "between" && /^\d/.test(lower[2 + interval.used] ?? "")
+                    ? windowOf(lower.slice(1 + interval.used))
+                    : undefined;
             const every: Repeat =
                 window === undefined
                     ? { minutes: interval.minutes }
@@ -402,7 +437,10 @@ export function parseWhen(
             throw new Error(WHEN_HELP);
         }
 
-        if (lower[days === undefined ? 2 : 3] === "between") {
+        if (
+            lower[days === undefined ? 2 : 3] === "between" &&
+            /^\d/.test(lower[days === undefined ? 3 : 4] ?? "")
+        ) {
             throw new Error(
                 "Only a repeat every so many minutes has a window: every 30m between 9:00 and 17:00.",
             );
@@ -510,6 +548,10 @@ export function checkRepeat(given: unknown, limits: WhenLimits = {}): Repeat {
         return value.window === undefined || value.window === null
             ? { minutes }
             : { minutes, window: checkWindow(value.window) };
+    }
+
+    if (value.window !== undefined && value.window !== null) {
+        throw new Error("Only a repeat every so many minutes has a window.");
     }
 
     const at = givenTime(value.at);

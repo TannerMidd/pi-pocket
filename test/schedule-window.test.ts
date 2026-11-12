@@ -32,6 +32,9 @@ test("a window reads as people write it or as the editor sends it, and a bad one
 
     assert.deepEqual(parsed.every, weekdays);
     assert.equal(parsed.rest, "check it");
+    // "between" with no time after it is a message, as before windows.
+    assert.equal(parseWhen("every 30m between us", friday, york).rest, "between us");
+    assert.equal(parseWhen("every day 8:00 between us", friday, york).rest, "between us");
     assert.equal(describeRepeat(weekdays), "every 30 minutes, 09:00 to 17:00 on weekdays");
     assert.deepEqual(
         checkRepeat({ minutes: 30, window: { from: "9:00", to: "17:00", days: [5, 1, 2, 3, 4] } }),
@@ -54,6 +57,7 @@ test("a window reads as people write it or as the editor sends it, and a bad one
     assert.throws(() =>
         checkRepeat({ minutes: 30, window: { from: "9:00", to: "5:00", days: [] } }),
     );
+    assert.throws(() => checkRepeat({ at: "08:00", window: { from: "9:00", to: "17:00" } }));
 });
 
 test("a window runs from its start, every so often, before its end, across midnight and DST", () => {
