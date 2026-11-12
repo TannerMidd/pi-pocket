@@ -899,6 +899,13 @@ export class Relay {
 
             if (outcome === "delivered") {
                 state.delivered += 1;
+
+                // A wait that ended (a busy session, a restart's first moments) is no longer an error.
+                if (state.lastError?.startsWith("Not delivered yet") === true) {
+                    delete state.lastError;
+                    delete state.lastErrorAt;
+                }
+
                 state.recent = [
                     ...state.recent,
                     {
@@ -1119,8 +1126,10 @@ export class Relay {
             );
         } catch (error) {
             // The mark stays: the service may have taken it before the answer failed. Only a connector whose service
-            // sends a key once sends it again.
-            throw new Error(this.scrub(config, message(error)));
+            // sends a key once sends it again. Pi hears it too: a new call has a new key, so it could show twice.
+            throw new Error(
+                `${this.scrub(config, message(error))} The reply may have gone out: do not send it again unless you know it did not.`,
+            );
         }
 
         const id = typeof answer?.id === "string" ? answer.id.slice(0, 100) : undefined;
