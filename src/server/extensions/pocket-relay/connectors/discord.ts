@@ -819,6 +819,7 @@ async function run(context: RelayContext): Promise<void> {
 const discord: RelayConnector = {
     kind: "discord",
     label: "Discord",
+    idempotentReply: true,
     description:
         "A Discord bot: it hears messages in your servers and direct messages, and replies.",
     shape: "stream",

@@ -148,9 +148,12 @@ export interface InboxDelivery {
     instructions?: string;
     /** The fence's tag: a lowercase word with `-`, such as `chat-message`. Default `outside-data`. */
     tag?: string;
-    /** Attributes of the fence's opening tag, up to 8, each made one line without quotes. */
+    /** Attributes of the fence's opening tag, up to 8 (not `from` or `from-id`), each made one line without quotes. */
     attributes?: Readonly<Record<string, string>>;
-    /** Who sent it, outside the fence: `trusted` says that the id is one the owner marked, as guidance, not a boundary. */
+    /**
+     * Who sent it: the fence's `from` and `from-id`, inside it. Outside it, only `trusted`: the id is one the owner marked
+     * (guidance to the model, not a boundary).
+     */
     sender?: { name: string; id?: string; trusted?: boolean };
     /** A cap of messages an hour for one source (`bucket`), counted in memory across every caller; at most 600. */
     limit?: { bucket: string; perHour: number };

@@ -59,7 +59,7 @@ interface ConnectorState {
     /** The latest events delivered, newest last: a reply finds its event here. */
     recent: Heard[];
     /** Replies sent, by key: a call that runs again does not send twice. */
-    replies: Record<string, { at: number; id?: string }>;
+    replies: Record<string, { at: number; id?: string; sending?: boolean }>;
     /** When each author's recent messages came, for the limit per author. */
     authors: Record<string, number[]>;
     delivered: number;
@@ -96,7 +96,7 @@ export const LIMITS = {
 } as const;
 const MAX_PENDING = 200;
 const MAX_RECENT = 200;
-const MAX_REPLIES = 200;
+const MAX_REPLIES = 2000;
 const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
 const BACKOFF_MIN = 5_000;
@@ -183,12 +183,40 @@ export function checkConnector(connector: RelayConnector): RelayConnector {
     return connector;
 }
 
-/** The secret fields' values of a connector: what is hidden, and scrubbed out of errors. */
+/** The longest secret value: what `host.hide` takes at most. */
+export const MAX_SECRET = 4096;
+
+/**
+ * The secret fields' values of a connector: what is hidden, and scrubbed out of errors. A value of lines (headers, one
+ * `Name: value` each) gives each line's value too, and each long word in it (the token after `Bearer`), so a service
+ * that echoes one header, or one token, does not show it.
+ */
 export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]): string[] {
-    return fields
-        .filter((field) => field.type === "secret")
-        .map((field) => config.values[field.name])
-        .filter((value): value is string => typeof value === "string" && value !== "");
+    const found = new Set<string>();
+
+    for (const field of fields) {
+        const value = field.type === "secret" ? config.values[field.name] : undefined;
+
+        if (typeof value !== "string" || value.trim() === "") {
+            continue;
+        }
+
+        found.add(value);
+
+        for (const line of value.split(/\r?\n/)) {
+            const part = (line.includes(":") ? line.slice(line.indexOf(":") + 1) : line).trim();
+
+            found.add(part);
+
+            for (const word of part.split(/\s+/)) {
+                if (word.length >= 8) {
+                    found.add(word);
+                }
+            }
+        }
+    }
+
+    return [...found].filter((value) => value.length >= 4 && value.length <= MAX_SECRET);
 }
 
 /** A field's value as the connector reads it: the owner's, else its default. */
@@ -200,6 +228,23 @@ function valuesOf(config: ConnectorConfig, fields: readonly RelayField[]): Relay
     }
 
     return Object.freeze(values);
+}
+
+/** The relays of each folder in this process that have not stopped: one module version's, then the next's. */
+function aliveIn(folder: string): Set<Promise<void>> {
+    const key = Symbol.for("pocket-relay.alive");
+    const all = ((globalThis as Record<symbol, unknown>)[key] ??= new Map()) as Map<
+        string,
+        Set<Promise<void>>
+    >;
+    let alive = all.get(folder);
+
+    if (alive === undefined) {
+        alive = new Set();
+        all.set(folder, alive);
+    }
+
+    return alive;
 }
 
 /** A file written whole or not at all, readable by its user alone. */
@@ -436,21 +481,48 @@ export class Relay {
     readonly #runners = new Map<string, Runner>();
     readonly #connectorsFile: string;
     readonly #stateFile: string;
-    #configs: Record<string, ConnectorConfig>;
-    #states: Record<string, ConnectorState>;
+    #configs: Record<string, ConnectorConfig> = {};
+    #states: Record<string, ConnectorState> = {};
     #writing: Promise<void> = Promise.resolve();
     #dirty = false;
+    #loaded = false;
     #stopped = false;
     #unhide: () => void = () => {};
+    readonly #replying = new Map<string, Promise<string>>();
+    /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
+    readonly #ended: Promise<void>;
+    #end: () => void = () => {};
+    /**
+     * Settles when the files are read and the connectors started. A module's new version loads before the old one's
+     * cleanups run (`reload.ts`): it waits for every relay of this folder still running, so two never write the files.
+     */
+    readonly ready: Promise<void>;
 
     constructor(options: RelayOptions) {
         this.#options = options;
         mkdirSync(options.folder, { recursive: true, mode: 0o700 });
         this.#connectorsFile = join(options.folder, "connectors.json");
         this.#stateFile = join(options.folder, "state.json");
-        this.#configs = load(this.#connectorsFile, { connectors: {} }).connectors ?? {};
-        this.#states = load(this.#stateFile, { connectors: {} }).connectors ?? {};
-        this.#hide();
+        this.#ended = new Promise<void>((resolve) => {
+            this.#end = resolve;
+        });
+
+        const alive = aliveIn(options.folder);
+        const before = [...alive];
+
+        alive.add(this.#ended);
+        void this.#ended.then(() => alive.delete(this.#ended));
+        this.ready = Promise.all(before).then(() => {
+            if (this.#stopped) {
+                return;
+            }
+
+            this.#configs = load(this.#connectorsFile, { connectors: {} }).connectors ?? {};
+            this.#states = load(this.#stateFile, { connectors: {} }).connectors ?? {};
+            this.#loaded = true;
+            this.#hide();
+            this.start();
+        });
     }
 
     now(): number {
@@ -577,6 +649,11 @@ export class Relay {
 
     /** Keep both files soon; writes run one at a time, and the last state wins. */
     persist(): Promise<void> {
+        // Before its files are read, a relay has nothing of its own to keep, and must not write over them.
+        if (!this.#loaded) {
+            return this.#writing;
+        }
+
         this.#dirty = true;
         this.#writing = this.#writing.then(async () => {
             if (!this.#dirty) {
@@ -608,13 +685,18 @@ export class Relay {
                     type: "secret" as const,
                 }));
 
-            return secretsOf(config, fields)
-                .filter((value) => value.length >= 8)
-                .map((value) => ({ value, label: `secret relay ${config.name}` }));
+            return secretsOf(config, fields).map((value) => ({ value, label: "secret relay" }));
         });
         const unhide = this.#unhide;
 
-        this.#unhide = this.#options.hide(values);
+        try {
+            this.#unhide = this.#options.hide(values);
+        } catch (error) {
+            this.log(`its secrets could not be hidden: ${message(error)}`);
+
+            this.#unhide = () => {};
+        }
+
         unhide();
     }
 
@@ -810,8 +892,9 @@ export class Relay {
         request: { text: string; replyTo?: string; key: string },
         signal: AbortSignal,
     ): Promise<string> {
+        await this.ready;
+
         const connector = this.#kinds.get(config.kind);
-        const state = this.stateOf(config.id);
 
         if (connector === undefined) {
             throw new Error(`No ${config.kind} connector is loaded now.`);
@@ -821,8 +904,42 @@ export class Relay {
             throw new Error(`The ${connector.label} connector only listens: it cannot reply.`);
         }
 
-        if (Object.hasOwn(state.replies, request.key)) {
+        const running = this.#replying.get(request.key);
+
+        if (running !== undefined) {
+            return running;
+        }
+
+        const sending = this.#send(
+            config,
+            connector as RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
+            request,
+            signal,
+        ).finally(() => this.#replying.delete(request.key));
+
+        this.#replying.set(request.key, sending);
+
+        return sending;
+    }
+
+    async #send(
+        config: ConnectorConfig,
+        connector: RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
+        request: { text: string; replyTo?: string; key: string },
+        signal: AbortSignal,
+    ): Promise<string> {
+        const state = this.stateOf(config.id);
+        const kept = Object.hasOwn(state.replies, request.key)
+            ? state.replies[request.key]
+            : undefined;
+
+        if (kept !== undefined && kept.sending !== true) {
             return "Sent already.";
+        }
+
+        // A send a restart cut off: a service that sends a key once gets it again; any other might show it twice.
+        if (kept !== undefined && connector.idempotentReply !== true) {
+            return "This reply may have gone out before a restart, so it was not sent again.";
         }
 
         const heard =
@@ -849,6 +966,9 @@ export class Relay {
         const values = valuesOf(config, connector.fields);
         let answer: { id?: string } | void;
 
+        state.replies[request.key] = { at: this.now(), sending: true };
+        await this.persist();
+
         try {
             answer = await connector.reply(
                 {
@@ -865,6 +985,9 @@ export class Relay {
                 },
             );
         } catch (error) {
+            delete state.replies[request.key];
+            void this.persist();
+
             throw new Error(this.scrub(config, message(error)));
         }
 
@@ -885,6 +1008,8 @@ export class Relay {
 
     /** Save a connector (new or edited) and start or stop it to match. */
     async put(config: ConnectorConfig): Promise<void> {
+        await this.ready;
+
         const before = this.config(config.id);
 
         if (before === undefined && Object.keys(this.#configs).length >= LIMITS.connectors) {
@@ -903,6 +1028,8 @@ export class Relay {
     }
 
     async remove(id: string): Promise<boolean> {
+        await this.ready;
+
         if (this.config(id) === undefined) {
             return false;
         }
@@ -938,6 +1065,7 @@ export class Relay {
 
         if (
             this.#stopped ||
+            !this.#loaded ||
             config === undefined ||
             connector === undefined ||
             !config.enabled ||
@@ -983,9 +1111,15 @@ export class Relay {
     /** Stop everything: the module goes. */
     async stop(): Promise<void> {
         this.#stopped = true;
-        await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
-        await this.persist();
-        this.#unhide();
+
+        try {
+            await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
+            await this.persist();
+            await this.#writing;
+        } finally {
+            this.#unhide();
+            this.#end();
+        }
     }
 
     running(): number {

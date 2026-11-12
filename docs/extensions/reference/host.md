@@ -458,13 +458,13 @@ deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolea
 
 Since 0.29.0 · Experimental
 
-Sends one message to `target`, as `[via <via>]`. Pi reads the person's `instructions` first, then the sender, then the payload between `<tag>` tags, then a line that says the payload is data.
+Sends one message to `target`, as `[via <via>]`. Pi reads the person's `instructions` first, then whether the sender is trusted, then the payload between `<tag>` tags, then a line that says the payload is data.
 
 - `by`: the id of the person Pi works for on it. The person must be able to see and steer the session, and not be a viewer.
 - `payload`: the text that came. Core makes it safe between the tags (no closing tag survives) and cuts it to 8,000 characters.
 - `key`: delivers once. A second delivery with the same key sends nothing and returns `{ sent: false }`, also after a restart. Use the source's own id for the event.
 - `tag` and `attributes`: the fence's tag (default `outside-data`) and up to 8 attributes, each made one line without quotes.
-- `sender`: who sent it, written outside the fence. With `trusted: true`, Pi reads that the owner marked this id. This is guidance to the model, not a boundary: an id can be spoofed on some services.
+- `sender`: who sent it. The name and the id go in the fence's tag, as `from` and `from-id`, because they came from outside. Outside the fence, one line says only whether the owner marked the id as trusted (`trusted: true`). This is guidance to the model, not a boundary: an id can be spoofed on some services.
 - `limit`: a cap of messages in an hour for one `bucket`, kept in memory. A restart resets it. The cap is 600 at most.
 
 It throws an error with a `status`: 400 for a delivery that cannot be right, 410 when the session is gone or its person cannot see it, 503 when PiP is off, 429 when the bucket's limit is reached, and 409 when the session does not take messages now. Try again later after a 409 or a 503, with the same key.

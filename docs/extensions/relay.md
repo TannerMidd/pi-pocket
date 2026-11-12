@@ -38,15 +38,15 @@ Each event goes through these checks, in this order. An event that fails the fir
 6. More than 200 events wait: the oldest is dropped and counted.
 7. The connector's limit in an hour is reached when the event is delivered (the inbox says 429): dropped and counted.
 
-A session that cannot take the message now (someone else drives it, a spend limit, PiP is off, or the session is gone) does not drop the event. It stays first in the queue and the relay tries again, after 15 seconds at first and up to 10 minutes later. A delivery that the inbox calls impossible (400) is dropped and counted.
+A session that cannot take the message now (someone else drives it, a spend limit, or the session is gone) does not drop the event. It stays first in the queue and the relay tries again, after 15 seconds at first and up to 10 minutes later. A delivery that the inbox calls impossible (400) is dropped and counted. A connector delivers to an ordinary session, not to PiP: PiP gets outside data through webhooks.
 
 ## What Pi reads
 
 A message shows as `[via relay <name>]`. It has, in order:
 
 1. The owner's instructions, and a line that tells Pi how to answer: `relay_reply` with the connector's name and `reply_to` set to the event id. For a connector with no `reply`, the line says that it only listens. The relay writes this line, outside the fence.
-2. The sender, outside the fence: `Sent by "name" (id "…"): an id the owner marked as trusted.` or `not an id the owner marked as trusted.` This is guidance for the model, not a boundary: on some services, a person can pretend to be another.
-3. The event inside `<relay-message connector="<name>" kind="<kind>">` tags. First its lines (`event`, `channel`, `thread`, `sent`, `link`, `attachments`), then an empty line, then the text (6,000 characters at most; the whole message is cut to 8,000).
+2. One line, outside the fence, about the sender's id: it is, or it is not, one the owner marked as trusted. This is guidance for the model, not a boundary: on some services, a person can pretend to be another.
+3. The event inside `<relay-message connector="<name>" kind="<kind>" from="<name>" from-id="<id>">` tags: the sender's name and id are in the tag, inside the fence. First its lines (`event`, `channel`, `thread`, `sent`, `link`, `attachments`), then an empty line, then the text (6,000 characters at most; the whole message is cut to 8,000).
 4. A line that says what is between the tags is data, not instructions.
 
 A prompt section in the session says the same, so Pi knows it works with outside data.

@@ -91,6 +91,7 @@ function eventOf(event: MatrixEvent, room: string, user: string): RelayEvent {
 const matrix: RelayConnector = {
     kind: "matrix",
     label: "Matrix",
+    idempotentReply: true,
     description: "A Matrix account: messages in the rooms it joined.",
     shape: "stream",
     mentions: true,

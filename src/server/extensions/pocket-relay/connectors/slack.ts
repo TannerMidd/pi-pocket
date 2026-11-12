@@ -136,29 +136,37 @@ async function socketRun(
         try {
             const envelope = JSON.parse(String(message.data)) as Envelope;
 
-            if (envelope.envelope_id) {
-                socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
-            }
+            const ack = () => {
+                if (envelope.envelope_id && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
+                }
+            };
 
             if (envelope.type === "disconnect") {
+                ack();
                 finish();
             }
 
-            if (envelope.type === "events_api" && envelope.payload?.event) {
-                const event = eventOf(envelope.payload.event, user, channels);
+            const event =
+                envelope.type === "events_api" && envelope.payload?.event
+                    ? eventOf(envelope.payload.event, user, channels)
+                    : undefined;
 
-                if (event) {
-                    pending = pending
-                        .then(async () => {
-                            if (!context.signal.aborted) {
-                                await context.emit([event]);
-                            }
-                        })
-                        .catch(() => {
-                            failure = new Error("Slack message delivery failed.");
-                            finish();
-                        });
-                }
+            // An event is acknowledged only once the relay stored it: Slack sends one it did not hear back about again.
+            if (event) {
+                pending = pending
+                    .then(async () => {
+                        if (!context.signal.aborted) {
+                            await context.emit([event]);
+                            ack();
+                        }
+                    })
+                    .catch(() => {
+                        failure = new Error("Slack message delivery failed.");
+                        finish();
+                    });
+            } else if (envelope.type !== "disconnect") {
+                ack();
             }
         } catch {
             failure = new Error("Slack sent an invalid socket message.");

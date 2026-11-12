@@ -6,7 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { InboxApi, InboxDelivery } from "../src/server/host.ts";
-import { type ConnectorConfig, Relay } from "../src/server/extensions/pocket-relay/runtime.ts";
+import {
+    type ConnectorConfig,
+    Relay,
+    secretsOf,
+} from "../src/server/extensions/pocket-relay/runtime.ts";
 import {
     type RelayConnector,
     type RelayContext,
@@ -166,6 +170,17 @@ test("what came is delivered once, also after a restart in the middle", async ()
     mock.push(event("1"));
     await until(() => delivered.length === 1, "the first event");
 
+    // A module's new version loads before the old one stops: it reads the files only once the old one is done.
+    const overlap = open(where, inbox);
+    let read = false;
+
+    void overlap.ready.then(() => {
+        read = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(read, false, "the new version waits");
+    await overlap.stop();
+
     // The session takes nothing now: the next event waits on disk, in the queue.
     state.refuse = true;
     mock.push(event("2"));
@@ -175,6 +190,13 @@ test("what came is delivered once, also after a restart in the middle", async ()
     assert.equal(statSync(join(where, "state.json")).mode & 0o777, 0o600);
     assert.equal(statSync(join(where, "connectors.json")).mode & 0o777, 0o600);
     assert.ok(hidden.includes("very-secret-token-value"), "the token is hidden from Pi");
+    assert.ok(
+        secretsOf(
+            config("mock", { values: { token: "Authorization: Bearer abcdefghijk\nX-Key: k123" } }),
+            mock.connector.fields,
+        ).includes("abcdefghijk"),
+        "each header's token is hidden on its own",
+    );
 
     // A restart: the waiting event goes, and the connector, which saw event 1 again, does not send it twice.
     state.refuse = false;
@@ -182,7 +204,7 @@ test("what came is delivered once, also after a restart in the middle", async ()
     const again = scripted();
 
     second.register(again.connector);
-    second.start();
+    await second.ready;
     assert.equal(second.stateOf("c-mock").own.cursor, "2");
     again.push(event("1"), event("3"));
     await until(() => delivered.length === 3, "the waiting and the new event");
@@ -312,7 +334,13 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
     const signal = new AbortController().signal;
     const request = { text: "hello", replyTo: "7", key: "task:call" };
 
-    assert.equal(await relay.reply(config("mock"), request, signal), "Sent.");
+    // Two calls with one key at once, then again: one send.
+    const both = await Promise.all([
+        relay.reply(config("mock"), request, signal),
+        relay.reply(config("mock"), request, signal),
+    ]);
+
+    assert.deepEqual(both, ["Sent.", "Sent."]);
     assert.equal(await relay.reply(config("mock"), request, signal), "Sent already.");
     assert.deepEqual(mock.replies, [{ text: "hello", key: "task:call", to: "7" }]);
     await assert.rejects(
@@ -328,6 +356,13 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
         relay.reply(config("mock"), { ...request, key: "third" }, signal),
         (error: Error) =>
             !error.message.includes("very-secret") && /\[secret\]/.test(error.message),
+    );
+
+    // A send that a restart cut off is not sent again by a connector the service does not keep it once for.
+    relay.stateOf("c-mock").replies.cut = { at: 1, sending: true };
+    assert.match(
+        await relay.reply(config("mock"), { ...request, key: "cut" }, signal),
+        /may have gone out before a restart/,
     );
     await relay.stop();
 });

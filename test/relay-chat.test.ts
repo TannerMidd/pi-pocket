@@ -467,8 +467,13 @@ test(
             [true, true, false, true],
         );
         assert.equal(fake.events[2]!.thread, "100.1");
+        // Every envelope is acknowledged; one with an event only after the relay stored it, so filtered ones go first.
+        const acks = (mock.sockets[0]!.received as { envelope_id: string }[]).map(
+            (ack) => ack.envelope_id,
+        );
+
         assert.deepEqual(
-            mock.sockets[0]!.received,
+            [...acks].sort(),
             [
                 "message",
                 "duplicate",
@@ -478,8 +483,9 @@ test(
                 "thread",
                 "last",
                 "disconnect",
-            ].map((envelope_id) => ({ envelope_id })),
+            ].sort(),
         );
+        assert.ok(acks.indexOf("filtered") < acks.indexOf("message"));
     },
 );
 

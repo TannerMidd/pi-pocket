@@ -105,6 +105,11 @@ export interface RelayConnector {
     check?(values: RelayValues): string | undefined;
     poll?(context: RelayContext): Promise<void>;
     run?(context: RelayContext): Promise<void>;
+    /**
+     * The service sends a reply once for its key (Discord's nonce, Matrix's transaction id): after a restart cut off a
+     * send, the relay sends it again. Without it, the relay does not, so a reply is never shown twice.
+     */
+    idempotentReply?: boolean;
     /** Send a reply. Without it, the connector only listens. Returns the id the service gave it, if any. */
     reply?(
         context: Pick<RelayContext, "values" | "signal" | "log">,

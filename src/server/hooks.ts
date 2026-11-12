@@ -142,12 +142,14 @@ export function contentOf(post: Post): { raw: string; json?: unknown } {
     }
 }
 
+/** A post's content as Pi gets it, before it is made safe: JSON trimmed and compact, anything else as text. */
+function payloadRaw(content: { raw: string; json?: unknown }): string {
+    return content.json === undefined ? content.raw : JSON.stringify(trimPayload(content.json));
+}
+
 /** What Pi gets of a post's content: JSON trimmed and compact, anything else as text; fenced safely, and cut. */
 export function payloadText(content: { raw: string; json?: unknown }): string {
-    const text =
-        content.json === undefined ? content.raw : JSON.stringify(trimPayload(content.json));
-
-    return clip(defang(text), PAYLOAD_CHARS);
+    return clip(defang(payloadRaw(content)), PAYLOAD_CHARS);
 }
 
 /** What a GitHub payload is about, in order: the first of these that says who wrote it is who acted. */
@@ -602,17 +604,23 @@ export class Hooks {
 
         // Gone, or its person cannot reach it: a 410 the service hears, before anything is asked of GitHub.
         const person = app.config.userById(hook.by);
+        const meta = app.sessionMeta(target);
 
         if (
             person === undefined ||
             person.role === "viewer" ||
-            app.sessionMeta(target) === undefined ||
+            meta === undefined ||
             !app.canSee(person, target)
         ) {
             throw new HttpError(
                 410,
                 "This webhook's session is gone, or its person cannot reach it.",
             );
+        }
+
+        // PiP turned off keeps its hooks: they come back when it is on again.
+        if (meta.pip !== undefined && !app.pip.available(person)) {
+            throw new HttpError(503, "PiP is turned off on this server.");
         }
 
         const content = contentOf(post);
@@ -647,7 +655,8 @@ export class Hooks {
             instructions: hook.instructions,
             tag: PAYLOAD_TAG,
             ...(what === "" ? {} : { attributes: { event: what } }),
-            payload: payloadText(content),
+            // Raw: the inbox makes it safe between the tags and cuts it, as `payloadText` does.
+            payload: payloadRaw(content),
             key,
             limit: { bucket: `hook:${hook.id}`, perHour: POSTS_PER_HOUR },
         });

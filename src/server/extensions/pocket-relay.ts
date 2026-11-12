@@ -21,7 +21,7 @@ import matrix from "./pocket-relay/connectors/matrix.ts";
 import rss from "./pocket-relay/connectors/rss.ts";
 import slack from "./pocket-relay/connectors/slack.ts";
 import telegram from "./pocket-relay/connectors/telegram.ts";
-import { type ConnectorConfig, LIMITS, Relay } from "./pocket-relay/runtime.ts";
+import { type ConnectorConfig, LIMITS, MAX_SECRET, Relay } from "./pocket-relay/runtime.ts";
 import { type RelayConnector, RelayError } from "./pocket-relay/types.ts";
 
 export const RELAY_MODULE = "pocket-relay";
@@ -236,8 +236,8 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
                 }
 
                 if (typeof value === "string" && value !== "") {
-                    if (value.length > 8192) {
-                        fail(`${field.label} is too long.`);
+                    if (value.length > MAX_SECRET) {
+                        fail(`${field.label} is ${MAX_SECRET} characters at most.`);
                     }
 
                     values[field.name] = value;
@@ -324,13 +324,21 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         });
     };
 
-    web.route("GET", "connectors", (request) => ({
-        kinds: relay.kinds().map(kindView),
-        connectors: relay.configs().map(view),
-        sessions: request.sessions().map(({ id, title, archived }) => ({ id, title, archived })),
-    }));
+    web.route("GET", "connectors", async (request) => {
+        await relay.ready;
+
+        return {
+            kinds: relay.kinds().map(kindView),
+            connectors: relay.configs().map(view),
+            sessions: request
+                .sessions()
+                .map(({ id, title, archived }) => ({ id, title, archived })),
+        };
+    });
 
     web.route("POST", "connectors", async (request) => {
+        await relay.ready;
+
         const config = parse(request);
 
         try {
@@ -346,6 +354,8 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
     });
 
     web.route("PUT", "connectors/:id", async (request) => {
+        await relay.ready;
+
         const before =
             relay.config(request.params.id ?? "") ??
             (() => {
@@ -361,6 +371,8 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
     });
 
     web.route("DELETE", "connectors/:id", async (request) => {
+        await relay.ready;
+
         const before = relay.config(request.params.id ?? "");
 
         if (before === undefined || !(await relay.remove(before.id))) {
@@ -392,6 +404,8 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         replay: "safe",
         deferred: true,
         execute: async (args, api, context) => {
+            await relay.ready;
+
             const bound = relay.boundTo(Number(api.conversationId));
 
             if (bound.length === 0) {
