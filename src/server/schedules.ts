@@ -292,6 +292,16 @@ export class Schedules {
             }
 
             if (stopped === undefined) {
+                // A queue lookup or commit wait can pass the window's end after the first check.
+                if (
+                    item.every !== undefined &&
+                    outsideWindow(item.every, runtime.now(), item.zone)
+                ) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+
+                    return { status: "running", checkpoint: { phase: "wait" } };
+                }
+
                 await conversation.submit(tx, {
                     type: "input",
                     content: item.content,
