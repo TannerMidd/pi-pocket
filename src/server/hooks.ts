@@ -649,17 +649,29 @@ export class Hooks {
         );
         // GitHub's event names are short: a longer one is not GitHub's, and does not get to fill the tag.
         const what = event === undefined ? "" : `GitHub ${attribute(event).slice(0, 60)}`;
-        const { sent } = await app.inbox.deliver(target, {
-            by: person.id,
-            via: `webhook ${label(hook.name)}`,
-            instructions: hook.instructions,
-            tag: PAYLOAD_TAG,
-            ...(what === "" ? {} : { attributes: { event: what } }),
-            // Raw: the inbox makes it safe between the tags and cuts it, as `payloadText` does.
-            payload: payloadRaw(content),
-            key,
-            limit: { bucket: `hook:${hook.id}`, perHour: POSTS_PER_HOUR },
-        });
+        const { sent } = await app.inbox
+            .deliver(target, {
+                by: person.id,
+                via: `webhook ${label(hook.name)}`,
+                instructions: hook.instructions,
+                tag: PAYLOAD_TAG,
+                ...(what === "" ? {} : { attributes: { event: what } }),
+                // Raw: the inbox makes it safe between the tags and cuts it, as `payloadText` does.
+                payload: payloadRaw(content),
+                key,
+                limit: { bucket: `hook:${hook.id}`, perHour: POSTS_PER_HOUR },
+            })
+            .catch((error: unknown) => {
+                // A webhook's own words for its limit, as before the inbox: a sender may match them.
+                if (error instanceof HttpError && error.status === 429) {
+                    throw new HttpError(
+                        429,
+                        `This webhook takes ${POSTS_PER_HOUR} posts an hour at most.`,
+                    );
+                }
+
+                throw error;
+            });
 
         if (!sent) {
             return { status: 200, message: "Delivered already." };
