@@ -136,6 +136,7 @@ import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { withQuietLimit } from "./deadline.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
 import { ask, browserFor, checkValues } from "./extension-points.ts";
@@ -1625,7 +1626,10 @@ export class PocketApp {
         // Each command hides core's secrets as they are now.
         this.secrets.sync();
 
-        return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
+        return withQuietLimit(
+            wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
+            () => this.background.limits.commandQuietMs,
+        );
     }
 
     #env(cwd: string): ExecutionEnv {
