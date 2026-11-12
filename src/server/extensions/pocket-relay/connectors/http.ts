@@ -27,6 +27,7 @@ const fields: readonly RelayField[] = [
         name: "headers",
         label: "Headers",
         type: "secret",
+        multiline: true,
         description:
             "One Name: value on each line, for example Authorization: Bearer … . Sent with every poll.",
     },
@@ -113,6 +114,7 @@ const fields: readonly RelayField[] = [
         name: "replyHeaders",
         label: "Reply headers",
         type: "secret",
+        multiline: true,
         description: "One Name: value on each line, sent with a reply.",
     },
     {

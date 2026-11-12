@@ -261,9 +261,14 @@
     flex: none;
 }
 
-.relay-secret-edit input {
+.relay-secret-edit input,
+.relay-secret-edit textarea {
     flex: 1;
     min-width: 0;
+}
+
+.relay-masked {
+    -webkit-text-security: disc;
 }
 
 .relay-secret-word {
