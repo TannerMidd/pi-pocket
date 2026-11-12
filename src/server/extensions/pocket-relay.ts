@@ -21,7 +21,13 @@ import matrix from "./pocket-relay/connectors/matrix.ts";
 import rss from "./pocket-relay/connectors/rss.ts";
 import slack from "./pocket-relay/connectors/slack.ts";
 import telegram from "./pocket-relay/connectors/telegram.ts";
-import { type ConnectorConfig, LIMITS, MAX_SECRET, Relay } from "./pocket-relay/runtime.ts";
+import {
+    type ConnectorConfig,
+    LIMITS,
+    MAX_SECRET,
+    Relay,
+    tooShort,
+} from "./pocket-relay/runtime.ts";
 import { type RelayConnector, RelayError } from "./pocket-relay/types.ts";
 
 export const RELAY_MODULE = "pocket-relay";
@@ -249,6 +255,13 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
                 if (typeof value === "string" && value !== "") {
                     if (value.length > MAX_SECRET) {
                         fail(`${field.label} is ${MAX_SECRET} characters at most.`);
+                    }
+
+                    // `secretsOf` does not hide a value that short: Pi would see it where the service echoes it.
+                    if (tooShort(value)) {
+                        fail(
+                            `${field.label} has a value under 4 characters: one that short cannot be hidden from Pi.`,
+                        );
                     }
 
                     values[field.name] = value;

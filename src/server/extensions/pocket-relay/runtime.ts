@@ -193,6 +193,8 @@ const SCHEME = /^(bearer|basic|bot|token|digest)$/i;
 
 /** The longest secret value: what `host.hide` takes at most. */
 export const MAX_SECRET = 4096;
+/** The shortest value hidden: a shorter one would hide ordinary words. */
+const MIN_SECRET = 4;
 
 /**
  * The secret fields' values of a connector: what is hidden, and scrubbed out of errors. A value of lines (headers, one
@@ -227,7 +229,20 @@ export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]
         }
     }
 
-    return [...found].filter((value) => value.length >= 4 && value.length <= MAX_SECRET);
+    return [...found].filter((value) => value.length >= MIN_SECRET && value.length <= MAX_SECRET);
+}
+
+/** Whether a secret value holds a credential too short to hide: a line's value, or its last word (see `secretsOf`). */
+export function tooShort(value: string): boolean {
+    return value.split(/\r?\n/).some((line) => {
+        const part = (line.includes(":") ? line.slice(line.indexOf(":") + 1) : line).trim();
+        const last = part.split(/\s+/).at(-1) ?? "";
+
+        return (
+            part !== "" &&
+            (part.length < MIN_SECRET || (last.length < MIN_SECRET && !SCHEME.test(last)))
+        );
+    });
 }
 
 /** A field's value as the connector reads it: the owner's, else its default. */
