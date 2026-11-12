@@ -16,6 +16,8 @@ const API = "https://discord.com/api/v10";
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 const DAY = 86_400_000;
 const IDENTIFY_GAP = 30_000;
+/** The gap doubles after each identify that does not reach READY, up to this. */
+const IDENTIFY_GAP_MAX = 600_000;
 /** How long a closed socket waits for the gateway's answer: a dead connection never gives one. */
 const CLOSE_WAIT = 2_000;
 /** Discord says Hello at once: a connection with no Hello in this time is closed. */
@@ -55,6 +57,8 @@ interface State {
     session?: Session;
     user?: string;
     identifies: number[];
+    /** Identifies since the last READY. */
+    misses?: number;
     cursors: Record<string, Cursor>;
     backfill?: boolean;
 }
@@ -162,6 +166,10 @@ function readState(saved: Readonly<Record<string, unknown>>): State {
 
     if (Array.isArray(saved.identifies)) {
         state.identifies = saved.identifies.filter((at): at is number => typeof at === "number");
+    }
+
+    if (typeof saved.misses === "number" && saved.misses > 0) {
+        state.misses = saved.misses;
     }
 
     if (saved.cursors !== null && typeof saved.cursors === "object") {
@@ -490,6 +498,8 @@ async function run(context: RelayContext): Promise<void> {
                     user?: User;
                 };
 
+                delete state.misses;
+
                 if (typeof ready.session_id === "string") {
                     state.session = {
                         id: ready.session_id,
@@ -540,15 +550,17 @@ async function run(context: RelayContext): Promise<void> {
         }
     };
 
-    // Waits until Discord's identify limit allows one more: 30 s apart, 900 a day.
+    // Waits until Discord's identify limit allows one more: 30 s apart, 900 a day. The gap doubles after each
+    // identify that does not reach READY (up to 10 min), so a gateway that keeps closing does not use up the day.
     const identifyGate = async (): Promise<boolean> => {
         const now = Date.now();
 
         state.identifies = state.identifies.filter((at) => now - at < DAY).sort((a, b) => a - b);
         const last = state.identifies.at(-1);
         const count = state.identifies.length;
+        const gap = Math.min(IDENTIFY_GAP * 2 ** Math.min(state.misses ?? 0, 5), IDENTIFY_GAP_MAX);
         const wait = Math.max(
-            last === undefined ? 0 : last + IDENTIFY_GAP - now,
+            last === undefined ? 0 : last + gap - now,
             count >= IDENTIFY_MAX ? state.identifies[count - IDENTIFY_MAX]! + DAY - now : 0,
         );
 
@@ -670,6 +682,7 @@ async function run(context: RelayContext): Promise<void> {
                             });
                         } else {
                             state.identifies.push(Date.now());
+                            state.misses = (state.misses ?? 0) + 1;
                             save();
                             send({
                                 op: 2,
