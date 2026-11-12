@@ -185,6 +185,8 @@ test("what came is delivered once, also after a restart in the middle", async ()
     state.refuse = true;
     mock.push(event("2"));
     await until(() => first.stateOf("c-mock").pending.length === 1, "the event to wait");
+    // `pending` grows before the write ends: the cursor is saved only after it, once `emit` resolves.
+    await until(() => first.stateOf("c-mock").own.cursor === "2", "the cursor");
     await first.stop();
     assert.equal(first.running(), 0);
     assert.equal(statSync(join(where, "state.json")).mode & 0o777, 0o600);
