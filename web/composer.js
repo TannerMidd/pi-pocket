@@ -2,6 +2,7 @@
 // what was sent before (↑, Ctrl+R), fold long pastes, pick the model, stop.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "./avatar.js";
+import { useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
 import { chatUnread, TypingLine } from "./chat.js";
 import {
@@ -389,6 +390,138 @@ const modeHint = (mode) => SEND_MODES.find(([value]) => value === mode)[2];
 /** What Interrupt does to a message waiting in the queue: the others there stay queued. */
 const QUEUED_INTERRUPT_HINT =
     "Stops the run right now (also its tool call), then sends this one. The other queued messages stay queued";
+
+/**
+ * Steer, Queue, and Interrupt as one button and its menu: a narrow message box shows it while Pi works instead of the
+ * three (`.mode-switch`), so the model keeps its room. A tap or a click opens it and leaves the focus in the box (a
+ * phone keeps its keyboard); Enter, Space, ↑, or ↓ open it with the focus on the chosen mode. A pick, Esc, a press
+ * outside, or back closes it.
+ */
+function ModePick({ mode, onPick }) {
+    const [open, setOpen] = useState(false);
+    const wrap = useRef(null);
+    const menu = useRef(null);
+    // Opened from the keyboard: the focus goes to the chosen mode.
+    const keyed = useRef(false);
+    const label = SEND_MODES.find(([value]) => value === mode)[1];
+
+    // Closed from inside the menu, the focus goes back to the button; from the box, it stays there.
+    const close = () => {
+        if (menu.current?.contains(document.activeElement)) {
+            wrap.current?.querySelector(".mode-pick-button").focus();
+        }
+
+        setOpen(false);
+    };
+
+    useBack(open, close);
+    useLayoutEffect(() => {
+        if (open && keyed.current) {
+            keyed.current = false;
+            menu.current?.querySelector('[aria-checked="true"]')?.focus();
+        }
+    });
+    // Before the first frame, not after it: a press right after the menu shows closes it too.
+    useLayoutEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        const outside = (event) => !wrap.current?.contains(event.target) && setOpen(false);
+        const shut = () => setOpen(false);
+
+        // Esc closes the menu, and does not count as the first of the two presses that stop Pi (`app.js`).
+        const onKey = (event) => {
+            if (event.key === "Escape" && !event.isComposing) {
+                event.preventDefault();
+                event.stopPropagation();
+                close();
+            }
+        };
+
+        addEventListener("pointerdown", outside, true);
+        addEventListener("keydown", onKey, true);
+        addEventListener("resize", shut);
+
+        return () => {
+            removeEventListener("pointerdown", outside, true);
+            removeEventListener("keydown", onKey, true);
+            removeEventListener("resize", shut);
+        };
+    }, [open]);
+
+    const onMenuKey = (event) => {
+        const items = [...menu.current.querySelectorAll("button")];
+        const index = items.indexOf(document.activeElement);
+        const target = {
+            ArrowDown: items[(index + 1) % items.length],
+            ArrowUp: items[(index - 1 + items.length) % items.length],
+            Home: items[0],
+            End: items.at(-1),
+        }[event.key];
+
+        if (target) {
+            event.preventDefault();
+            target.focus();
+        } else if (event.key === "Tab") {
+            setOpen(false);
+        }
+    };
+
+    return html`<div class="mode-pick" data-part="composer-button" ref=${wrap}>
+        <button
+            class=${`mode-pick-button ${mode === "interrupt" ? "interrupt" : ""}`}
+            aria-haspopup="menu"
+            aria-expanded=${open ? "true" : "false"}
+            aria-label=${`Send as: ${label}`}
+            title=${modeHint(mode)}
+            onMouseDown=${(event) => event.preventDefault()}
+            onClick=${(event) => {
+                // `detail` is 0 for Enter or Space.
+                keyed.current = event.detail === 0;
+                setOpen(!open);
+            }}
+            onKeyDown=${(event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    keyed.current = true;
+                    setOpen(true);
+                }
+            }}
+        >
+            ${label}
+            <${Icon} name="chevron" size=${12} stroke=${2.2} class="mode-pick-caret" />
+        </button>
+        ${
+            open &&
+            html`<div
+                class="pop-menu session-menu mode-menu"
+                role="menu"
+                aria-label="Send as"
+                ref=${menu}
+                onKeyDown=${onMenuKey}
+            >
+                ${SEND_MODES.map(
+                    ([value, name, tip]) => html`<button
+                        class=${`session-menu-item ${value === "interrupt" ? "interrupt" : ""}`}
+                        role="menuitemradio"
+                        aria-checked=${mode === value ? "true" : "false"}
+                        tabindex="-1"
+                        title=${tip}
+                        onMouseDown=${(event) => event.preventDefault()}
+                        onClick=${() => {
+                            onPick(value);
+                            close();
+                        }}
+                    >
+                        <span>${name}</span>
+                        ${mode === value && html`<${Icon} name="check" size=${14} />`}
+                    </button>`,
+                )}
+            </div>`
+        }
+    </div>`;
+}
 
 /**
  * Whether a queued message's Interrupt asks first: the first tap reads "Interrupt now?", a second within 4 s sends it.
@@ -2350,6 +2483,7 @@ export function Composer() {
                                 )}
                             </div>`
                         }
+                        ${busy && html`<${ModePick} mode=${sendMode} onPick=${setSendMode} />`}
                         <${MicButton}
                             dictation=${dictation}
                             class="composer-mic"
