@@ -28,6 +28,7 @@ import {
     defineTool,
     type Extension,
     InboxDoc,
+    type InboxState,
     LiveDoc,
     type LiveState,
     type ModelRef,
@@ -919,6 +920,44 @@ function statusLine(
     return `${name}: ${parts.join("; ")}`;
 }
 
+/** The start of a message that waits, on one line. */
+function opening(content: unknown): string {
+    const text =
+        typeof content === "string"
+            ? content
+            : (Array.isArray(content) ? content : [])
+                  .map((part: { type?: string; text?: string }) =>
+                      part.type === "text" ? (part.text ?? "") : "",
+                  )
+                  .join(" ");
+    const flat = text.replace(/\s+/g, " ").trim();
+
+    return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
+}
+
+/**
+ * What waits in a subagent's queue, for status: each message's start, and when the subagent gets it. A steer goes in
+ * at its next pause (after its current tool call, or when its run ends), a follow-up only once its current run ends. A
+ * message no longer listed was taken, or, when its run failed, given back with a report that says so. Empty when none
+ * waits.
+ */
+function waitingNote(inbox: Readonly<InboxState> | undefined): string {
+    // Writes wait there too (a compaction's summary, say): they are no messages.
+    const each = (inbox?.items ?? []).flatMap((item) =>
+        item.mode === "write"
+            ? []
+            : [
+                  `${item.mode === "followUp" ? "a follow-up, taken when its current run ends" : "a steer, taken at its next pause"}: “${opening(item.content)}”`,
+              ],
+    );
+
+    if (each.length === 0) {
+        return "";
+    }
+
+    return `; ${each.length === 1 ? "1 message waits" : `${each.length} messages wait`} in its queue (${each.join("; ")})`;
+}
+
 export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
     // The guide, for tool search to show where this section never does: when Pi calls subagent through codemode.
     web?.provide({ guide: (model: ModelRef | undefined) => guide(host, model) });
@@ -1024,7 +1063,12 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             if (action === "status") {
                 const names =
                     name === undefined || name === "all" ? Object.keys(registry.agents) : [name];
-                const shown: { name: string; record: SubagentRecord; live?: LiveState }[] = [];
+                const shown: {
+                    name: string;
+                    record: SubagentRecord;
+                    waiting: string;
+                    live?: LiveState;
+                }[] = [];
                 // Without a name, only those at work: a session's finished subagents can be many.
                 const rest: Partial<Record<ReturnType<typeof ending>, number>> = {};
 
@@ -1038,13 +1082,16 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                     }
 
                     const live = await api.snapshot(LiveDoc, found.conversationId, context);
+                    const waiting = waitingNote(
+                        await api.snapshot(InboxDoc, found.conversationId, context),
+                    );
 
-                    if (name === undefined && live?.run === undefined) {
+                    if (name === undefined && live?.run === undefined && waiting === "") {
                         rest[ending(found)] = (rest[ending(found)] ?? 0) + 1;
                         continue;
                     }
 
-                    shown.push({ name: each, record: found, ...(live ? { live } : {}) });
+                    shown.push({ name: each, record: found, waiting, ...(live ? { live } : {}) });
                 }
 
                 if (name !== undefined && name !== "all" && shown.length === 0) {
@@ -1067,18 +1114,19 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                     return found;
                 }, context);
                 const now = api.now();
-                const lines = shown.map((each) =>
-                    statusLine(
-                        each.name,
-                        each.record,
-                        each.live,
-                        host.approvals
-                            .forConversation(each.record.conversationId)
-                            .map((call) => call.tool),
-                        lastAt.get(each.name),
-                        now,
-                        stalledMs(),
-                    ),
+                const lines = shown.map(
+                    (each) =>
+                        statusLine(
+                            each.name,
+                            each.record,
+                            each.live,
+                            host.approvals
+                                .forConversation(each.record.conversationId)
+                                .map((call) => call.tool),
+                            lastAt.get(each.name),
+                            now,
+                            stalledMs(),
+                        ) + each.waiting,
                 );
                 const counted = Object.entries(rest).map(([how, count]) => `${count} ${how}`);
 
@@ -1235,6 +1283,11 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 }
             }
 
+            // A subagent at work takes a message only at its next boundary: Pi is told when, so it does not take the
+            // message as read.
+            const atWork =
+                action === "send" &&
+                (await api.snapshot(LiveDoc, agent!.conversationId, context))?.run !== undefined;
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
 
@@ -1306,7 +1359,13 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);
 
                 if (action === "send") {
-                    return `Sent to ${name}.`;
+                    if (!atWork) {
+                        return `Sent to ${name}.`;
+                    }
+
+                    return followUp === true
+                        ? `Queued for ${name}: it is at work, and gets the message only when its current run ends. Until then it works on what it had; status shows what waits.`
+                        : `Queued for ${name}: it is at work, and gets the message at its next pause, after its current tool call or when its run ends. status shows what waits.`;
                 }
 
                 const runs = model ?? parent.model;
