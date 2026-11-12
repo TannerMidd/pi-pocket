@@ -278,7 +278,15 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
     }
     ${
         ["text", "image", "binary"].includes(file?.kind) &&
-        html`<a class="button small" href=${downloadUrl(file.path)} download>Download</a>`
+        html`<a
+            class="icon-button"
+            href=${downloadUrl(file.path)}
+            download
+            title="Download"
+            aria-label="Download"
+        >
+            <${Icon} name="download" size=${16} />
+        </a>`
     }
     ${
         file &&
