@@ -141,7 +141,7 @@ interface RelayEvent {
 ```
 
 - `id` is unique in this connector, and the same each time the event comes. Use the service's own id. The relay delivers an id once, so an id that is not stable sends the same message again, and an id that is reused loses messages.
-- `author.id` is what the owner lists as trusted. Use the service's stable id for the account, never a name that a person can change. When a source has no people (a feed), use one id for the whole source: the limit for each author then limits the source.
+- `author.id` is what the owner lists as trusted. Use the service's stable id for the account, never a name that a person can change. When a source has no people (a feed), use one id for the whole source, and set `authorLimit: false` so that only the connector's limit applies (the `rss` and `http` connectors do this). Without it, the limit for each author limits the source.
 - `channel` is where the event came from, and where a reply goes (a channel, a chat, a room). `thread` is a thread in it. `channelName` is for Pi to read.
 - `mentioned` is `true` when the event names the connector's own account, or came in a direct message.
 - `at` is in milliseconds since 1970. `url` is a link. `attachments` are one-line descriptions (a name, a type, a size), never content.

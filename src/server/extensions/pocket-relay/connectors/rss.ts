@@ -481,6 +481,7 @@ const connector: RelayConnector = {
     label: "RSS / Atom feed",
     description: "Delivers the new items of an RSS or Atom feed.",
     shape: "poll",
+    authorLimit: false,
     interval: 900,
     fields: [
         {
