@@ -123,7 +123,7 @@ const KINDS = [
         "Waiting for a limit",
         "when a run waits more than ten minutes for a provider's limit to clear",
     ],
-    ["stalled", "Stalled work", "when a subagent makes no progress past its hard limit"],
+    ["stalled", "Stalled work", "when a subagent or linked session makes no progress past its hard limit"],
     ["mention", "Mentions", "when someone writes @your name in a chat"],
     ["chat", "Chat messages", "in sessions you take part in"],
 ];

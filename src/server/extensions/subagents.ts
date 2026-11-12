@@ -55,7 +55,15 @@ import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
-import { clock, progressOf, span, STALL_LOOK, waitingOn } from "../stall-facts.ts";
+import {
+    callTimeoutMs,
+    clock,
+    hardLimitOf,
+    progressOf,
+    span,
+    STALL_LOOK,
+    waitingOn,
+} from "../stall-facts.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
 
 /** Pi Pocket's options on a tool definition, beside Pi Durable's own. */
@@ -105,11 +113,14 @@ type ReporterInput = {
     followUp: boolean;
     requestedBy?: string;
 };
-/** "follow": a Stop took the message out of the queue; it goes again as `request` (`key`: its old submission). */
+/**
+ * "follow": a Stop took the message out of the queue; it goes again as `request` (`key`: its old submission). `held`:
+ * a Stop held it, until a person sends or drops it (else an interrupt sends it again at once).
+ */
 type ReporterState =
     | { phase: "deliver" }
     | { phase: "report"; report?: string }
-    | { phase: "follow"; request: string; key: string };
+    | { phase: "follow"; request: string; key: string; held?: boolean };
 
 /** How a message to a subagent ended: settled, or dropped by a person from the queue a Stop held it in. */
 type Settled =
@@ -118,6 +129,9 @@ type Settled =
 
 /** What a reporter concludes from a message that a person took out of the queue for good. */
 const DROPPED = { status: "unanswered", reason: "dropped" } as const;
+
+/** What a reporter concludes from a message an interrupt took out of the queue and did not send again. */
+const STOPPED_AGAIN = { status: "unanswered", reason: "aborted" } as unknown as Settled;
 
 /** How often a reporter looks at a message a Stop held, until it goes again or is dropped. */
 const FOLLOW_MS = 3_000;
@@ -133,11 +147,12 @@ async function heldAgain(
     conversationId: ConversationId,
     key: string,
     context: Context,
-): Promise<boolean> {
-    const held = (await runtime.snapshot(HeldDoc, conversationId, context))?.items ?? [];
+): Promise<{ held: boolean; pending: boolean }> {
+    const items = (await runtime.snapshot(HeldDoc, conversationId, context))?.items ?? [];
     const interrupts = (await runtime.snapshot(InterruptsDoc, conversationId, context))?.pending;
+    const held = items.some((item) => item.key === key);
 
-    return held.some((item) => item.key === key) || Object.keys(interrupts ?? {}).length > 0;
+    return { held, pending: held || Object.keys(interrupts ?? {}).length > 0 };
 }
 
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent, through `Courier`. */
@@ -166,11 +181,16 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
         const ranOn = ran === undefined ? "" : `${ran.provider}/${ran.modelId}: `;
         const stopped =
             !withdrawn && settled.status === "unanswered" && settled.reason === "aborted";
+        // Only a message still in the queue can be held and sent again: one the run took (`entry`) ended with it.
+        const queued = (settled as { entry?: unknown }).entry === undefined;
         const again =
-            stopped && sent !== undefined ? heldRequest(sent.request, sent.id) : undefined;
+            stopped && queued && sent !== undefined
+                ? heldRequest(sent.request, sent.id)
+                : undefined;
         const waits =
-            again !== undefined &&
-            (await heldAgain(runtime, conversationId, String(sent!.id), context));
+            again === undefined
+                ? { held: false, pending: false }
+                : await heldAgain(runtime, conversationId, String(sent!.id), context);
 
         await runtime.commit(async (tx) => {
             const next = (report?: string) =>
@@ -181,10 +201,25 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                     ? undefined
                     : await tx.submissionByRequest(conversationId, again);
 
-            if (again !== undefined && (waits || resent !== undefined)) {
+            if (again !== undefined && (waits.pending || resent !== undefined)) {
+                // Held until a person acts, which can take long: the parent hears now that its answer comes later.
+                if (waits.held && resent === undefined) {
+                    await putReports(tx, runtime.conversationId, Courier, [
+                        {
+                            name,
+                            text: `${REPORT_PREFIX}${name} stopped: a person stopped it. Your message waits, held, until a person sends it or drops it; its answer then comes by itself]`,
+                        },
+                    ]);
+                }
+
                 return {
                     status: "running",
-                    checkpoint: { phase: "follow", request: again, key: String(sent!.id) },
+                    checkpoint: {
+                        phase: "follow",
+                        request: again,
+                        key: String(sent!.id),
+                        ...(waits.held ? { held: true } : {}),
+                    },
                 } as const;
             }
 
@@ -238,6 +273,8 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
             agent.answeredAt = Date.now();
             agent.failed = false;
             delete agent.error;
+            // It answered: the stall watch may stop its work again.
+            delete agent.stops;
             const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
                 AssistantMessage | undefined;
 
@@ -330,6 +367,8 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                     (signal): signal is AbortSignal => signal !== undefined,
                 );
 
+                let held = checkpoint.held === true;
+
                 for (;;) {
                     let found: SubmissionRecord | undefined;
 
@@ -348,12 +387,20 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                         });
                     }
 
-                    const pending =
-                        record !== undefined ||
-                        (await heldAgain(runtime, child, checkpoint.key, context));
+                    const now = await heldAgain(runtime, child, checkpoint.key, context);
 
-                    if (!pending) {
-                        return conclude(reporter, runtime, context, DROPPED, false, undefined);
+                    held ||= now.held;
+
+                    // Gone: a person dropped what was held; an interrupt that sent nothing again stopped it.
+                    if (record === undefined && !now.pending) {
+                        return conclude(
+                            reporter,
+                            runtime,
+                            context,
+                            held ? DROPPED : STOPPED_AGAIN,
+                            false,
+                            undefined,
+                        );
                     }
 
                     await pause(FOLLOW_MS, AbortSignal.any(signals));
@@ -972,10 +1019,18 @@ async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<num
 async function recentOf(
     tx: Tx,
     conversationId: ConversationId,
-): Promise<{ at?: number; words?: string }> {
+    callId?: string,
+): Promise<{ at?: number; words?: string; timeoutMs?: number }> {
     const page = await tx.scanEntries({ conversationId, order: "descending" }, ACTIVITY_ENTRIES);
     let at: number | undefined;
     let words: string | undefined;
+    const timeoutMs =
+        callId === undefined
+            ? undefined
+            : callTimeoutMs(
+                  page.items.flatMap((entry) => entry.model ?? []),
+                  callId,
+              );
 
     for (const entry of page.items) {
         const times = (entry.model ?? [])
@@ -1005,13 +1060,17 @@ async function recentOf(
         }
     }
 
-    return { ...(at === undefined ? {} : { at }), ...(words === undefined ? {} : { words }) };
+    return {
+        ...(at === undefined ? {} : { at }),
+        ...(words === undefined ? {} : { words }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    };
 }
 
 /** The default hard limit: past it with no progress, the stuck call is stopped. Twice the soft one, as a margin. */
 const STOP_MINUTES = 60;
 
-/** How often the stall watch stops one message's work by itself; after that, a person decides. */
+/** How often the stall watch stops a subagent's work by itself until it answers again; after that, a person decides. */
 export const MAX_STOPS = 2;
 
 type StallAction =
@@ -1032,7 +1091,7 @@ type StallState =
  * Looks at a parent's subagents at work, once a minute, without a model call. One with no progress past the soft limit
  * (`stalledMinutes`) is reported to the parent, once a quiet spell, with what it waits on and since when; those of one
  * look go as one message. Past the hard limit, the stuck call is stopped (or the run, when no call runs), the parent is
- * told, and so is the owner; at most `MAX_STOPS` times for one message, then a person decides. It ends when none is at
+ * told, and so is the owner; at most `MAX_STOPS` times until it answers again, then a person decides. It ends when none is at
  * work, and the next message to a subagent starts it again.
  */
 function stallWatchFor(
@@ -1047,7 +1106,7 @@ function stallWatchFor(
         phases: {
             look: async (watch, runtime, context) => {
                 const parent = runtime.conversationId;
-                const { soft, hard } = limits();
+                const { soft, hard: limit } = limits();
                 const at = runtime.now();
                 const doc = await runtime.snapshot(SubagentsDoc, parent, context);
                 const before = watch.state.checkpoint.seen ?? {};
@@ -1077,8 +1136,11 @@ function stallWatchFor(
                     // Reads first: a commit reads the tables only before it writes one.
                     const recent = new Map<string, Awaited<ReturnType<typeof recentOf>>>();
 
-                    for (const { name, record } of busy) {
-                        recent.set(name, await recentOf(tx, record.conversationId));
+                    for (const { name, record, live } of busy) {
+                        recent.set(
+                            name,
+                            await recentOf(tx, record.conversationId, waitingOn(live).callId),
+                        );
                     }
 
                     const state = await tx.doc(SubagentsDoc, parent);
@@ -1098,20 +1160,31 @@ function stallWatchFor(
                             continue;
                         }
 
-                        const since = Math.max(recent.get(name)?.at ?? 0, seen[name]!.at);
+                        // A message to it starts the wait over: a nudge is no reason to say it again at once.
+                        const since = Math.max(
+                            recent.get(name)?.at ?? 0,
+                            seen[name]!.at,
+                            record.askedAt ?? 0,
+                        );
                         const quiet = at - since;
 
                         if (record.stall?.since !== since) {
                             record.stall = { since };
                         }
 
-                        // Waiting for a person to allow a call is no stall.
-                        if (host.approvals.forConversation(record.conversationId).length > 0) {
+                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall.
+                        if (
+                            host.approvals.forConversation(record.conversationId).length > 0 ||
+                            host.waitsForLimit?.(record.conversationId) === true
+                        ) {
                             continue;
                         }
 
                         const stall = record.stall!;
                         const on = waitingOn(live);
+                        // A call with its own timeout runs until then.
+                        const hard =
+                            limit <= 0 ? 0 : hardLimitOf(limit, recent.get(name)?.timeoutMs);
 
                         if (quiet >= soft && stall.told !== true) {
                             stall.told = true;
@@ -1126,8 +1199,7 @@ function stallWatchFor(
                         }
 
                         stall.stopped = true;
-                        const asked = record.askedAt ?? 0;
-                        const count = record.stops?.askedAt === asked ? record.stops.count : 0;
+                        const count = record.stops ?? 0;
 
                         if (count >= MAX_STOPS) {
                             reports.push({
@@ -1140,7 +1212,7 @@ function stallWatchFor(
                             continue;
                         }
 
-                        record.stops = { askedAt: asked, count: count + 1 };
+                        record.stops = count + 1;
                         const which = `stop ${count + 1} of ${MAX_STOPS}`;
 
                         if (on.callId !== undefined && typeof host.stopToolCall === "function") {
@@ -1351,7 +1423,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             name: "stopMinutes",
             label: "Stop a stalled call after (minutes)",
             description:
-                "With no progress for this long, Pi Pocket stops the subagent's stuck call (or its run, when no call runs), and its parent and you are told. At most 2 times for one message: after that, a person decides. 0: never stop.",
+                "With no progress for this long, Pi Pocket stops the subagent's stuck call (or its run, when no call runs), and its parent and you are told. At most 2 times until it answers again: after that, a person decides. A call with its own timeout runs until then. 0: never stop.",
             type: "number",
             default: STOP_MINUTES,
             min: 0,
@@ -1747,7 +1819,6 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 record.asked = message.trim().slice(0, 300);
                 record.askedAt = Date.now();
                 delete record.stoppedBy;
-                delete record.stall;
 
                 if (!watched) {
                     state.stallWatch = await tx.createTask(StallWatch, null, BACKGROUND);

@@ -47,6 +47,34 @@ export function waitingOn(live: LiveState): { what: string; callId?: string } {
     };
 }
 
+/**
+ * The `timeout` (in ms) that a call gave itself, from the messages of its transcript: a call with its own limit runs
+ * until that limit, also past the hard limit of a stall watch. Undefined when it gave none.
+ */
+export function callTimeoutMs(messages: readonly unknown[], callId: string): number | undefined {
+    for (const message of messages) {
+        const content = (message as { role?: string; content?: unknown }).content;
+
+        if ((message as { role?: string }).role !== "assistant" || !Array.isArray(content)) {
+            continue;
+        }
+
+        for (const part of content as { type?: string; id?: string; arguments?: unknown }[]) {
+            const timeout = (part.arguments as { timeout?: unknown } | undefined)?.timeout;
+
+            if (part.type === "toolCall" && part.id === callId) {
+                return typeof timeout === "number" && timeout > 0 ? timeout * 1000 : undefined;
+            }
+        }
+    }
+
+    return undefined;
+}
+
+/** The hard limit of a call: the watch's, or past the call's own `timeout` with a minute to spare. */
+export const hardLimitOf = (hard: number, timeoutMs: number | undefined) =>
+    timeoutMs === undefined ? hard : Math.max(hard, timeoutMs + 60_000);
+
 /** A time of day, for messages to Pi: in UTC, as servers and people's zones differ. */
 export const clock = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
 

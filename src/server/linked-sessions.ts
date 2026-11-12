@@ -35,7 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
-import { progressOf, waitingOn } from "./stall-facts.ts";
+import { callTimeoutMs, progressOf, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -525,21 +525,29 @@ export class LinkedSessions implements LinkedSessionsApi {
             const id = each.id as unknown as ConversationId;
             const live = await app.harness.snapshot(LiveDoc, id, context);
 
-            if (live?.run === undefined) {
+            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall.
+            if (
+                live?.run === undefined ||
+                app.approvals.forConversation(id).length > 0 ||
+                app.limits.waits().some((wait) => wait.conversationId === Number(id))
+            ) {
                 continue;
             }
 
-            const at = await app.harness.commit(async (tx) => {
-                const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
-                const times = page.items.flatMap((entry) =>
-                    (entry.model ?? [])
-                        .map((message) => message.timestamp)
-                        .filter((time) => typeof time === "number" && Number.isFinite(time)),
-                );
-
-                return times.length === 0 ? undefined : Math.max(...times);
-            }, context);
             const on = waitingOn(live);
+            const { at, timeoutMs } = await app.harness.commit(async (tx) => {
+                const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
+                const messages = page.items.flatMap((entry) => entry.model ?? []);
+                const times = messages
+                    .map((message) => message.timestamp)
+                    .filter((time) => typeof time === "number" && Number.isFinite(time));
+
+                return {
+                    at: times.length === 0 ? undefined : Math.max(...times),
+                    timeoutMs:
+                        on.callId === undefined ? undefined : callTimeoutMs(messages, on.callId),
+                };
+            }, context);
 
             found.push({
                 address: addresses.get(each.id)!,
@@ -547,6 +555,7 @@ export class LinkedSessions implements LinkedSessionsApi {
                 ...(at === undefined ? {} : { at }),
                 waiting: on.what,
                 ...(on.callId === undefined ? {} : { callId: on.callId }),
+                ...(timeoutMs === undefined ? {} : { timeoutMs }),
             });
         }
 

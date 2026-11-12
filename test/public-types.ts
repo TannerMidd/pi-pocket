@@ -82,6 +82,7 @@ type Internal =
     | "memory"
     | "toolNames"
     | "stopToolCall"
+    | "waitsForLimit"
     | "alertOwner";
 
 type PublicHost = Pick<PocketHost, keyof Host>;

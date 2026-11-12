@@ -177,6 +177,11 @@ test("helpers past the soft limit cost the parent one message, with what each wa
         "Running now marks its call stalled",
     );
 
+    // A nudge starts the wait over: it brings no stall message again at once.
+    await say(id, "nudge soft-a");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal((await inbox(id)).filter((text) => text.includes(" stalled: ")).length, 1);
+
     for (const name of ["soft-a", "soft-b"]) {
         await (await app.harness.conversation(
             (await agent(id, name)).conversationId,
@@ -185,7 +190,7 @@ test("helpers past the soft limit cost the parent one message, with what each wa
     }
 });
 
-test("the hard limit stops the stuck call, 2 times for one message, then leaves it to a person", async () => {
+test("the hard limit stops the stuck call, 2 times until it answers, then leaves it to a person", async () => {
     settings(30, 60);
     alerts.length = 0;
     const id = await session();
@@ -244,6 +249,10 @@ test("a person's Stop is said as such, and the message it held reaches the paren
         async () =>
             (await inbox(id)).some((text) => text.includes("held stopped: a person stopped it")),
         "the report of the Stop",
+    );
+    await until(
+        async () => (await inbox(id)).some((text) => text.includes("Your message waits, held")),
+        "word that the message waits, held, while nobody sends it",
     );
     await until(() => !app.isBusy(child), "the subagent stopped");
     assert.equal(await app.commands.sendHeld(child, owner(app)), 1);

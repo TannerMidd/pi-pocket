@@ -350,8 +350,8 @@ export type SubagentRecord = {
     dealtAt?: number;
     /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
     stall?: { since: number; told?: true; stopped?: true };
-    /** How often the stall watch stopped its work on the message it was last sent (by `askedAt`): 2 at most. */
-    stops?: { askedAt: number; count: number };
+    /** How often the stall watch stopped its work since it last answered: 2 at most, then a person decides. */
+    stops?: number;
     /** Who stopped its run: a person, its parent (`subagent stop`), or the stall watch. A new message clears it. */
     stoppedBy?: "person" | "parent" | "deadline";
 };

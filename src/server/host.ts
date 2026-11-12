@@ -64,6 +64,8 @@ export interface LinkedActivity {
     waiting: string;
     /** The call it waits on, when one runs. */
     callId?: string;
+    /** The `timeout` that call gave itself, in ms: it runs until then. */
+    timeoutMs?: number;
 }
 
 /**
@@ -536,6 +538,8 @@ export interface PocketHost {
      * printed, and the run goes on. False when no such call runs.
      */
     stopToolCall(conversationId: ConversationId, callId: string): Promise<boolean>;
+    /** Whether a run of the conversation waits for a provider's limit to clear (`limit-gate.ts`): no stall. */
+    waitsForLimit(conversationId: ConversationId): boolean;
     /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
     alertOwner(conversationId: ConversationId, title: string, body: string): void;
     /**

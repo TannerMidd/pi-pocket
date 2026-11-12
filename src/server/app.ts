@@ -927,6 +927,8 @@ export class PocketApp {
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
+            waitsForLimit: (conversationId) =>
+                this.limits.waits().some((wait) => wait.conversationId === Number(conversationId)),
             alertOwner: (conversationId, title, body) =>
                 this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
