@@ -29,6 +29,7 @@ import {
     type Extension,
     InboxDoc,
     LiveDoc,
+    type LiveState,
     type ModelRef,
     section,
     type SubmissionId,
@@ -37,7 +38,14 @@ import {
     type ToolRegistration,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { type PendingReport, PlanDoc, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
+import {
+    type PendingReport,
+    PlanDoc,
+    REPORT_PREFIX,
+    STOPPED,
+    type SubagentRecord,
+    SubagentsDoc,
+} from "../docs.ts";
 import { describe } from "../errors.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
@@ -808,9 +816,131 @@ async function chosenModel(
     return ref;
 }
 
+/** How long a subagent at work may go with nothing new in its transcript before status calls it stalled, by default. */
+const STALLED_MINUTES = 30;
+
+/** How many of a transcript's newest entries status reads to find its last message. */
+const ACTIVITY_ENTRIES = 20;
+
+/** A time span, short: "40 s", "12 min", "3 h", "2 d". */
+function span(ms: number): string {
+    const seconds = Math.max(0, Math.round(ms / 1000));
+
+    if (seconds < 60) {
+        return `${seconds} s`;
+    }
+
+    const minutes = Math.round(seconds / 60);
+
+    if (minutes < 60) {
+        return `${minutes} min`;
+    }
+
+    const hours = Math.round(minutes / 60);
+
+    return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
+}
+
+/**
+ * When a subagent last did something: the time of the newest message in its transcript (its brief, an answer, a tool
+ * call, or a tool result). Output that a tool call streams while it runs does not count.
+ */
+async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<number | undefined> {
+    const page = await tx.scanEntries({ conversationId, order: "descending" }, ACTIVITY_ENTRIES);
+
+    for (const entry of page.items) {
+        const times = (entry.model ?? [])
+            .map((message) => message.timestamp)
+            .filter((at) => typeof at === "number" && Number.isFinite(at));
+
+        if (times.length > 0) {
+            return Math.max(...times);
+        }
+    }
+
+    return undefined;
+}
+
+/** How a subagent that does not work now ended, by its record: done, failed (and why), stopped, or never answered. */
+function ending(record: SubagentRecord): "done" | "failed" | "stopped" | "idle" {
+    if (record.failed === true) {
+        return record.error === STOPPED ? "stopped" : "failed";
+    }
+
+    return record.answeredAt === undefined ? "idle" : "done";
+}
+
+/**
+ * One subagent's line for status. At work: whether it waits for a person to allow a call, the calls it runs, a model
+ * request it retries, and how long ago it last did something, called stalled past `stalledMs`. Otherwise: how it ended,
+ * and when.
+ */
+function statusLine(
+    name: string,
+    record: SubagentRecord,
+    live: LiveState | undefined,
+    asking: readonly string[],
+    lastAt: number | undefined,
+    now: number,
+    stalledMs: number,
+): string {
+    if (live?.run === undefined) {
+        const how = ending(record);
+        const at = record.answeredAt ?? record.askedAt;
+        const why = how === "failed" && record.error !== undefined ? `: ${record.error}` : "";
+
+        return `${name}: ${how}${at === undefined ? "" : ` ${span(now - at)} ago`}${why}`;
+    }
+
+    const parts = [
+        asking.length > 0 ? `waiting for a person to allow ${asking.join(", ")}` : "working",
+    ];
+    const running = (live.tools ?? [])
+        .filter((tool) => tool.status === "running")
+        .map((tool) => tool.name);
+
+    if (running.length > 0) {
+        parts.push(`running ${running.join(", ")}`);
+    }
+
+    if (live.generation?.retry !== undefined) {
+        parts.push(`retrying its model request (${live.generation.retry.error.slice(0, 120)})`);
+    }
+
+    if (lastAt !== undefined) {
+        const quiet = now - lastAt;
+        const stalled = asking.length === 0 && quiet >= stalledMs;
+
+        parts.push(
+            `last activity ${span(quiet)} ago${stalled ? `: stalled, nothing new for ${span(stalledMs)} or more` : ""}`,
+        );
+    }
+
+    return `${name}: ${parts.join("; ")}`;
+}
+
 export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
     // The guide, for tool search to show where this section never does: when Pi calls subagent through codemode.
     web?.provide({ guide: (model: ModelRef | undefined) => guide(host, model) });
+
+    web?.settings([
+        {
+            name: "stalledMinutes",
+            label: "Stalled after (minutes)",
+            description:
+                "A subagent at work with no new message, tool call, or tool result for this long is called stalled when Pi asks for the status of its subagents.",
+            type: "number",
+            default: STALLED_MINUTES,
+            min: 1,
+            max: 10080,
+        },
+    ]);
+
+    const stalledMs = () => {
+        const value = web?.setting("stalledMinutes");
+
+        return (typeof value === "number" ? value : STALLED_MINUTES) * 60_000;
+    };
 
     const Courier = courierFor(host);
     const Reporter = reporterFor(Courier, host);
@@ -865,7 +995,8 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             "thinking, tools" +
             (choosing ? "" : "; it runs on your model") +
             "), send (name, message; followUp: true queues it after the current answer, else steers), stop (name), " +
-            "status (name, or all). Reports come back by themselves; do not poll.",
+            "status (name; all for every one; none for those at work, each with its last activity, and a count of the rest). " +
+            "Reports come back by themselves; do not poll.",
         parameters,
         // Not rerun after a crash: repeating stop could stop newer work. The model sees the interruption and can check
         // with status.
@@ -893,7 +1024,9 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             if (action === "status") {
                 const names =
                     name === undefined || name === "all" ? Object.keys(registry.agents) : [name];
-                const lines: string[] = [];
+                const shown: { name: string; record: SubagentRecord; live?: LiveState }[] = [];
+                // Without a name, only those at work: a session's finished subagents can be many.
+                const rest: Partial<Record<ReturnType<typeof ending>, number>> = {};
 
                 for (const each of names) {
                     const found = Object.hasOwn(registry.agents, each)
@@ -904,11 +1037,55 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                         continue;
                     }
 
-                    const busy =
-                        (await api.snapshot(LiveDoc, found.conversationId, context))?.run !==
-                        undefined;
+                    const live = await api.snapshot(LiveDoc, found.conversationId, context);
 
-                    lines.push(`${each}: ${busy ? "working" : "idle"}`);
+                    if (name === undefined && live?.run === undefined) {
+                        rest[ending(found)] = (rest[ending(found)] ?? 0) + 1;
+                        continue;
+                    }
+
+                    shown.push({ name: each, record: found, ...(live ? { live } : {}) });
+                }
+
+                if (name !== undefined && name !== "all" && shown.length === 0) {
+                    return reply(`No subagent named ${name}.`);
+                }
+
+                // Only for those at work: a finished one's record says when it ended.
+                const lastAt = await api.commit(async (tx) => {
+                    const found = new Map<string, number | undefined>();
+
+                    for (const each of shown) {
+                        if (each.live?.run !== undefined) {
+                            found.set(
+                                each.name,
+                                await lastActivity(tx, each.record.conversationId),
+                            );
+                        }
+                    }
+
+                    return found;
+                }, context);
+                const now = api.now();
+                const lines = shown.map((each) =>
+                    statusLine(
+                        each.name,
+                        each.record,
+                        each.live,
+                        host.approvals
+                            .forConversation(each.record.conversationId)
+                            .map((call) => call.tool),
+                        lastAt.get(each.name),
+                        now,
+                        stalledMs(),
+                    ),
+                );
+                const counted = Object.entries(rest).map(([how, count]) => `${count} ${how}`);
+
+                if (counted.length > 0) {
+                    lines.push(
+                        `${lines.length === 0 ? "None at work" : "Not at work"}: ${counted.join(", ")}. status with name "all" lists them.`,
+                    );
                 }
 
                 return reply(lines.length === 0 ? "No subagents." : lines.join("\n"));
