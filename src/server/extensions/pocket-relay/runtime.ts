@@ -789,7 +789,7 @@ export class Relay {
 
             if (
                 (typeof event.text !== "string" || event.text.trim() === "") &&
-                (event.attachments ?? []).length === 0
+                (Array.isArray(event.attachments) ? event.attachments : []).length === 0
             ) {
                 continue;
             }
@@ -887,6 +887,21 @@ export class Relay {
             return "done" as const;
         };
 
+        let payload: string;
+
+        // An event it cannot render (a connector's odd field) is dropped: tried again, it would hold up the queue.
+        try {
+            payload = payloadOf(event);
+        } catch (error) {
+            this.failed(
+                config.id,
+                `A message was dropped: ${this.scrub(config, message(error))}`,
+                false,
+            );
+
+            return finish("dropped");
+        }
+
         if (inbox === undefined) {
             this.failed(
                 config.id,
@@ -909,7 +924,7 @@ export class Relay {
                     id: event.author.id,
                     trusted: config.ownerIds.includes(event.author.id),
                 },
-                payload: payloadOf(event),
+                payload,
                 key: `relay-${config.id}-${event.id}`,
                 limit: { bucket: `relay:${config.id}`, perHour: config.perHour },
             });
@@ -1235,6 +1250,9 @@ export class Relay {
     }
 }
 
+/** The latest time a Date holds, in ms. */
+const MAX_DATE = 8.64e15;
+
 /** What Pi reads between the fence's tags: where it came from, then the text. */
 export function payloadOf(event: RelayEvent): string {
     const lines = [
@@ -1245,11 +1263,11 @@ export function payloadOf(event: RelayEvent): string {
               ]
             : []),
         ...(event.thread === undefined ? [] : [`thread: ${event.thread}`]),
-        ...(typeof event.at === "number" && Number.isFinite(event.at)
+        ...(typeof event.at === "number" && Math.abs(event.at) <= MAX_DATE
             ? [`sent: ${new Date(event.at).toISOString()}`]
             : []),
         ...(event.url === undefined ? [] : [`link: ${event.url}`]),
-        ...(event.attachments === undefined || event.attachments.length === 0
+        ...(!Array.isArray(event.attachments) || event.attachments.length === 0
             ? []
             : [
                   `attachments: ${event.attachments
