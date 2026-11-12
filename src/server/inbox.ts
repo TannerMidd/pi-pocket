@@ -9,10 +9,10 @@ import { requestFor } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
 
-export const DEFAULT_INSTRUCTIONS =
+const DEFAULT_INSTRUCTIONS =
     "Something happened that you were set up to hear about. Say in a line what it is, and whether anything needs doing.";
 
-export const MAX_PAYLOAD = 8000;
+const MAX_PAYLOAD = 8000;
 const MAX_INSTRUCTIONS = 4000;
 const TAG = /^[a-z][a-z0-9-]{0,39}$/;
 const MAX_ATTRIBUTES = 8;
@@ -33,7 +33,7 @@ export interface InboxDelivery {
 }
 
 /** A label as one line without brackets: the message shows as `[via <label>]`. */
-export const viaLabel = (text: string): string =>
+const viaLabel = (text: string): string =>
     text
         .replace(/[[\]]/g, "")
         .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
@@ -45,14 +45,14 @@ const oneLine = (text: string): string =>
     text.replace(/\p{Cf}/gu, "").replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ");
 
 /** A key a request id can hold as it is (`clientKey`'s alphabet, 64 at most), else a hash of it. */
-export function requestKey(key: string): string {
+function requestKey(key: string): string {
     return /^[A-Za-z0-9_-]{1,64}$/.test(key)
         ? key
         : `in-${createHash("sha256").update(key).digest("base64url").slice(0, 40)}`;
 }
 
 /** The sender's name and id came from outside: they go inside the fence. Outside it: only the owner's trust mark. */
-export function inboxText(delivery: InboxDelivery): string {
+function inboxText(delivery: InboxDelivery): string {
     const tag = delivery.tag ?? "outside-data";
     const sender = delivery.sender;
     const fields = [

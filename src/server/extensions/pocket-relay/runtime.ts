@@ -65,10 +65,10 @@ interface ConnectorState {
     fatal?: string;
 }
 
-export type StatusState =
+type StatusState =
     "off" | "starting" | "running" | "waiting" | "failed" | "stopped" | "no-connector";
 
-export interface Status {
+interface Status {
     state: StatusState;
     text?: string;
     lastError?: string;
@@ -106,7 +106,7 @@ const DELIVERY_RETRY_MAX = 10 * 60_000;
 const KIND = /^[a-z][a-z0-9-]{0,39}$/;
 const FIELD = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
-export const RELAY_INSTRUCTIONS =
+const RELAY_INSTRUCTIONS =
     "A message came through the relay. Read it. Answer it when it asks something of you, or when the owner's instructions say so.";
 
 const fresh = (): ConnectorState => ({
@@ -122,7 +122,7 @@ const fresh = (): ConnectorState => ({
 const message = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
-export function scrub(text: string, secrets: readonly string[]): string {
+function scrub(text: string, secrets: readonly string[]): string {
     let out = text;
 
     for (const secret of secrets) {
@@ -134,7 +134,7 @@ export function scrub(text: string, secrets: readonly string[]): string {
     return out.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
-export function checkConnector(connector: RelayConnector): RelayConnector {
+function checkConnector(connector: RelayConnector): RelayConnector {
     if (connector === null || typeof connector !== "object") {
         throw new Error("relay: a connector is an object");
     }
@@ -281,7 +281,7 @@ function load<T>(path: string, empty: T): T {
 }
 
 /** Never rejects. */
-export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
         if (signal.aborted) {
             resolve();
@@ -312,7 +312,7 @@ async function within(promise: Promise<unknown>, ms: number): Promise<void> {
 const backoff = (failures: number, min: number, max: number): number =>
     Math.min(max, min * 2 ** Math.max(0, failures - 1)) * (1 + Math.random() * 0.2);
 
-export interface RelayOptions {
+interface RelayOptions {
     folder: string;
     inbox: () => InboxApi | undefined;
     log: (line: string) => void;
@@ -1256,7 +1256,7 @@ export class Relay {
 /** The latest time a Date holds, in ms. */
 const MAX_DATE = 8.64e15;
 
-export function payloadOf(event: RelayEvent): string {
+function payloadOf(event: RelayEvent): string {
     const lines = [
         `event: ${event.id}`,
         ...(event.channelName !== undefined || event.channel !== undefined

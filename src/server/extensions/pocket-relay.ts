@@ -30,8 +30,8 @@ import {
 } from "./pocket-relay/runtime.ts";
 import { type RelayConnector, RelayError } from "./pocket-relay/types.ts";
 
-export const RELAY_MODULE = "pocket-relay";
-export const REPLY_TOOL = "relay_reply";
+const RELAY_MODULE = "pocket-relay";
+const REPLY_TOOL = "relay_reply";
 const SERVICE_API = 1;
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
