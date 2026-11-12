@@ -13,6 +13,8 @@ export interface RelayField {
     placeholder?: string;
     default?: string | number | boolean;
     required?: boolean;
+    /** A secret of several lines (headers): the form shows a masked text area. */
+    multiline?: boolean;
     min?: number;
     max?: number;
     choices?: { value: string; label: string }[];

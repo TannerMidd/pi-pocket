@@ -419,17 +419,33 @@ export default function setup(pocket) {
         const id = `relay-field-${field.name}`;
 
         if (state.mode === "replace" || (!set && state.mode !== "clear")) {
+            const placeholder = field.placeholder ?? (set ? "New value" : "");
+            const onInput = (event) =>
+                onChange({ mode: "replace", text: event.currentTarget.value });
+            // A password input strips newlines, so a secret of lines (headers) gets a masked text area.
+            const control = field.multiline
+                ? html`<textarea
+                      id=${id}
+                      class="relay-masked"
+                      rows="3"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder=${placeholder}
+                      value=${state.text}
+                      onInput=${onInput}
+                  ></textarea>`
+                : html`<input
+                      id=${id}
+                      type="password"
+                      autocomplete="new-password"
+                      spellcheck="false"
+                      placeholder=${placeholder}
+                      value=${state.text}
+                      onInput=${onInput}
+                  />`;
+
             return html`<div class="relay-secret-edit">
-                <input
-                    id=${id}
-                    type="password"
-                    autocomplete="new-password"
-                    spellcheck="false"
-                    placeholder=${field.placeholder ?? (set ? "New value" : "")}
-                    value=${state.text}
-                    onInput=${(event) =>
-                        onChange({ mode: "replace", text: event.currentTarget.value })}
-                />
+                ${control}
                 ${
                     set &&
                     html`<button
