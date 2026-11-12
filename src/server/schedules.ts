@@ -639,7 +639,7 @@ export class Schedules {
 
     /**
      * When a schedule given as data goes out first: `next` for one that goes out once, or for a repeat every so many
-     * minutes when given; else the repeat's next time. Throws with a short explanation when `next` will not do.
+     * minutes without a window when given; else the repeat's next time. Throws with a short explanation when `next` will not do.
      */
     #timeOf(at: { next?: number; every?: Repeat }, zone: string): { next: number; every?: Repeat } {
         const now = this.#app.now();
@@ -650,7 +650,7 @@ export class Schedules {
         }
 
         const next =
-            at.next !== undefined && "minutes" in at.every
+            at.next !== undefined && "minutes" in at.every && at.every.window === undefined
                 ? checkMoment(at.next, now, { aheadMs })
                 : nextRepeat(at.every, now, zone);
 

@@ -1,7 +1,7 @@
 /**
  * When a scheduled message goes out, in the words people type: `in 30m`, `7:00`, `tomorrow 9am`, `fri 17:30`,
- * `every 2h`, `every day 8:00`, `every weekday 8:00`, `every mon,thu 9:00`. Clock times are wall-clock times in a time
- * zone, so `every day 8:00` stays at 8:00 across daylight saving changes.
+ * `every 2h`, `every day 8:00`, `every weekday 8:00`, `every mon,thu 9:00`, `every 30m between 9:00 and 17:00 on weekdays`.
+ * Clock times are wall-clock times in a time zone, so `every day 8:00` stays at 8:00 across daylight saving changes.
  */
 
 /** How often a schedule may repeat, at most: a runaway loop of model calls costs money. */
@@ -20,8 +20,14 @@ export type WhenLimits = {
     aheadMs?: number;
 };
 
-/** A repeat: every so many minutes, or at a clock time on some days of the week (0 Sunday … 6 Saturday; all when absent). */
-export type Repeat = { minutes: number } | { at: string; days?: number[] };
+/**
+ * The hours a repeat every so many minutes runs in (since 0.29.0): from `from` (`HH:MM`) to `to`, on the days a window
+ * opens (0 Sunday … 6 Saturday; all when absent). A `to` at or before `from` ends on the next day.
+ */
+export type RepeatWindow = { from: string; to: string; days?: number[] };
+
+/** A repeat: every so many minutes, maybe only in a window, or at a clock time on some days of the week (all when absent). */
+export type Repeat = { minutes: number; window?: RepeatWindow } | { at: string; days?: number[] };
 
 export type When = { next: number; every?: Repeat };
 
@@ -162,11 +168,65 @@ export function nextClockTime(
     throw new Error(`No time matches ${at}`);
 }
 
+/**
+ * The first run of a windowed repeat after `after`: at the window's start, then every `minutes` while before its end.
+ * The start and the end are wall-clock times; the runs between are `minutes` of real time apart, so a window that holds
+ * a daylight saving change is an hour shorter or longer and has a run less or more.
+ */
+function nextInWindow(minutes: number, window: RepeatWindow, after: number, zone: string): number {
+    const [fromHour = 0, fromMinute = 0] = window.from.split(":").map(Number);
+    const [toHour = 0, toMinute = 0] = window.to.split(":").map(Number);
+    const overnight = window.to <= window.from;
+    const today = wallClock(after, zone);
+    let best: number | undefined;
+
+    // From yesterday, whose window may run into today, to eight days ahead, which always reaches an open day.
+    for (let ahead = -1; ahead <= 8; ahead++) {
+        const day = today.day + ahead;
+        const weekday = new Date(Date.UTC(today.year, today.month - 1, day)).getUTCDay();
+
+        if (window.days !== undefined && !window.days.includes(weekday)) {
+            continue;
+        }
+
+        const start = zonedMoment(today.year, today.month, day, fromHour, fromMinute, zone);
+
+        if (best !== undefined && start >= best) {
+            break;
+        }
+
+        const end = zonedMoment(
+            today.year,
+            today.month,
+            day + (overnight ? 1 : 0),
+            toHour,
+            toMinute,
+            zone,
+        );
+        const step = minutes * 60_000;
+        const run = start > after ? start : start + (Math.floor((after - start) / step) + 1) * step;
+
+        if (run < end && (best === undefined || run < best)) {
+            best = run;
+        }
+    }
+
+    if (best === undefined) {
+        throw new Error(`No time matches ${window.from} to ${window.to}`);
+    }
+
+    return best;
+}
+
 /** The next time a repeat goes out after `after`. */
 export function nextRepeat(repeat: Repeat, after: number, zone: string): number {
-    return "minutes" in repeat
-        ? after + repeat.minutes * 60_000
-        : nextClockTime(after, repeat.at, repeat.days, zone);
+    if ("minutes" in repeat) {
+        return repeat.window === undefined
+            ? after + repeat.minutes * 60_000
+            : nextInWindow(repeat.minutes, repeat.window, after, zone);
+    }
+
+    return nextClockTime(after, repeat.at, repeat.days, zone);
 }
 
 /** `7`, `7:30`, `19:05`, `7pm`, `7:30am` as `HH:MM`; undefined for anything else. */
@@ -240,7 +300,36 @@ function duration(words: readonly string[]): { minutes: number; used: number } |
 }
 
 export const WHEN_HELP =
-    "Say when: in 30m, 7:00, 7pm, tomorrow 9:00, fri 17:30, or every 2h, every day 8:00, every weekday 8:00, every mon,thu 9:00.";
+    "Say when: in 30m, 7:00, 7pm, tomorrow 9:00, fri 17:30, or every 2h, every day 8:00, every weekday 8:00, every mon,thu 9:00, every 30m between 9:00 and 17:00 on weekdays.";
+
+const WINDOW_HELP = "Say a window as: every 30m between 9:00 and 17:00, and maybe on weekdays.";
+const SAME_ENDS = "A window must end at another time than it starts.";
+
+/** `between 9:00 and 17:00`, maybe `on weekdays`, at the start of `words`: the window, and how many words it took. */
+function windowOf(words: readonly string[]): { window: RepeatWindow; used: number } {
+    const from = clockTime(words[1] ?? "");
+    const to = clockTime(words[3] ?? "");
+
+    if (from === undefined || words[2] !== "and" || to === undefined) {
+        throw new Error(WINDOW_HELP);
+    }
+
+    if (from === to) {
+        throw new Error(SAME_ENDS);
+    }
+
+    if (words[4] !== "on") {
+        return { window: { from, to }, used: 4 };
+    }
+
+    const days = dayList(words[5] ?? "");
+
+    if (days === undefined) {
+        throw new Error("Say the window's days as weekdays, weekends, mon,wed, or day.");
+    }
+
+    return { window: days === "every" ? { from, to } : { from, to, days }, used: 6 };
+}
 
 /** A span of time for a message: `a year` for the default, else days. */
 function aheadText(ms: number): string {
@@ -292,9 +381,18 @@ export function parseWhen(
                 );
             }
 
-            const every = { minutes: interval.minutes };
+            const window =
+                next === "between" ? windowOf(lower.slice(1 + interval.used)) : undefined;
+            const every: Repeat =
+                window === undefined
+                    ? { minutes: interval.minutes }
+                    : { minutes: interval.minutes, window: window.window };
 
-            return { next: nextRepeat(every, now, zone), every, rest: rest(1 + interval.used) };
+            return {
+                next: nextRepeat(every, now, zone),
+                every,
+                rest: rest(1 + interval.used + (window?.used ?? 0)),
+            };
         }
 
         const days = dayList(lower[1] ?? "");
@@ -302,6 +400,12 @@ export function parseWhen(
 
         if (at === undefined) {
             throw new Error(WHEN_HELP);
+        }
+
+        if (lower[days === undefined ? 2 : 3] === "between") {
+            throw new Error(
+                "Only a repeat every so many minutes has a window: every 30m between 9:00 and 17:00.",
+            );
         }
 
         const every: Repeat = days === undefined || days === "every" ? { at } : { at, days };
@@ -403,32 +507,68 @@ export function checkRepeat(given: unknown, limits: WhenLimits = {}): Repeat {
             throw new Error(TOO_LONG);
         }
 
-        return { minutes };
+        return value.window === undefined || value.window === null
+            ? { minutes }
+            : { minutes, window: checkWindow(value.window) };
     }
 
-    const at = typeof value.at === "string" ? clockTime(value.at) : undefined;
+    const at = givenTime(value.at);
 
-    if (at === undefined || !/^\d{1,2}:\d{2}$/.test(String(value.at))) {
+    if (at === undefined) {
         throw new Error("A repeat needs a time of day, such as 08:00.");
     }
 
-    if (value.days === undefined) {
-        return { at };
-    }
+    const days =
+        value.days === undefined
+            ? undefined
+            : givenDays(value.days, "Pick at least one day for the repeat.");
 
-    const days = value.days;
+    return days === undefined ? { at } : { at, days };
+}
 
+/** `HH:MM` given as data, as `HH:MM`; undefined for anything else. */
+function givenTime(given: unknown): string | undefined {
+    return typeof given === "string" && /^\d{1,2}:\d{2}$/.test(given)
+        ? clockTime(given)
+        : undefined;
+}
+
+/** Days of the week given as data: at least one, sorted, without repeats; undefined for all seven. */
+function givenDays(days: unknown, problem: string): number[] | undefined {
     if (
         !Array.isArray(days) ||
         days.length === 0 ||
         !days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6)
     ) {
-        throw new Error("Pick at least one day for the repeat.");
+        throw new Error(problem);
     }
 
     const sorted = [...new Set(days as number[])].sort((a, b) => a - b);
 
-    return sorted.length === 7 ? { at } : { at, days: sorted };
+    return sorted.length === 7 ? undefined : sorted;
+}
+
+/** A repeat's window given as data, checked: two different times of day, and maybe some days. */
+function checkWindow(given: unknown): RepeatWindow {
+    const value = (typeof given === "object" && given !== null ? given : {}) as Record<
+        string,
+        unknown
+    >;
+    const from = givenTime(value.from);
+    const to = givenTime(value.to);
+
+    if (from === undefined || to === undefined) {
+        throw new Error("A window needs a start and an end time, such as 09:00 and 17:00.");
+    }
+
+    if (from === to) {
+        throw new Error(SAME_ENDS);
+    }
+
+    const days =
+        value.days === undefined ? undefined : givenDays(value.days, "Pick at least one day.");
+
+    return days === undefined ? { from, to } : { from, to, days };
 }
 
 /** A one-time moment given as data, checked: in the future, and no further ahead than allowed. */
@@ -450,37 +590,48 @@ export function checkMoment(given: unknown, now: number, limits: WhenLimits = {}
     return Math.round(given);
 }
 
-/** A repeat in words, as the schedule list shows it: "every 2 hours", "weekdays at 08:00". */
-export function describeRepeat(repeat: Repeat): string {
-    if ("minutes" in repeat) {
-        const { minutes } = repeat;
-
-        if (minutes % 1440 === 0) {
-            return minutes === 1440 ? "every day" : `every ${minutes / 1440} days`;
-        }
-
-        if (minutes % 60 === 0) {
-            return minutes === 60 ? "every hour" : `every ${minutes / 60} hours`;
-        }
-
-        return `every ${minutes} minutes`;
-    }
-
-    const days = repeat.days;
-
-    if (days === undefined) {
-        return `every day at ${repeat.at}`;
-    }
-
+/** Some days of the week in words: "weekdays", "weekends", "mon, thu". */
+function daysText(days: readonly number[]): string {
     if (days.join() === WEEKDAYS.join()) {
-        return `weekdays at ${repeat.at}`;
+        return "weekdays";
     }
 
     if (days.join() === "0,6") {
-        return `weekends at ${repeat.at}`;
+        return "weekends";
     }
 
-    return `${days.map((day) => DAY_NAMES[day]).join(", ")} at ${repeat.at}`;
+    return days.map((day) => DAY_NAMES[day]).join(", ");
+}
+
+/** A repeat every so many minutes in words: "every 2 hours". */
+function intervalText(minutes: number): string {
+    if (minutes % 1440 === 0) {
+        return minutes === 1440 ? "every day" : `every ${minutes / 1440} days`;
+    }
+
+    if (minutes % 60 === 0) {
+        return minutes === 60 ? "every hour" : `every ${minutes / 60} hours`;
+    }
+
+    return `every ${minutes} minutes`;
+}
+
+/**
+ * A repeat in words, as the schedule list shows it: "every 2 hours", "every 30 minutes, 09:00 to 17:00 on weekdays",
+ * "weekdays at 08:00".
+ */
+export function describeRepeat(repeat: Repeat): string {
+    if ("minutes" in repeat) {
+        const window = repeat.window;
+
+        return window === undefined
+            ? intervalText(repeat.minutes)
+            : `${intervalText(repeat.minutes)}, ${window.from} to ${window.to}${window.days === undefined ? "" : ` on ${daysText(window.days)}`}`;
+    }
+
+    return repeat.days === undefined
+        ? `every day at ${repeat.at}`
+        : `${daysText(repeat.days)} at ${repeat.at}`;
 }
 
 /** A moment as people read it in `zone`: "Mon 07:00" within the week ahead, "Oct 12 07:00" after that. */
