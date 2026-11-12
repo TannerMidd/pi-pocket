@@ -181,7 +181,7 @@ Pi calls `relay_reply` with `text`, and usually `reply_to`, the event id. The re
 
 - `to`: the event Pi answers. It has only the `id`, `channel`, and `thread` that the relay kept, and the author's id. The relay keeps the last 200 events that it delivered: an older id gives Pi an error.
 - `channel` and `thread`: those of `to`. Without `to`, there are none: use a default channel from your fields.
-- `key`: the same for a call that runs again after a restart. The relay keeps the keys of the last 2,000 replies, and two calls with one key at once send once. Before it calls `reply`, the relay writes the key down as sending. When a restart cuts a send off, the relay sends it again only for a connector with `idempotentReply: true`, a service that sends one key once (Discord's nonce with `enforce_nonce`, Matrix's transaction id). Any other connector does not send it again, so a reply never shows twice; Pi hears that it may have gone out.
+- `key`: the same for a call that runs again after a restart. The relay keeps the keys of the last 2,000 replies, and two calls with one key at once send once. Before it calls `reply`, the relay writes the key down as sending. When a send fails, or a restart cuts it off, the relay sends that key again only for a connector with `idempotentReply: true`, a service that sends one key once (Discord's nonce with `enforce_nonce`, Matrix's transaction id). Any other connector does not send it again, so a reply never shows twice; Pi hears that it may have gone out.
 
 Return `{ id }`, the id the service gave, or nothing. A call that takes more than 30 seconds is aborted: pass `context.signal` to your requests. A thrown error goes to Pi as an error, with secrets taken out. The `reply` gets only `values`, `signal`, and `log`.
 
