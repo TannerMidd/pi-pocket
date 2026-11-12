@@ -18,6 +18,8 @@ const DAY = 86_400_000;
 const IDENTIFY_GAP = 30_000;
 /** How long a closed socket waits for the gateway's answer: a dead connection never gives one. */
 const CLOSE_WAIT = 2_000;
+/** Discord says Hello at once: a connection with no Hello in this time is closed. */
+const HELLO_WAIT = 30_000;
 const IDENTIFY_MAX = 900;
 const CURSOR_MAX = 100;
 const BACKFILL_CHANNELS = 25;
@@ -733,6 +735,10 @@ async function run(context: RelayContext): Promise<void> {
 
             closeCurrent = close;
             signal.addEventListener("abort", onAbort, { once: true });
+            timer = setTimeout(() => {
+                context.log("Discord sent no Hello: reconnecting.");
+                close();
+            }, HELLO_WAIT);
 
             if (signal.aborted) {
                 close();
