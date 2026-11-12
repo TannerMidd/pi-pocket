@@ -2000,7 +2000,6 @@ test(
         await shows(["Project lesson one."], "this project's lessons only");
         assert.deepEqual((await listed()).counts, ["1", "1", "0"]);
         assert.match((await listed()).on, /^This project: 1 lesson$/);
-        // On a phone the three scopes take their short names, and each keeps its count in view.
         const labels = await inPage<string[]>(`
             return JSON.stringify([...document.querySelectorAll(".memory-scope button")].map((each) => {
                 const fits = each.scrollWidth <= each.clientWidth;
@@ -2031,7 +2030,6 @@ test(
             view.lessons.find((lesson) => lesson.text === "Everywhere lesson two.")?.scope,
             "everywhere",
         );
-        // This session's own: listed alone, and a lesson added there is for this session only.
         await tap(".memory-scope button:nth-child(3)");
         await shows([], "this session's lessons only");
         await page.evaluate(`

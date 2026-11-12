@@ -465,12 +465,10 @@ test("the editor keeps a window, previews the server's next run, removes it", re
             (await read(`document.querySelector('[aria-label="From"]')?.value`)) === "09:00",
         "the editor with its window",
     );
-    // The server's next run, in the list, is the editor's preview.
     assert.match(
         await read(`document.querySelector(".sched-preview").textContent`),
         new RegExp(`Weekdays, 09:00 to 17:00 · Next ${next}`),
     );
-    // A cleared time says so, and the editor stays.
     await inPage(
         `const from = document.querySelector('[aria-label="From"]'); from.value = ""; from.dispatchEvent(new Event("input", { bubbles: true })); return "0";`,
     );

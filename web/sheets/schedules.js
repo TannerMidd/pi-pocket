@@ -100,11 +100,7 @@ function nextClock(at, days, now, zone = deviceZone()) {
     return Number.NaN;
 }
 
-/**
- * The next run after `now` of a repeat every `minutes` in `window`, as the server works it out (`nextRepeat`): at the
- * window's start on a day it opens, then every `minutes` while before its end, which is on the next day when not after
- * the start.
- */
+/** The next run after `now` of a repeat every `minutes` in `window`: the server's `nextRepeat`, in this browser. */
 function nextInWindow(minutes, window, now, zone) {
     const wall = wallOf(zone);
     const [year, month, today] = wall(now).date;
@@ -357,7 +353,6 @@ function ScheduleEditor({ schedule, onDone }) {
                 : [...draft.days, day].sort((a, b) => a - b),
         });
 
-    // The days of "On days", and of the window of "Every".
     const dayPicker = html`<div class="sched-days" role="group" aria-label="Days">
             ${DAY_LETTERS.map(
                 (letter, day) => html`<button
