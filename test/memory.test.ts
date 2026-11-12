@@ -877,6 +877,12 @@ test("a session's lessons have a room of their own, and so do the ones that wait
     await app.memory.add(id, elsewhere, writer, { text: "everywhere one", scope: "everywhere" });
     await app.memory.add(other, elsewhere, writer, { text: "other one", scope: "session" });
 
+    // A full project leaves the session room too.
+    for (let index = 1; index < MAX_PROJECT_LESSONS; index++) {
+        await app.memory.add(id, elsewhere, writer, { text: `p${index}`, scope: "project" });
+    }
+
+    await app.memory.add(other, elsewhere, writer, { text: "other two", scope: "session" });
     await clear();
 
     // Waiting ones: a person's session lessons that wait count in that session only.
