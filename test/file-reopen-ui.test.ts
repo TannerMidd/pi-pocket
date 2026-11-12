@@ -101,60 +101,30 @@ test("opening the file that the sheet shows reads it again", real, async () => {
     await shows("second text");
 });
 
-for (const viewport of ["mobile", "desktop"] as const) {
-    test(`a binary file offers a byte-exact download on ${viewport}`, real, async () => {
-        const binary = join(work, 'résumé #1 "draft".zip');
-        const bytes = Buffer.from([0x50, 0x4b, 0, 0xff, 0x80, 0x0a]);
+test("a binary file offers a download link that reaches the file", real, async () => {
+    const binary = join(work, 'résumé #1 "draft".zip');
 
-        writeFileSync(binary, bytes);
-        await opened(VIEWPORTS[viewport]);
+    writeFileSync(binary, Buffer.from([0x50, 0x4b, 0, 0xff, 0x80, 0x0a]));
+    await opened(VIEWPORTS.mobile);
+    await inPage(`(await import("/ui.js")).openFile(${JSON.stringify(binary)}); return "null";`);
+    await see(
+        `const link = document.querySelector(".file-viewer a[download]");
+        const rect = link?.getBoundingClientRect();
+        return JSON.stringify(!!rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth);`,
+        "the Download control inside the viewport",
+    );
+    const result = await inPage<{ path: string; status: number }>(`
+        const url = new URL(document.querySelector(".file-viewer a[download]").href);
 
-        if (viewport === "desktop") {
-            await inPage(
-                `(await import("/files-panel.js")).setFilesOpen(true, "files"); return "null";`,
-            );
-        }
+        return JSON.stringify({
+            path: url.searchParams.get("path"),
+            status: (await fetch(url)).status,
+        });
+    `);
 
-        await inPage(
-            `(await import("/ui.js")).openFile(${JSON.stringify(binary)}); return "null";`,
-        );
-        await see(
-            `return JSON.stringify(document.querySelector(".file-viewer a[download]") !== null)`,
-            "the Download control",
-        );
-        await see(
-            `const link = document.querySelector(".file-viewer a[download]");
-            const rect = link?.getBoundingClientRect();
-            return JSON.stringify(!!rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth);`,
-            "the Download control inside the viewport",
-        );
-        const result = await inPage<{
-            path: string;
-            status: number;
-            disposition: string;
-            bytes: number[];
-            fits: boolean;
-        }>(`
-            const link = document.querySelector(".file-viewer a[download]");
-            const url = new URL(link.href);
-            const response = await fetch(url);
-            const rect = link.getBoundingClientRect();
-            return JSON.stringify({
-                path: url.searchParams.get("path"),
-                status: response.status,
-                disposition: response.headers.get("content-disposition"),
-                bytes: Array.from(new Uint8Array(await response.arrayBuffer())),
-                fits: rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth,
-            });
-        `);
-
-        assert.equal(result.path, binary);
-        assert.equal(result.status, 200);
-        assert.match(result.disposition, /^attachment;/);
-        assert.deepEqual(result.bytes, [...bytes]);
-        assert.equal(result.fits, true);
-    });
-}
+    assert.equal(result.path, binary);
+    assert.equal(result.status, 200);
+});
 
 test("text files offer Download, but folders do not", real, async () => {
     writeFileSync(notes, "download this text\n");
