@@ -296,6 +296,14 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
     });
 }
 
+/** Waits for `promise`, `ms` at most, and leaves no timer. Never rejects. */
+async function within(promise: Promise<unknown>, ms: number): Promise<void> {
+    const waited = new AbortController();
+
+    await Promise.race([promise.catch(() => {}), sleep(ms, waited.signal)]);
+    waited.abort();
+}
+
 const backoff = (failures: number, min: number, max: number): number =>
     Math.min(max, min * 2 ** Math.max(0, failures - 1)) * (1 + Math.random() * 0.2);
 
@@ -1219,10 +1227,7 @@ export class Relay {
         this.#runners.delete(id);
         runner.abort.abort();
         // A connector that does not stop when asked is not waited for long.
-        await Promise.race([
-            runner.done.catch(() => {}),
-            sleep(3000, new AbortController().signal),
-        ]);
+        await within(runner.done, 3000);
     }
 
     /** Stop everything: the module goes. */
@@ -1231,7 +1236,8 @@ export class Relay {
 
         try {
             this.#replies.abort();
-            await Promise.allSettled([...this.#replying.values()]);
+            // A drop-in's reply that ignores its abort is not waited for long: the connectors stop all the same.
+            await within(Promise.allSettled([...this.#replying.values()]), 3000);
             await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
             // A runner past its deadline may still deliver: its delivery ends before the secrets and the files go.
             await Promise.allSettled([...this.#delivering]);
