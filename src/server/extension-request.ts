@@ -1,5 +1,5 @@
 /** Request-lifetime document access and conversation authorization for extension routes. */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { AgentState, ConversationId, DocumentReader, Tx } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";

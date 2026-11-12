@@ -3,7 +3,7 @@
  * extension (`extensions/goals.ts`) runs the check in the session's folder; while it fails, Pi is told so, with the
  * end of the output, and keeps going, up to a number of checks. This module keeps the goal and runs the check.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";

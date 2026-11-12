@@ -1,5 +1,5 @@
 /** A design's bundle, read from the artifact documents: the page, and every asset of the version. */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentReader } from "@earendil-works/pi-durable";
 import { ArtifactAssetDoc, ArtifactBodyDoc, ArtifactsDoc, type ArtifactMeta } from "../docs.ts";
 import type { PocketHost } from "../host.ts";

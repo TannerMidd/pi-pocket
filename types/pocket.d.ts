@@ -13,7 +13,7 @@
  * release. A member without it is stable. The reference is in `docs/extensions/reference/`. `test/public-types.ts`
  * fails when this file and Pi Pocket's code do not agree.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type {

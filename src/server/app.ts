@@ -4250,7 +4250,8 @@ export class PocketApp {
 /**
  * Continue on the runtime's calls: after Pi and the caller shaped a request, each shaper may replace the payload, the
  * last one closest to the wire. With no shaper, the call goes on untouched. A shaper may answer with a promise. One
- * that throws is logged and skipped: a faulty module must not fail the model call.
+ * that throws is logged and skipped: a faulty module must not fail the model call. A shaped call sends its whole
+ * request: an Anthropic thread continuation would leave out the system blocks and tools a shaper may have changed.
  */
 export function installRequestShaping(
     models: { streamSimple: ModelRuntime["streamSimple"] },
@@ -4266,6 +4267,7 @@ export function installRequestShaping(
 
         return stream(model, context, {
             ...options,
+            disableContinuation: true,
             onPayload: async (payload, payloadModel) => {
                 const asked = await options?.onPayload?.(payload, payloadModel);
                 let next = asked ?? payload;

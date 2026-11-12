@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import { type ToolCall } from "@earendil-works/pi-ai";
 import { obj, str } from "@earendil-works/pi-schema";
