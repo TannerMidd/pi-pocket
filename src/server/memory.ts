@@ -51,7 +51,7 @@ const SESSION_KEY = "pocket-session:";
 
 export const sessionKey = (root: ConversationId | number) => `${SESSION_KEY}${String(root)}`;
 
-export function sessionOf(lesson: Pick<Lesson, "project">): number | undefined {
+function sessionOf(lesson: Pick<Lesson, "project">): number | undefined {
     if (lesson.project?.startsWith(SESSION_KEY) !== true) {
         return undefined;
     }
