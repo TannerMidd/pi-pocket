@@ -910,6 +910,18 @@ test("a session's lessons have a room of their own, and so do the ones that wait
     assert.equal(project.pending, true);
     await app.memory.add(other, elsewhere, asGuest, { text: "other", scope: "session" });
 
+    // And at most 40 in all: new sessions do not fill the owner's list.
+    for (let index = 1; index < MAX_PENDING; index++) {
+        await app.memory.add(other, elsewhere, asGuest, { text: `o${index}`, scope: "session" });
+    }
+
+    const third = await newSession(app, elsewhere);
+
+    await assert.rejects(
+        app.memory.add(third, elsewhere, asGuest, { text: "third", scope: "session" }),
+        /40 session lessons wait for the owner's approval already/,
+    );
+
     // A guest cannot approve, the owner's own counts at once, and Pi's forgetting one in force is a proposal.
     const waiting = (await lessons()).find((each) => each.text === "g0")!;
 

@@ -36,6 +36,8 @@ export const MAX_EVERYWHERE_LESSONS = 30;
 export const MAX_SESSION_LESSONS = 20;
 /** Lessons waiting for approval that one person (or Pi for them) may have, so nobody fills the owner's list. */
 export const MAX_PENDING = 20;
+/** Session lessons waiting that one person may have across all sessions, so new sessions do not fill the owner's list. */
+export const MAX_PENDING_SESSIONS = 2 * MAX_PENDING;
 /** How long a folder's project is kept before git is asked again (a folder can become a repository). */
 const PROJECT_FOR_MS = 60_000;
 
@@ -407,6 +409,20 @@ export class Memory {
                 throw new HttpError(
                     409,
                     `${String(MAX_PENDING)} lessons ${session ? "for this session " : ""}wait for the owner's approval already: wait for them first.`,
+                );
+            }
+
+            if (
+                pending &&
+                session &&
+                items.filter(
+                    (item) =>
+                        item.pending === true && item.by === by && sessionOf(item) !== undefined,
+                ).length >= MAX_PENDING_SESSIONS
+            ) {
+                throw new HttpError(
+                    409,
+                    `${String(MAX_PENDING_SESSIONS)} session lessons wait for the owner's approval already: wait for them first.`,
                 );
             }
 
