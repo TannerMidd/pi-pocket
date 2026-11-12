@@ -62,6 +62,7 @@ interface RelayConnector {
     shape: "poll" | "stream";
     interval?: number;
     mentions?: boolean;
+    idempotentReply?: boolean;
     check?(values: RelayValues): string | undefined;
     poll?(context: RelayContext): Promise<void>;
     run?(context: RelayContext): Promise<void>;
@@ -180,7 +181,7 @@ Pi calls `relay_reply` with `text`, and usually `reply_to`, the event id. The re
 
 - `to`: the event Pi answers. It has only the `id`, `channel`, and `thread` that the relay kept, and the author's id. The relay keeps the last 200 events that it delivered: an older id gives Pi an error.
 - `channel` and `thread`: those of `to`. Without `to`, there are none: use a default channel from your fields.
-- `key`: the same for a call that runs again after a restart. The relay keeps the keys of the last 200 replies and does not call `reply` twice for one key, but a restart can stop a call after your `reply` sent and before the relay wrote it down. When the service can, use `key` to send once on its side: Discord has a nonce with `enforce_nonce`, and Matrix has a transaction id.
+- `key`: the same for a call that runs again after a restart. The relay keeps the keys of the last 2,000 replies, and two calls with one key at once send once. Before it calls `reply`, the relay writes the key down as sending. When a restart cuts a send off, the relay sends it again only for a connector with `idempotentReply: true`, a service that sends one key once (Discord's nonce with `enforce_nonce`, Matrix's transaction id). Any other connector does not send it again, so a reply never shows twice; Pi hears that it may have gone out.
 
 Return `{ id }`, the id the service gave, or nothing. A call that takes more than 30 seconds is aborted: pass `context.signal` to your requests. A thrown error goes to Pi as an error, with secrets taken out. The `reply` gets only `values`, `signal`, and `log`.
 
@@ -437,5 +438,5 @@ Lancet Guard blocks Pi's tools from every `x.*` folder in the data folder, so Pi
 
 - Connectors: 50. Name: 60 characters. Instructions: 2,000 characters. Owner IDs: 20, each one word of 100 characters or fewer.
 - Limit in an hour, for each author: 1 to 120, default 10. For the connector: 1 to 600, default 30. The count for the connector is the inbox's `limit`, in memory: a restart forgives it. The count for each author is kept in `state.json`.
-- Events waiting: 200. Events remembered for replies: 200. Replies remembered: 200. Saved state: 64 KB. A reply's wait: 30 seconds.
+- Events waiting: 200. Events remembered for replies: 200. Replies remembered: 2,000. Saved state: 64 KB. A reply's wait: 30 seconds.
 - Poll wait: 10 seconds at least. Backoff: 5 seconds to 15 minutes. Delivery retry: 15 seconds to 10 minutes.
