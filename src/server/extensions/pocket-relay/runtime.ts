@@ -99,6 +99,7 @@ const MAX_RECENT = 200;
 const MAX_REPLIES = 2000;
 const MAX_OWN_STATE = 64 * 1024;
 const HOUR = 3_600_000;
+const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
 const BACKOFF_MAX = 15 * 60_000;
 /** A stream that ran this long before it ended was well: its backoff starts again. */
@@ -183,6 +184,9 @@ export function checkConnector(connector: RelayConnector): RelayConnector {
     return connector;
 }
 
+/** Words before a credential, which would hide ordinary text. */
+const SCHEME = /^(bearer|basic|bot|token|digest)$/i;
+
 /** The longest secret value: what `host.hide` takes at most. */
 export const MAX_SECRET = 4096;
 
@@ -208,8 +212,11 @@ export function secretsOf(config: ConnectorConfig, fields: readonly RelayField[]
 
             found.add(part);
 
-            for (const word of part.split(/\s+/)) {
-                if (word.length >= 8) {
+            const words = part.split(/\s+/);
+
+            for (const [index, word] of words.entries()) {
+                // A credential is the last word (after `Bearer`), or any long one.
+                if (word.length >= 8 || (index === words.length - 1 && !SCHEME.test(word))) {
                     found.add(word);
                 }
             }
@@ -485,7 +492,11 @@ export class Relay {
     #states: Record<string, ConnectorState> = {};
     #writing: Promise<void> = Promise.resolve();
     #dirty = false;
+    /** Whether the last write of the files worked. */
+    #written = true;
     #loaded = false;
+    /** Aborts the replies under way when the relay stops. */
+    readonly #replies = new AbortController();
     #stopped = false;
     #unhide: () => void = () => {};
     readonly #replying = new Map<string, Promise<string>>();
@@ -666,7 +677,9 @@ export class Relay {
                 await mkdir(this.#options.folder, { recursive: true, mode: 0o700 });
                 await save(this.#connectorsFile, { version: 1, connectors: this.#configs });
                 await save(this.#stateFile, { version: 1, connectors: this.#states });
+                this.#written = true;
             } catch (error) {
+                this.#written = false;
                 this.log(`its files could not be written: ${message(error)}`);
             }
         });
@@ -674,7 +687,8 @@ export class Relay {
         return this.#writing;
     }
 
-    #hide(): void {
+    /** Hide every connector's secrets, then stop hiding the old set. False, and the old set kept, when it failed. */
+    #hide(): boolean {
         const values = Object.values(this.#configs).flatMap((config) => {
             // A kind not loaded yet: hide every text value that looks like a key, to be safe.
             const fields =
@@ -687,17 +701,22 @@ export class Relay {
 
             return secretsOf(config, fields).map((value) => ({ value, label: "secret relay" }));
         });
-        const unhide = this.#unhide;
+        let unhide: () => void;
 
         try {
-            this.#unhide = this.#options.hide(values);
+            unhide = this.#options.hide(values);
         } catch (error) {
             this.log(`its secrets could not be hidden: ${message(error)}`);
 
-            this.#unhide = () => {};
+            return false;
         }
 
-        unhide();
+        const before = this.#unhide;
+
+        this.#unhide = unhide;
+        before();
+
+        return true;
     }
 
     /** Store events a connector heard, filtered: when this resolves, they will be delivered. */
@@ -904,6 +923,10 @@ export class Relay {
             throw new Error(`The ${connector.label} connector only listens: it cannot reply.`);
         }
 
+        if (this.#stopped) {
+            throw new Error("The relay is stopping. Try again in a moment.");
+        }
+
         const running = this.#replying.get(request.key);
 
         if (running !== undefined) {
@@ -939,7 +962,7 @@ export class Relay {
 
         // A send a restart cut off: a service that sends a key once gets it again; any other might show it twice.
         if (kept !== undefined && connector.idempotentReply !== true) {
-            return "This reply may have gone out before a restart, so it was not sent again.";
+            return "This reply may have gone out already (an earlier send failed or was cut off), so it was not sent again.";
         }
 
         const heard =
@@ -969,11 +992,22 @@ export class Relay {
         state.replies[request.key] = { at: this.now(), sending: true };
         await this.persist();
 
+        // Without the mark on disk, a restart in the send could send it twice.
+        if (!this.#written) {
+            delete state.replies[request.key];
+
+            throw new Error("The relay could not write its files, so the reply was not sent.");
+        }
+
         try {
             answer = await connector.reply(
                 {
                     values,
-                    signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+                    signal: AbortSignal.any([
+                        signal,
+                        this.#replies.signal,
+                        AbortSignal.timeout(30_000),
+                    ]),
                     log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
                 },
                 {
@@ -985,9 +1019,8 @@ export class Relay {
                 },
             );
         } catch (error) {
-            delete state.replies[request.key];
-            void this.persist();
-
+            // The mark stays: the service may have taken it before the answer failed. Only a connector whose service
+            // sends a key once sends it again.
             throw new Error(this.scrub(config, message(error)));
         }
 
@@ -995,10 +1028,14 @@ export class Relay {
 
         state.replies[request.key] = { at: this.now(), ...(id === undefined ? {} : { id }) };
 
+        // A call runs again only after a restart cut it off: a key a week old will not come again.
+        const now = this.now();
         const keys = Object.keys(state.replies);
 
         for (const key of keys.slice(0, Math.max(0, keys.length - MAX_REPLIES))) {
-            delete state.replies[key];
+            if (now - state.replies[key]!.at > REPLY_LIFETIME) {
+                delete state.replies[key];
+            }
         }
 
         await this.persist();
@@ -1016,12 +1053,23 @@ export class Relay {
             throw new Error(`The relay keeps ${LIMITS.connectors} connectors at most.`);
         }
 
-        await this.#stop(config.id);
+        // A secret that cannot be hidden is not kept: Pi would see it in what the service echoes.
         this.#configs[config.id] = config;
+
+        if (!this.#hide()) {
+            if (before === undefined) {
+                delete this.#configs[config.id];
+            } else {
+                this.#configs[config.id] = before;
+            }
+
+            throw new Error("Its secrets cannot be hidden from Pi, so it was not saved.");
+        }
+
+        await this.#stop(config.id);
 
         // An edit is the owner's answer to a fatal error: try again.
         delete this.stateOf(config.id).fatal;
-        this.#hide();
         await this.persist();
         this.#start(config.id);
         this.changed(config.id);
@@ -1113,6 +1161,8 @@ export class Relay {
         this.#stopped = true;
 
         try {
+            this.#replies.abort();
+            await Promise.allSettled([...this.#replying.values()]);
             await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
             await this.persist();
             await this.#writing;

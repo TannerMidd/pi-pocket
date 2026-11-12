@@ -358,11 +358,16 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
             !error.message.includes("very-secret") && /\[secret\]/.test(error.message),
     );
 
-    // A send that a restart cut off is not sent again by a connector the service does not keep it once for.
+    // A send that failed, or that a restart cut off, may have gone: a connector whose service does not keep a key once
+    // does not send it again.
+    assert.match(
+        await relay.reply(config("mock"), { ...request, key: "third" }, signal),
+        /may have gone out already/,
+    );
     relay.stateOf("c-mock").replies.cut = { at: 1, sending: true };
     assert.match(
         await relay.reply(config("mock"), { ...request, key: "cut" }, signal),
-        /may have gone out before a restart/,
+        /may have gone out already/,
     );
     await relay.stop();
 });

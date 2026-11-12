@@ -101,8 +101,19 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         inbox: () => host.inbox,
         log: (text) => console.log(text),
         onStatus: (id, status) => web.send("status", { id, status }),
+        // All or nothing: one value that cannot be hidden takes back the ones before it.
         hide: (values) => {
-            const stops = values.map((value) => host.hide(value));
+            const stops: (() => void)[] = [];
+
+            try {
+                for (const value of values) {
+                    stops.push(host.hide(value));
+                }
+            } catch (error) {
+                stops.forEach((stop) => stop());
+
+                throw error;
+            }
 
             return () => stops.forEach((stop) => stop());
         },
@@ -324,6 +335,14 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         });
     };
 
+    const put = async (config: ConnectorConfig) => {
+        try {
+            await relay.put(config);
+        } catch (error) {
+            throw web.error(409, error instanceof Error ? error.message : String(error));
+        }
+    };
+
     web.route("GET", "connectors", async (request) => {
         await relay.ready;
 
@@ -341,12 +360,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
 
         const config = parse(request);
 
-        try {
-            await relay.put(config);
-        } catch (error) {
-            throw web.error(409, error instanceof Error ? error.message : String(error));
-        }
-
+        await put(config);
         await bind(request);
         web.send("changed");
 
@@ -363,7 +377,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
             })();
         const config = parse(request, before);
 
-        await relay.put(config);
+        await put(config);
         await bind(request, before.target);
         web.send("changed");
 
