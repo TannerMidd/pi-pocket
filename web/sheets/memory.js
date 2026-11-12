@@ -437,6 +437,10 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     );
     const waitingHere = waiting.filter((lesson) => lesson.scope === chosen);
     const sessionLabel = project ? "This session" : "PiP only";
+    // The session's room: every lesson in force, those with a change that waits too (they are listed to approve).
+    const inForce = data.lessons.filter(
+        (lesson) => lesson.scope === "session" && !lesson.pending,
+    ).length;
     const sessionEmpty = project
         ? "Nothing yet. These last for the rest of this session."
         : "Nothing yet.";
@@ -570,7 +574,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
         ${
             chosen === "session" &&
             html`<${Group}
-                title=${`${sessionLabel} · ${shown.length} of ${data.limits.session}`}
+                title=${`${sessionLabel} · ${inForce} of ${data.limits.session}`}
                 lessons=${shown}
                 data=${data}
                 conversationId=${id}

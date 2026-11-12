@@ -2042,6 +2042,23 @@ test(
     `);
         await tap(".lesson-add .button.primary:not([disabled])");
         await shows(["Session lesson one."], "the session's new lesson");
+        // Its room counts every lesson in force, one with a change that waits too.
+        const lessonId = (await app.memory.view(first, owner(app))).lessons.find(
+            (lesson) => lesson.text === "Session lesson one.",
+        )!.id;
+
+        await app.memory.change(first, work, { ...writer, byPi: true, name: "Pi" }, lessonId, {
+            text: "Session lesson one, changed.",
+        });
+        await until(
+            async () =>
+                (
+                    await inPage<string[]>(
+                        `return JSON.stringify([...document.querySelectorAll(".sheet .group-title")].map((each) => each.textContent))`,
+                    )
+                ).includes("This session · 1 of 20"),
+            "the session's room with the lesson that has a proposal",
+        );
         assert.equal(
             (await app.memory.view(first, owner(app))).lessons.find(
                 (lesson) => lesson.text === "Session lesson one.",
