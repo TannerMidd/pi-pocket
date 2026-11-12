@@ -333,6 +333,13 @@ describe("rss connector", () => {
         const started = Date.now();
 
         assert.throws(() => parseFeed("<item>".repeat(40_000)));
+
+        for (const open of ["<author>", "<link>", "<![CDATA[", "<br "]) {
+            parseFeed(
+                `<rss><item><description>${open.repeat(40_000)}</description>${open.repeat(40_000)}</item></rss>`,
+            );
+        }
+
         assert.ok(Date.now() - started < 200, `took ${Date.now() - started} ms`);
     });
 
