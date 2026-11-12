@@ -30,14 +30,12 @@ import {
 } from "./pocket-relay/runtime.ts";
 import { type RelayConnector, RelayError } from "./pocket-relay/types.ts";
 
-export const RELAY_MODULE = "pocket-relay";
-export const REPLY_TOOL = "relay_reply";
-/** The version of the service other modules use (`web.use("pocket-relay")`). */
+const RELAY_MODULE = "pocket-relay";
+const REPLY_TOOL = "relay_reply";
 const SERVICE_API = 1;
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
 
-/** One line of text, trimmed, or undefined. */
 const line = (value: unknown, max: number): string | undefined =>
     typeof value === "string" &&
     value.trim() !== "" &&
@@ -46,7 +44,6 @@ const line = (value: unknown, max: number): string | undefined =>
         ? value.trim()
         : undefined;
 
-/** A whole number in a range, or the default. */
 function count(value: unknown, range: { min: number; max: number; default: number }): number {
     if (value === undefined || value === null || value === "") {
         return range.default;
@@ -61,7 +58,6 @@ function count(value: unknown, range: { min: number; max: number; default: numbe
     return number;
 }
 
-/** Offer `relay_reply` to the model in a session, or stop offering it: only bound sessions get it. */
 async function offer(tx: Tx, conversationId: ConversationId, on: boolean): Promise<void> {
     const agent = await tx.doc(AgentDoc, conversationId);
     const current = agent.modelTools;
@@ -132,7 +128,6 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
     relay.start();
     web.onDispose(() => relay.stop());
 
-    // Other modules add connectors of their own: `web.use("pocket-relay").register(connector)` (docs/extensions/relay.md).
     web.provide(
         Object.freeze({
             api: SERVICE_API,
@@ -143,7 +138,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
 
     web.client(RELAY_MODULE, { access: "owner" });
 
-    /** A connector as the owner's browser sees it: no secret values, only whether each is set. */
+    /** No secret values: only whether each is set. */
     const view = (config: ConnectorConfig) => {
         const fields = relay.kind(config.kind)?.fields ?? [];
         const secret = new Set(
@@ -180,7 +175,6 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         fields: connector.fields,
     });
 
-    /** A connector the owner sent, checked; `before` for an edit. Throws a 400 that says what is wrong. */
     const parse = (request: WebRequest, before?: ConnectorConfig): ConnectorConfig => {
         const body = request.body;
 
@@ -338,7 +332,6 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         };
     };
 
-    /** Offer the reply tool where connectors deliver now, and nowhere else: `before` is where one delivered. */
     const bind = async (request: WebRequest, before?: number) => {
         const targets = new Set(relay.configs().map((config) => config.target));
 

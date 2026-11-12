@@ -16,7 +16,7 @@ import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { type Hook, HooksDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
-import { attribute, clip, defang } from "./fence.ts";
+import { attribute } from "./fence.ts";
 import { BRANCH_EVENTS, canWrite, MAY_WRITE, parseRepo } from "./github.ts";
 import { clientKey } from "./requests.ts";
 import { TRIGGERS_EXTENSION } from "./watches.ts";
@@ -30,9 +30,8 @@ const MAX_INSTRUCTIONS = 2000;
 /** Posts one hook turns into messages in an hour; past it, 429. */
 const POSTS_PER_HOUR = 30;
 
-/** The largest post taken (GitHub's pushes can be big), and how much of it Pi gets. */
+/** The largest post taken: GitHub's pushes can be big. */
 export const MAX_POST = 5 * 1024 * 1024;
-const PAYLOAD_CHARS = 8000;
 
 /** How a post's content reaches Pi: fenced, so it reads as data, not as instructions. */
 const PAYLOAD_TAG = "webhook-payload";
@@ -142,14 +141,8 @@ export function contentOf(post: Post): { raw: string; json?: unknown } {
     }
 }
 
-/** A post's content as Pi gets it, before it is made safe: JSON trimmed and compact, anything else as text. */
 function payloadRaw(content: { raw: string; json?: unknown }): string {
     return content.json === undefined ? content.raw : JSON.stringify(trimPayload(content.json));
-}
-
-/** What Pi gets of a post's content: JSON trimmed and compact, anything else as text; fenced safely, and cut. */
-export function payloadText(content: { raw: string; json?: unknown }): string {
-    return clip(defang(payloadRaw(content)), PAYLOAD_CHARS);
 }
 
 /** What a GitHub payload is about, in order: the first of these that says who wrote it is who acted. */
@@ -656,7 +649,7 @@ export class Hooks {
                 instructions: hook.instructions,
                 tag: PAYLOAD_TAG,
                 ...(what === "" ? {} : { attributes: { event: what } }),
-                // Raw: the inbox makes it safe between the tags and cuts it, as `payloadText` does.
+                // Raw: the inbox makes it safe between the tags and cuts it.
                 payload: payloadRaw(content),
                 key,
                 limit: { bucket: `hook:${hook.id}`, perHour: POSTS_PER_HOUR },

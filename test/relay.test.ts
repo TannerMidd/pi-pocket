@@ -1,5 +1,3 @@
-// The relay's runtime (`extensions/pocket-relay/runtime.ts`): delivery once across a restart, filters and limits, a
-// connector that fails without stopping anything, a stop that leaves no socket, and replies that send once.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -323,7 +321,6 @@ test("a connector that throws backs off and goes on; a fatal error stops it unti
     assert.equal(polls, 2);
     assert.equal(relay.stateOf("c-flaky").lastError, "bad token");
 
-    // An edit tries again.
     await relay.put(config("flaky", { updatedAt: 2 }));
     await until(() => polls === 3, "a new try");
     await relay.stop();

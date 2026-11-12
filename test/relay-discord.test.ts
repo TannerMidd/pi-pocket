@@ -1,5 +1,3 @@
-// The relay's Discord connector against a mocked gateway and REST API: identify and resume, a lost session's
-// backfill, filters and mentions, a fatal close, the reply's body, and a clean stop.
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import discord from "../src/server/extensions/pocket-relay/connectors/discord.ts";
@@ -18,7 +16,6 @@ const C1 = "1001";
 const closes: number[] = [];
 const Native = globalThis.WebSocket;
 
-// Records the close codes the connector sends.
 globalThis.WebSocket = class extends Native {
     override close(code?: number, reason?: string): void {
         closes.push(code ?? 1005);
