@@ -1,4 +1,4 @@
-// Memory: the lessons Pi keeps across sessions, for this session's project and for everywhere.
+// Memory: the lessons Pi keeps, for this session's project, for everywhere, and for this session alone.
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Sheet, timeAgo } from "../ui.js";
@@ -100,21 +100,22 @@ function refresh() {
     store.set((state) => ({ memoryRev: (state.memoryRev ?? 0) + 1 }));
 }
 
-/** The menu's hint: how many lessons apply here and everywhere, and for the owner how many wait for approval. */
+/** The menu's hint: how many lessons apply here, everywhere, and in this session; for the owner, how many wait. */
 export function memoryHint(data) {
     if (!data) {
         return "";
     }
 
     const live = data.lessons.filter((lesson) => !lesson.pending);
-    const here = live.filter((lesson) => lesson.scope === "project").length;
-    const everywhere = live.length - here;
+    const count = (scope) => live.filter((lesson) => lesson.scope === scope).length;
+    const session = count("session");
     const waiting = data.owner
         ? data.lessons.filter((lesson) => lesson.pending || lesson.proposal).length
         : 0;
     const parts = [
-        data.project ? `${here} here` : null,
-        `${everywhere} everywhere`,
+        data.project ? `${count("project")} here` : null,
+        `${count("everywhere")} everywhere`,
+        session > 0 ? `${session} this session` : null,
         waiting > 0 ? `${waiting} to approve` : null,
     ];
 
@@ -160,7 +161,7 @@ export function PendingMemories({ id, before }) {
     </div>`;
 }
 
-/** Save a lesson by hand: for this project, or everywhere. */
+/** Save a lesson by hand: for this project, everywhere, or this session. */
 export async function remember(text, scope = "project", conversationId) {
     const id = conversationId ?? store.state.conversationId;
     const lesson = await api(path(id), { text, scope });
@@ -206,7 +207,25 @@ function Source({ lesson }) {
 const reach = (lesson) =>
     lesson.scope === "everywhere"
         ? "everywhere: every session, and PiP"
-        : (lesson.projectName ?? "this project");
+        : lesson.scope === "session"
+          ? (lesson.projectName ?? "this session only")
+          : (lesson.projectName ?? "this project");
+
+/**
+ * The scopes the sheet offers here, `[scope, label, short label for a phone]`: a project's when the session has one
+ * (PiP has none), and the session's own when the server keeps them (an older one has no `limits.session`).
+ */
+function scopesOf(data) {
+    return [
+        data.project ? ["project", "This project", "Project"] : null,
+        ["everywhere", "Everywhere"],
+        data.limits.session !== undefined
+            ? data.project
+                ? ["session", "This session", "Session"]
+                : ["session", "PiP only"]
+            : null,
+    ].filter(Boolean);
+}
 
 /** One lesson: its text, where it came from, and what this person may do with it. */
 function Lesson({ lesson, data, conversationId, pendingOnly = false }) {
@@ -347,8 +366,8 @@ function Group({ title, lessons, data, empty, conversationId, pendingOnly = fals
  * The sheet's scope: which lessons it lists, and where one added by hand goes. Each shows how many it holds, and for the
  * owner how many of them wait for approval, so none hides behind the other.
  */
-function ScopeSwitch({ scope, setScope, lessons, waiting }) {
-    const option = (which, label) => {
+function ScopeSwitch({ scope, setScope, scopes, lessons, waiting }) {
+    const option = ([which, label, short]) => {
         const count = lessons.filter(
             (lesson) => lesson.scope === which && !waiting.includes(lesson),
         ).length;
@@ -362,21 +381,21 @@ function ScopeSwitch({ scope, setScope, lessons, waiting }) {
             class=${scope === which ? "on" : ""}
             onClick=${() => setScope(which)}
         >
-            <span>${label}</span>
+            <span class="memory-scope-long">${label}</span>
+            <span class="memory-scope-short">${short ?? label}</span>
             <span class="memory-scope-count">${count}</span>
             ${pending > 0 && html`<span class="tab-count">${pending}</span>`}
         </button>`;
     };
 
     return html`<div class="segmented memory-scope" role="radiogroup" aria-label="Lessons for">
-        ${option("project", "This project")}
-        ${option("everywhere", "Everywhere")}
+        ${scopes.map(option)}
     </div>`;
 }
 
 /**
- * The lessons Pi keeps: what waits for approval, this project's, and everywhere's; and one added by hand. The scope
- * switch picks which of the two it lists, and where a new one goes.
+ * The lessons Pi keeps: what waits for approval, this project's, everywhere's, and this session's; and one added
+ * by hand. The scope switch picks which it lists, and where a new one goes.
  */
 export function MemorySheet({ draft: initial = "", conversationId, pendingOnly = false }) {
     const id = conversationId ?? store.state.conversationId;
@@ -408,7 +427,8 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     }
 
     const project = data.project;
-    const chosen = project ? scope : "everywhere";
+    const scopes = pendingOnly ? [] : scopesOf(data);
+    const chosen = scopes.some(([which]) => which === scope) ? scope : "everywhere";
     const waiting = data.owner
         ? data.lessons.filter((lesson) => lesson.pending || lesson.proposal)
         : [];
@@ -416,6 +436,21 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
         (lesson) => lesson.scope === chosen && !waiting.includes(lesson),
     );
     const waitingHere = waiting.filter((lesson) => lesson.scope === chosen);
+    const sessionLabel = project ? "This session" : "PiP only";
+    const sessionEmpty = project
+        ? "Nothing yet. These last for the rest of this session."
+        : "Nothing yet.";
+    const own = !scopes.some(([which]) => which === "session")
+        ? ""
+        : project
+          ? "This session's own go to it and its subagents alone, and to its forks."
+          : "PiP's own go to PiP alone, no session.";
+    const goesTo =
+        chosen === "project"
+            ? `For ${project.name}`
+            : chosen === "session"
+              ? `For ${project ? "this session" : "PiP"} only`
+              : "For every session and PiP";
 
     const add = () => {
         if (busy || text.trim() === "") {
@@ -444,7 +479,8 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
             className="pending-memories"
         >
             <p class="muted small">
-                Memories waiting for your approval, across every project and everywhere.
+                Memories waiting for your approval, across every project, everywhere, and each
+                session's own.
                 Approve only what you want Pi to keep; until then Pi goes on as before.
             </p>
             <${Group}
@@ -460,13 +496,14 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
 
     return html`<${Sheet} title=${title} onClose=${closeSheet} wide=${true}>
         <p class="muted small">
-            Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. ${project ? html`Those for <b>${project.name}</b> go to every session in it, worktrees too; the rest go everywhere.` : "PiP keeps lessons for everywhere."} Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.
+            Short lessons Pi keeps across sessions: how to build and test, gotchas, conventions, preferences. ${project ? html`Those for <b>${project.name}</b> go to every session in it, worktrees too; the rest go everywhere.` : "PiP keeps lessons for everywhere."} ${own} Pi proposes one only when asked, or when sure it will help in many later sessions, and the owner approves; yours count at once.
         </p>
         ${
-            project &&
+            scopes.length > 1 &&
             html`<${ScopeSwitch}
                 scope=${chosen}
                 setScope=${setScope}
+                scopes=${scopes}
                 lessons=${data.lessons}
                 waiting=${waiting}
             />`
@@ -489,7 +526,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                 ></textarea>
                 <div class="row">
                     <span class="muted small lesson-add-for">
-                        ${chosen === "project" ? `For ${project.name}` : "For every session and PiP"}
+                        ${goesTo}
                     </span>
                     <button
                         class="button primary"
@@ -528,6 +565,16 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                 data=${data}
                 conversationId=${id}
                 empty="Nothing yet."
+            />`
+        }
+        ${
+            chosen === "session" &&
+            html`<${Group}
+                title=${`${sessionLabel} · ${shown.length} of ${data.limits.session}`}
+                lessons=${shown}
+                data=${data}
+                conversationId=${id}
+                empty=${sessionEmpty}
             />`
         }
     <//>`;
