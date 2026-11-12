@@ -30,7 +30,7 @@ const MAX_INSTRUCTIONS = 2000;
 /** Posts one hook turns into messages in an hour; past it, 429. */
 const POSTS_PER_HOUR = 30;
 
-/** The largest post taken (GitHub's pushes can be big), and how much of it Pi gets. */
+/** The largest post taken: GitHub's pushes can be big. */
 export const MAX_POST = 5 * 1024 * 1024;
 
 /** How a post's content reaches Pi: fenced, so it reads as data, not as instructions. */
