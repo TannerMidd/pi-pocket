@@ -85,7 +85,7 @@ const fields: readonly RelayField[] = [
         label: "Cursor parameter",
         type: "text",
         description:
-            "Optional. The query parameter that carries the cursor. Use it with the cursor field. Without both, the connector remembers the ids it has seen (up to 1000).",
+            "Optional. The query parameter that carries the cursor. Use it with the cursor field. Without both, the connector watches the newest 500 items and remembers the ids it has seen (up to 2,000).",
     },
     {
         name: "cursorField",

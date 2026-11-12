@@ -106,6 +106,7 @@ interface RelayField {
     min?: number;
     max?: number;
     choices?: { value: string; label: string }[];
+    multiline?: boolean;
 }
 
 type RelayValues = Readonly<Record<string, string | number | boolean | undefined>>;
@@ -113,7 +114,8 @@ type RelayValues = Readonly<Record<string, string | number | boolean | undefined
 
 - `name`: a letter, then letters, digits, and `_`, 40 characters at most, and each name once. A name that is wrong throws when the connector registers.
 - `text` is one line, 8,192 characters at most. `textarea` has more lines, 8,192 characters at most. `number` follows `min` and `max`. `choice` is one of the `choices`. `boolean` is `true` or `false`.
-- `secret` is a text of 8,192 characters at most for a token or a key. It never goes to the owner's browser: the sheet shows only whether it is set, and the owner keeps, replaces, or clears it. The server hides the values with `host.hide`, so Pi and people cannot read them in a transcript (a value of 8 characters or more), and the relay takes them out of every error and status (4 characters or more). The relay refuses to save a secret, or a header line's value, of fewer than 4 characters: it cannot hide one that short. A secret never goes in a `description` or a default.
+- `secret` is a text of 8,192 characters at most for a token or a key. It never goes to the owner's browser: the sheet shows only whether it is set, and the owner keeps, replaces, or clears it. The server hides the values with `host.hide`, so Pi and people cannot read them in a transcript, and the relay takes them out of every error and status. The relay refuses to save a secret, or a header line's value, of fewer than 4 characters: it cannot hide one that short. A secret never goes in a `description` or a default.
+- `multiline: true` on a `secret` field: the sheet draws it as a masked text area of more lines (the `http` connector's headers, one `Name: value` on each line). A password input would join the lines.
 - `required: true`: the owner must give a value, or the field must have a `default`.
 - `context.values` has each field's value as the owner set it, else the `default`, else `undefined`. The object is frozen.
 
@@ -208,14 +210,14 @@ Use the class from the service (`service.RelayError`). The relay also reads `ret
 
 ## The built-in connectors
 
-| Kind       | Shape  | The owner gives                                                                                                       | Replies | Notes                                                                              |
-| ---------- | ------ | --------------------------------------------------------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `discord`  | stream | A bot token, channel IDs (empty: all the bot sees), direct messages on or off, a reply channel.                       | Yes     | The Developer Portal needs **Message Content Intent**. A nonce makes a reply once. |
-| `telegram` | stream | A bot token, chat IDs (empty: all), a default reply chat.                                                             | Yes     |                                                                                    |
-| `slack`    | stream | An app token (`xapp-…`, Socket Mode) and a bot token (`xoxb-…`), channel IDs (empty: all), a default reply channel.   | Yes     |                                                                                    |
-| `matrix`   | stream | A homeserver address, an access token, room IDs (empty: joined rooms), a default reply room.                          | Yes     | A transaction id makes a reply once.                                               |
-| `http`     | poll   | An address that answers with JSON, headers, the fields of an item, an optional cursor, and an optional reply address. | Yes     | Items must come oldest first. Without a cursor, it remembers 1,000 ids.            |
-| `rss`      | poll   | A feed address (RSS or Atom). Default every 15 minutes.                                                               | No      | The first poll records the feed and delivers nothing.                              |
+| Kind       | Shape  | The owner gives                                                                                                       | Replies | Notes                                                                                                                                                     |
+| ---------- | ------ | --------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `discord`  | stream | A bot token, channel IDs (empty: all the bot sees), direct messages on or off, a reply channel.                       | Yes     | The Developer Portal needs **Message Content Intent**. A nonce makes a reply once.                                                                        |
+| `telegram` | stream | A bot token, chat IDs (empty: all), a default reply chat.                                                             | Yes     |                                                                                                                                                           |
+| `slack`    | stream | An app token (`xapp-…`, Socket Mode) and a bot token (`xoxb-…`), channel IDs (empty: all), a default reply channel.   | Yes     |                                                                                                                                                           |
+| `matrix`   | stream | A homeserver address, an access token, room IDs (empty: joined rooms), a default reply room.                          | Yes     | A transaction id makes a reply once.                                                                                                                      |
+| `http`     | poll   | An address that answers with JSON, headers, the fields of an item, an optional cursor, and an optional reply address. | Yes     | Items must come oldest first. Without a cursor, it watches the newest 500 items and remembers 2,000 ids. It does not follow a redirect to another origin. |
+| `rss`      | poll   | A feed address (RSS or Atom). Default every 15 minutes.                                                               | No      | The first poll records the feed and delivers nothing.                                                                                                     |
 
 ## Your own connector
 
