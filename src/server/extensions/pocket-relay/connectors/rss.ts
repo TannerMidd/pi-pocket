@@ -8,7 +8,9 @@ import {
     type RelayValues,
 } from "../types.ts";
 
-const SEEN_LIMIT = 1000;
+const SEEN_LIMIT = 2000;
+const MAX_ITEMS = 500;
+const MAX_BODY = 5_000_000;
 const SUMMARY_LIMIT = 1500;
 
 const ENTITIES: Record<string, string> = {
@@ -159,19 +161,80 @@ function parseItem(block: string): FeedItem {
 
 /** The items of an RSS or Atom document, in the order they come, and the feed's own title. */
 export function parseFeed(xml: string): { title: string | undefined; items: FeedItem[] } {
-    const blocks = [...xml.matchAll(/<(item|entry)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)];
+    // One pass: an item that never closes ends the scan, so the work stays linear.
+    const open = /<(item|entry)\b[^<>]*>/gi;
+    const bodies: string[] = [];
+    let head = "";
+    let from = 0;
 
-    if (blocks.length === 0 && !/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) {
+    for (let match = open.exec(xml); match !== null; match = open.exec(xml)) {
+        const close = new RegExp(`</${match[1]}\\s*>`, "gi");
+
+        close.lastIndex = open.lastIndex;
+
+        const ended = close.exec(xml);
+
+        if (ended === null) {
+            break;
+        }
+
+        head += xml.slice(from, match.index);
+        from = close.lastIndex;
+        open.lastIndex = from;
+
+        if (bodies.length < MAX_ITEMS) {
+            bodies.push(xml.slice(match.index + match[0].length, ended.index));
+        }
+    }
+
+    head += xml.slice(from);
+
+    if (bodies.length === 0 && !/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) {
         throw new Error("The answer is not an RSS or Atom feed.");
     }
 
-    const head = xml.replace(/<(item|entry)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
-
     return {
         title: nonEmpty(heading(element(head, "title") ?? "")),
-        items: blocks.map((block) => parseItem(block[2] ?? "")),
+        items: bodies.map(parseItem),
     };
 }
+
+/** Reads an answer's text, and refuses one larger than `max` bytes, so one answer cannot fill the memory. */
+export async function readCapped(response: Response, max = MAX_BODY): Promise<string> {
+    const declared = Number(response.headers.get("content-length"));
+
+    if (Number.isFinite(declared) && declared > max) {
+        throw new Error("The answer is too large.");
+    }
+
+    const reader = response.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+
+    while (reader !== undefined) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+            break;
+        }
+
+        size += value.byteLength;
+
+        if (size > max) {
+            void reader.cancel();
+
+            throw new Error("The answer is too large.");
+        }
+
+        chunks.push(value);
+    }
+
+    return Buffer.concat(chunks).toString("utf8");
+}
+
+/** An id is kept as a short hash: 2,000 URLs would pass the 64 KB the relay keeps for a connector. */
+export const keyOf = (id: string): string =>
+    createHash("sha1").update(id).digest("base64url").slice(0, 16);
 
 function retryAfterOf(response: Response): number {
     const header = response.headers.get("retry-after");
@@ -265,19 +328,21 @@ async function poll(context: RelayContext): Promise<void> {
         throw new Error(`The feed failed with status ${response.status}.`);
     }
 
-    const feed = parseFeed(await response.text());
+    const feed = parseFeed(await readCapped(response));
     const host = new URL(address).host;
     const seen = Array.isArray(state.seen) ? (state.seen as string[]) : undefined;
     const known = new Set(seen ?? []);
+    const keys = new Set<string>();
     const ids = new Set<string>();
     const fresh: FeedItem[] = [];
 
     for (const item of feed.items) {
-        if (!ids.has(item.id) && !known.has(item.id)) {
+        if (!ids.has(item.id) && !known.has(keyOf(item.id)) && !known.has(item.id)) {
             fresh.push(item);
         }
 
         ids.add(item.id);
+        keys.add(keyOf(item.id));
     }
 
     fresh.reverse();
@@ -304,7 +369,7 @@ async function poll(context: RelayContext): Promise<void> {
     const lastModified = response.headers.get("last-modified");
 
     context.save({
-        seen: [...ids, ...(seen ?? []).filter((id) => !ids.has(id))].slice(0, SEEN_LIMIT),
+        seen: [...keys, ...(seen ?? []).filter((key) => !keys.has(key))].slice(0, SEEN_LIMIT),
         ...(etag === null ? {} : { etag }),
         ...(lastModified === null ? {} : { lastModified }),
     });

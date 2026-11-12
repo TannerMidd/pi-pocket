@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, describe, test } from "node:test";
 import http from "../src/server/extensions/pocket-relay/connectors/http.ts";
-import rss from "../src/server/extensions/pocket-relay/connectors/rss.ts";
+import rss, { parseFeed } from "../src/server/extensions/pocket-relay/connectors/rss.ts";
 import {
     type RelayContext,
     type RelayError,
@@ -326,6 +326,35 @@ describe("rss connector", () => {
         assert.equal(requests[1]?.["if-none-match"], '"v1"');
         assert.equal(requests[1]?.["if-modified-since"], "Wed, 03 Jan 2024 10:00:00 GMT");
         assert.deepEqual(events, []);
-        assert.deepEqual(state().seen, ["tag:example.com,2024:1"]);
+        assert.equal((state().seen as string[]).length, 1);
     });
+
+    test("an unterminated <item> list parses in linear time", () => {
+        const started = Date.now();
+
+        assert.throws(() => parseFeed("<item>".repeat(40_000)));
+        assert.ok(Date.now() - started < 200, `took ${Date.now() - started} ms`);
+    });
+
+    test("the seen ids stay under the 64 KB the relay keeps, and no old item comes twice", async () => {
+        const links = Array.from(
+            { length: 900 },
+            (_, i) => `https://example.com/blog/${i}/${"s".repeat(80)}`,
+        );
+        const items = links.map((link) => `<item><link>${link}</link></item>`).join("");
+        const mock = await serve(() => ({ text: `<rss><channel>${items}</channel></rss>` }));
+        const { context, events, state } = fake({ url: mock.url });
+
+        await rss.poll!(context);
+        assert.ok(JSON.stringify(state()).length < 64 * 1024);
+        await rss.poll!(context);
+        assert.deepEqual(events, []);
+    });
+});
+
+test("the headers of the http connector take several lines", () => {
+    const lines = http.fields.filter((field) => field.name.toLowerCase().endsWith("headers"));
+
+    assert.equal(lines.length, 2);
+    assert.ok(lines.every((field) => field.multiline === true));
 });

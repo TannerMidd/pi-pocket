@@ -1,5 +1,6 @@
 /** The relay's generic HTTP connector: polls a JSON address for new items, and can reply with a request. */
 import { createHash } from "node:crypto";
+import { keyOf, readCapped } from "./rss.ts";
 import {
     RelayError,
     type RelayConnector,
@@ -10,7 +11,8 @@ import {
     type RelayValues,
 } from "../types.ts";
 
-const SEEN_LIMIT = 1000;
+const SEEN_LIMIT = 2000;
+const MAX_ITEMS = 500;
 const DEFAULT_REPLY_BODY = '{"text": {{text}}}';
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
 
@@ -440,24 +442,27 @@ async function poll(context: RelayContext): Promise<void> {
         failOn(response, "The poll");
     }
 
+    const raw = await readCapped(response);
     let data: unknown;
 
     try {
-        data = await response.json();
+        data = JSON.parse(raw);
     } catch {
         throw new Error("The answer is not valid JSON.");
     }
 
     const itemsPath = text(values, "itemsPath");
-    const list = itemsPath === "" ? data : pick(data, itemsPath);
+    const whole = itemsPath === "" ? data : pick(data, itemsPath);
 
-    if (!Array.isArray(list)) {
+    if (!Array.isArray(whole)) {
         throw new Error("The items path does not point to a list in the answer.");
     }
 
-    const last: unknown = list.length > 0 ? list[list.length - 1] : undefined;
+    const last: unknown = whole.length > 0 ? whole[whole.length - 1] : undefined;
     const lastCursor = useCursor && last !== undefined ? asText(pick(last, cursorField)) : "";
     const nextCursor = lastCursor === "" ? cursor : lastCursor;
+    // The list runs oldest first: without a cursor, the newest MAX_ITEMS are the ones to watch.
+    const list = useCursor ? whole : whole.slice(-MAX_ITEMS);
     const events = list.flatMap((item) => {
         const event = toEvent(item, values, base);
 
@@ -476,21 +481,24 @@ async function poll(context: RelayContext): Promise<void> {
 
     const seen = Array.isArray(state.seen) ? (state.seen as string[]) : [];
     const known = new Set(seen);
-    const fresh = events.filter((event, index) => {
-        const first = events.findIndex((other) => other.id === event.id) === index;
+    const once = new Set<string>();
+    const fresh = events.filter((event) => {
+        const first = !once.has(event.id);
 
-        return first && !known.has(event.id);
+        once.add(event.id);
+
+        return first && !known.has(keyOf(event.id)) && !known.has(event.id);
     });
 
     if (!baseline && fresh.length > 0) {
         await context.emit(fresh);
     }
 
-    const current = new Set(events.map((event) => event.id));
+    const current = new Set(events.map((event) => keyOf(event.id)).reverse());
 
     context.save({
         started: true,
-        seen: [...current, ...seen.filter((id) => !current.has(id))].slice(0, SEEN_LIMIT),
+        seen: [...current, ...seen.filter((key) => !current.has(key))].slice(0, SEEN_LIMIT),
     });
 }
 
@@ -539,7 +547,7 @@ async function reply(
     }
 
     try {
-        const id = pick(await response.json(), "id");
+        const id = pick(JSON.parse(await readCapped(response)), "id");
 
         return typeof id === "string" || typeof id === "number" ? { id: String(id) } : undefined;
     } catch {
