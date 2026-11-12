@@ -203,6 +203,7 @@ async function socketRun(
 const slack: RelayConnector = {
     kind: "slack",
     label: "Slack",
+    description: "A Slack app in Socket Mode: messages in its channels and direct messages.",
     shape: "stream",
     mentions: true,
     fields: [

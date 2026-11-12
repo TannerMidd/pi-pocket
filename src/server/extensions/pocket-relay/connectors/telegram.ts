@@ -147,6 +147,7 @@ function eventOf(message: Message, bot: TelegramUser): RelayEvent {
 const telegram: RelayConnector = {
     kind: "telegram",
     label: "Telegram",
+    description: "A Telegram bot: messages to it and in its groups. Make one with @BotFather.",
     shape: "stream",
     mentions: true,
     fields: [
