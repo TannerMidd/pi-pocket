@@ -20,7 +20,7 @@ import { DiffBlock } from "./diff.js";
 import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
 import { personStorage } from "./person-storage.js";
-import { splitQuote } from "./quote-text.js";
+import { quoteParts } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted, InlineArtifact } from "./rich.js";
@@ -76,9 +76,9 @@ import {
 } from "./ui.js";
 import { LessonCall, memoryAvailable } from "./sheets/memory.js";
 
-const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
+const REPORT = /^\[subagent (\S+) (answered|failed|stopped|stalled)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
-const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
+const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed|stopped|stalled))/;
 
 /**
  * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
@@ -337,14 +337,17 @@ function CodedText({ text }) {
 function Report({ report, view, fresh }) {
     const [, name, verb, after, text] = report;
     const child = view.subagents.find((agent) => agent.name === name);
-    // A failed one says why: "failed: stopped before it answered", "failed: Bad request".
-    const why = verb === "failed" ? after.replace(/^:\s*/, "") : "";
+    // One that did not answer says why: "failed: Bad request", "stalled again: no progress for 1 h…". Its words
+    // before the colon stay in its head ("stopped by Pi Pocket").
+    const said = verb === "answered" ? undefined : /^([^:]*):\s*([\s\S]*)$/.exec(after);
+    const why = said?.[2] ?? "";
+    const more = said?.[1]?.trim() ?? "";
 
     return html`<div
-        class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
+        class=${`report ${verb === "answered" ? "" : verb} ${fresh ? "enter" : ""}`}
     >
         <div class="report-head">
-            <span class="report-name">${name}</span> ${verb}
+            <span class="report-name">${name}</span> ${verb}${more && ` ${more}`}
             ${
                 child &&
                 html`<button class="link" onClick=${() => openSubagent(child.conversationId)}>
@@ -865,15 +868,19 @@ function UserMessage({ entry, view, users }) {
     </div>`;
 }
 
+/** A person's message with its quotes (Reply's, or typed as "> …") shown as quotes, each where it was written. */
 function QuotedText({ text }) {
-    const quote = splitQuote(text);
+    const parts = quoteParts(text);
 
-    if (!quote) {
+    if (!parts) {
         return html`<${CodedText} text=${text} />`;
     }
 
-    return html`<blockquote class="reply-quote" data-part="reply-quote">${quote.passage}</blockquote>
-        ${quote.rest && html`<${CodedText} text=${quote.rest} />`}`;
+    return parts.map((part) =>
+        part.quote === undefined
+            ? html`<${CodedText} text=${part.text} />`
+            : html`<blockquote class="reply-quote" data-part="reply-quote">${part.quote}</blockquote>`,
+    );
 }
 
 function Collapsible({ text, limit = 600 }) {
@@ -3442,8 +3449,9 @@ function windowStart(rows, from) {
 }
 
 /**
- * How long after a kept session shows again (`keptView` in store.js) what comes for it is its catch-up: what the server
- * sends after the switch, which glides in at the bottom, or arrives below the reader without moving what they read.
+ * How long what comes for a session is its catch-up, from the server's first view after the session showed from what
+ * the tab or the device kept, or after a reconnect (`due`): it glides in at the bottom, or arrives below the reader
+ * without moving what they read.
  */
 const CATCH_UP_MS = 3000;
 /** How long a session held for its changes (Appearance's Wait for updates) waits for them before it shows anyway. */
@@ -3584,11 +3592,12 @@ export function Transcript() {
         entrance.current = routeSliding() ? "" : "rising";
     }
 
-    // When a kept session showed again, drawn from what the tab kept: what comes for it until `CATCH_UP_MS` after is its
-    // catch-up. 0 for a session that opened from the server's view (one held for its changes too).
-    const keptAt = useRef(null);
-
-    keptAt.current ??= view.conversation && !held ? performance.now() : 0;
+    // When the catch-up began, or 0. It begins with the first view after `due`, however late that view comes.
+    const keptAt = useRef(0);
+    // The view on screen as a catch-up became due (rows from what was kept, or a reconnect), until the next view comes.
+    const due = useRef(null);
+    const open = store.state.connection === "open";
+    const wasOpen = useRef(open);
     const catching = () => keptAt.current > 0 && performance.now() - keptAt.current < CATCH_UP_MS;
     /** The row the reader looks at, as this draw began, while the session catches up (`anchorOf`). */
     const anchor = useRef(null);
@@ -3654,6 +3663,24 @@ export function Transcript() {
     // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
     // function returns), to keep it there after.
     const drawnRows = useRef(rows);
+    // A draw has put rows on screen.
+    const shown = useRef(false);
+
+    // Back from a reconnect, with rows on screen: what the server sends now is a catch-up.
+    if (open && !wasOpen.current && shown.current) {
+        due.current = view;
+    }
+
+    wasOpen.current = open;
+
+    // The first view after one that was due is the catch-up: with new rows, they glide, however late they come.
+    if (due.current !== null && view !== due.current) {
+        due.current = null;
+
+        if (rows !== drawnRows.current && shown.current && view.conversation && !held) {
+            keptAt.current = performance.now();
+        }
+    }
 
     if (rows !== drawnRows.current) {
         drawnRows.current = rows;
@@ -3700,6 +3727,13 @@ export function Transcript() {
         place(element);
         counted.current = rows.length;
 
+        // The first rows on screen are what the tab or the device kept: the server's view of them is still to come.
+        if (!shown.current && rows.length > 0 && !viewSynced(view.conversation?.id)) {
+            due.current = view;
+        }
+
+        shown.current = rows.length > 0;
+
         if (rows.length === 0) {
             return;
         }
@@ -3735,8 +3769,12 @@ export function Transcript() {
         }
 
         // The row measured from was drawn again (or folded away): the glide goes by what came below, from where the end
-        // of the column was. Without this a large catch-up jumped there in one frame.
-        const now = placed ?? before.at - addedBelow(column.current, before);
+        // of the column was. It also goes by that when the row is still there and rows came after it, which a bottom
+        // anchor's own edge does not include. Without this a catch-up jumped there in one frame.
+        const now =
+            placed === null || (before.bottom && addedBelow(column.current, before) > 0)
+                ? before.at - addedBelow(column.current, before)
+                : placed;
 
         if (!before.bottom) {
             // A browser that keeps the row in place by itself (scroll anchoring) has: then this moves nothing.
@@ -3811,7 +3849,8 @@ export function Transcript() {
             return;
         }
 
-        if (keptAt.current > 0) {
+        // A kept session's rows are on screen: what mounts after them, its catch-up first, is new.
+        if (due.current !== null || keptAt.current > 0) {
             settledFor = conversationId;
 
             return;
@@ -4003,8 +4042,22 @@ export function Transcript() {
     }
 
     if (!view.conversation || held) {
-        const { connection, sessions, conversationId } = store.state;
+        const { connection, sessions, conversationId, pending } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
+
+        // Nothing kept anywhere: the session's own pane, its title, and a quiet loader, not the full-page boot screen.
+        // A session held for its changes keeps that screen, as before.
+        if (pending === conversationId && !held) {
+            return html`<main class="scroller">
+                <div class="transcript" data-part="transcript">
+                    <div class="loader" role="status">
+                        <${Spinner} label="Loading" />
+                        <span>${title ? `Loading ${title}` : "Loading"}…</span>
+                    </div>
+                </div>
+            </main>`;
+        }
+
         const caption =
             connection === "connecting"
                 ? "connecting"

@@ -27,6 +27,10 @@ const currentConversation = () => store.state.view.conversation?.id;
 export const fileUrl = (path, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/file?path=${encodeURIComponent(path)}`;
 
+/** A regular file saved to this device, with the same access checks as the file viewer. */
+export const downloadUrl = (path, conversationId = currentConversation()) =>
+    `/api/c/${conversationId}/download?path=${encodeURIComponent(path)}`;
+
 /** The `index`th image stored in a message: a pasted image or one a tool returned. */
 export const entryImageUrl = (entryId, index, conversationId = currentConversation()) =>
     `/api/c/${conversationId}/image/${entryId}/${index}`;
@@ -1046,6 +1050,51 @@ export function formatWhen(ms) {
     return `${day} ${time}`;
 }
 
+/**
+ * How long until a time ahead, as a countdown: "12:04" under an hour (minutes and seconds), "2h 15m" under a day,
+ * "1d 3h" after; "now" once it is due.
+ */
+export function countdown(ms, now = Date.now()) {
+    const seconds = Math.max(0, Math.floor((ms - now) / 1000));
+
+    if (seconds === 0) {
+        return "now";
+    }
+
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3600);
+
+    return days > 0 ? `${days}d ${hours}h` : `${hours}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/** The time now, which draws the component again each second while `on`: for a countdown that shows. */
+export function useSecond(on = true) {
+    const [now, setNow] = useState(Date.now);
+
+    useEffect(() => {
+        if (!on) {
+            return undefined;
+        }
+
+        let timer = 0;
+
+        const tick = () => {
+            setNow(Date.now());
+            timer = setTimeout(tick, 1000 - (Date.now() % 1000));
+        };
+
+        tick();
+
+        return () => clearTimeout(timer);
+    }, [on]);
+
+    return now;
+}
+
 /** The minute now, for what shows a time ago: a memo that keys on it draws again as the minute turns (`useMinute`). */
 const minuteNow = () => Math.floor(Date.now() / 60_000);
 
@@ -1168,6 +1217,8 @@ const ICONS = {
     reply: "M9 14L4 9l5-5M4 9h10a6 6 0 016 6v4",
     send: "M12 19V5M5 12l7-7 7 7",
     stop: "M7 7h10v10H7z",
+    pause: "M8 5v14M16 5v14",
+    play: "M7 5l12 7-12 7z",
     mic: "M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM19 11a7 7 0 01-14 0M12 18v3",
     clip: "M21 11.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9",
     plus: "M12 5v14M5 12h14",
@@ -1180,6 +1231,7 @@ const ICONS = {
     chevron: "M9 6l6 6-6 6",
     down: "M6 9l6 6 6-6",
     up: "M12 19V5M5 12l7-7 7 7",
+    download: "M12 4v11M7 10l5 5 5-5M5 20h14",
     eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 100-6 3 3 0 000 6z",
     search: "M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-4.3-4.3",
     shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",

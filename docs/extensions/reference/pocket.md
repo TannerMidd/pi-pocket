@@ -251,12 +251,23 @@ The id of the session that this tab shows, a number as in its address (`/s/12`),
 ### `openConversation`
 
 ```ts
-openConversation(id: number | string): void;
+openConversation(id: number | string, options?: { artifact?: string; version?: number }): void;
 ```
 
 Since 0.16.0 · Stable
 
 Open a positive integer conversation id through normal app navigation. This closes the extension page and keeps normal Back behavior. Sheets close when changing conversations; call `pocket.closeSheet()` first to close your own sheet even when that conversation is already open. The server still checks access; an id grants no access. Invalid ids throw. Use a bound start's `session` or a human list item's `conversationId`, not a private app URL.
+
+`options.artifact` (since 0.29.0 · experimental) opens the app's artifact viewer on that artifact of the conversation, after the conversation opens. `options.version` is a positive integer; without it the viewer shows the latest version. It returns nothing. The server still checks access when the conversation loads, so a missing artifact or no access fails quietly, as in the Artifacts sheet. A `artifact` that is not a string, or a `version` that is not a positive integer, is ignored. Older apps ignore `options` and only open the conversation.
+
+```js
+// A page lists artifacts that agents made in other sessions: a tap opens one in the viewer.
+html`<button
+    onClick=${() => pocket.openConversation(ask.session, { artifact: "intake-502-check", version: 2 })}
+>
+    Read the plan
+</button>`;
+```
 
 ### `onConversation`
 
@@ -1244,7 +1255,7 @@ What shows comes in layers, the last one wins: each item's default place, then t
 | Slot       | Ids, in their default order                                                                                                                                        | Fixed                                                                          | Modules' items go           |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------- |
 | `topbar`   | `core:subagents`, `core:changes`, `core:peeks`, `core:files`, `core:browser`, `core:artifacts`, `core:people`, `core:menu`                                         | `core:menu`, last                                                              | after `core:browser`        |
-| `status`   | `core:connection`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:background`, `core:guard`                                          | `core:connection`, `core:guard`                                                | after `core:cache`          |
+| `status`   | `core:connection`, `core:schedules`, `core:here`, `core:speed`, `core:context`, `core:cache`, `core:spend`, `core:background`, `core:guard`                        | `core:connection`, `core:guard`                                                | after `core:cache`          |
 | `places`   | `core:files`, `core:changes`, `core:browser`, `core:artifacts`, `core:chat`, `core:find`, `core:launcher` (touch screens), `core:branch`, `core:pip`, `core:peeks` | none                                                                           | last: a tile for each panel |
 | `composer` | `core:places`, `core:attach`, `core:model`, `core:plan`                                                                                                            | none (Send, Stop, the mic, and Steer, Queue and Interrupt are not in the slot) | after `core:plan`           |
 | `reply`    | `core:time`, `core:react`, `core:discuss`, `core:pin`, `core:copy`, `core:more`                                                                                    | `core:more`, last                                                              | before `core:more`          |

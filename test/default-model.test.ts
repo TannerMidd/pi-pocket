@@ -1,6 +1,8 @@
 // The model and thinking level new sessions start with: the owner's choice, ahead of the last one picked.
 import { type App, cleanUp, openApp, owner, work } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 
@@ -126,4 +128,29 @@ test("with no model anyone chose, a new session starts with none, never the firs
     // The last one picked, once there is one.
     app.config.lastModel = { provider: "faux", modelId: "other", thinkingLevel: "low" };
     assert.deepEqual(await startsWith(), { model: "other", thinkingLevel: "low" });
+});
+
+test("a thinking level belongs to its model: a switch takes the level chosen for it, in Pi's map (#283)", async () => {
+    const file = join(process.env.PI_CODING_AGENT_DIR!, "settings.json");
+    const { id } = await app.commands.createSession(owner(app), { cwd: work });
+    const pick = (modelId: string, thinkingLevel?: string) =>
+        app.commands.configure(id, owner(app), {
+            model: { provider: "faux", modelId },
+            ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+        });
+
+    // A switch with no level takes the TUI's level for that model, and Pocket never writes the map.
+    const map = JSON.stringify({ modelThinkingLevels: { "faux/thinker": "high" } });
+
+    writeFileSync(file, map);
+    await pick("other", "low");
+    await pick("thinker");
+    assert.equal((await app.agentState(id))?.thinkingLevel, "high");
+    await pick("thinker", "medium");
+    assert.equal(readFileSync(file, "utf8"), map);
+
+    // A new session on the last model picked takes the level set for it in the TUI since.
+    app.config.lastModel = { provider: "faux", modelId: "other", thinkingLevel: "low" };
+    writeFileSync(file, JSON.stringify({ modelThinkingLevels: { "faux/other": "medium" } }));
+    assert.deepEqual(await startsWith(), { model: "other", thinkingLevel: "medium" });
 });

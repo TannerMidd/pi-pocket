@@ -1,5 +1,5 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
-import { onRoute, popRoute, pushRoute, routeState } from "./back.js";
+import { onRoute, popRoute, pushRoute, routeState, routeUnder } from "./back.js";
 import { hostCan, onPageVisibility, pageVisible } from "./host.js";
 import { sessionForest, unfolded } from "./session-tree.js";
 import { liveMessage } from "./live.js";
@@ -305,6 +305,8 @@ export const store = {
          * server's view of it comes (Appearance's Wait for updates, `holdsFor`): its id, or null.
          */
         holding: null,
+        /** A session opened without a tab-memory view: its pane waits for the device or server, not a boot screen. */
+        pending: null,
         missing: null,
         connection: "connecting",
         notices: [],
@@ -313,8 +315,11 @@ export const store = {
         auth: null,
         /** A transcript message the next chat message discusses: `{ entryId, text }`. */
         chatQuote: null,
-        /** A passage the session's next message quotes (Reply): `{ text }`. Leaving the session drops it. */
-        replyQuote: null,
+        /**
+         * The passages Reply quoted that wait for the session's message box, in order: `[{ text }]`. The box takes each
+         * as it can (not while a send is on its way). Leaving the session drops them.
+         */
+        replyQuotes: [],
         /**
          * A passage PiP's next message quotes (Ask PiP, or Reply on PiP's own board): `{ text, session? }`, with the
          * session it came from. One for PiP wherever it shows, so moving PiP between its places keeps it as it is.
@@ -457,7 +462,7 @@ export const openId = (state = store.state) =>
  * whose box has PiP's quote) and back from there. Going to another session drops it.
  */
 const keptReply = (state, id, over) =>
-    (over === null ? id : over.id) === openId(state) ? { replyQuote: state.replyQuote } : {};
+    (over === null ? id : over.id) === openId(state) ? { replyQuotes: state.replyQuotes } : {};
 
 // ─── People: presence, typing, and the side chat ───────────────────────────────────
 
@@ -473,7 +478,7 @@ function peopleFor(id, reads = store.state.chatReads) {
         presence: [],
         notes: null,
         chatQuote: null,
-        replyQuote: null,
+        replyQuotes: [],
         chatRead: id === null ? 0 : (reads[id] ?? 0),
     };
 }
@@ -1182,10 +1187,36 @@ function forgetKept() {
 
 // ─── Sessions kept on the device ───────────────────────────────────────────────────────────────────────────────────
 
-/** Whether this browser keeps sessions on the device: the server allows it (`PI_POCKET_SESSION_CACHE`), and it can. */
+/**
+ * Who is signed in, and this server's build, as the page carries them (`serveApp`): `{ user, build }`, the same shape
+ * `hello` sends, so a session the device kept can be checked (`usable`) before `/api/me` answers. Null when the page
+ * names neither, as for a signed-out request.
+ */
+function knownFromPage() {
+    const text = document.getElementById("pocket-known")?.textContent;
+
+    if (!text) {
+        return null;
+    }
+
+    try {
+        const known = JSON.parse(text);
+
+        return known?.user?.id && typeof known.build === "string" ? known : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Whether this browser keeps sessions on the device: the server allows it (`PI_POCKET_SESSION_CACHE`), and it can.
+ * Before `/api/me` answers, the page saying who is signed in (`knownFromPage`) says the server allows it: a server
+ * that does not sends no such page, and what it kept is checked again once the answer comes.
+ */
 const onDevice = () =>
     !deviceCacheStopped &&
-    store.state.server?.deviceCache === true &&
+    (store.state.server?.deviceCache === true ||
+        (store.state.me === undefined && store.state.server == null && knownFromPage() !== null)) &&
     typeof indexedDB !== "undefined";
 
 /** Set at sign-out, in this tab or another: the device keeps nothing more. */
@@ -1291,10 +1322,11 @@ function readDevice(id) {
         : disk.read(id).catch(() => undefined);
 }
 
-/** Whether what the device kept of session `id` may be used: this person's, with the same rights, of this build. */
-function usable(found, id) {
-    const { me, server } = store.state;
-
+/**
+ * Whether what the device kept of session `id` may be used: this person's, with the same rights, of this build. Before
+ * `/api/me` answers, the page's own word of who and which build (`knownFromPage`) stands in for the store's.
+ */
+function usable(found, id, { me, server } = store.state) {
     return (
         found !== undefined &&
         onDevice() &&
@@ -1307,9 +1339,9 @@ function usable(found, id) {
 }
 
 /** A session the device kept (`readDevice`), as `deviceView` gives it, once it is checked. */
-function adopt(id, found) {
+function adopt(id, found, identity = store.state) {
     if (
-        !usable(found, id) ||
+        !usable(found, id, identity) ||
         store.state.conversationId !== id ||
         store.state.view.conversation != null
     ) {
@@ -1498,7 +1530,15 @@ function keptView(id) {
     shownSeen = kept?.seen ?? null;
 
     if (kept === undefined) {
-        return { view: emptyView(), transcriptFrom: null, transcriptPlace: null, holding: null };
+        // Not in memory: the device may have it (`showKept` reads it). Until that read, or the server's view, the
+        // transcript shows the session's header and a quiet loader, not the full-page boot screen (`pending`).
+        return {
+            view: emptyView(),
+            transcriptFrom: null,
+            transcriptPlace: null,
+            holding: null,
+            pending: id,
+        };
     }
 
     const hold = holdsFor(kept);
@@ -1509,6 +1549,8 @@ function keptView(id) {
         transcriptFrom: place?.from ?? null,
         transcriptPlace: place === null ? null : { keep: place.keep },
         holding: hold ? id : null,
+        // In hand: its quiet loader, from a switch that found nothing in memory, goes.
+        pending: null,
     };
 }
 
@@ -1567,8 +1609,13 @@ function applyView(data) {
         synced = data.conversation.id;
     }
 
-    // A session held for its changes (`holdsFor`) shows with them.
-    store.set((state) => ({ view: mergeView(state.view, data), missing: null, holding: null }));
+    // A session held for its changes (`holdsFor`) shows with them. Its quiet loader (`pending`) goes with the view.
+    store.set((state) => ({
+        view: mergeView(state.view, data),
+        missing: null,
+        holding: null,
+        pending: null,
+    }));
 }
 
 /**
@@ -1937,7 +1984,7 @@ const handlers = {
         store.set((state) => ({
             // Said of a session this tab has since left (`show`), it is not what the tab shows.
             ...(state.conversationId === data.conversationId
-                ? { missing: data.message, holding: null }
+                ? { missing: data.message, holding: null, pending: null }
                 : {}),
             ...(state.view.conversation?.id === data.conversationId ? { view: emptyView() } : {}),
         }));
@@ -2529,6 +2576,18 @@ export function navigate(
     showKept(conversationId);
 }
 
+/**
+ * Go up to the session this one belongs to (a subagent's parent). Opened over it, back to its entry, as a swipe back
+ * goes; reached another way (the list, a notification), in this route's place. Either way no entry of this route stays
+ * above the parent's, for back to open again.
+ */
+export function navigateUp(conversationId) {
+    navigate(
+        conversationId,
+        routeUnder() === `/s/${conversationId}` ? { back: true } : { replace: true },
+    );
+}
+
 /** The number of the last session gone to, so a read of the device that comes late does not show an older one. */
 let going = 0;
 
@@ -2551,7 +2610,8 @@ function showKept(id) {
         }
 
         if (found !== undefined) {
-            store.set(found);
+            // In hand from the device: its quiet loader, shown while the read ran, goes.
+            store.set({ ...found, pending: null });
         }
 
         show();
@@ -2588,15 +2648,36 @@ onRoute(() => {
     }
 });
 
+// A failed `/api/me` leaves this device snapshot on screen; its original provenance follows the next attempt.
+let shownEarly = null;
+
 export async function start() {
     const generation = accountGeneration;
+    const retained = shownEarly;
 
     try {
         const asked = moment();
-        // The session the page opens on, from the device, read while the server answers who this is: then checked.
+        // Read the device while asking who this is. The signed-in page supplies the same identity and build for
+        // `usable`, never a browser-stored guess. Apply a checked copy as soon as the read finishes.
         const id = store.state.conversationId;
         const onDisk = id === null ? undefined : readDevice(id);
-        const hello = await api("me");
+        const answer = api("me");
+
+        // The request may fail before IndexedDB answers; it is handled by the await below.
+        void answer.catch(() => {});
+        const cached = await onDisk;
+        const known = knownFromPage();
+        const early =
+            known === null ? undefined : adopt(id, cached, { me: known.user, server: known });
+
+        if (early !== undefined) {
+            shownEarly = { id, cached };
+        }
+
+        store.set(early ?? {});
+        // Let App's queued render replace the static boot screen before revealing a checked transcript.
+        queueMicrotask(() => document.getElementById("app")?.removeAttribute("hidden"));
+        const hello = await answer;
 
         if (!acceptPerson(hello.user, generation)) {
             return;
@@ -2612,15 +2693,30 @@ export async function start() {
         });
         store.set(layoutPatch(firstLayout()));
 
-        if (onDisk !== undefined && store.state.view.conversation == null) {
-            const cached = await onDisk;
+        if (generation !== accountGeneration || changingAccount) {
+            reloadAccount();
 
-            if (generation !== accountGeneration || changingAccount) {
-                reloadAccount();
+            return;
+        }
 
-                return;
-            }
+        // Recheck the original record, including its owner, against `/api/me`. A changed sign-in, rights, build, or
+        // device-cache policy must remove the early view, and must not keep it for a later switch, including on retry.
+        const shown = early !== undefined ? { id, cached } : retained;
 
+        if (
+            shown !== null &&
+            store.state.view.conversation?.id === shown.id &&
+            !usable(shown.cached, shown.id)
+        ) {
+            forgetKept();
+            store.set({
+                view: emptyView(),
+                transcriptFrom: null,
+                transcriptPlace: null,
+                holding: null,
+                pending: shown.id,
+            });
+        } else if (store.state.view.conversation == null) {
             const found = adopt(id, cached);
 
             if (found !== undefined) {
@@ -2628,6 +2724,7 @@ export async function start() {
             }
         }
 
+        shownEarly = null;
         connect();
     } catch (error) {
         if (generation !== accountGeneration || changingAccount) {
@@ -2641,6 +2738,7 @@ export async function start() {
         }
 
         store.set({ me: error.status === 401 ? null : undefined });
+        queueMicrotask(() => document.getElementById("app")?.removeAttribute("hidden"));
 
         if (error.status !== 401) {
             notify("error", `Server unreachable: ${error.message}`);
@@ -2743,7 +2841,18 @@ export const actions = {
             when,
             zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
+    /** From the Schedules sheet's editor: `{ text, next?, every? }`, when as data. Clock times are this device's. */
+    addSchedule: (schedule) =>
+        api(`c/${current()}/schedules`, {
+            ...schedule,
+            zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+    /** The editor's change: it keeps the schedule's time zone unless it gives `zone`, for a new time of day. */
+    updateSchedule: (id, schedule) =>
+        api(`c/${current()}/schedules/${encodeURIComponent(id)}`, schedule, { method: "PUT" }),
     cancelSchedule: (id) => api(`c/${current()}/schedules/${encodeURIComponent(id)}/cancel`, {}),
+    pauseSchedule: (id, paused) =>
+        api(`c/${current()}/schedules/${encodeURIComponent(id)}/pause`, { paused }),
     setGoal: (command) => api(`c/${current()}/goal`, { command }),
     removeWorktree: (force) => api(`c/${current()}/worktree`, { remove: true, force }),
     clearGoal: () => api(`c/${current()}/goal`, { clear: true }),
@@ -3022,9 +3131,10 @@ let waitingInserts = [];
 
 /**
  * Take, once, what `insertIntoComposer` put for `conversationId` that no box took yet: its files, and its text after
- * `current` (the box's words), or null for none. Null when nothing waits for it.
+ * `current` (the box's words), or null for none. Null when nothing waits for it. `underQuote`: `current` ends in a quote
+ * that is a piece, which inline text goes under: joined to its line, the quote would be plain text.
  */
-export function takeInsert(current, conversationId) {
+export function takeInsert(current, conversationId, underQuote = false) {
     const forThis = (insert) => insert.for === conversationId || insert.for === null;
     const mine = waitingInserts.filter(forThis);
 
@@ -3037,7 +3147,7 @@ export function takeInsert(current, conversationId) {
 
     for (const insert of mine) {
         if (insert.text !== "") {
-            const gap = insert.inline ? " " : "\n\n";
+            const gap = !insert.inline ? "\n\n" : underQuote && text === current ? "\n" : " ";
 
             text =
                 text.trim() === ""
@@ -3062,7 +3172,11 @@ export const showsPip = (state = store.state) =>
 
 /** Reply to a passage of the conversation shown: on PiP's board, it is PiP's quote. */
 export function quoteReply(text) {
-    store.set(showsPip() ? { pipQuote: { text } } : { replyQuote: { text } });
+    store.set((state) =>
+        showsPip(state)
+            ? { pipQuote: { text } }
+            : { replyQuotes: [...state.replyQuotes, { text }] },
+    );
 }
 
 /**
@@ -3074,24 +3188,17 @@ export function dropQuote(quote) {
         return;
     }
 
-    if (quote === store.state.replyQuote) {
-        store.set({ replyQuote: null });
+    if (store.state.replyQuotes.includes(quote)) {
+        store.set((state) => ({ replyQuotes: state.replyQuotes.filter((each) => each !== quote) }));
     } else if (quote === store.state.pipQuote) {
         store.set({ pipQuote: null });
     }
 }
 
-/**
- * A send that did not go gives its quote back, unless another took its place meanwhile: to PiP's box (`pip`), or to the
- * box of session `id` while it is still open.
- */
-export function giveBackQuote(quote, pip, id) {
-    const free = pip
-        ? store.state.pipQuote === null
-        : store.state.replyQuote === null && openId() === id;
-
-    if (quote && free) {
-        store.set(pip ? { pipQuote: quote } : { replyQuote: quote });
+/** A send to PiP that did not go gives its quote back, unless another took its place meanwhile. */
+export function giveBackQuote(quote) {
+    if (quote && store.state.pipQuote === null) {
+        store.set({ pipQuote: quote });
     }
 }
 

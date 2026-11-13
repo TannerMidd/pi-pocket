@@ -990,7 +990,7 @@ function Composer({ id, busy, board = false }) {
         }
 
         if (!success) {
-            giveBackQuote(quoted, true);
+            giveBackQuote(quoted);
         }
     };
 
@@ -1422,6 +1422,69 @@ function PipPanel({ leaving, scrim }) {
 }
 
 /** The mark in the corner: only while PiP works, or has something new. */
+/**
+ * How far the session's message box rises above the bottom of the window, as it grows (a held-messages bar, a queue,
+ * a long draft) and as the window changes; null while there is none. The mark keeps above it.
+ */
+function useComposerRise(on) {
+    const [rise, setRise] = useState(null);
+
+    useEffect(() => {
+        if (!on) {
+            return undefined;
+        }
+
+        let box = null;
+        let frame = 0;
+
+        const measure = () => {
+            frame = 0;
+            const top = box?.getBoundingClientRect().top;
+
+            setRise(top === undefined ? null : Math.max(0, Math.round(window.innerHeight - top)));
+        };
+
+        const later = () => {
+            frame ||= requestAnimationFrame(measure);
+        };
+
+        const resized = new ResizeObserver(later);
+
+        // The box comes and goes with the session in view: found again when the page changes.
+        const find = () => {
+            const found = document.querySelector('footer.composer-wrap[data-part="composer"]');
+
+            if (found !== box) {
+                resized.disconnect();
+                box = found;
+
+                if (box) {
+                    resized.observe(box);
+                }
+
+                later();
+            }
+        };
+
+        const changes = new MutationObserver(find);
+
+        find();
+        changes.observe(document.body, { childList: true, subtree: true });
+        window.addEventListener("resize", later);
+        window.visualViewport?.addEventListener("resize", later);
+
+        return () => {
+            cancelAnimationFrame(frame);
+            resized.disconnect();
+            changes.disconnect();
+            window.removeEventListener("resize", later);
+            window.visualViewport?.removeEventListener("resize", later);
+        };
+    }, [on]);
+
+    return rise;
+}
+
 function PipBubble() {
     const { pip } = store.state;
     const unread = pipUnread();
@@ -1430,6 +1493,7 @@ function PipBubble() {
         pip && !pipBoard() && (pip.busy || unread) ? (pip.busy ? "busy" : "news") : null,
         150,
     );
+    const rise = useComposerRise(kept !== null);
 
     if (kept === null) {
         return null;
@@ -1437,6 +1501,7 @@ function PipBubble() {
 
     return html`<button
         class=${`pip-bubble ${kept} ${leaving ? "leaving" : ""}`}
+        style=${rise === null ? undefined : `--composer-rise: ${rise}px`}
         aria-label=${kept === "busy" ? "PiP is working: open PiP" : "PiP has something new: open PiP"}
         title="PiP (Alt+A)"
         onClick=${() => openPip()}

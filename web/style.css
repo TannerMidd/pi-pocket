@@ -2038,8 +2038,12 @@ kbd {
 }
 
 /* Light themes' magenta can be faint as text on their ground: toward the foreground, as a thought's mark is. */
-:root[data-mode="light"] :is(.linked-mark, .linked-tag) {
+:root[data-mode="light"] :is(.linked-mark, .linked-tag, .status-line .schedules-now) {
     color: color-mix(in oklab, var(--spark) 60%, var(--body));
+}
+
+:root[data-mode="light"] .sched-sheet {
+    --sched: color-mix(in oklab, var(--spark) 60%, var(--body));
 }
 
 .linked-name {
@@ -3164,6 +3168,11 @@ pre.diff .del {
     border-color: var(--err-line);
 }
 
+.report.stalled,
+.report.stopped {
+    border-color: var(--warn-line);
+}
+
 /* Reports that arrived together, as one message to Pi: a card each. */
 .report-group {
     display: flex;
@@ -3206,6 +3215,12 @@ pre.diff .del {
     color: var(--err);
     font-size: 13px;
     overflow-wrap: anywhere;
+}
+
+/* A stalled or stopped subagent is no failure: its words are in the warning color. */
+.report.stalled .report-why,
+.report.stopped .report-why {
+    color: var(--warn);
 }
 
 /* Lancet Guard asks before a call: at the end of the turn, until someone answers. */
@@ -4285,13 +4300,6 @@ pre.diff .del {
     }
 }
 
-/* Steer, Queue, and Interrupt leave no room for the model on a narrow box while Pi works: it shows again after. */
-@container composer (max-width: 480px) {
-    .composer.busy .composer-row .model-chip {
-        display: none;
-    }
-}
-
 /* The buttons that extensions add to the row: any number of them can come. Where they would push Send (or Stop) out of a
  * narrow box (two or more up to 480 px, one up to 340 px), they take a line of their own under the row, where they stay
  * while Pi works. The break is the row's `::after`: a line of no height, so only the buttons' margin parts the lines. A
@@ -4355,16 +4363,11 @@ pre.diff .del {
     }
 }
 
-/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px, and the row needs 335), Steer,
- * Queue, and Interrupt would push Stop out of the box: while Pi works, Attach goes and the three get closer. Attach
- * comes back when Pi stops. */
+/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px), Attach goes while Pi works,
+ * so the model keeps room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
 @container composer (max-width: 340px) {
     .composer.busy .composer-row .attach-button {
         display: none;
-    }
-
-    .composer.busy .mode-switch button {
-        padding-inline: 6px;
     }
 }
 
@@ -4495,6 +4498,71 @@ pre.diff .del {
 
 .mode-switch button.interrupt.on {
     color: var(--err);
+}
+
+/* On a narrow box the three are one button with a menu (`ModePick`): the model keeps its place beside it. */
+.mode-pick {
+    display: none;
+    position: relative;
+    flex: none;
+}
+
+@container composer (max-width: 480px) {
+    .composer.busy .mode-switch {
+        display: none;
+    }
+
+    .composer.busy .mode-pick {
+        display: block;
+    }
+}
+
+.mode-pick-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-in);
+    height: 30px;
+    padding: 0 8px 0 12px;
+    border-radius: var(--r-pill);
+    background: var(--hover);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    transition: background-color var(--t-hover) var(--ease-out);
+}
+
+.mode-pick-button[aria-expanded="true"] {
+    background: var(--raised);
+}
+
+.mode-pick-button.interrupt,
+.mode-menu .session-menu-item.interrupt {
+    color: var(--err);
+}
+
+/* The chevron points down, as the model's: the menu opens up from it, over the conversation. */
+.mode-pick-caret {
+    color: var(--faint);
+    transform: rotate(90deg);
+}
+
+/* Up from the button, at its right edge (`.pop-menu` alone is fixed in place). */
+.mode-pick .mode-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + var(--gap-out));
+    z-index: 2;
+    min-width: 160px;
+}
+
+.mode-menu .session-menu-item {
+    align-items: center;
+}
+
+.mode-menu .session-menu-item .icon {
+    margin-left: auto;
+    color: var(--accent);
 }
 
 .stop-button,
@@ -4727,6 +4795,72 @@ pre.diff .del {
     animation: pulse 1.4s infinite;
 }
 
+/* The session's scheduled messages: a pill on the left, across from the background one, in the theme's second color.
+ * It does not pulse: nothing runs yet. Hovered, it shows a countdown to the next one above it. */
+.status-line .schedules-now {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--spark) 14%, transparent);
+    color: var(--spark);
+    font: inherit;
+}
+
+.status-line .schedules-now.paused {
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    color: var(--muted);
+}
+
+.status-line .schedules-tip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 210px;
+    max-width: min(300px, calc(100vw - 24px));
+    padding: 8px 10px;
+    border-radius: var(--r-card);
+    background: var(--raised);
+    box-shadow: var(--pop);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text);
+    text-align: left;
+    white-space: normal;
+    pointer-events: none;
+}
+
+.status-line .schedules-tip .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+}
+
+.status-line .schedules-tip .countdown {
+    font: 600 15px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--spark);
+}
+
+.status-line .schedules-tip .what {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.status-line .schedules-tip .muted {
+    font-size: 11px;
+}
+
 /* How fast the last answer came, once Appearance turns it on: its two halves spaced like the line's items. */
 .status-line .speed {
     display: inline-flex;
@@ -4751,6 +4885,7 @@ pre.diff .del {
 .status-line[data-short~="here"] .here.alone,
 .status-line[data-short~="guard"] .guard .word,
 .status-line[data-short~="guard"] .background-now .word,
+.status-line[data-short~="guard"] .schedules-now .word,
 .status-line[data-short~="cache"] .cache,
 .status-line[data-short~="wait"] .speed .wait,
 .status-line[data-short~="wait"] .speed.wait-only {
@@ -8791,23 +8926,136 @@ div.group-head {
 .custom-endpoint-models {
     display: flex;
     flex-direction: column;
-    max-height: 280px;
+    max-height: 420px;
     overflow-y: auto;
     border: 1px solid var(--hair);
     border-radius: var(--r-control);
     background: var(--bg);
 }
 
-.custom-endpoint-model.check {
+.custom-endpoint-model + .custom-endpoint-model {
+    border-top: 1px solid var(--hair);
+}
+
+/* A model: its checkbox and id, then, once chosen, Images, its thinking levels, and its context and price on the right. */
+.custom-endpoint-model-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 12px;
     min-height: 40px;
+    padding: 4px 12px;
+}
+
+.custom-endpoint-model-name.check {
+    flex: 1 1 200px;
+    min-width: 0;
     margin: 0;
-    padding: 0 12px;
     color: var(--text);
     overflow-wrap: anywhere;
 }
 
-.custom-endpoint-model + .custom-endpoint-model {
-    border-top: 1px solid var(--hair);
+.custom-endpoint-model-caps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px 12px;
+    margin-left: auto;
+}
+
+.custom-endpoint-model-caps .check {
+    margin: 0;
+}
+
+.model-thinking-button {
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.model-thinking-button.on {
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+.model-thinking-button.bad {
+    color: var(--warn);
+    border-color: var(--warn-line);
+}
+
+/* A model's thinking levels, or its context and price, opened under its row. */
+.model-thinking,
+.model-limits {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 12px 12px;
+    padding: 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control);
+    background: var(--card);
+}
+
+.model-thinking p,
+.model-limits p {
+    margin: 0;
+}
+
+.model-limits-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 8px;
+}
+
+.model-limits input {
+    min-width: 0;
+}
+
+.model-thinking-on.check {
+    margin: 0;
+    color: var(--text);
+}
+
+.model-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.model-tier {
+    display: grid;
+    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-tier select,
+.model-tier input {
+    min-width: 0;
+}
+
+/* On a phone the value goes under the level: side by side, the value had no room left to show. */
+@media (max-width: 480px) {
+    .model-tier {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .model-tier select {
+        grid-area: 1 / 1;
+    }
+
+    .model-tier button {
+        grid-area: 1 / 2;
+    }
+
+    .model-tier input {
+        grid-area: 2 / 1 / 3 / 3;
+    }
+}
+
+.model-tier-buttons {
+    gap: 8px;
 }
 
 .custom-endpoint-buttons {
@@ -10363,22 +10611,418 @@ textarea.notes {
     flex: 1 1 14rem;
 }
 
-/* A scheduled message in its sheet: what Pi gets, when, and who set it. */
-.schedule {
+/* The Schedules sheet: a summary with the next countdown, New schedule and quick add, then a card per schedule; a tap
+ * on one opens the editor in its place. Its color is the status line pill's: the theme's second one. */
+.sched-sheet {
+    --sched: var(--spark);
+    --sched-soft: color-mix(in srgb, var(--spark) 14%, transparent);
+    --sched-line: color-mix(in srgb, var(--spark) 45%, transparent);
+}
+
+.sched-sheet .sheet-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sched-summary {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 11px 14px;
+    padding: 12px 14px;
+    border-radius: var(--r-card);
+    background: var(--sched-soft);
+    color: var(--text);
     font-size: 13.5px;
 }
 
-.schedule > .icon {
+.sched-summary b {
+    font: 600 15px var(--mono);
+}
+
+.sched-next {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.sched-big {
+    font: 600 20px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+}
+
+.sched-add {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.sched-add .button {
     flex: none;
-    box-sizing: content-box;
-    padding: 8px;
+}
+
+.sched-quick {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+}
+
+.sched-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 22px 12px;
+    color: var(--muted);
+    text-align: center;
+}
+
+.sched-empty > .icon {
+    color: var(--sched);
+    margin-bottom: 4px;
+}
+
+.sched-empty p {
+    margin: 0;
+    max-width: 34ch;
+}
+
+.sched-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* A schedule: its card, which a tap edits, and beside it a button to pause or resume it. */
+.sched-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.sched-item.paused .sched-card {
+    border-style: dashed;
+    background: transparent;
+}
+
+.sched-item.paused :is(.sched-text, .sched-mark) {
+    opacity: 0.6;
+}
+
+.sched-item.paused .sched-countdown {
+    color: var(--muted);
+}
+
+.sched-pause {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: none;
+    width: 56px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 11px;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-item.paused .sched-pause {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+@media (hover: hover) {
+    .sched-pause:hover {
+        border-color: var(--sched-line);
+        color: var(--text);
+    }
+}
+
+.sched-pause:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
+.sched-card {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--text);
+    text-align: left;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out);
+}
+
+.sched-card:disabled {
+    cursor: default;
+}
+
+@media (hover: hover) {
+    .sched-card:not(:disabled):hover {
+        border-color: var(--sched-line);
+        background: var(--card-2);
+    }
+
+    .sched-card:not(:disabled):hover .sched-edit {
+        opacity: 1;
+    }
+}
+
+.sched-card:focus-visible {
+    outline: 2px solid var(--sched-line);
+    outline-offset: 1px;
+}
+
+.sched-mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
     border-radius: var(--r-row);
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.sched-text {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 13.5px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.sched-meta {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.sched-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex: none;
+}
+
+.sched-countdown {
+    font: 12px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--sched);
+    white-space: nowrap;
+}
+
+.sched-edit {
+    font-size: 11.5px;
+    color: var(--muted);
+    opacity: 0.7;
+}
+
+/* The editor, in a schedule's place or above the list for a new one. */
+.sched-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--sched-line);
+    border-radius: var(--r-card);
+    background: var(--card);
+}
+
+.sched-editor textarea {
+    resize: vertical;
+    min-height: 140px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.sched-kinds {
+    align-self: stretch;
+}
+
+.sched-kinds button {
+    flex: 1;
+}
+
+.sched-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-row input[type="date"],
+.sched-row input[type="time"] {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    color-scheme: inherit;
+}
+
+.sched-row select {
+    width: auto;
+    flex: 1;
+}
+
+/* The window's two times: where the row is too narrow for both whole ("11:00 PM" and the clock), "and" and To go on a
+ * line of their own. */
+.sched-row[data-part="schedule-window"] {
+    flex-wrap: wrap;
+}
+
+.sched-row[data-part="schedule-window"] input[type="time"] {
+    flex-basis: 8.5em;
+}
+
+.sched-amount {
+    width: 5.5em;
+    flex: none;
+    font-family: var(--mono);
+}
+
+.sched-word {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.sched-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.sched-chips .chip {
+    color: var(--muted);
+}
+
+.sched-chips .chip.toggle.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-days {
+    display: flex;
+    gap: 6px;
+}
+
+.sched-day {
+    flex: 1;
+    max-width: 42px;
+    aspect-ratio: 1;
+    border: 1px solid var(--hair-2);
+    border-radius: 50%;
+    font: 600 12.5px var(--mono);
+    color: var(--muted);
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        border-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+.sched-day.on {
+    border-color: var(--sched-line);
+    background: var(--sched-soft);
+    color: var(--sched);
+}
+
+.sched-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--sched-soft);
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+.sched-preview > .icon {
+    color: var(--sched);
+    flex: none;
+}
+
+.sched-preview .sched-countdown {
+    margin-left: auto;
+}
+
+.sched-preview.wrong {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.sched-changed {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-row);
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: 12.5px;
+}
+
+.sched-changed > .icon {
+    flex: none;
+    margin-top: 2px;
+}
+
+.sched-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sched-actions .grow {
+    flex: 1;
+}
+
+.sched-actions .button.danger {
+    color: var(--err);
+}
+
+.sched-board {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .sched-board:hover {
+        color: var(--text);
+    }
 }
 
 /* A change to a lesson that waits for the owner, under the lesson it would change. */
@@ -10476,18 +11120,59 @@ textarea.notes {
 }
 
 .lesson-add > .row {
-    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
-.lesson-add .segmented {
-    background: var(--bg);
-    flex: 1 0 auto;
+/* Where the lesson goes: the scope chosen above. */
+.lesson-add-for {
+    flex: 1;
+    min-width: 0;
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Memory's scope: which lessons the sheet lists, and where one added goes; each half a thumb's tap, with its count. */
+.memory-scope {
+    align-self: stretch;
     flex-wrap: nowrap;
 }
 
-.lesson-add .segmented button {
+.memory-scope button {
     flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 36px;
     white-space: nowrap;
+}
+
+.memory-scope-count {
+    color: var(--muted);
+    font: 11.5px var(--mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-scope button.on .memory-scope-count {
+    color: var(--muted);
+}
+
+/* Three scopes on a phone: "Project" and "Session" leave room for their counts. */
+.memory-scope-short {
+    display: none;
+}
+
+@media (max-width: 430px) {
+    .memory-scope-long {
+        display: none;
+    }
+
+    .memory-scope-short {
+        display: inline;
+    }
 }
 
 /* Done when: a goal met, or one Pi gave up on. */
@@ -11258,6 +11943,16 @@ textarea.notes {
     background: var(--warn-soft);
 }
 
+.rb-sched.paused {
+    opacity: 0.6;
+}
+
+.rb-held.rb-paused {
+    border-color: var(--hair-2);
+    background: var(--card-2);
+    color: var(--muted);
+}
+
 .rb-sched-text {
     font-size: 12.5px;
     color: var(--text);
@@ -11602,9 +12297,29 @@ textarea.notes {
         font-size: 12px;
     }
 
+    /* A phone's picked schedule: its title and its buttons stay put, and only the message and its facts scroll. */
     .rb-bar {
         max-height: 70dvh;
+        overflow: hidden;
+    }
+
+    .rb-bar .rb-detail {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .rb-bar .rb-detail-head,
+    .rb-bar .rb-actions {
+        flex: none;
+    }
+
+    .rb-bar .rb-detail-body {
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
     }
 }
 
@@ -16415,6 +17130,7 @@ textarea.notes {
             .attach-button,
             .model-chip,
             .plan-chip,
+            .mode-pick-button,
             .composer-mic,
             .stop-button,
             .send-button
@@ -16427,6 +17143,7 @@ textarea.notes {
             .attach-button,
             .model-chip,
             .plan-chip,
+            .mode-pick-button,
             .composer-mic,
             .stop-button,
             .send-button
@@ -16436,8 +17153,12 @@ textarea.notes {
         inset: -4px -2px;
     }
     /* The chips are shorter: their layers reach further up and down. */
-    .composer-row :is(.model-chip, .plan-chip)::before {
+    .composer-row :is(.model-chip, .plan-chip, .mode-pick-button)::before {
         inset: -5px -2px;
+    }
+    /* The modes in its menu, a thumb's height each. */
+    .mode-menu .session-menu-item {
+        min-height: 40px;
     }
     /* Where the row has room, the icon buttons are as wide as a thumb's tap (their look is the icon alone). */
     @container composer (min-width: 360px) {
@@ -16546,11 +17267,13 @@ textarea.notes {
     /* The guard and the review's branch keep their small pills; an invisible layer past each takes a thumb's tap. */
     .status-line .guard,
     .status-line .background-now,
+    .status-line .schedules-now,
     .dr-branch {
         position: relative;
     }
     .status-line .guard::after,
     .status-line .background-now::after,
+    .status-line .schedules-now::after,
     .dr-branch::after {
         content: "";
         position: absolute;
@@ -17940,7 +18663,7 @@ textarea.notes {
     left: calc(8px + var(--inset-l));
     right: calc(8px + var(--inset-r));
     bottom: 8px;
-    z-index: 3;
+    z-index: 5;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -18814,9 +19537,13 @@ textarea.notes {
         display: block;
     }
 
-    /* Above the message box and the jump to the newest message, both at the bottom right. */
+    /* Above the message box and the jump to the newest message, both at the bottom right. The message box grows with
+     * what it holds (a held-messages bar, a queue): its height is measured, and the mark keeps above it. */
     .pip-bubble {
-        bottom: calc(176px + env(safe-area-inset-bottom));
+        bottom: max(
+            calc(176px + env(safe-area-inset-bottom)),
+            calc(var(--composer-rise, 0px) + 56px)
+        );
     }
 
     .pip-scrim {
@@ -20928,6 +21655,28 @@ pre.gallery-code {
     font-size: 12px;
 }
 
+/* Reply's quotes in Separate (Appearance): a strip each over the session's box, in order; many scroll. */
+.quote-strips {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 40vh;
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x)) 0;
+    overflow: hidden auto;
+}
+
+.quote-strips .quote-strip {
+    flex: none;
+    min-width: 0;
+    margin: 0;
+}
+
+.quote-strips-clear {
+    align-self: flex-end;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
 .quote-strip-text {
     flex: 1;
     min-width: 0;
@@ -20948,6 +21697,163 @@ pre.gallery-code {
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* A quote after words in a message: a little room above it too. */
+.user-text > * + .reply-quote {
+    margin-top: 0.4rem;
+}
+
+/* Quotes Reply put in the message box (quote-box.js). The box keeps its own text, which goes clear while there is a
+ * quote; the drawing under it shows the same lines, each quote styled. Only color, fills, and lines differ there: a
+ * change of size, weight, or spacing would move the words away from the caret. */
+.quote-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: calc(8px * var(--space-y)) calc(16px * var(--space-x)) 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.quote-count strong {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.quote-count .link {
+    font-size: 12px;
+}
+
+.composer.quoting textarea {
+    position: relative;
+    z-index: 1;
+    color: transparent;
+    caret-color: var(--text);
+    /* Room for each quote's ×. */
+    padding-right: calc(16px * var(--space-x) + 28px);
+}
+
+.quote-box-drawing,
+.quote-box-over {
+    position: absolute;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.quote-box-drawing {
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.quote-box-over {
+    z-index: 2;
+}
+
+.quote-box-scroll {
+    position: relative;
+    transform: translateY(var(--quote-scroll, 0px));
+}
+
+.composer.sending .quote-box-drawing {
+    opacity: 0.5;
+}
+
+.quote-box-line {
+    display: block;
+}
+
+.quote-line {
+    color: var(--muted);
+}
+
+.quote-line-mark {
+    color: var(--accent);
+}
+
+/* Each quote is one block, its lines (empty ones too) inside it. */
+.quote-block {
+    display: block;
+}
+
+[data-quote-style="fade"] .quote-block,
+[data-quote-style="tint"] .quote-block {
+    /* Out to the left by as much as it goes in: the words stay where the box has them. */
+    margin-left: -6px;
+    padding-left: 6px;
+    --quote-fill: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+[data-quote-style="fade"] .quote-block {
+    border-radius: 4px 0 0 4px;
+    background: linear-gradient(90deg, var(--quote-fill), transparent 85%);
+}
+
+[data-quote-style="tint"] .quote-block {
+    --quote-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 6px;
+    background: var(--quote-fill);
+}
+
+[data-quote-style="ghost"] .quote-line {
+    color: color-mix(in oklab, var(--muted) 72%, var(--bg));
+}
+
+[data-quote-style="ghost"] .quote-line-mark {
+    color: var(--edge);
+}
+
+/* A first Backspace under a quote: the next one removes it. */
+.quote-block.marked .quote-line,
+.quote-block.marked .quote-line-mark {
+    color: var(--err);
+}
+
+.quote-block.marked {
+    --quote-fill: var(--err-soft);
+}
+
+.quote-block.marked .quote-line-text {
+    text-decoration: line-through;
+    text-decoration-color: var(--err-line);
+}
+
+/* One mark for a quote: Markdown needs a "> " on each of its lines, the eye only the first. The others keep their room,
+   so the words stay where the box's caret has them. */
+.quote-line + .quote-line .quote-line-mark {
+    color: transparent;
+}
+
+.quote-remove {
+    position: absolute;
+    right: 6px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: var(--r-row);
+    color: var(--muted);
+    pointer-events: auto;
+    transition:
+        color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .quote-remove:hover {
+        color: var(--text);
+        background: var(--hover);
+    }
+}
+
+@media (pointer: coarse) {
+    .quote-remove {
+        width: 26px;
+        height: 26px;
+        margin-top: -1px;
+    }
 }
 
 /* Your picture in the name sheet: a preview and its buttons. */

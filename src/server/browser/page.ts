@@ -3,6 +3,7 @@
  * and people do to it.
  */
 import { BrowserError, type Connection, type Json } from "./cdp.ts";
+import { clientHints } from "./identity.ts";
 import { KEYS, keyEvents, parseKeys } from "./keys.ts";
 import {
     DESCRIBE_FUNCTION,
@@ -156,6 +157,7 @@ export class BrowserPage {
     readonly #target: string;
     readonly #context: string;
     readonly #baseAgent: string;
+    readonly #brand: { name: string; version: string } | undefined;
     readonly #changed: () => void;
     readonly #saved: (saved: Saved) => void;
     #frameId = "";
@@ -194,6 +196,8 @@ export class BrowserPage {
         target: string;
         context: string;
         userAgent: string;
+        /** The browser's name and full version: its client hints name them, as its user agent does. */
+        brand?: { name: string; version: string };
         viewport: Viewport;
         changed: () => void;
         saved: (saved: Saved) => void;
@@ -204,6 +208,7 @@ export class BrowserPage {
         this.#target = options.target;
         this.#context = options.context;
         this.#baseAgent = options.userAgent;
+        this.#brand = options.brand;
         this.#viewport = options.viewport;
         this.#changed = options.changed;
         this.#saved = options.saved;
@@ -988,7 +993,13 @@ export class BrowserPage {
             }),
             agent === ""
                 ? Promise.resolve()
-                : this.#send("Emulation.setUserAgentOverride", { userAgent: agent }),
+                : this.#send("Emulation.setUserAgentOverride", {
+                      userAgent: agent,
+                      userAgentMetadata:
+                          this.#brand === undefined || this.#brand.version === ""
+                              ? undefined
+                              : clientHints(this.#brand.name, this.#brand.version, viewport.mobile),
+                  }),
         ]);
     }
 

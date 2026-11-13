@@ -88,14 +88,18 @@ function join(before, words, after) {
  * Dictation into a textarea (`box`, a ref). `onText(value, caret)` hears each change, as typing does, so the box's own
  * draft saving keeps it. Words go in at the caret while the box has the focus, and after its text when it does not.
  * Returns whether it listens, and `toggle` and `stop` (`stop(true)` drops words not yet settled: for sending, leaving).
- * `top` marks PiP's box, which takes Alt+V while it shows.
+ * `top` marks PiP's box, which takes Alt+V while it shows. `place(value, start, end)` may move where words go from the
+ * selection `start`..`end`: it gives back `{ text, start, end }` (the text may change, a line added for them), or null
+ * to leave them there (the session's box keeps them out of a quote).
  */
-export function useDictation(box, onText, { top = false } = {}) {
+export function useDictation(box, onText, { top = false, place = null } = {}) {
     const [listening, setListening] = useState(false);
     const hear = useRef(onText);
+    const where = useRef(place);
     const self = useRef(null);
 
     hear.current = onText;
+    where.current = place;
 
     if (self.current === null) {
         self.current = {
@@ -162,8 +166,16 @@ export function useDictation(box, onText, { top = false } = {}) {
                 const rebase = () => {
                     const at = focused() ? element.selectionStart : element.value.length;
                     const end = focused() ? element.selectionEnd : at;
+                    const placed = where.current?.(element.value, at, end) ?? {
+                        text: element.value,
+                        start: at,
+                        end,
+                    };
 
-                    base = { before: element.value.slice(0, at), after: element.value.slice(end) };
+                    base = {
+                        before: placed.text.slice(0, placed.start),
+                        after: placed.text.slice(placed.end),
+                    };
                     from = seen;
                     moving = false;
                 };

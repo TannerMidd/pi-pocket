@@ -19,9 +19,15 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import { AuthorsDoc, ScheduleDoc } from "../src/server/docs.ts";
+import { AuthorsDoc, ChatDoc, ScheduleDoc } from "../src/server/docs.ts";
 import { DEFAULT_SCHEDULE_LIMITS } from "../src/server/schedules.ts";
-import { describeRepeat, nextClockTime, parseWhen, zonedMoment } from "../src/server/when.ts";
+import {
+    checkRepeat,
+    describeRepeat,
+    nextClockTime,
+    parseWhen,
+    zonedMoment,
+} from "../src/server/when.ts";
 
 const iso = (moment: number) => new Date(moment).toISOString();
 /** Sunday, October 4, 2026, 10:00 in Chicago (15:00 UTC). */
@@ -85,6 +91,8 @@ test("the shortest repeat and the furthest ahead can be set", () => {
         sunday + 400 * day,
     );
     assert.throws(() => parseWhen("in 400d x", sunday, chicago), /up to a year ahead/);
+    assert.throws(() => parseWhen("every 999999999999m x", sunday, chicago), /366 days/);
+    assert.throws(() => checkRepeat({ minutes: 1e15 }), /366 days/, "the editor too");
 });
 
 test("clock times hold across daylight saving changes", () => {
@@ -290,6 +298,24 @@ test("a scheduled message goes out at its time, also after a restart, once; a re
     assert.deepEqual(await items(id), []);
 });
 
+test("a windowed repeat whose window passed while the server was down waits for its next window", async () => {
+    const id = await newSession(app);
+    const hhmm = (at: number) => new Date(at).toISOString().slice(11, 16);
+    const from = Math.ceil((Date.now() + ahead) / 60_000) * 60_000 + 60_000;
+    const repeat = await app.commands.schedule(id, owner(app), {
+        when: `every 10m between ${hhmm(from)} and ${hhmm(from + 30 * 60_000)} missed`,
+        zone: "UTC",
+    });
+
+    assert.equal(repeat.next, from);
+    const startsAt = await restartLater(60);
+
+    await until(async () => (await items(id))[0]!.next > startsAt, "the next window");
+    assert.equal((await items(id))[0]?.runs, 0);
+    assert.ok(!(await userTexts(id)).some((text) => text.includes("missed")));
+    await app.commands.cancelSchedule(id, owner(app), repeat.id);
+});
+
 test("Pi schedules, lists, and cancels its own messages with its tool", async () => {
     const id = await newSession(app);
 
@@ -422,4 +448,271 @@ test("archiving a session says how many repeating schedules keep running there",
         repeating: 1,
     });
     assert.equal((await items(id)).length, 2, "archiving cancels nothing");
+});
+
+test("a schedule can be changed: its text and time, from once to a repeat and back, and the old time sends nothing", async () => {
+    const id = await newSession(app);
+    const once = await app.commands.schedule(id, owner(app), {
+        when: "in 10m old text",
+        zone: "UTC",
+    });
+    const now = app.now();
+
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, { text: "x", next: now - 1 }),
+        { status: 400, message: /passed/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, {
+            text: "x",
+            every: { minutes: 5 },
+            next: now + 60_000,
+        }),
+        { status: 400, message: /at most every 10 minutes/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, { text: "x", every: { at: "25:00" } }),
+        { status: 400, message: /time of day/ },
+    );
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), "nope", { text: "x", next: now + 60_000 }),
+        { status: 404 },
+    );
+    const viewer = app.config.addUser("Vic", "viewer").user;
+
+    await assert.rejects(
+        app.commands.updateSchedule(id, viewer, once.id, { text: "x", next: now + 60_000 }),
+        { status: 403 },
+    );
+
+    // To a weekday repeat: a new task takes it over, and the old one ends without sending.
+    const repeat = await app.commands.updateSchedule(id, owner(app), once.id, {
+        text: "weekday text",
+        every: { at: "09:30", days: [1, 2, 3, 4, 5] },
+        zone: "UTC",
+    });
+
+    assert.equal(repeat.id, once.id);
+    assert.notEqual(String(repeat.taskId), String(once.taskId));
+    assert.deepEqual(repeat.every, { at: "09:30", days: [1, 2, 3, 4, 5] });
+    assert.equal(repeat.text, "weekday text");
+    assert.match(repeat.content, /\[scheduled\] weekday text$/);
+    assert.equal(new Date(repeat.next).toISOString().slice(11, 16), "09:30");
+    await until(
+        async () => (await app.harness.getTask(once.taskId, context))?.state.status === "terminal",
+        "the old task to end",
+    );
+    assert.equal((await items(id)).length, 1, "the schedule stays");
+
+    // Back to once, two minutes from now; then the old time passes and only the new text goes out, once.
+    const soon = await app.commands.updateSchedule(id, owner(app), once.id, {
+        text: "new text",
+        next: app.now() + 2 * 60_000,
+    });
+
+    assert.equal(soon.every, undefined);
+    // A save made from an older copy (another person changed it since) is refused, not written over theirs.
+    await assert.rejects(
+        app.commands.updateSchedule(id, owner(app), once.id, {
+            text: "stale",
+            next: app.now() + 60_000,
+            version: String(repeat.revision),
+        }),
+        { status: 409, message: /changed this schedule/ },
+    );
+    assert.equal(soon.revision, 2, "each edit counts");
+    assert.equal(
+        (
+            await app.commands.updateSchedule(id, owner(app), once.id, {
+                text: "new text",
+                next: soon.next,
+                version: String(soon.revision),
+            })
+        ).text,
+        "new text",
+    );
+    assert.equal(soon.zone, "UTC", "the zone stays when none is given");
+    await restartLater(11);
+    await until(
+        async () => (await userTexts(id)).some((text) => text.includes("[scheduled] new text")),
+        "the changed message to go out",
+    );
+    await until(async () => (await items(id)).length === 0, "it to be done");
+    const sent = (await userTexts(id)).filter((text) => text.includes("[scheduled]"));
+
+    assert.equal(sent.length, 1, "sent once, with the new text only");
+});
+
+test("a cancel stops the task an edit gave a schedule, and an edited repeat sends only its new text", async () => {
+    const id = await newSession(app);
+    const schedule = await app.commands.schedule(id, owner(app), {
+        when: "every 10m first text",
+        zone: "UTC",
+    });
+
+    // A cancel after an edit stops the task the edit started, not only the one it replaced.
+    const edited = await app.commands.updateSchedule(id, owner(app), schedule.id, {
+        text: "edited",
+        every: { minutes: 30 },
+    });
+
+    await app.commands.cancelSchedule(id, owner(app), schedule.id);
+    await until(
+        async () =>
+            (await app.harness.getTask(edited.taskId, context))?.state.status === "terminal",
+        "the edit's task to end",
+    );
+    assert.deepEqual(await items(id), []);
+
+    // The edit's message goes out in its place, and the cancelled first text never does.
+    const kept = await app.commands.schedule(id, owner(app), {
+        when: "every 10m first",
+        zone: "UTC",
+    });
+
+    await app.commands.updateSchedule(id, owner(app), kept.id, {
+        text: "second",
+        every: { minutes: 10 },
+    });
+    await restartLater(11);
+    await until(
+        async () => (await userTexts(id)).some((text) => text.includes("[scheduled] second")),
+        "the edited repeat to go out",
+    );
+    const sent = (await userTexts(id)).filter((text) => text.includes("[scheduled]"));
+
+    assert.equal(sent.length, 1, `only the edited text, once: ${sent.join(", ")}`);
+});
+
+test("a schedule id is only ever one of the session's own", async () => {
+    const id = await newSession(app);
+
+    for (const name of ["__proto__", "constructor", "toString"]) {
+        await assert.rejects(
+            app.commands.updateSchedule(id, owner(app), name, {
+                text: "x",
+                next: app.now() + 60_000,
+            }),
+            { status: 404 },
+        );
+        assert.equal(await app.schedules.cancel(id, name), undefined);
+    }
+
+    assert.equal(
+        ({} as Record<string, unknown>).taskId,
+        undefined,
+        "nothing reached Object.prototype",
+    );
+    assert.equal(({} as Record<string, unknown>).text, undefined);
+});
+
+test("a person pauses a schedule and resumes it: paused, nothing goes out; resumed, it goes on", async () => {
+    const id = await newSession(app);
+    const repeat = await app.commands.schedule(id, owner(app), {
+        when: "every 10m paused ping",
+        zone: "UTC",
+    });
+    const once = await app.commands.schedule(id, owner(app), {
+        when: "in 5m once while paused",
+        zone: "UTC",
+    });
+    const viewer = app.config.addUser("Vee", "viewer").user;
+
+    await assert.rejects(app.commands.pauseSchedule(id, viewer, repeat.id, true), { status: 403 });
+    await assert.rejects(app.commands.pauseSchedule(id, owner(app), "nope", true), { status: 404 });
+    await assert.rejects(app.commands.pauseSchedule(id, owner(app), repeat.id, "yes"), {
+        status: 400,
+    });
+
+    const paused = await app.commands.pauseSchedule(id, owner(app), repeat.id, true);
+
+    assert.equal(paused.paused?.by, owner(app).id);
+    assert.notEqual(String(paused.taskId), String(repeat.taskId), "a new task holds it");
+    await app.commands.pauseSchedule(id, owner(app), once.id, true);
+    // Pausing again changes nothing.
+    assert.equal(
+        String((await app.commands.pauseSchedule(id, owner(app), repeat.id, true)).taskId),
+        String(paused.taskId),
+    );
+    await until(
+        async () =>
+            (await app.harness.getTask(repeat.taskId, context))?.state.status === "terminal",
+        "the old task to end",
+    );
+    // Pause and Resume at once: one wins, and only a call that changed it says so in the chat.
+    const chatLines = async () =>
+        JSON.stringify((await app.harness.snapshot(ChatDoc, id, context)) ?? {}).match(
+            /(paused|resumed) the scheduled “once while paused”/g,
+        ) ?? [];
+    const linesBefore = (await chatLines()).length;
+
+    await Promise.all([
+        app.commands.pauseSchedule(id, owner(app), once.id, false),
+        app.commands.pauseSchedule(id, owner(app), once.id, true),
+    ]);
+    const nowPaused = (await items(id)).find((each) => each.id === once.id)?.paused !== undefined;
+    const lines = await chatLines();
+
+    assert.ok(lines.length - linesBefore <= 2, "no line for a call that changed nothing");
+    assert.equal(
+        lines.at(-1)?.startsWith("paused") ?? !nowPaused,
+        nowPaused,
+        "the last line says how it is",
+    );
+    await app.commands.pauseSchedule(id, owner(app), once.id, true);
+
+    // Past both times: nothing goes out, and both are kept.
+    await restartLater(25);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal((await userTexts(id)).filter((text) => text.includes("[scheduled]")).length, 0);
+    assert.equal((await items(id)).length, 2);
+    // Edited while paused, it stays paused.
+    const edited = await app.commands.updateSchedule(id, owner(app), repeat.id, {
+        text: "paused ping 2",
+        every: { minutes: 10 },
+    });
+
+    assert.ok(edited.paused !== undefined, "an edit keeps it paused");
+    // A pause is no edit: an editor opened before it still saves.
+    const revision = edited.revision;
+
+    await app.commands.pauseSchedule(id, owner(app), repeat.id, false);
+    await app.commands.pauseSchedule(id, owner(app), repeat.id, true);
+    assert.equal(
+        (
+            await app.commands.updateSchedule(id, owner(app), repeat.id, {
+                text: "paused ping 2",
+                every: { minutes: 10 },
+                version: String(revision),
+            })
+        ).paused !== undefined,
+        true,
+    );
+    // Pi's tool lists it as paused.
+    const listed = await app.schedules.list(id);
+
+    assert.ok(listed.every((each) => each.paused !== undefined));
+
+    // Resumed: the one whose time passed goes out now; the repeat goes on from a time still to come.
+    await app.commands.pauseSchedule(id, owner(app), once.id, false);
+    const resumed = await app.commands.pauseSchedule(id, owner(app), repeat.id, false);
+
+    assert.equal(resumed.paused, undefined);
+    assert.ok(resumed.next > app.now(), "the next time is still to come");
+    await until(
+        async () =>
+            (await userTexts(id)).some((text) => text.includes("[scheduled] once while paused")),
+        "the missed one to go out on resume",
+    );
+    await restartLater(11);
+    await until(
+        async () =>
+            (await userTexts(id)).some((text) => text.includes("[scheduled] paused ping 2")),
+        "the repeat to go on",
+    );
+    assert.equal(
+        (await userTexts(id)).filter((text) => text.includes("[scheduled] paused ping")).length,
+        1,
+        "once, with the edited text",
+    );
 });

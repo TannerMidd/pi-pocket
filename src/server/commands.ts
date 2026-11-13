@@ -69,7 +69,12 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
-import { globalModelSettings, projectModelDefault } from "./project-model.ts";
+import {
+    globalModelSettings,
+    piGlobalSettings,
+    projectModelDefault,
+    rememberedLevel,
+} from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
 import {
@@ -84,7 +89,7 @@ import {
 } from "./resend.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
-import { describeMoment, describeRepeat, knownZone } from "./when.ts";
+import { checkRepeat, describeMoment, describeRepeat, knownZone, type Repeat } from "./when.ts";
 import {
     createWorktree,
     discardWorktree,
@@ -646,9 +651,10 @@ export class Commands {
      * The model a new session starts with, always one a person chose: `prefer` (with its thinking level) when it is
      * signed in here, or else the owner's default, even when it is not signed in now: the session then shows that, and
      * its first message fails in sight, where another model would spend on what nobody chose for it. Without an owner's
-     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model,
-     * then Pi's global default. A no-cwd caller (imports and PiP itself) keeps the legacy default selection. Never
-     * the first model there is: with none chosen, the session starts without a model, and someone picks one.
+     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model (at
+     * its level in Pi's `modelThinkingLevels`, when it has one), then Pi's global default. A no-cwd caller (imports and
+     * PiP itself) keeps the legacy default selection. Never the first model there is: with none chosen, the session
+     * starts without a model, and someone picks one.
      */
     #defaultModel(
         prefer?: {
@@ -704,7 +710,10 @@ export class Commands {
               : project !== undefined
                 ? project.thinkingLevel
                 : lastPicked !== undefined
-                  ? last?.thinkingLevel
+                  ? ((cwd === undefined
+                        ? undefined
+                        : rememberedLevel(defaults, lastPicked.provider, lastPicked.id)) ??
+                    last?.thinkingLevel)
                   : cwd === undefined
                     ? settings.getDefaultThinkingLevel()
                     : global?.defaultThinkingLevel) ?? "off") as ModelThinkingLevel;
@@ -769,7 +778,9 @@ export class Commands {
         // Archiving leaves its repeating schedules running: the person is told how many.
         const repeating =
             patch.archived === true
-                ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+                ? (await app.schedules.list(id)).filter(
+                      (item) => item.every !== undefined && item.paused === undefined,
+                  ).length
                 : 0;
 
         return { repeating };
@@ -1368,6 +1379,7 @@ export class Commands {
 
         // Subagents' reports go: a person meant the work stopped.
         await this.#discardReports(id);
+        await this.#stoppedByPerson(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
@@ -1381,6 +1393,24 @@ export class Commands {
                     : `stopped the run; ${held} queued ${held === 1 ? "message waits" : "messages wait"} to be sent`,
             );
         }
+    }
+
+    /** A subagent a person stops: its report to its parent says a person did, not that it failed. */
+    async #stoppedByPerson(id: ConversationId): Promise<void> {
+        const parent = this.#app.parentOf(id);
+
+        if (parent === undefined || !this.#app.isBusy(id)) {
+            return;
+        }
+
+        await this.#app.harness.commit(async (tx) => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+            const name = Object.keys(agents).find((each) => agents[each]!.conversationId === id);
+
+            if (name !== undefined) {
+                agents[name]!.stoppedBy = "person";
+            }
+        }, context);
     }
 
     /**
@@ -1788,6 +1818,8 @@ export class Commands {
         // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
         const requests = new Map<number, string | undefined>();
 
+        await this.#stoppedByPerson(id);
+
         for (let attempt = 0; ; attempt++) {
             const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
 
@@ -1985,7 +2017,19 @@ export class Commands {
             );
         }
 
+        // A model picked with no level takes the level Pi's TUI keeps for it; PiP's panel keeps its own.
+        const remembered =
+            request.model === undefined ||
+            request.thinkingLevel !== undefined ||
+            request.pipPanel === true
+                ? undefined
+                : rememberedLevel(
+                      piGlobalSettings(app.defaultCwd),
+                      request.model.provider,
+                      request.model.modelId,
+                  );
         const wanted = (request.thinkingLevel ??
+            remembered ??
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
@@ -2199,7 +2243,13 @@ export class Commands {
     async schedule(
         id: ConversationId,
         user: User,
-        request: { when?: unknown; zone?: unknown },
+        request: {
+            when?: unknown;
+            text?: unknown;
+            next?: unknown;
+            every?: unknown;
+            zone?: unknown;
+        },
     ): Promise<Schedule> {
         const app = this.#app;
 
@@ -2211,9 +2261,14 @@ export class Commands {
             throw new HttpError(400, `Unknown time zone ${zone}`);
         }
 
+        // From the Schedules sheet's editor: the text, and when as data, instead of `when` typed in words.
+        const given = request.next !== undefined || request.every !== undefined;
+        const at = given ? this.#scheduleTime(request) : undefined;
+
         app.spend.check(user, id);
         const schedule = await app.schedules.add(id, {
             when: optionalText(request.when, "when") ?? "",
+            ...(at === undefined ? {} : { at, text: optionalText(request.text, "text") ?? "" }),
             by: user,
             ...(zone === undefined ? {} : { zone }),
         });
@@ -2223,6 +2278,115 @@ export class Commands {
                 : describeRepeat(schedule.every);
 
         await app.collab.activity(id, user, `scheduled “${snippet(schedule.text, 60)}” ${when}`);
+
+        return schedule;
+    }
+
+    /**
+     * Change a scheduled message: its text, and when it goes out: `next` (a moment) for one that goes out once, `every`
+     * for a repeat (with `next` its first time, for one every so many minutes), in `zone`.
+     */
+    async updateSchedule(
+        id: ConversationId,
+        user: User,
+        scheduleId: string,
+        request: {
+            text?: unknown;
+            next?: unknown;
+            every?: unknown;
+            zone?: unknown;
+            version?: unknown;
+        },
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        await app.requireDriver(id, user);
+        const zone = optionalText(request.zone, "zone");
+        const version = optionalText(request.version, "version");
+
+        if (zone !== undefined && !knownZone(zone)) {
+            throw new HttpError(400, `Unknown time zone ${zone}`);
+        }
+
+        const at = this.#scheduleTime(request);
+
+        app.spend.check(user, id);
+        const schedule = await app.schedules.update(id, scheduleId, {
+            text: optionalText(request.text, "text") ?? "",
+            ...at,
+            ...(zone === undefined ? {} : { zone }),
+            ...(version === undefined ? {} : { version }),
+            by: user,
+        });
+        const when =
+            schedule.every === undefined
+                ? `for ${describeMoment(schedule.next, schedule.zone)}`
+                : describeRepeat(schedule.every);
+
+        await app.collab.activity(
+            id,
+            user,
+            `changed the scheduled “${snippet(schedule.text, 60)}” to ${when}`,
+        );
+
+        return schedule;
+    }
+
+    /** A schedule's time as the editor sends it, its repeat checked: `next` (a moment), `every` (a repeat), or both. */
+    #scheduleTime(request: { next?: unknown; every?: unknown }): {
+        next?: number;
+        every?: Repeat;
+    } {
+        if (request.next !== undefined && typeof request.next !== "number") {
+            throw new HttpError(400, "next must be a time in milliseconds");
+        }
+
+        try {
+            return {
+                ...(request.next === undefined ? {} : { next: request.next }),
+                ...(request.every === undefined || request.every === null
+                    ? {}
+                    : {
+                          every: checkRepeat(request.every, {
+                              repeatMinutes: this.#app.schedules.limits.repeatMinutes,
+                          }),
+                      }),
+            };
+        } catch (error) {
+            throw new HttpError(400, describe(error));
+        }
+    }
+
+    /** Pause a scheduled message, or resume it: paused, it sends nothing until someone resumes it. */
+    async pauseSchedule(
+        id: ConversationId,
+        user: User,
+        scheduleId: string,
+        paused: unknown,
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        await app.requireDriver(id, user);
+
+        if (typeof paused !== "boolean") {
+            throw new HttpError(400, "paused must be true or false");
+        }
+
+        if (!paused) {
+            app.spend.check(user, id);
+        }
+
+        const { schedule, changed } = await app.schedules.pause(id, scheduleId, paused, user);
+
+        if (changed) {
+            await app.collab.activity(
+                id,
+                user,
+                `${paused ? "paused" : "resumed"} the scheduled “${snippet(schedule.text, 60)}”`,
+            );
+        }
 
         return schedule;
     }
@@ -2695,6 +2859,7 @@ export class Commands {
                 forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
                 ...(place.worktree === undefined ? {} : { worktree: place.worktree }),
             };
+            await app.memory.forked(tx, id, forked, title);
 
             if (fork.resend !== undefined) {
                 await tx.createTask(ResendTask, fork.resend, {

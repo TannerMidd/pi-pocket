@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useBack } from "./back.js";
+import { screenPaste } from "./browser-paste.js";
 import {
     browserApi,
     browserAvailable,
@@ -293,6 +294,28 @@ function Screen({ frame, interactive, send }) {
         return () => element.removeEventListener("wheel", wheel);
     }, [interactive, send]);
 
+    // Firefox gives a paste to the element it last edited, not the focused screen: take it on the document, in
+    // the capture phase, before that element's own paste handler (the composer's) can act on it.
+    useEffect(() => {
+        if (!interactive) {
+            return undefined;
+        }
+
+        const paste = (event) => {
+            const text = screenPaste(event, ref.current, document.activeElement);
+
+            if (text !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                send({ type: "text", text });
+            }
+        };
+
+        document.addEventListener("paste", paste, true);
+
+        return () => document.removeEventListener("paste", paste, true);
+    }, [interactive, send]);
+
     if (!interactive) {
         return html`<img
             class="browser-screen"
@@ -428,17 +451,6 @@ function Screen({ frame, interactive, send }) {
         send({ type: "key", key: event.key, modifiers });
     };
 
-    const paste = (event) => {
-        const text = event.clipboardData?.getData("text") ?? "";
-
-        if (text === "") {
-            return;
-        }
-
-        event.preventDefault();
-        send({ type: "text", text });
-    };
-
     return html`<img
         ref=${ref}
         class="browser-screen live"
@@ -452,7 +464,6 @@ function Screen({ frame, interactive, send }) {
         onPointerCancel=${() => (drag.current = null)}
         onContextMenu=${(event) => event.preventDefault()}
         onKeyDown=${key}
-        onPaste=${paste}
     />`;
 }
 

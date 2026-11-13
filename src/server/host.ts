@@ -53,6 +53,23 @@ export interface LinkedSession {
     failed?: string;
 }
 
+/** A linked session at work, as a stall watch sees it (`LinkedSessionsApi.activity`). */
+export interface LinkedActivity {
+    address: string;
+    /** Changes while it makes any progress: a new message, a call, output, its answer as it streams. */
+    progress: string;
+    /** When its newest message came. */
+    at?: number;
+    /** What it waits on, in words: "its bash call", "its model". */
+    waiting: string;
+    /** The call it waits on, when one runs. */
+    callId?: string;
+    /** The `timeout` that call gave itself, in ms: it runs until then. */
+    timeoutMs?: number;
+    /** It waits for a person to allow a call, or for a provider's limit: no stall, and its quiet time starts after. */
+    paused?: true;
+}
+
 /**
  * Sessions that a session starts and messages (`linked-sessions.ts`). Each acts as the person Pi works for in `source`,
  * with their checks; a call made again with the same `key` acts once, and returns what the first did.
@@ -72,17 +89,17 @@ export interface LinkedSessionsApi {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }>;
+    ): Promise<{ session: ConversationId; address: string; answers?: boolean }>;
     /**
      * Send `message` to the linked session at address `to`: at its next pause, or with `steer: false` after its run.
-     * `answers` says whether its final answer comes back to the source by itself (the source started it); otherwise the
-     * message asks it to reply when an answer is needed.
+     * `answers` says whether its final answer comes back to the source by itself (the source started it, and did not
+     * turn its answers off with `reports`); otherwise the message asks it to reply when an answer is needed.
      */
     send(
         source: ConversationId,
         request: { to: string; message: string; steer?: boolean },
         key: string,
-    ): Promise<{ answers: boolean }>;
+    ): Promise<{ answers?: boolean }>;
     /**
      * Stop the run of the linked session at address `to`, and withdraw what waits in its queue. Idle is a no-op.
      * Returns whether it was working.
@@ -97,8 +114,29 @@ export interface LinkedSessionsApi {
         request: { to: string; archived?: boolean },
         key: string,
     ): Promise<{ archived: boolean; repeating: number }>;
+    /**
+     * Set whether `source`, as a lead, takes the run-end answers of the sessions it started (`take`, the default true).
+     * Returns the state now.
+     */
+    reports(
+        source: ConversationId,
+        request: { take: boolean },
+        key: string,
+    ): Promise<{ take: boolean }>;
     /** The sessions linked to `source`, at any distance, that the person Pi works for there sees. */
     list(source: ConversationId): Promise<LinkedSession[]>;
+    /** The sessions `source` started and takes the answers of, while they are at work: for a stall watch. */
+    activity?(source: ConversationId): Promise<LinkedActivity[]>;
+    /** Stop one stuck call of a session `source` leads; its run goes on. False when no such call runs. */
+    stopCall?(source: ConversationId, request: { to: string; callId: string }): Promise<boolean>;
+    /** Call `start` with the lead each time a session it leads starts a run, whoever woke it: for a stall watch. */
+    onLedRun?(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void;
 }
 
 /**
@@ -123,6 +161,41 @@ export interface SessionsApi {
         },
         key: string,
     ): Promise<{ session: ConversationId }>;
+}
+
+/** What `host.inbox.deliver` delivers. */
+export interface InboxDelivery {
+    /** The id of the person Pi works for on it: they must be able to steer in the session. */
+    by: string;
+    /** One short line: the message shows as `[via <via>]`. */
+    via: string;
+    /** What came, as text: core makes it safe between tags and cuts it to 8,000 characters. */
+    payload: string;
+    /** Delivers once: a delivery again with the same key, also after a restart, sends nothing. */
+    key: string;
+    /** The person's own instructions, first and outside the fence. Default: say what it is, and whether to act. */
+    instructions?: string;
+    /** The fence's tag: a lowercase word with `-`, such as `chat-message`. Default `outside-data`. */
+    tag?: string;
+    /** Attributes of the fence's opening tag, up to 8 (not `from` or `from-id`), each made one line without quotes. */
+    attributes?: Readonly<Record<string, string>>;
+    /**
+     * Who sent it: the fence's `from` and `from-id`, inside it. Outside it, only `trusted`: the id is one the owner marked
+     * (guidance to the model, not a boundary).
+     */
+    sender?: { name: string; id?: string; trusted?: boolean };
+    /** A cap of messages an hour for one source (`bucket`), counted in memory across every caller; at most 600. */
+    limit?: { bucket: string; perHour: number };
+}
+
+/**
+ * Outside data delivered to sessions (`inbox.ts`). Throws an error whose `status` says why it did not go: 400 a delivery
+ * that cannot be right, 410 the session is gone or its person cannot see it, 503 PiP is off, 429 the bucket's limit,
+ * 409 the session does not take messages now (try again later).
+ */
+export interface InboxApi {
+    /** Deliver to `target`. `sent: false`: its key delivered it before. */
+    deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
 }
 
 /** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
@@ -506,12 +579,28 @@ export interface PocketHost {
         conversationId?: ConversationId,
     ): void;
     /**
+     * Stop one running tool call of a conversation, by its call id: its result says it was aborted, with what it
+     * printed, and the run goes on. False when no such call runs.
+     */
+    stopToolCall(conversationId: ConversationId, callId: string): Promise<boolean>;
+    /** Whether a run of the conversation waits for a provider's limit to clear (`limit-gate.ts`): no stall. */
+    waitsForLimit(conversationId: ConversationId): boolean;
+    /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
+    alertOwner(conversationId: ConversationId, title: string, body: string): void;
+    /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.
      */
     heldBack(conversationId: ConversationId): string | undefined;
     /** Call `listener` whenever the owner changes a spend limit; returns how to stop. */
     onLimitsChanged(listener: () => void): () => void;
+    /**
+     * Data from outside (a chat message, a feed's item, a service's event) delivered to an existing session, or to PiP,
+     * as a message from a person, the path webhooks use (`inbox.ts`). Undefined on a server started before 0.29.0.
+     *
+     * @experimental In 0.29: it can change in a minor release (docs/extensions/policies/api-stability.md).
+     */
+    readonly inbox?: InboxApi;
     /**
      * Sessions that a session starts and messages (`linked-sessions.ts`): each one is an ordinary session, linked to the
      * one that started it. The checks of the person Pi works for apply, and a call repeated with its key acts once.

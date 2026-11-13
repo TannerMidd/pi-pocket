@@ -438,6 +438,37 @@ Makes a top-level session and, when `message` is given, sends that text as its f
 - A source past its spend limit, a person invited to one session, and a PiP source are refused, and nothing is made.
 - A blank `message` is refused, and nothing is made. A `message` is also refused when the session gets no model: no `model` and no default model.
 
+## Outside data
+
+### `inbox`
+
+```ts
+readonly inbox?: InboxApi;
+```
+
+Since 0.29.0 · Experimental
+
+Gives data from outside the app (a chat message, a feed's item, a service's event) to a session that exists, or to PiP, as a message from one person. Webhooks use the same path. It is `undefined` on a server older than 0.29.0: check `host.inbox?.deliver` first. [Delivering outside data](../inbox.md) tells how to use it.
+
+#### `inbox.deliver`
+
+```ts
+deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+```
+
+Since 0.29.0 · Experimental
+
+Sends one message to `target`, as `[via <via>]`. Pi reads the person's `instructions` first, then whether the sender is trusted, then the payload between `<tag>` tags, then a line that says the payload is data.
+
+- `by`: the id of the person Pi works for on it. The person must be able to see and steer the session, and not be a viewer.
+- `payload`: the text that came. Core makes it safe between the tags (no closing tag survives) and cuts it to 8,000 characters.
+- `key`: delivers once. A second delivery with the same key sends nothing and returns `{ sent: false }`, also after a restart. Use the source's own id for the event.
+- `tag` and `attributes`: the fence's tag (default `outside-data`) and up to 8 attributes, each made one line without quotes.
+- `sender`: who sent it. The name and the id go in the fence's tag, as `from` and `from-id`, because they came from outside. Outside the fence, one line says only whether the owner marked the id as trusted (`trusted: true`). This is guidance to the model, not a boundary: an id can be spoofed on some services.
+- `limit`: a cap of messages in an hour for one `bucket`, kept in memory. A restart resets it. The cap is 600 at most.
+
+It throws an error with a `status`: 400 for a delivery that cannot be right, 410 when the session is gone or its person cannot see it, 503 when PiP is off, 429 when the bucket's limit is reached, and 409 when the session does not take messages now. Try again later after a 409 or a 503, with the same key.
+
 ## Linked sessions
 
 ### `linkedSessions`
@@ -459,12 +490,12 @@ start(
     source: ConversationId,
     request: { title?: string; message: string; model?: string; thinking?: string; cwd?: string },
     key: string,
-): Promise<{ session: ConversationId; address: string }>;
+): Promise<{ session: ConversationId; address: string; answers?: boolean }>;
 ```
 
 Since 0.14.0 · Experimental
 
-Makes a session linked to `source` and sends it `message` as its first message. It returns the new session's id, and the address that `source` uses for it.
+Makes a session linked to `source` and sends it `message` as its first message. It returns the new session's id, and the address that `source` uses for it. `answers` (since 0.29.0) says whether its final answer comes back to `source` by itself: it is `false` when `source` turned its answers off with [`linkedSessions.reports`](#linkedsessionsreports). An older Pi Pocket does not return it.
 
 - The new session works in `cwd` when supplied, otherwise the folder of `source`. `cwd` must name an existing folder and uses the normal folder-picker path rules. A blank `cwd` counts as no `cwd`. A relative `cwd` resolves against the folder of the server process, not the folder of the source. `cwd` is since 0.19.0: an older Pi Pocket ignores it and uses the folder of `source`, so a gallery entry that needs it sets `minPocket` to `0.19.0`. It gets a copy of the agent settings of `source`, but not its history.
 - Without `title`, the title is the first line of `message`.
@@ -479,12 +510,12 @@ send(
     source: ConversationId,
     request: { to: string; message: string; steer?: boolean },
     key: string,
-): Promise<{ answers: boolean }>;
+): Promise<{ answers?: boolean }>;
 ```
 
 Since 0.14.0 · Experimental
 
-Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.28.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers, with `{ answers }` (since 0.28.0): whether the session's final answer comes back to the source by itself, which it does only when the source started it.
+Sends `message` to the linked session at the address `to`. The session gets it at its next pause (since 0.28.0; before, only with `steer: true`). With `steer: false`, it waits for the session's run to end. `send` returns when the session takes the message, not when it answers, with `{ answers }` (since 0.28.0): whether the session's final answer comes back to the source by itself, which it does only when the source started it. An older Pi Pocket does not return it.
 
 The session that gets the message reads it between tags. Words before it say that the agent of another session wrote it, and that it is a request, not a person's order. They also give the address to write to, and say that its final answer goes back by itself when its run ends ([linked-sessions.md](../linked-sessions.md#a-sessions-final-answer-comes-back-by-itself)).
 
@@ -515,6 +546,20 @@ archive(
 Since 0.28.0 · Experimental
 
 Archives the linked session at the address `to`. With `archived: false`, it brings the session back. Without `archived`, it archives. `archived` in the result says whether the session is archived now. `repeating` is how many of its repeating schedules keep running: an archive does not stop them. It needs the same access as `send`. An older Pi Pocket has no `archive`.
+
+#### `linkedSessions.reports`
+
+```ts
+reports(
+    source: ConversationId,
+    request: { take: boolean },
+    key: string,
+): Promise<{ take: boolean }>;
+```
+
+Since 0.29.0 · Experimental
+
+Sets whether `source`, as a lead, takes the final answers of the sessions it started when their runs end. By default it takes them. With `take: false`, no run end of a session it started reaches it: old ones, new ones, archived ones, from any start path. `send` from `source` then returns `answers: false`, and its message asks the target to send the answer. With `take: true`, the answers come back. `take` in the result says the state now. The switch is stored on the session `source`. It needs the same access as `archive`, but on `source` itself: the turn, no plan mode, and room under the spend limit. A repeat with the same `key` changes nothing again and returns the first result, even with other arguments. A `take` that is not a boolean throws a `TypeError`, and nothing is stored. An older Pi Pocket has no `reports`: check for it.
 
 #### `linkedSessions.list`
 
@@ -810,4 +855,7 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
+- `toolNames`: the names of the tools that the modules that are on give now (built-in and drop-in), for codemode's Only mode.
+- `stopToolCall`, `waitsForLimit`, `alertOwner` (since 0.29.0): for the stall watches of Subagents and Agent Teams. They stop one running call, say whether a run waits for a provider's limit, and tell the owner (a notice and a push).
+- `linkedSessions.activity`, `linkedSessions.stopCall`, `linkedSessions.onLedRun` (since 0.29.0): for the stall watch of Agent Teams. They give the led sessions at work, stop a stuck call of a led session, and call back when a led session starts a run.
 - `updates`: updates of Pi Pocket itself, for the Updates module's routes. Its status says how the copy was installed (`installKind`: `git`, `npm-global`, `npm-local`, `npx`, or `unknown`) and what stands in the way of an update from the app.

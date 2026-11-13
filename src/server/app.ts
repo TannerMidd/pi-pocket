@@ -6,6 +6,7 @@
  * What people ask of Pi lives in `commands.ts`, the people's side of a session in `collab.ts`, push notifications in
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -44,7 +45,8 @@ import {
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
+import { CodingTools, createCodingTools } from "@earendil-works/pi-durable/tools";
 import { Alerts } from "./alerts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
@@ -54,7 +56,7 @@ import { Commands } from "./commands.ts";
 import { ExtensionSessions } from "./extension-sessions.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
 import { removeAvatar, saveAvatar } from "./avatars.ts";
-import { APP_ROOT, ConfigStore, modulesWith, type User } from "./config.ts";
+import { APP_ROOT, ConfigStore, helloUser, modulesWith, type User } from "./config.ts";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
@@ -107,6 +109,7 @@ import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
+import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
@@ -132,9 +135,11 @@ import {
 } from "./room.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
+import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { withQuietLimit } from "./deadline.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
 import { ask, browserFor, checkValues } from "./extension-points.ts";
@@ -426,6 +431,8 @@ export class PocketApp {
     readonly repoWatches = new RepoWatches(this);
     /** Webhooks: addresses other services post to, each a message to a session or PiP (`hooks.ts`). */
     readonly hooks = new Hooks(this);
+    /** Outside data delivered to a session as a person's message: webhooks, and extensions (`inbox.ts`). */
+    readonly inbox = new Inbox(this);
     /** Lessons Pi keeps across sessions, for a project or everywhere. */
     readonly memory = new Memory(this);
     /** Each person's favorite working folders, shared by their devices. */
@@ -452,6 +459,8 @@ export class PocketApp {
     readonly browsers: Browsers;
     /** What extension modules add to the app: their routes, browser modules, and events (`extension-web.ts`). */
     readonly webs: ExtensionWebs;
+    /** Core's own secrets: hidden in every session, and kept from Pi by Lancet Guard (`secrets.ts`). */
+    readonly secrets: CoreSecrets;
     #websTimer: NodeJS.Timeout | undefined;
     /** Whose tabs the next `hello` for browser modules goes to: those who may use any of these. */
     readonly #websFor = new Set<WebAccess>();
@@ -654,6 +663,15 @@ export class PocketApp {
             links: this.publicLinks,
             settings: (module) => this.config.extensionSettings(module),
         });
+        this.secrets = new CoreSecrets({
+            hidden: this.hidden,
+            config: this.config,
+            dataDir: this.dataDir,
+            agentDir: getAgentDir(),
+            settingsOf: (module) => this.webs.settingsOf(module),
+            log: (line) => this.#log(line),
+        });
+        this.guard.protect = (tool, args, cwd) => this.secrets.blocked(tool, args, cwd);
     }
 
     /**
@@ -839,7 +857,7 @@ export class PocketApp {
 
         const registry = createRegistry();
 
-        registry.install(CodingTools);
+        registry.install(await codingTools(this.#log));
         // Durable work of the app itself, whatever extension modules are on.
         registry.install(
             defineExtension({
@@ -855,6 +873,8 @@ export class PocketApp {
                 hooks: [
                     hook(ToolTask, {
                         afterTool: (_call, result, api) => {
+                            // A secret that changed while the tool ran is hidden from its result too.
+                            this.secrets.sync();
                             const cleaned = this.hidden.result(result, api.conversationId);
 
                             return cleaned === result ? undefined : cleaned;
@@ -911,7 +931,16 @@ export class PocketApp {
                     options?.open === true,
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
+            stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
+            waitsForLimit: (conversationId) =>
+                this.limits.waits().some((wait) => wait.conversationId === Number(conversationId)),
+            alertOwner: (conversationId, title, body) =>
+                this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
+            inbox: Object.freeze({
+                deliver: (target: ConversationId, delivery: InboxDelivery) =>
+                    this.inbox.deliver(target, delivery),
+            }),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
             sessions: this.extensionSessions,
@@ -1057,6 +1086,8 @@ export class PocketApp {
             void this.guard.warm().catch(() => {});
         }
 
+        // Core's secrets are hidden before any work goes on, with the settings the modules that loaded declare.
+        this.secrets.sync();
         await this.pip.tuneAll((line) => this.#log(line));
         // Work a previous process left unfinished continues now.
         this.harness.resume();
@@ -1606,7 +1637,13 @@ export class PocketApp {
 
     /** A folder's environment, with what extensions add to each command and hide from its output in this session. */
     #wrapped(id: ConversationId, cwd: string): ExecutionEnv {
-        return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
+        // Each command hides core's secrets as they are now.
+        this.secrets.sync();
+
+        return withQuietLimit(
+            wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
+            () => this.background.commandQuietMs,
+        );
     }
 
     #env(cwd: string): ExecutionEnv {
@@ -1655,6 +1692,22 @@ export class PocketApp {
                 client.send("notice", { level, message });
             }
         }
+    }
+
+    /** Stop one running tool call, alone: its task is aborted, and its run goes on with the result that says so. */
+    async stopToolCall(id: ConversationId, callId: string): Promise<boolean> {
+        const live = await this.harness.snapshot(LiveDoc, id, context);
+        const slot = [...(live?.tools ?? []), ...(live?.nestedTools ?? [])].find(
+            (each) => each.callId === callId && each.status === "running",
+        );
+
+        if (slot?.taskId === undefined) {
+            return false;
+        }
+
+        await this.harness.abortTask(slot.taskId, context);
+
+        return true;
     }
 
     /** A notice for the owner's tabs alone: about what only they may change. */
@@ -2593,12 +2646,7 @@ export class PocketApp {
 
     async hello(user: User) {
         return {
-            user: {
-                id: user.id,
-                name: user.name,
-                role: user.role,
-                ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
-            },
+            user: helloUser(user),
             users: this.people(user),
             models: await this.modelList(),
             guard: await this.guardStatus(),
@@ -2609,6 +2657,8 @@ export class PocketApp {
                 home: homedir(),
                 defaultCwd: this.defaultCwd,
                 extensions: this.loader.extensionNames(),
+                // The shortest repeat, so the Schedules sheet's editor keeps Save off for one the server refuses.
+                scheduleRepeatMinutes: this.schedules.limits.repeatMinutes,
                 // The browser modules this person's tabs load (`extension-ui.js`), each with the tools its module
                 // installs: the only ones whose calls it may describe (`pocket.toolCall`).
                 ui: this.#browserModules(user),
@@ -3669,6 +3719,8 @@ export class PocketApp {
                 `${module.title} is on but failed to load: ${describe(error)}`,
             );
         } finally {
+            // A module that came or went changes which of its stored values are secret.
+            this.secrets.sync();
             await this.#refreshClients();
         }
 
@@ -3840,6 +3892,8 @@ export class PocketApp {
         }
 
         this.config.setExtensionSettings(module, next);
+        // Hidden at once in every session: the new value, and the old one too.
+        this.secrets.sync();
         this.webs.settingsChanged(module);
 
         return shownSettings(fields, next, false);
@@ -4286,4 +4340,23 @@ export function installRequestShaping(
             },
         });
     };
+}
+
+/**
+ * Pi Durable's coding tools, whose `read` shrinks and converts images with Photon, in a worker thread that exits when
+ * idle. Without Photon's WebAssembly, `read` sends only images that fit the model's limits as they are.
+ */
+async function codingTools(log: (line: string) => void) {
+    try {
+        const node = import.meta.resolve("@earendil-works/pi-durable/images/node");
+
+        // Where Pi Durable loads it from, so a missing package shows now and not on the first image.
+        createRequire(node).resolve("@silvia-odwyer/photon/photon_rs_bg.wasm");
+
+        return createCodingTools({ images: await createNodePhotonImages() });
+    } catch (error) {
+        log(`read cannot shrink images, Photon is missing: ${describe(error)}`);
+
+        return CodingTools;
+    }
 }

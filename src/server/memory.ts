@@ -1,8 +1,8 @@
 /**
- * Memory: short lessons Pi keeps across sessions, each for one project or for everywhere, and linked to the session it
- * came from. A project is a git repository with all its worktrees (they share one git folder), or a folder outside
- * any repository. Pi saves lessons with its memory tool and gets those that apply in its system prompt
- * (`extensions/memory.ts`); people see, add, change, and remove them in the Memory sheet.
+ * Memory: short lessons Pi keeps across sessions, each for one project or for everywhere, or for the rest of one
+ * session, and linked to the session it came from. A project is a git repository with all its worktrees (they share
+ * one git folder), or a folder outside any repository. Pi saves lessons with its memory tool and gets those that apply
+ * in its system prompt (`extensions/memory.ts`); people see, add, change, and remove them in the Memory sheet.
  *
  * A lesson added or changed for someone who is not the owner waits for the owner's approval before Pi uses it: a guest
  * could otherwise write instructions into every later session.
@@ -32,13 +32,43 @@ export const MAX_LESSON = 300;
 /** Lessons a project keeps, and lessons for everywhere, approved ones: pending ones do not take their room. */
 export const MAX_PROJECT_LESSONS = 40;
 export const MAX_EVERYWHERE_LESSONS = 30;
+export const MAX_SESSION_LESSONS = 20;
 /** Lessons waiting for approval that one person (or Pi for them) may have, so nobody fills the owner's list. */
 export const MAX_PENDING = 20;
+/** Session lessons waiting that one person may have across all sessions, so new sessions do not fill the owner's list. */
+export const MAX_PENDING_SESSIONS = 2 * MAX_PENDING;
 /** How long a folder's project is kept before git is asked again (a folder can become a repository). */
 const PROJECT_FOR_MS = 60_000;
 
 export type Project = { key: string; name: string };
-export type LessonScope = "project" | "everywhere";
+export type LessonScope = "project" | "everywhere" | "session";
+
+/**
+ * No project key (an absolute path or a `scheme://` address) has this form, so a server from before session lessons
+ * reads one as another project's and uses it nowhere, not everywhere.
+ */
+const SESSION_KEY = "pocket-session:";
+
+export const sessionKey = (root: ConversationId | number) => `${SESSION_KEY}${String(root)}`;
+
+function sessionOf(lesson: Pick<Lesson, "project">): number | undefined {
+    if (lesson.project?.startsWith(SESSION_KEY) !== true) {
+        return undefined;
+    }
+
+    const id = Number(lesson.project.slice(SESSION_KEY.length));
+
+    return Number.isSafeInteger(id) ? id : undefined;
+}
+
+export const scopeOf = (lesson: Pick<Lesson, "project">): LessonScope =>
+    lesson.project === undefined
+        ? "everywhere"
+        : sessionOf(lesson) === undefined
+          ? "project"
+          : "session";
+
+type Here = { project: Project | undefined; session: string };
 
 /** Who writes: a person, or Pi working for one (`userId` undefined when nobody is known). */
 export type Writer = { userId: string | undefined; byPi: boolean; name: string };
@@ -72,7 +102,8 @@ export type MemoryView = {
     lessons: LessonView[];
     owner: boolean;
     canWrite: boolean;
-    limits: { project: number; everywhere: number; text: number };
+    /** `session` is absent from a server before session lessons. */
+    limits: { project: number; everywhere: number; session: number; text: number };
 };
 
 /** A plain copy of a lesson out of a commit's document. */
@@ -91,6 +122,8 @@ export const flat = (text: string) =>
 // Cut by code points, so an emoji at the 80th is kept whole, not halved into a lone surrogate.
 const cut = (text: string) => Array.from(text).slice(0, 80).join("");
 const named = (name: string, key: string) => cut(flat(name)) || cut(flat(key));
+/** A server from before session lessons shows this name in the owner's pending queue. */
+const sessionName = (title: string | undefined) => `session “${named(title ?? "", "Untitled")}”`;
 const ordered = (lessons: Lesson[]) =>
     lessons.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 
@@ -125,6 +158,8 @@ export class Memory {
     readonly #app: PocketApp;
     readonly #projects = new Map<string, { at: number; project: Promise<Project> }>();
     #timer: NodeJS.Timeout | undefined;
+    /** The scopes this server keeps: a memory extension newer than the running server checks it. */
+    readonly scopes: readonly LessonScope[] = ["project", "everywhere", "session"];
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -160,13 +195,33 @@ export class Memory {
         return Object.values(doc?.items ?? {});
     }
 
-    /** The lessons that apply in a project (and everywhere's), oldest first, pending ones included. */
-    async applying(project: Project | undefined): Promise<Lesson[]> {
-        return ordered(
-            (await this.#all()).filter(
-                (lesson) => lesson.project === undefined || lesson.project === project?.key,
-            ),
+    async #here(conversationId: ConversationId, cwd: string | undefined): Promise<Here> {
+        return {
+            project: await this.project(conversationId, cwd),
+            session: sessionKey(this.#app.rootOf(conversationId)),
+        };
+    }
+
+    #applies(lesson: Lesson, here: Here): boolean {
+        return (
+            lesson.project === undefined ||
+            lesson.project === here.project?.key ||
+            lesson.project === here.session
         );
+    }
+
+    /** Oldest first, pending ones included. */
+    async applying(
+        project: Project | undefined,
+        conversationId?: ConversationId,
+    ): Promise<Lesson[]> {
+        const here: Here = {
+            project,
+            session:
+                conversationId === undefined ? "" : sessionKey(this.#app.rootOf(conversationId)),
+        };
+
+        return ordered((await this.#all()).filter((lesson) => this.#applies(lesson, here)));
     }
 
     /** What Pi's prompt has: the lessons in force for a conversation working in `cwd`, and its project. */
@@ -175,7 +230,9 @@ export class Memory {
         cwd: string | undefined,
     ): Promise<{ project: Project | undefined; lessons: Lesson[] }> {
         const project = await this.project(conversationId, cwd);
-        const lessons = (await this.applying(project)).filter((lesson) => lesson.pending !== true);
+        const lessons = (await this.applying(project, conversationId)).filter(
+            (lesson) => lesson.pending !== true,
+        );
 
         return { project, lessons };
     }
@@ -193,20 +250,32 @@ export class Memory {
         return writer.byPi || !this.#isOwner(writer.userId);
     }
 
-    /** A 409 when a project's (or everywhere's) approved lessons are full. */
     #roomFor(
         doc: { items: Record<string, Lesson> },
         lesson: Pick<Lesson, "project" | "projectName">,
     ) {
-        const max = lesson.project === undefined ? MAX_EVERYWHERE_LESSONS : MAX_PROJECT_LESSONS;
+        const scope = scopeOf(lesson);
+        const max =
+            scope === "everywhere"
+                ? MAX_EVERYWHERE_LESSONS
+                : scope === "session"
+                  ? MAX_SESSION_LESSONS
+                  : MAX_PROJECT_LESSONS;
         const kept = Object.values(doc.items).filter(
             (item) => item.project === lesson.project && item.pending !== true,
         ).length;
 
         if (kept >= max) {
+            const whose =
+                scope === "everywhere"
+                    ? "Lessons for everywhere"
+                    : scope === "session"
+                      ? "This session's lessons"
+                      : `${lesson.projectName ?? "This project"}'s lessons`;
+
             throw new HttpError(
                 409,
-                `${lesson.project === undefined ? "Lessons for everywhere" : `${lesson.projectName ?? "This project"}'s lessons`} are full (${String(max)}): forget one first, or fold two into one.`,
+                `${whose} are full (${String(max)}): forget one first, or fold two into one.`,
             );
         }
     }
@@ -229,7 +298,7 @@ export class Memory {
     /** A lesson that applies here (or anywhere for an authorized pending review), or a 404. */
     #find(
         doc: { items: Record<string, Lesson> },
-        project: Project | undefined,
+        here: Here | undefined,
         id: string,
         allProjects = false,
     ): Lesson {
@@ -239,7 +308,7 @@ export class Memory {
 
         if (
             lesson === undefined ||
-            (!allProjects && lesson.project !== undefined && lesson.project !== project?.key)
+            (!allProjects && (here === undefined || !this.#applies(lesson, here)))
         ) {
             throw new HttpError(404, `There is no lesson ${id} here.`);
         }
@@ -289,12 +358,17 @@ export class Memory {
     ): Promise<Lesson> {
         const app = this.#app;
         const text = this.#text(request.text);
-        const project =
-            request.scope === "project" ? await this.project(conversationId, cwd) : undefined;
         const root = app.rootOf(conversationId);
         const meta = app.sessionMeta(root);
+        const project =
+            request.scope === "session"
+                ? { key: sessionKey(root), name: sessionName(meta?.title) }
+                : request.scope === "project"
+                  ? await this.project(conversationId, cwd)
+                  : undefined;
         const by = writer.userId ?? meta?.createdBy ?? "";
         const pending = this.#held(writer);
+        const session = request.scope === "session";
 
         return app.harness.commit(async (tx) => {
             const doc = await tx.doc(MemoryDoc);
@@ -308,14 +382,33 @@ export class Memory {
                 return copy(same);
             }
 
+            // A session's waiting lessons count in that session only, so they take no room from the rest.
             if (
                 pending &&
-                items.filter((item) => item.pending === true && item.by === by).length >=
-                    MAX_PENDING
+                items.filter(
+                    (item) =>
+                        item.pending === true &&
+                        item.by === by &&
+                        (session ? item.project === project?.key : sessionOf(item) === undefined),
+                ).length >= MAX_PENDING
             ) {
                 throw new HttpError(
                     409,
-                    `${String(MAX_PENDING)} lessons wait for the owner's approval already: wait for them first.`,
+                    `${String(MAX_PENDING)} lessons ${session ? "for this session " : ""}wait for the owner's approval already: wait for them first.`,
+                );
+            }
+
+            if (
+                pending &&
+                session &&
+                items.filter(
+                    (item) =>
+                        item.pending === true && item.by === by && sessionOf(item) !== undefined,
+                ).length >= MAX_PENDING_SESSIONS
+            ) {
+                throw new HttpError(
+                    409,
+                    `${String(MAX_PENDING_SESSIONS)} session lessons wait for the owner's approval already: wait for them first.`,
                 );
             }
 
@@ -354,7 +447,7 @@ export class Memory {
                 tx,
                 conversationId,
                 writer,
-                `saved a lesson for ${project === undefined ? "everywhere" : project.name}: “${snippet(text, 80)}”${pending ? ", for the owner to approve" : ""}`,
+                `saved a lesson for ${session ? "this session" : project === undefined ? "everywhere" : project.name}: “${snippet(text, 80)}”${pending ? ", for the owner to approve" : ""}`,
             );
 
             return copy(lesson);
@@ -391,7 +484,7 @@ export class Memory {
         }
 
         const text = typeof change === "object" ? this.#text(change.text) : undefined;
-        const project = pendingOnly ? undefined : await this.project(conversationId, cwd);
+        const here = pendingOnly ? undefined : await this.#here(conversationId, cwd);
         const said = (tx: Tx, line: string) => this.#activity(tx, conversationId, writer, line);
 
         return app.harness.commit(async (tx) => {
@@ -402,7 +495,7 @@ export class Memory {
                 this.#requirePendingOwner(writer, conversationId);
             }
 
-            const lesson = this.#find(doc, project, id, pendingOnly);
+            const lesson = this.#find(doc, here, id, pendingOnly);
 
             if (pendingOnly && lesson.pending !== true && lesson.proposal === undefined) {
                 throw new HttpError(409, "This lesson changed since you looked: check it again.");
@@ -571,6 +664,35 @@ export class Memory {
         }, context);
     }
 
+    /** What waits for the owner stays with the parent: the owner approves it once, there. */
+    async forked(tx: Tx, from: ConversationId, to: ConversationId, title: string): Promise<void> {
+        const doc = await tx.doc(MemoryDoc);
+        const parent = sessionKey(this.#app.rootOf(from));
+        const kept = ordered(
+            Object.values(doc.items).filter(
+                (lesson) => lesson.project === parent && lesson.pending !== true,
+            ),
+        ).slice(0, MAX_SESSION_LESSONS);
+
+        for (const lesson of kept) {
+            let id = randomUUID().slice(0, 5);
+
+            while (Object.hasOwn(doc.items, id)) {
+                id = randomUUID().slice(0, 5);
+            }
+
+            // No call key: the parent's call run again must find the parent's lesson, not this copy.
+            const { key: _key, proposal: _proposal, ...rest } = copy(lesson);
+
+            doc.items[id] = {
+                ...rest,
+                id,
+                project: sessionKey(to),
+                projectName: sessionName(title),
+            };
+        }
+    }
+
     // ─── People ────────────────────────────────────────────────────────────
 
     #person(user: User): Writer {
@@ -594,7 +716,7 @@ export class Memory {
                       (lesson) => lesson.pending === true || lesson.proposal !== undefined,
                   ),
               )
-            : await this.applying(project);
+            : await this.applying(project, id);
         const lessons = applying
             .filter((lesson) => lesson.pending !== true || owner || lesson.by === user.id)
             .map((lesson): LessonView => {
@@ -604,14 +726,19 @@ export class Memory {
                         ? undefined
                         : (from.conversationId as unknown as ConversationId);
                 const seen = source !== undefined && app.sessionMeta(source) !== undefined;
+                const scope = scopeOf(lesson);
+                const session = sessionOf(lesson);
+                const meta =
+                    session === undefined
+                        ? undefined
+                        : app.sessionMeta(session as unknown as ConversationId);
+                const label = meta === undefined ? lesson.projectName : sessionName(meta.title);
 
                 return {
                     id: lesson.id,
                     text: lesson.text,
-                    scope: lesson.project === undefined ? "everywhere" : "project",
-                    ...(pendingOnly && lesson.projectName !== undefined
-                        ? { projectName: lesson.projectName }
-                        : {}),
+                    scope,
+                    ...(pendingOnly && label !== undefined ? { projectName: label } : {}),
                     byPi: lesson.byPi,
                     by: lesson.by,
                     byName: app.config.userById(lesson.by)?.name ?? "someone",
@@ -654,6 +781,7 @@ export class Memory {
             limits: {
                 project: MAX_PROJECT_LESSONS,
                 everywhere: MAX_EVERYWHERE_LESSONS,
+                session: MAX_SESSION_LESSONS,
                 text: MAX_LESSON,
             },
         };
@@ -672,7 +800,10 @@ export class Memory {
 
         return this.add(id, app.cwdOf(id), this.#person(user), {
             text: request.text,
-            scope: request.scope === "everywhere" ? "everywhere" : "project",
+            scope:
+                request.scope === "everywhere" || request.scope === "session"
+                    ? request.scope
+                    : "project",
         });
     }
 

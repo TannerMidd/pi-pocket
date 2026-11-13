@@ -13,7 +13,7 @@ import { isThinkingLevel } from "./models.ts";
 
 /** Fresh global defaults and trust policy for this creation only. Never reload or replace the shared app reader. */
 export function globalModelSettings(cwd: string): SettingsManager {
-    const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: false });
+    const settings = piGlobalSettings(cwd);
 
     if (settings.drainErrors().length > 0) {
         throw new HttpError(
@@ -23,6 +23,22 @@ export function globalModelSettings(cwd: string): SettingsManager {
     }
 
     return settings;
+}
+
+/** The level a person last chose for a model, from Pi's global `modelThinkingLevels`, as Pi's TUI keeps it. */
+export function rememberedLevel(
+    settings: SettingsManager,
+    provider: string,
+    modelId: string,
+): ModelThinkingLevel | undefined {
+    const level = settings.getModelThinkingLevel(provider, modelId);
+
+    return isThinkingLevel(level) ? level : undefined;
+}
+
+/** Read Pi's global settings fresh, so a level set in the TUI since counts. Pocket never writes them. */
+export function piGlobalSettings(cwd: string): SettingsManager {
+    return SettingsManager.create(cwd, getAgentDir(), { projectTrusted: false });
 }
 
 /** No project setting, including defaultProjectTrust, can grant trust to itself. Unreadable trust fails closed. */
