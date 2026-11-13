@@ -66,6 +66,8 @@ export interface LinkedActivity {
     callId?: string;
     /** The `timeout` that call gave itself, in ms: it runs until then. */
     timeoutMs?: number;
+    /** It waits for a person to allow a call, or for a provider's limit: no stall, and its quiet time starts after. */
+    paused?: true;
 }
 
 /**

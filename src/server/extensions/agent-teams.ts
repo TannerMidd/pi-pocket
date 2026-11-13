@@ -126,7 +126,10 @@ function stallWatchFor(
                 const before = watch.state.checkpoint.seen ?? {};
                 const seen: Seen = {};
 
-                for (const each of busy) {
+                // One that waits for an approval or a limit is left out: its quiet time starts again after the wait.
+                const active = busy.filter((each) => each.paused !== true);
+
+                for (const each of active) {
                     const prev = Object.hasOwn(before, each.address)
                         ? before[each.address]
                         : undefined;
@@ -153,7 +156,7 @@ function stallWatchFor(
                         }
                     }
 
-                    for (const each of busy) {
+                    for (const each of active) {
                         const since = Math.max(
                             each.at ?? 0,
                             seen[each.address]!.at,

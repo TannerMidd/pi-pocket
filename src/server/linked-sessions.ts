@@ -553,12 +553,21 @@ export class LinkedSessions implements LinkedSessionsApi {
             const id = each.id as unknown as ConversationId;
             const live = await app.harness.snapshot(LiveDoc, id, context);
 
-            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall.
+            if (live?.run === undefined) {
+                continue;
+            }
+
+            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall; it is still at work.
             if (
-                live?.run === undefined ||
                 app.approvals.forConversation(id).length > 0 ||
                 app.limits.waits().some((wait) => wait.conversationId === Number(id))
             ) {
+                found.push({
+                    address: addresses.get(each.id)!,
+                    progress: "",
+                    waiting: "an approval or a limit",
+                    paused: true,
+                });
                 continue;
             }
 

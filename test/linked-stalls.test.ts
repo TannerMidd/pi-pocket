@@ -119,6 +119,28 @@ test("a linked session that another wakes after its lead's watch ended is watche
     await until(async () => (await told(id)).includes("stalled: no progress"), "the lead told");
 });
 
+test("a linked session that waits long for an approval stays watched, and its quiet time starts after", async () => {
+    const [id, target] = await team();
+    const forConversation = app.approvals.forConversation.bind(app.approvals);
+    let asking = true;
+
+    await until(() => !app.isBusy(target), "its first answer");
+    app.approvals.forConversation = (conversation) =>
+        asking && conversation === target ? [{} as never] : forConversation(conversation);
+    await app.commands.submit(target, owner(app), { text: "WAKE_AND_HANG", requestId: "wait" });
+    await until(async () => (await running(target)) !== undefined, "the stuck call");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The wait outlasts the 3 min a watch keeps with none at work.
+    offset += 4 * 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    asking = false;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 61 * 60_000;
+    await until(async () => (await told(id)).includes("stalled: no progress"), "the lead told");
+    app.approvals.forConversation = forConversation;
+    await app.commands.abort(target, owner(app));
+});
+
 test("a started session cannot stop a call of its lead", async () => {
     const [lead, child] = await team();
 
