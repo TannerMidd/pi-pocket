@@ -20,7 +20,7 @@ export function quietMessage(ms: number): string {
     const minutes = Math.round(ms / 60_000);
     const span = minutes >= 1 ? `${minutes} min` : `${Math.round(ms / 1000)} s`;
 
-    return `Command timed out: it printed nothing for ${span}, so Pi Pocket stopped it and the processes it started. The output above is all it printed. For a long job that prints little, pass timeout (seconds), or use the background tool.`;
+    return `Command timed out: it printed nothing for ${span}, so Pi Pocket stopped it and the processes it started. The output above is all it printed. For a long job that prints little, pass timeout (seconds); in a session, not a subagent, the background tool can also run it.`;
 }
 
 /** `base`, with the quiet limit `quietMs()` (read at each command; 0 or less: none) on every command it runs. */
