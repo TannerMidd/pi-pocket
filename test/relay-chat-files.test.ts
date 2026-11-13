@@ -64,6 +64,7 @@ test(
     { timeout: 5000 },
     async (t) => {
         const TOKEN = "123456:secret-telegram-token";
+        let refusePhoto = false;
         const calls: { path: string; body: string; type: string }[] = [];
         const mock = await serve(t, (request, body): Answer => {
             const url = new URL(request.url!, "http://mock");
@@ -89,6 +90,9 @@ test(
                                             { file_id: "small", file_size: 4 },
                                             { file_id: "big", file_size: 4 },
                                         ],
+                                        // A GIF is both: it is listed once.
+                                        animation: { file_id: "gif", file_name: "a.gif" },
+                                        document: { file_id: "gif", file_name: "a.gif" },
                                     },
                                 },
                             ],
@@ -120,6 +124,9 @@ test(
                 case "/file/BOT/photos/m.jpg":
                     return { status: 302, headers: { location: `${mock.url}/elsewhere` } };
                 case "/BOT/sendPhoto":
+                    return refusePhoto
+                        ? { status: 400, json: { ok: false, error_code: 400 } }
+                        : { json: { ok: true, result: { message_id: calls.length } } };
                 case "/BOT/sendDocument":
                 case "/BOT/sendMessage":
                     return { json: { ok: true, result: { message_id: calls.length } } };
@@ -134,8 +141,10 @@ test(
 
         const [event] = run.events;
 
-        assert.equal(event!.files?.length, 1);
-        assert.equal(event!.files![0]!.ref, "big");
+        assert.deepEqual(
+            event!.files?.map((file) => file.ref),
+            ["big", "gif"],
+        );
 
         const live = { ...run.context, signal: new AbortController().signal };
         const got = await telegram.fetch!(live, event!.files![0]!, 25 * 1048576);
@@ -174,6 +183,15 @@ test(
             ["sendMessage", "sendDocument"],
         );
         assert.match(calls[1]!.body, /name="document"; filename="b.pdf"/);
+
+        // A photo Telegram refuses goes once more, as a document.
+        calls.length = 0;
+        refusePhoto = true;
+        await telegram.reply!(live, { text: "here", key: "k3", to: event, files: [png] });
+        assert.deepEqual(
+            calls.map((call) => call.path.split("/").at(-1)),
+            ["sendPhoto", "sendDocument"],
+        );
     },
 );
 
@@ -359,6 +377,17 @@ test(
                 };
             }
 
+            if (url.pathname === "/_matrix/client/v1/media/download/local/gone") {
+                return { status: 404, json: { errcode: "M_NOT_FOUND" } };
+            }
+
+            if (url.pathname === "/_matrix/client/v1/media/download/local/moved") {
+                return {
+                    status: 302,
+                    headers: { location: `${mock.url.replace("127.0.0.1", "localhost")}/x` },
+                };
+            }
+
             // An older homeserver: no authenticated media yet.
             if (url.pathname.startsWith("/_matrix/client/v1/media/download/")) {
                 return { status: 404, json: { errcode: "M_UNRECOGNIZED" } };
@@ -394,6 +423,24 @@ test(
             calls
                 .filter((call) => call.path.includes("/download/"))
                 .every((call) => call.auth === "Bearer fake"),
+        );
+
+        // Media that is gone does not fall back to the old API; a redirect off the homeserver is not followed.
+        calls.length = 0;
+        await assert.rejects(
+            matrix.fetch!(live, { name: "g", ref: "mxc://local/gone" }, 100),
+            /answered 404/,
+        );
+        await assert.rejects(
+            matrix.fetch!(live, { name: "m", ref: "mxc://local/moved" }, 100),
+            /not on the Matrix homeserver/,
+        );
+        assert.deepEqual(
+            calls.map((call) => call.path),
+            [
+                "/_matrix/client/v1/media/download/local/gone",
+                "/_matrix/client/v1/media/download/local/moved",
+            ],
         );
 
         const sends = async () => {

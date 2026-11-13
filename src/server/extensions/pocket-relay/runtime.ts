@@ -8,6 +8,7 @@ import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { InboxApi } from "../../host.ts";
+import { MAX_REPLY_BYTES } from "./files.ts";
 import {
     type RelayConnector,
     type RelayContext,
@@ -1049,6 +1050,12 @@ export class Relay {
             );
         }
 
+        if (files.reduce((sum, file) => sum + file.data.byteLength, 0) > MAX_REPLY_BYTES) {
+            throw new Error(
+                `A reply sends ${mb(MAX_REPLY_BYTES)} of files in all at most: nothing was sent.`,
+            );
+        }
+
         if (
             files.length > (connector.files?.max ?? 0) ||
             files.some((file) => file.data.byteLength > (connector.files?.maxBytes ?? 0))
@@ -1145,7 +1152,18 @@ export class Relay {
                     signal: AbortSignal.any([
                         signal,
                         this.#replies.signal,
-                        AbortSignal.timeout(request.files?.length ? 120_000 : 30_000),
+                        // About 1 MB a second more for files: 100 MB has 222 seconds.
+                        AbortSignal.timeout(
+                            request.files?.length
+                                ? 120_000 +
+                                      Math.ceil(
+                                          request.files.reduce(
+                                              (sum, file) => sum + file.data.byteLength,
+                                              0,
+                                          ) / 1024,
+                                      )
+                                : 30_000,
+                        ),
                     ]),
                     log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
                 },

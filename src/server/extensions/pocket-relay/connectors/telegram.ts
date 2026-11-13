@@ -128,7 +128,8 @@ function filesOf(message: Message): RelayFile[] {
     );
     const found: [TelegramFile | undefined, string, string | undefined][] = [
         [largest, `photo-${message.message_id}.jpg`, "image/jpeg"],
-        [message.document, "document", undefined],
+        // A GIF comes as `animation` and as `document` with the same file: list it once.
+        [message.animation === undefined ? message.document : undefined, "document", undefined],
         [message.video, `video-${message.message_id}.mp4`, undefined],
         [message.animation, `animation-${message.message_id}.mp4`, undefined],
         [message.audio, `audio-${message.message_id}.mp3`, undefined],

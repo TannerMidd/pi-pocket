@@ -204,7 +204,7 @@ Return `{ id }`, the id the service gave, or nothing. A call that takes more tha
 
 ### Files
 
-A connector that sends files declares `files: { max, maxBytes }`: `max` files of `maxBytes` each at most in one reply. Pi gives paths in `relay_reply`'s `files`. The relay reads each one and gives your `reply` the bytes in `reply.files`. The relay refuses a path outside the session's folder (after it follows links), a path with a hidden part (a name that starts with `.`, except the `.relay` folder), a file in the server's data folder, and a file over the caps. A connector without `files` refuses a reply with files, and nothing is sent. With files, a reply has 120 seconds.
+A connector that sends files declares `files: { max, maxBytes }`: `max` files of `maxBytes` each at most in one reply. Pi gives paths in `relay_reply`'s `files`. The relay reads each one and gives your `reply` the bytes in `reply.files`. The relay refuses a path outside the session's folder (after it follows links), a path with a hidden part (a name that starts with `.`, except the `.relay` folder), a file in the server's data folder, and a file over the caps. A connector without `files` refuses a reply with files, and nothing is sent. One reply sends 100 MB of files in all at most. With files, a reply has 120 seconds, and about 1 second more for each MB.
 
 A connector that downloads attachments has `fetch(context, file, maxBytes)`. It returns `{ data, type }`, with `maxBytes` (25 MB) at most. Pi calls `relay_fetch` with the event id and the attachment's number. The relay writes the file to `.relay/<event>/<number>-<name>` in the session's folder, with a safe name. It refuses a file over the cap, and a web page (`text/html`) in place of a file that did not name that type. Errors go to Pi without secrets and without links. Download only from the service's own file hosts, and never send the token to a host that is not the service's.
 
@@ -216,6 +216,12 @@ A connector that downloads attachments has `fetch(context, file, maxBytes)`. It 
 | Matrix   | Yes: 10 files, 50 MB each (or the homeserver's lower limit), each as its own event      | Yes, from the homeserver only; not from an encrypted room                     |
 | HTTP     | No                                                                                      | No                                                                            |
 | RSS      | No: it only listens                                                                     | No                                                                            |
+
+Limits of the built-in kinds:
+
+- Slack and Telegram have no idempotency key. A reply with files that a restart or an error cuts off can stay partly sent (the text without a file, or some of the files). The relay does not send it again.
+- Telegram sends each file as its own message. A short text (1,024 characters or fewer) is the first file's caption. A photo that Telegram refuses goes again as a document. A local Bot API server in `--local` mode gives paths on its disk: the relay cannot fetch from it.
+- Matrix sends the text and each file as separate events, each with its own transaction id. A homeserver keeps transaction ids for a limited time (Synapse about 30 minutes): a replay after a longer stop can show the reply twice. A replay uploads the files again.
 
 `relay_reply` and `relay_fetch` are deferred tools: they are offered only in sessions that a connector delivers to. The relay adds them to the session's `modelTools` when a connector is saved, and takes them out when no connector delivers there any more. Pi gives `connector` (the name) when more than one connector delivers to the session.
 
