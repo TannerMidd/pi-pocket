@@ -400,6 +400,34 @@ export class LinkedSessions implements LinkedSessionsApi {
         });
     }
 
+    /**
+     * Call `start` with the lead of a session that starts a run, whoever woke it, when the lead takes its answers and is
+     * not archived (as `watch`): for a stall watch, with a commit to start one. Until the returned function is called.
+     */
+    onLedRun(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void {
+        return this.#app.events.on("run.started", (run) => {
+            const id = run.conversationId as unknown as ConversationId;
+            const lead = this.#app.sessionMeta(id)?.linkedFrom?.id as ConversationId | undefined;
+
+            if (
+                run.conversationId !== run.session ||
+                lead === undefined ||
+                this.#app.sessionMeta(lead)?.archived === true ||
+                !this.#leads(lead, id)
+            ) {
+                return;
+            }
+
+            return start(lead, this.#app.harness, context);
+        });
+    }
+
     /** The report of `id`'s run to `lead`, keyed by what the run left, so a run reports once. */
     async #report(
         id: ConversationId,

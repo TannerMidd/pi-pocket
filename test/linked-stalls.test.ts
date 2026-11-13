@@ -36,6 +36,14 @@ before(async () => {
             );
         }
 
+        // A stuck call that a person asks for.
+        if (role === "user" && /WAKE_AND_HANG/.test(text)) {
+            return fauxAssistantMessage(
+                [fauxToolCall("bash", { command: "exec tail -f /dev/null" })],
+                { stopReason: "toolUse" },
+            );
+        }
+
         // The linked session: a call that never ends, then, once it is stopped, an answer.
         if (JSON.stringify(request).includes("HANG_HERE") && !text.includes("[linked sessions]")) {
             if (role !== "toolResult" && stuckCalls++ === 0) {
@@ -86,4 +94,35 @@ test("a lead hears once of a stalled linked session, and the hard limit stops it
     await until(() => !app.isBusy(target), "its run on to its answer");
     assert.match(await told(), /stop 1 of 2/);
     assert.equal(((await told()).match(/\[linked sessions\]/g) ?? []).length, 1, "one message");
+});
+
+test("a linked session that another wakes after its lead's watch ended is watched again", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "START_A_TEAM");
+    const target = app.sessions().find((each) => each.linkedFrom?.id === Number(id))!
+        .id as unknown as ConversationId;
+
+    await until(() => !app.isBusy(target), "its first answer");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 4 * 60_000;
+    // None at work for 3 min: the watch ends. A person wakes it, not its lead.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await app.commands.submit(target, owner(app), { text: "WAKE_AND_HANG", requestId: "w3" });
+    await until(
+        async () =>
+            (await app.harness.snapshot(LiveDoc, target, context))?.tools?.some(
+                (t) => t.status === "running",
+            ) === true,
+        "the stuck call",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 61 * 60_000;
+    await until(
+        async () =>
+            JSON.stringify(
+                (await (await app.harness.conversation(id, context))!.context(context)).messages,
+            ).includes("stalled: no progress"),
+        "the lead told",
+    );
 });

@@ -64,6 +64,18 @@ const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as 
 /** The soft and hard limits by default, as for subagents. */
 const STALLED_MINUTES = 30;
 const STOP_MINUTES = 60;
+
+/** `linkedSessions.onLedRun` (`linked-sessions.ts`): a session a lead started starts a run. */
+type LedRuns = {
+    onLedRun?(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void;
+};
+
 /** A request id as a person's work when Pi works for one, else nobody's. */
 const requested = (person: string | undefined, key: string) =>
     person === undefined ? key : requestFor(person, key);
@@ -363,10 +375,22 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             }
 
             if (!live) {
-                state.watch = Number(await tx.createTask(StallWatch, null, BACKGROUND));
+                state.watch = Number(
+                    await tx.createTask(StallWatch, null, { ...BACKGROUND, conversationId: lead }),
+                );
             }
         }, context);
     };
+
+    // A session it leads that starts a run, whoever woke it (its own subagent's report, a sibling, a person), is
+    // watched too. A server before `onLedRun` has none.
+    const stopLedRuns = (linked as LedRuns).onLedRun?.((lead, api, context) =>
+        watching(api, lead, undefined, context),
+    );
+
+    if (stopLedRuns !== undefined) {
+        web?.onDispose(stopLedRuns);
+    }
 
     const team = defineTool({
         name: "team",
