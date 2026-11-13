@@ -808,7 +808,16 @@ export type Hook = {
      * Where each answer to a post goes, and the secret that signs it (`reply-hooks.ts`). Absent: the hook only takes
      * posts. Set by the person who made it.
      */
-    reply?: { url: string; secret: string };
+    reply?: {
+        url: string;
+        secret: string;
+        /** A post was accepted and its answer is not yet sent: the next run's answer goes out. */
+        asked?: boolean;
+        /** The answer's entry id that was last delivered: the same answer is never sent twice. */
+        sent?: string;
+        /** An answer that is being delivered, with its attempts so far and when to try next. */
+        pending?: { entry: string; text: string; attempts: number; nextAt: number };
+    };
     /** Who made it: posts go as their work, with their checks and spend limit. */
     by: string;
     createdAt: number;

@@ -692,6 +692,10 @@ export class Hooks {
             if (item !== undefined) {
                 item.count += 1;
                 item.lastAt = now;
+
+                if (item.reply !== undefined) {
+                    item.reply.asked = true;
+                }
             }
         }, context);
 
