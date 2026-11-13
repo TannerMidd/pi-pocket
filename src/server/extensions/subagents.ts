@@ -1239,7 +1239,7 @@ function stallWatchFor(
 
                             reports.push({
                                 name,
-                                text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}).${words === undefined ? "" : ` Its last words: “${words}”.`} Send it the work again, or ask the user]`,
+                                text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}). Send it the work again, or ask the user]${words === undefined ? "" : ` Its last words: “${words}”.`}`,
                             });
                         }
 
