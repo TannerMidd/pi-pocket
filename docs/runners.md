@@ -34,7 +34,7 @@ The link has its own keys, like SSH, on top of HTTPS (`src/runner/secure-link.ts
 - The runner keeps the server's key. On each connection, each side proves its key, and every message after that is encrypted and signed. A server without the key, even one with a valid certificate, is refused, and the runner stops with: "… did not prove it is the server this computer linked to."
 - `pi-pocket runner status` shows both keys' fingerprints. **Runners** shows the server's where it makes the code, and each computer's on its card. They should match.
 
-A computer linked by an older runner shows **Link again** in **Runners**. It makes a code for that computer: link it with that code, and it keeps its sessions and people. Replacing the server's data folder makes a new server key: every computer must link again.
+A computer linked by an older runner shows **Link again** in **Runners**. It makes a code for that computer: link it with that code, and it keeps its sessions and people. Linking a computer again ends every connection of its old key, also one that was still connecting. Replacing the server's data folder makes a new server key: every computer must link again.
 
 ## Commands
 

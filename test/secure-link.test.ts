@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { WebSocket as Raw, WebSocketServer } from "ws";
-import { LINK_PATH, LINK_SUBPROTOCOL, CLOSE } from "../src/runner/protocol.ts";
+import { CLOSE, LINK_PATH, LINK_PROTOCOL, LINK_SUBPROTOCOL } from "../src/runner/protocol.ts";
 import { Runner, RunnerStopped } from "../src/runner/runner.ts";
 import {
     checkLinkAnswer,
@@ -387,6 +387,65 @@ describe("each connection", () => {
             // The old key no longer opens it; the new one does.
             await assert.rejects(openLink(url, LINK_SUBPROTOCOL, first), /Closed 4003/);
             (await openLink(url, LINK_SUBPROTOCOL, second)).close();
+        } finally {
+            await setup.close();
+        }
+    });
+
+    it("a connection that proved the old key does not outlive linking the computer again", async () => {
+        const setup = await serve();
+        const first = linkInProcess(
+            (request) => setup.runners.redeem(request),
+            setup.runners.makeCode("Laptop", "owner").code,
+        );
+        const url = `${setup.address.replace("http", "ws")}${LINK_PATH}`;
+        const hello = JSON.stringify({
+            type: "hello",
+            protocol: LINK_PROTOCOL,
+            session: null,
+            received: 0,
+            version: "t",
+            tools: { git: true, gh: false, github: false },
+        });
+        const online = () => setup.runners.list()[0]?.online;
+
+        try {
+            // Nothing changes between its handshake and its hello: the link is taken.
+            const kept = await openLink(url, LINK_SUBPROTOCOL, first);
+
+            kept.send(hello);
+            await until(() => online() === true, "online");
+            kept.close();
+            await until(() => online() === false, "offline");
+
+            // The handshake is done with the old key. Then the computer is linked again, before this one says hello:
+            // linking again finds no connection of it to end.
+            const old = await openLink(url, LINK_SUBPROTOCOL, first);
+            const closed = new Promise<number>((resolve) =>
+                old.once("close", (code: number) => resolve(code)),
+            );
+            const second = linkInProcess(
+                (request) => setup.runners.redeem(request),
+                setup.runners.makeCode("", "owner", first.id).code,
+            );
+
+            old.send(hello);
+            assert.equal(
+                await Promise.race([
+                    closed,
+                    new Promise<number>((resolve) => setTimeout(() => resolve(0), 3000)),
+                ]),
+                CLOSE_IDENTITY,
+                "the old key's connection is ended, not taken",
+            );
+            assert.equal(online(), false);
+
+            // The new key's is taken.
+            const fresh = await openLink(url, LINK_SUBPROTOCOL, second);
+
+            fresh.send(hello);
+            await until(() => online() === true, "online with the new key");
+            fresh.close();
         } finally {
             await setup.close();
         }

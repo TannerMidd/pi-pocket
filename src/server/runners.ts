@@ -23,6 +23,7 @@ import {
 import { type RawData, WebSocketServer } from "ws";
 import {
     checkLinkRequest,
+    CLOSE_IDENTITY,
     fingerprint,
     isPublicKey,
     linkAnswerProof,
@@ -1777,8 +1778,11 @@ export class Runners {
 
                 if (runner === undefined) {
                     link.close(CLOSE.removed, "Removed");
+                } else if (runner.publicKey !== link.key) {
+                    // Linked again while it proved the old key: as a key that proves nothing.
+                    link.close(CLOSE_IDENTITY, "This computer was linked again");
                 } else {
-                    this.#accept(link, runner);
+                    this.#accept(link, runner, link.key);
                 }
             });
             link.on("error", () => {});
@@ -1787,7 +1791,8 @@ export class Runners {
         return true;
     }
 
-    #accept(socket: WebSocket, runner: StoredRunner): void {
+    /** `key`: the public key the runner proved in the handshake (`ServerLinkSocket`). */
+    #accept(socket: WebSocket, runner: StoredRunner, key: string | undefined): void {
         const timer = setTimeout(() => socket.close(1002, "No hello"), HELLO_MS);
 
         socket.once("close", () => clearTimeout(timer));
@@ -1815,8 +1820,18 @@ export class Runners {
             }
 
             // Still here: removed while it was saying hello.
-            if (this.#config.runnerById(runner.id) === undefined) {
+            const now = this.#config.runnerById(runner.id);
+
+            if (now === undefined) {
                 socket.close(CLOSE.removed, "Removed");
+
+                return;
+            }
+
+            // Linked again while it was saying hello: linking again ends the connections it finds (`relinked`), and
+            // this one was not yet one. The key it proved is the old one, which opens nothing now.
+            if (now.publicKey !== key) {
+                socket.close(CLOSE_IDENTITY, "This computer was linked again");
 
                 return;
             }

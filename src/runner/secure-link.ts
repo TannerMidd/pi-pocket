@@ -629,6 +629,11 @@ export type ServerHandshake = {
 export class ServerLinkSocket extends LinkSocket {
     /** The computer this link is from, once proven. */
     id: string | undefined;
+    /**
+     * The public key it proved, once proven. The key is read when the handshake starts, so the computer can be linked
+     * again, with a new key, before the link is used: who takes the link compares this with the key kept now.
+     */
+    key: string | undefined;
 
     constructor(ws: WebSocket, handshake: ServerHandshake) {
         super(ws);
@@ -721,6 +726,7 @@ export class ServerLinkSocket extends LinkSocket {
                 }
 
                 this.id = hello.id as string;
+                this.key = runnerKey;
                 this.start(keys(shared, said, "server"));
             });
         });
