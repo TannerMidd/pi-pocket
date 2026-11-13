@@ -1,8 +1,9 @@
 /** Keep working toward an objective that a separate evaluator checks after each turn. */
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { defineExtension, GenerationTask, hook, section } from "@earendil-works/pi-durable";
+import { HttpError } from "../errors.ts";
 import type { GoalEvaluationPolicy, GoalVerdict } from "../goal-evaluator.ts";
-import type { PocketHost } from "../host.ts";
+import type { ConversationWebRequest, ExtensionWeb, PocketHost } from "../host.ts";
 
 const MAX_OUTPUT_CHARS = 2048;
 const MAX_REASON_CHARS = 400;
@@ -75,7 +76,52 @@ function readVerdict(
     return { verdict, reason: cleanReason };
 }
 
-export default function createObjectiveGoal(host: PocketHost) {
+export default function createObjectiveGoal(host: PocketHost, web?: ExtensionWeb) {
+    // A live reload can precede the server restart that supplies this temporary UI bridge.
+    if (web !== undefined && typeof host.objectiveGoals.view === "function") {
+        const handle = (change: boolean) => async (request: ConversationWebRequest) => {
+            const id = request.conversation.id;
+
+            try {
+                if (change) {
+                    const { args, requestId, revision } = request.body;
+
+                    if (
+                        typeof args !== "string" ||
+                        typeof requestId !== "string" ||
+                        !/^[a-zA-Z0-9_-]{1,64}$/.test(requestId) ||
+                        (revision !== null && typeof revision !== "string")
+                    ) {
+                        throw web.error(
+                            400,
+                            "Goal arguments, revision, and a valid requestId are required.",
+                        );
+                    }
+
+                    await host.objectiveGoals.command(id, request.user, args, requestId, revision);
+                }
+
+                return await host.objectiveGoals.view(id, request.user);
+            } catch (error) {
+                if (error instanceof HttpError) {
+                    throw web.error(error.status, error.message);
+                }
+
+                throw error;
+            }
+        };
+
+        web.conversationRoute("GET", "goals/:source", handle(false), {
+            conversation: "source",
+            access: "view",
+        });
+        web.conversationRoute("POST", "goals/:source", handle(true), {
+            conversation: "source",
+            access: "steer",
+        });
+        web.client("objective-goal", { access: "view" });
+    }
+
     const policy: GoalEvaluationPolicy = {
         instructions: SYSTEM_PROMPT,
         emptyTurnLimit: 3,

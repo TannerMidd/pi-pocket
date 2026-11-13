@@ -1,0 +1,256 @@
+.x-goal-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 4px 0;
+    padding: 4px 6px 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--card);
+    color: var(--text);
+    flex-shrink: 0;
+}
+
+.x-goal-overview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding: 3px 0;
+    text-align: left;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+
+.x-goal-overview > svg,
+.x-goal-detail-heading > svg {
+    flex-shrink: 0;
+    color: var(--accent);
+}
+
+.x-goal-overview-text {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.x-goal-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.x-goal-status {
+    color: var(--muted);
+    font-weight: 400;
+}
+
+.x-goal-warning {
+    color: var(--warn);
+}
+
+.x-goal-objective {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.x-goal-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.x-goal-bar[data-state="completed"] .x-goal-status,
+.x-goal-detail-heading[data-state="completed"] {
+    color: var(--ok);
+}
+
+.x-goal-bar:is([data-state="blocked"], [data-state="budget"]) .x-goal-status,
+.x-goal-detail-heading:is([data-state="blocked"], [data-state="budget"]) {
+    color: var(--warn);
+}
+
+.x-goal-sheet {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.x-goal-sheet p,
+.x-goal-sheet dl {
+    margin: 0;
+}
+
+.x-goal-sheet form {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.x-goal-sheet label {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.x-goal-sheet :is(textarea, input) {
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+}
+
+.x-goal-sheet textarea {
+    min-height: 120px;
+    max-height: 40vh;
+    resize: vertical;
+}
+
+.x-goal-detail-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.x-goal-full-objective {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.x-goal-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+.x-goal-metrics dt {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.x-goal-metrics dd {
+    margin: 4px 0 0;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.x-goal-budget-progress {
+    width: 100%;
+    height: 5px;
+    accent-color: var(--accent);
+}
+
+.x-goal-result {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--card);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.x-goal-actions,
+.x-goal-field-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.x-goal-field-row input {
+    flex: 1 1 150px;
+}
+
+.x-goal-sheet .button {
+    min-height: 44px;
+}
+
+.x-goal-settings {
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+}
+
+.x-goal-settings summary {
+    display: list-item;
+    min-height: 44px;
+    align-content: center;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.x-goal-settings form + form {
+    margin-top: 16px;
+}
+
+.x-goal-delete {
+    justify-self: start;
+}
+
+.x-goal-delete-confirm {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--err);
+    border-radius: 12px;
+}
+
+.x-goal-sheet :is(.error-box, .x-goal-delete-confirm) {
+    overflow-wrap: anywhere;
+}
+
+.x-goal-sheet .error-box .button {
+    margin: 8px 0 0 8px;
+}
+
+.x-goal-bar :is(button:focus-visible),
+.x-goal-sheet summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.x-goal-bar button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.dock[data-compact] .x-goal-bar .x-goal-heading strong {
+    display: none;
+}
+
+.dock[data-compact] .x-goal-bar .x-goal-overview-text {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dock[data-compact] .x-goal-bar .x-goal-heading {
+    flex-shrink: 0;
+}
+
+@media (max-width: 420px) {
+    .x-goal-toggle {
+        padding-inline: 8px;
+    }
+}

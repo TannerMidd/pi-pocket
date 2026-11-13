@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
-import { BackgroundDoc, GoalDoc, PlanDoc, SubagentsDoc } from "./docs.ts";
+import { BackgroundDoc, GoalDoc, PlanDoc, SubagentsDoc, TurnsDoc } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { evaluateGoal, type GoalEvaluation, type GoalEvaluationPolicy } from "./goal-evaluator.ts";
 import { resolveModel } from "./models.ts";
@@ -222,13 +222,67 @@ export class ObjectiveGoals {
         return { message: statusText(doc?.goal, used(ledger), app.now()) };
     }
 
+    /** A small UI projection for the extension, until the workflow moves out of core. */
+    async view(id: ConversationId, actor: Pick<User, "id">) {
+        const app = this.#app;
+        const user = app.config.userById(actor.id);
+
+        if (user === undefined) {
+            throw new HttpError(401, "Sign in again to view this goal.");
+        }
+
+        app.requireSee(user, id);
+
+        if (app.sessionMeta(id) === undefined || app.pip.ownerOf(id) !== undefined) {
+            throw new HttpError(400, "Only ordinary sessions can have a goal.");
+        }
+
+        const [doc, ledger, turns] = await Promise.all([
+            app.harness.snapshot(ObjectiveGoalDoc, id, context),
+            app.harness.snapshot(UsageDoc, id, context),
+            app.harness.snapshot(TurnsDoc, app.rootOf(id), context),
+        ]);
+        const goal = doc?.goal;
+
+        return {
+            canSteer: user.role !== "viewer" && (turns?.on !== true || turns.driver === user.id),
+            goal:
+                goal === undefined
+                    ? null
+                    : {
+                          revision: goal.revision,
+                          objective: goal.objective,
+                          status: goal.status,
+                          budget: goal.budget,
+                          tokens: usedByGoal(goal, used(ledger)),
+                          turns: goal.turns,
+                          activeMs:
+                              goal.activeMs +
+                              (goal.activeSince === undefined
+                                  ? 0
+                                  : Math.max(0, app.now() - goal.activeSince)),
+                          evaluator:
+                              goal.evaluatorModel === undefined
+                                  ? null
+                                  : `${goal.evaluatorModel.provider}/${goal.evaluatorModel.modelId}`,
+                          reason: goal.reason ?? null,
+                      },
+        };
+    }
+
     async command(
         id: ConversationId,
-        user: User,
+        actor: Pick<User, "id">,
         raw: string,
         requestId: string,
+        expectedRevision?: string | null,
     ): Promise<{ message: string }> {
         const app = this.#app;
+        const user = app.config.userById(actor.id);
+
+        if (user === undefined) {
+            throw new HttpError(401, "Sign in again to change this goal.");
+        }
 
         app.requireSee(user, id);
 
@@ -258,6 +312,13 @@ export class ObjectiveGoals {
 
             if (doc.lastRequest === request) {
                 return doc.pending === undefined ? undefined : { ...doc.pending };
+            }
+
+            if (expectedRevision !== undefined && (goal?.revision ?? null) !== expectedRevision) {
+                throw new HttpError(
+                    409,
+                    "The goal changed in another tab. Review the latest goal and try again.",
+                );
             }
 
             delete doc.pending;
