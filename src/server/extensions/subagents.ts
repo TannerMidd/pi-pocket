@@ -1223,7 +1223,7 @@ function stallWatchFor(
                             });
                             reports.push({
                                 name,
-                                text: `${REPORT_PREFIX}${name}: Pi Pocket stopped ${on.what}, which made no progress for ${span(quiet)} (${which}). The subagent goes on with that call's partial output; its report comes by itself]`,
+                                text: `${REPORT_PREFIX}${name} stalled: Pi Pocket stopped ${on.what}, which made no progress for ${span(quiet)} (${which}). The subagent goes on with that call's partial output; its report comes by itself]`,
                             });
                         } else {
                             record.stoppedBy = "deadline";

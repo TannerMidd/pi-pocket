@@ -76,9 +76,9 @@ import {
 } from "./ui.js";
 import { LessonCall, memoryAvailable } from "./sheets/memory.js";
 
-const REPORT = /^\[subagent (\S+) (answered|failed)([^\]]*)\]\s?([\s\S]*)$/;
+const REPORT = /^\[subagent (\S+) (answered|failed|stopped|stalled)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
-const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed))/;
+const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed|stopped|stalled))/;
 
 /**
  * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
@@ -337,14 +337,17 @@ function CodedText({ text }) {
 function Report({ report, view, fresh }) {
     const [, name, verb, after, text] = report;
     const child = view.subagents.find((agent) => agent.name === name);
-    // A failed one says why: "failed: stopped before it answered", "failed: Bad request".
-    const why = verb === "failed" ? after.replace(/^:\s*/, "") : "";
+    // One that did not answer says why: "failed: Bad request", "stalled again: no progress for 1 h…". Its words
+    // before the colon stay in its head ("stopped by Pi Pocket").
+    const said = verb === "answered" ? undefined : /^([^:]*):\s*([\s\S]*)$/.exec(after);
+    const why = said?.[2] ?? "";
+    const more = said?.[1]?.trim() ?? "";
 
     return html`<div
-        class=${`report ${verb === "failed" ? "failed" : ""} ${fresh ? "enter" : ""}`}
+        class=${`report ${verb === "answered" ? "" : verb} ${fresh ? "enter" : ""}`}
     >
         <div class="report-head">
-            <span class="report-name">${name}</span> ${verb}
+            <span class="report-name">${name}</span> ${verb}${more && ` ${more}`}
             ${
                 child &&
                 html`<button class="link" onClick=${() => openSubagent(child.conversationId)}>

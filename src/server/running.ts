@@ -159,6 +159,10 @@ async function describeTask(
             return { label: "compacting the context" };
         case "pocket.subagent-reporter":
             return { label: "waiting for a subagent's answer" };
+        case "pocket.subagent-stall-watch":
+            return { label: "watching subagents for work with no progress" };
+        case "pocket.linked-stall-watch":
+            return { label: "watching linked sessions for work with no progress" };
         case "pocket.follow-failure":
             return { label: "waiting for a failed subagent to answer a message" };
 
