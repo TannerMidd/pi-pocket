@@ -653,7 +653,13 @@ describe("runner link", () => {
             });
 
             wrong.start();
-            await assert.rejects(wrong.finished, RunnerStopped);
+            // The server signs its refusal of a key that is not the one it keeps, so the runner knows to stop.
+            await assert.rejects(wrong.finished, (error: Error) => {
+                assert.ok(error instanceof RunnerStopped);
+                assert.match(error.message, /linked this computer again with a new key/);
+
+                return true;
+            });
 
             const runner = new Runner({
                 link: { server: setup.address, ...linked },

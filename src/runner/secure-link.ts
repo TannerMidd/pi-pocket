@@ -13,7 +13,8 @@
  * by eye, as SSH's do.
  *
  * Each connection. Over the WebSocket, before anything else:
- *   1. runner → server  `{ type: "hs1", id, eph, nonce }`           its computer id, a new X25519 key, 32 random bytes
+ *   1. runner → server  `{ type: "hs1", id, key, eph, nonce }`      its computer id and public key, a new X25519 key,
+ *                                                                    32 random bytes
  *   2. server → runner  `{ type: "hs2", eph, nonce, sig }`          its new X25519 key, 32 random bytes, and its
  *                                                                    identity's signature of the transcript
  *   3. runner → server  `{ type: "hs3", sig }`                      the runner identity's signature of the transcript
@@ -21,6 +22,11 @@
  * each direction from the X25519 secret and the transcript. Every message after that is one binary WebSocket message:
  * the sealed `[kind byte][payload]`, its nonce the message's number in its direction, so a message dropped, replayed,
  * or moved breaks the link.
+ *
+ * Stopping for good. A runner stops for good only when the server it linked to says so, with proof: inside the sealed
+ * link (`protocol.ts` `Bye.stop`), or, when no link can be sealed because its computer is gone or has a new key, with
+ * `{ type: "refused", why, sig }` in place of step 2, signed by the server's identity over this handshake's own values
+ * (`refusal`). An HTTP answer, a close code, or an answer that proves nothing stops no runner: it tries again.
  */
 import type { LookupFunction } from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
@@ -48,7 +54,7 @@ const VERSION = "pi-pocket-link-2";
 
 /** How long the handshake may take before the link is dropped. */
 export const HANDSHAKE_MS = 15_000;
-/** WebSocket close code: the other side did not prove its key. The runner stops; the server just drops it. */
+/** WebSocket close code: the other side did not prove its key. For logs and tests: a code stops no runner. */
 export const CLOSE_IDENTITY = 4003;
 
 /** Ready states, as the `ws` package numbers them. */
@@ -343,6 +349,32 @@ function transcript(parts: {
     ].join("\0");
 }
 
+/** Why the server refuses a runner for good before the link is sealed: its computer is gone, or has a new key. */
+export type Refusal = "removed" | "relinked";
+
+/**
+ * What the server signs to refuse a runner in the handshake (`{ type: "refused", why, sig }`, in place of step 2), so
+ * the runner knows the word is its server's and stops for good. It names this handshake's own id, key, and random
+ * values: a refusal made for another computer, another key, or another connection proves nothing. The server signs
+ * "removed" only for an id it does not know, and "relinked" only for a key that is not the one it keeps.
+ */
+function refusal(parts: {
+    why: Refusal;
+    id: string;
+    runnerEph: string;
+    runnerNonce: string;
+    runnerKey: string;
+}): string {
+    return [
+        `${VERSION}-refused`,
+        parts.why,
+        parts.id,
+        parts.runnerEph,
+        parts.runnerNonce,
+        parts.runnerKey,
+    ].join("\0");
+}
+
 function newEphemeral(): { publicKey: string; privateKey: KeyObject } {
     const pair = generateKeyPairSync("x25519");
 
@@ -373,8 +405,11 @@ function toBuffer(data: WebSocket.RawData): Buffer {
           : Buffer.from(data);
 }
 
+/** A value of the handshake. Never with the byte that parts what is signed (`transcript`, `refusal`). */
 function text(value: unknown): value is string {
-    return typeof value === "string" && value.length > 0 && value.length < 200;
+    return (
+        typeof value === "string" && value.length > 0 && value.length < 200 && !value.includes("\0")
+    );
 }
 
 /** Kinds of message inside the link, as the first byte of each sealed one. */
@@ -493,12 +528,16 @@ export class LinkSocket extends EventEmitter {
     }
 }
 
-/** The runner's end: proves its key, and checks the server's against the pinned one. */
+/**
+ * The runner's end: proves its key, and checks the server's against the pinned one. `events.refused`: the server
+ * proved its key and refuses this computer for good (`refusal`). `events.unproven`: what answered did not prove the
+ * pinned key, so nothing it says counts. Either way the link closes.
+ */
 export class RunnerLinkSocket extends LinkSocket {
     constructor(
         ws: WebSocket,
         link: { id: string; key: string; serverKey: string },
-        onIdentity: () => void,
+        events: { unproven?: () => void; refused?: (why: Refusal) => void } = {},
     ) {
         super(ws);
 
@@ -522,20 +561,75 @@ export class RunnerLinkSocket extends LinkSocket {
                 return;
             }
 
-            ws.send(JSON.stringify({ type: "hs1", id: link.id, eph: eph.publicKey, nonce }));
+            ws.send(
+                JSON.stringify({
+                    type: "hs1",
+                    id: link.id,
+                    key: identity.publicKey,
+                    eph: eph.publicKey,
+                    nonce,
+                }),
+            );
         });
         ws.once("close", () => clearTimeout(timer));
         ws.once("message", (data, binary) => {
             const answer = parse(data, binary);
 
+            if (identity === undefined) {
+                clearTimeout(timer);
+                this.fail("This computer's key is not valid");
+
+                return;
+            }
+
+            if (answer?.type === "refused") {
+                const why =
+                    answer.why === "removed" || answer.why === "relinked" ? answer.why : undefined;
+                let signed = false;
+
+                try {
+                    signed =
+                        why !== undefined &&
+                        text(answer.sig) &&
+                        verify(
+                            null,
+                            Buffer.from(
+                                refusal({
+                                    why,
+                                    id: link.id,
+                                    runnerEph: eph.publicKey,
+                                    runnerNonce: nonce,
+                                    runnerKey: identity.publicKey,
+                                }),
+                            ),
+                            publicKeyOf(link.serverKey, "Ed25519"),
+                            Buffer.from(answer.sig, "base64url"),
+                        );
+                } catch {
+                    signed = false;
+                }
+
+                clearTimeout(timer);
+
+                if (signed && why !== undefined) {
+                    events.refused?.(why);
+                } else {
+                    events.unproven?.();
+                }
+
+                this.fail("Refused");
+
+                return;
+            }
+
             if (
-                identity === undefined ||
                 answer?.type !== "hs2" ||
                 !text(answer.eph) ||
                 !text(answer.nonce) ||
                 !text(answer.sig)
             ) {
                 clearTimeout(timer);
+                events.unproven?.();
                 this.fail("The server did not answer the handshake");
 
                 return;
@@ -571,7 +665,7 @@ export class RunnerLinkSocket extends LinkSocket {
             clearTimeout(timer);
 
             if (!proven || shared === undefined) {
-                onIdentity();
+                events.unproven?.();
                 this.fail("The server did not prove its key", CLOSE_IDENTITY);
 
                 return;
@@ -603,7 +697,7 @@ export function openLink(
     return import("ws").then(
         ({ WebSocket: Raw }) =>
             new Promise((resolve, reject) => {
-                const socket = new RunnerLinkSocket(new Raw(url, protocol), link, () => {});
+                const socket = new RunnerLinkSocket(new Raw(url, protocol), link);
 
                 socket.once("open", () => resolve(socket));
                 socket.once("close", (code: number, reason: Buffer) =>
@@ -618,7 +712,7 @@ export function openLink(
 export type ServerHandshake = {
     identity: Identity;
     runnerKey: (id: string) => string | undefined;
-    /** No computer with this id (removed): the runner is told so, and stops. */
+    /** The close code for no computer with this id (removed). The signed refusal before it is what stops the runner. */
     unknown: number;
 };
 
@@ -648,6 +742,7 @@ export class ServerLinkSocket extends LinkSocket {
             if (
                 hello?.type !== "hs1" ||
                 !text(hello.id) ||
+                !text(hello.key) ||
                 !text(hello.eph) ||
                 !text(hello.nonce)
             ) {
@@ -659,9 +754,37 @@ export class ServerLinkSocket extends LinkSocket {
 
             const runnerKey = handshake.runnerKey(hello.id);
 
-            if (runnerKey === undefined) {
+            // No such computer, or it has another key now (linked again): refused with the server's signature, so the
+            // runner knows it is its server that says so, and stops. A close code alone would stop nothing.
+            if (runnerKey !== hello.key) {
+                const why: Refusal = runnerKey === undefined ? "removed" : "relinked";
+
                 clearTimeout(timer);
-                this.fail("Removed", handshake.unknown);
+                this.raw.send(
+                    JSON.stringify({
+                        type: "refused",
+                        why,
+                        sig: sign(
+                            null,
+                            Buffer.from(
+                                refusal({
+                                    why,
+                                    id: hello.id,
+                                    runnerEph: hello.eph,
+                                    runnerNonce: hello.nonce,
+                                    runnerKey: hello.key,
+                                }),
+                            ),
+                            identity,
+                        ).toString("base64url"),
+                    }),
+                );
+
+                if (why === "removed") {
+                    this.fail("Removed", handshake.unknown);
+                } else {
+                    this.fail("This computer was linked again", CLOSE_IDENTITY);
+                }
 
                 return;
             }

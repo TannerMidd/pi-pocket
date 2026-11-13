@@ -34,15 +34,27 @@ export const LINK_PATH = "/runner/socket";
 /** Where a runner exchanges a one-time code for its key, on the server. */
 export const LINK_CODE_PATH = "/runner/link";
 
-/** WebSocket close codes with a meaning for the runner. */
+/**
+ * WebSocket close codes the server ends a link with, for logs and tests. A code stops no runner: anyone on the path can
+ * send one. A runner stops for good only on what the server proves: `Bye.stop` inside the sealed link, or a signed
+ * refusal in the handshake (`secure-link.ts`).
+ */
 export const CLOSE = {
-    /** Another connection of the same computer took over: this runner stops. */
+    /** Another connection of the same computer took over. */
     replaced: 4000,
-    /** The computer was removed from the server: its key no longer works, and the runner stops. */
+    /** The computer was removed from the server: its key no longer works. */
     removed: 4001,
-    /** The two sides speak different link protocols: the runner stops. */
+    /** The two sides speak different link protocols. */
     protocol: 4002,
 } as const;
+
+/**
+ * Why the server sends a runner away for good: its computer was removed, another runner took its link, the two sides
+ * speak different link protocols, or its computer was linked again with a new key.
+ */
+export type Stop = "removed" | "replaced" | "protocol" | "relinked";
+
+const STOPS: ReadonlySet<unknown> = new Set<Stop>(["removed", "replaced", "protocol", "relinked"]);
 
 /** The largest WebSocket message either side accepts: one pi-env frame (16 MiB) and some room. */
 export const MAX_MESSAGE = 17 * 1024 * 1024;
@@ -201,8 +213,11 @@ export type Welcome = {
 /** Either side: bytes of the other side's stream received so far, so the other side can drop them. */
 export type Ack = { type: "ack"; received: number };
 
-/** Either side, before it closes the link on purpose: why. */
-export type Bye = { type: "bye"; reason: string };
+/**
+ * Either side, before it closes the link on purpose: why. `stop`, from the server alone: the runner stops for good.
+ * It is sealed with the link's keys, so only the server this computer linked to can say it.
+ */
+export type Bye = { type: "bye"; reason: string; stop?: Stop };
 
 /** Server to runner: open a TCP connection to `host`:`port` on the computer, as stream `id`. */
 export type NetOpen = {
@@ -546,7 +561,10 @@ export function parseControl(text: string): ControlMessage | undefined {
         case "ack":
             return count("received") ? (message as Ack) : undefined;
         case "bye":
-            return typeof message.reason === "string" ? (message as Bye) : undefined;
+            return typeof message.reason === "string" &&
+                (message.stop === undefined || STOPS.has(message.stop))
+                ? (message as Bye)
+                : undefined;
         case "confirm":
             return typeof message.id === "string" &&
                 (message.kind === "new" || message.kind === "fork" || message.kind === "move") &&

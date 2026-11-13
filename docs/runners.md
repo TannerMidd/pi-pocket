@@ -31,7 +31,8 @@ The link has its own keys, like SSH, on top of HTTPS (`src/runner/secure-link.ts
 - The server has one key, made once and kept in its data folder. It does not change when the website certificate renews.
 - Each computer makes its own key when it links. Its private key stays on that computer; the server keeps only its public key.
 - The link code never travels. The runner proves it knows the code, and the server proves it knows the code too, so someone in the middle at link time cannot put in their own key.
-- The runner keeps the server's key. On each connection, each side proves its key, and every message after that is encrypted and signed. A server without the key, even one with a valid certificate, is refused, and the runner stops with: "… did not prove it is the server this computer linked to."
+- The runner keeps the server's key. On each connection, each side proves its key, and every message after that is encrypted and signed. A server without the key, even one with a valid certificate, is refused: the runner sends it nothing, says once "… did not prove it is the server this computer linked to", and tries again.
+- Only the server the computer linked to can stop its runner for good, and it proves that each time: inside the encrypted link, or with a signed refusal when the computer was removed or linked again. An HTTP error, a close code, or another program at the server's address never stops a runner. It tries again.
 - `pi-pocket runner status` shows both keys' fingerprints. **Runners** shows the server's where it makes the code, and each computer's on its card. They should match.
 
 A computer linked by an older runner shows **Link again** in **Runners**. It makes a code for that computer: link it with that code, and it keeps its sessions and people. Linking a computer again ends every connection of its old key, also one that was still connecting. Replacing the server's data folder makes a new server key: every computer must link again.
@@ -286,7 +287,7 @@ The quiet limit of commands (a bash command that prints nothing for 15 minutes i
 
 Panels that show the computer's files (Files, Changes, the folder picker) say that the computer is offline instead of waiting. A new session, a fork, or a move to another folder on an offline computer cannot start: the computer must answer whether it allows the folder.
 
-Removing a computer in **Runners** stops its runner and cancels its key. A runner that the server removed exits with code 3, except in macOS service mode, where it exits with code 0 so launchd does not restart it. The desktop app does not restart it.
+Removing a computer in **Runners** stops its runner and cancels its key. A runner that the server removed exits with code 3, except in macOS service mode, where it exits with code 0 so launchd does not restart it. The desktop app does not restart it. The runner stops the same way when its computer is linked again with a new key, when another runner takes its link, or when the two sides speak different link protocols.
 
 ## Later
 

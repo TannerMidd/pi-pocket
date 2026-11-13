@@ -24,7 +24,7 @@ import { privateFolders } from "./private-folders.ts";
 import { join } from "node:path";
 import { localDaemon } from "@earendil-works/pi-env";
 import { WebSocket as RawWebSocket } from "ws";
-import { CLOSE_IDENTITY, RunnerLinkSocket } from "./secure-link.ts";
+import { RunnerLinkSocket } from "./secure-link.ts";
 import { checkTransport, pinnedLookup, refusal, type Transport } from "./transport.ts";
 
 /** The link to the server, sealed with the link's keys (`secure-link.ts`). */
@@ -45,6 +45,7 @@ import { permissionId, RequestGate, sessionScope } from "./request-gate.ts";
 import { Tasks } from "./tasks.ts";
 import type {
     RunnerTools,
+    Stop,
     TaskRequest,
     TaskResult,
     PiSessionsRequest,
@@ -52,7 +53,6 @@ import type {
     RunnerPiSession,
 } from "./protocol.ts";
 import {
-    CLOSE,
     COMPANION_SUFFIX,
     type Confirm,
     type Confirmed,
@@ -195,7 +195,10 @@ const WITHDRAWN = "Withdrawn by the server.";
 /** What a question here came to; `method` says how an allowed one was approved. */
 type Approval = { allow: boolean; reason?: string; method?: ApprovalMethod; withdrawn?: boolean };
 
-/** Why a runner stopped for good: the server removed it, another one took its place, or the protocols differ. */
+/**
+ * Why a runner stopped for good: the server removed it, linked its computer again with a new key, gave its link to
+ * another runner, or speaks another protocol. Only its own server can say so (`#sentAway`).
+ */
 export class RunnerStopped extends Error {}
 
 /** The pi-env daemon on this computer: started with a fresh token, its output read after its sync line. */
@@ -363,6 +366,8 @@ export class Runner {
     #retryTimer: NodeJS.Timeout | undefined;
     /** Why the last connect was refused before it began (`transport.ts`), so it is said once. */
     #refused: string | undefined;
+    /** Why the last connection failed before the server welcomed it (`#trouble`), so it is said once. */
+    #troubled: string | undefined;
     /** The network streams of the current connection. */
     #streams: StreamLink | undefined;
     /** Network connections opened so far, for tests. */
@@ -568,6 +573,10 @@ export class Runner {
 
     /** Stop for good, with why. */
     #fail(message: string): void {
+        if (this.#stopping) {
+            return;
+        }
+
         this.#stopping = true;
         clearTimeout(this.#retryTimer);
         clearInterval(this.#stateTimer);
@@ -712,8 +721,10 @@ export class Runner {
         }
 
         const link = this.#options.link;
-        // Sealed with this computer's key and the server's pinned one (`secure-link.ts`): a server that cannot prove
-        // its key is not this computer's server, and the runner stops.
+        let unproven = false;
+        // Sealed with this computer's key and the server's pinned one (`secure-link.ts`). What cannot prove that key is
+        // not this computer's server: nothing is sent to it, nothing it says counts, and the runner tries again. Only
+        // the proven server sends this runner away for good: here with a signed refusal, later with a sealed `bye`.
         const ws = new RunnerLinkSocket(
             new RawWebSocket(this.#url, LINK_SUBPROTOCOL, {
                 maxPayload: MAX_MESSAGE + 64,
@@ -722,7 +733,10 @@ export class Runner {
                 ...(lookup === undefined ? {} : { lookup }),
             }),
             link,
-            () => {},
+            {
+                unproven: () => (unproven = true),
+                refused: (why) => this.#fail(this.#sentAway(why, "")),
+            },
         );
 
         this.#socket = ws;
@@ -761,17 +775,12 @@ export class Runner {
         }, PING_MS);
 
         pinger.unref();
+        // An HTTP answer in place of the link, whatever its status: a proxy, another program at this address, or a
+        // server that is starting. None of them is this computer's server proving its key, so none stops the runner.
         ws.on("unexpected-response", (_request, response) => {
-            if (response.statusCode === 401) {
-                this.#fail(
-                    `${link.server} no longer accepts this computer's key. To link again, run pi-pocket runner and choose Link again.`,
-                );
-            } else {
-                this.#log(
-                    `${link.server} returned HTTP ${String(response.statusCode)}. Retrying automatically. If this continues, check that Pi Pocket is running at this address.`,
-                );
-            }
-
+            this.#trouble(
+                `${link.server} returned HTTP ${String(response.statusCode)}. Retrying automatically. If this continues, check that Pi Pocket is running at this address.`,
+            );
             ws.terminate();
         });
         ws.on("open", () => {
@@ -832,7 +841,8 @@ export class Runner {
                 );
             }
         });
-        ws.on("close", (code, reason) => {
+        // A close code stops nothing: anyone on the path can send one. The runner tries again.
+        ws.on("close", (_code, reason) => {
             clearInterval(pinger);
             // Network streams do not survive a drop: the browser on the server opens them again.
             streams.dropAll();
@@ -860,36 +870,10 @@ export class Runner {
 
             const why = reason.toString("utf8");
 
-            if (code === CLOSE_IDENTITY) {
-                this.#fail(
-                    `${link.server} did not prove it is the server this computer linked to. Someone may be in the middle. If you replaced the server's data folder, link this computer again with a new code from Menu > Runners.`,
+            if (unproven) {
+                this.#trouble(
+                    `${link.server} did not prove it is the server this computer linked to, so nothing was sent to it. Someone may be in the middle, or another server answers at this address. Trying again. If you replaced the server's data folder, link this computer again with a new code from Menu > Runners.`,
                 );
-
-                return;
-            }
-
-            if (code === CLOSE.removed) {
-                this.#fail(
-                    `${link.server} removed this computer. To link again, run pi-pocket runner and choose Link again.`,
-                );
-
-                return;
-            }
-
-            if (code === CLOSE.replaced) {
-                this.#fail(
-                    "Another runner is using this computer's link. This runner has stopped. Stop the other runner before you start this one again.",
-                );
-
-                return;
-            }
-
-            if (code === CLOSE.protocol) {
-                this.#fail(
-                    `${why}. Update Pi Pocket on this computer and the server, then start the runner again.`,
-                );
-
-                return;
             }
 
             if (welcomed) {
@@ -914,6 +898,7 @@ export class Runner {
             // Runners shows this computer's settings, folders, and sessions as soon as it is welcomed.
             this.#lastState = "";
             queueMicrotask(() => void this.#state());
+            this.#troubled = undefined;
 
             if (message.resume) {
                 const resent =
@@ -1032,12 +1017,45 @@ export class Runner {
 
             this.#streams?.message(message);
         } else if (message?.type === "bye") {
-            this.#log(`Server message: ${message.reason}`);
+            // Sealed with the link's keys: only this computer's server can send its runner away for good.
+            if (message.stop === undefined) {
+                this.#log(`Server message: ${message.reason}`);
+            } else {
+                this.#fail(this.#sentAway(message.stop, message.reason));
+                ws.close(1000, "Stopped");
+            }
         } else {
             ws.close(1002, "Unexpected message");
         }
 
         return welcomed;
+    }
+
+    /** What to say when this computer's server sent the runner away for good (`stop`), with the server's `reason`. */
+    #sentAway(stop: Stop, reason: string): string {
+        const server = this.#options.link.server;
+
+        switch (stop) {
+            case "removed":
+                return `${server} removed this computer. To link again, run pi-pocket runner and choose Link again.`;
+            case "relinked":
+                return `${server} linked this computer again with a new key, so this runner's key no longer works. Run pi-pocket runner and choose Link again, with a new code from Menu > Runners.`;
+            case "replaced":
+                return "Another runner is using this computer's link. This runner has stopped. Stop the other runner before you start this one again.";
+            case "protocol":
+                return `${reason === "" ? "The server speaks another link protocol" : reason}. Update Pi Pocket on this computer and the server, then start the runner again.`;
+        }
+    }
+
+    /**
+     * A connection failed before the server welcomed it, and the runner tries again: say why once, until a link is
+     * welcomed or the reason changes.
+     */
+    #trouble(line: string): void {
+        if (line !== this.#troubled) {
+            this.#troubled = line;
+            this.#log(line);
+        }
     }
 
     /** Public state never contains the authenticator secret, failures, or accepted counter. */
