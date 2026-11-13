@@ -15,6 +15,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { type Hook, HooksDoc } from "./docs.ts";
+import { replyUrlProblem } from "./reply-hooks.ts";
 import { HttpError } from "./errors.ts";
 import { attribute, clip, defang } from "./fence.ts";
 import { BRANCH_EVENTS, canWrite, MAY_WRITE, parseRepo } from "./github.ts";
@@ -389,7 +390,13 @@ export class Hooks {
     async add(
         user: User,
         target: ConversationId,
-        request: { name?: unknown; instructions?: unknown; signed?: unknown; anyone?: unknown },
+        request: {
+            name?: unknown;
+            instructions?: unknown;
+            signed?: unknown;
+            anyone?: unknown;
+            replyUrl?: unknown;
+        },
     ): Promise<HookView> {
         const app = this.#app;
 
@@ -417,6 +424,14 @@ export class Hooks {
             throw new HttpError(413, `Instructions are limited to ${MAX_INSTRUCTIONS} characters.`);
         }
 
+        if (request.replyUrl !== undefined && request.replyUrl !== "") {
+            const problem = replyUrlProblem(request.replyUrl);
+
+            if (problem !== undefined) {
+                throw new HttpError(400, problem);
+            }
+        }
+
         const hook: Hook = {
             id: randomBytes(6).toString("base64url"),
             secret: randomBytes(24).toString("base64url"),
@@ -426,6 +441,14 @@ export class Hooks {
             by: user.id,
             ...(request.signed === true ? { signed: true } : {}),
             ...(request.anyone === true ? { anyone: true } : {}),
+            ...(typeof request.replyUrl === "string" && request.replyUrl !== ""
+                ? {
+                      reply: {
+                          url: request.replyUrl,
+                          secret: randomBytes(24).toString("base64url"),
+                      },
+                  }
+                : {}),
             createdAt: app.now(),
             count: 0,
         };

@@ -804,6 +804,11 @@ export type Hook = {
      * can write to it) reach Pi too. Absent: they are dropped. Only a person sets it, in the hooks sheet.
      */
     anyone?: boolean;
+    /**
+     * Where each answer to a post goes, and the secret that signs it (`reply-hooks.ts`). Absent: the hook only takes
+     * posts. Set by the person who made it.
+     */
+    reply?: { url: string; secret: string };
     /** Who made it: posts go as their work, with their checks and spend limit. */
     by: string;
     createdAt: number;
