@@ -50,6 +50,26 @@ export interface RelayEvent {
     at?: number;
     /** Attachments as one-line descriptions (a name, a type, a size): never their content. */
     attachments?: string[];
+    /**
+     * Attachments Pi can fetch (`relay_fetch`), when the connector has `fetch`: the relay lists them by number, and
+     * keeps `ref` on the server only.
+     */
+    files?: RelayFile[];
+}
+
+/** An attachment that came. `ref` is the connector's own (a URL, a file id): Pi never sees it. */
+export interface RelayFile {
+    name: string;
+    type?: string;
+    size?: number;
+    ref: string;
+}
+
+/** A file Pi sends with a reply: the relay reads it from the session's folder, and checks the caps first. */
+export interface RelayOutFile {
+    name: string;
+    type: string;
+    data: Uint8Array;
 }
 
 /** What a connector's code gets while it runs. */
@@ -85,6 +105,8 @@ export interface RelayReply {
     thread?: string;
     /** The same for a call that runs again: a connector that can, sends it once (a Discord nonce, say). */
     key: string;
+    /** Files to send with it, only when the connector has `files`. */
+    files?: RelayOutFile[];
 }
 
 /** A connector: a kind of connection that the owner can add as many of as they want. */
@@ -117,6 +139,17 @@ export interface RelayConnector {
      * name of one of its fields: the author's limit applies only when that field has a value (or a default).
      */
     authorLimit?: false | string;
+    /** It sends files with a reply: `max` files of `maxBytes` each at most. Without it, a reply with files is refused. */
+    files?: { max: number; maxBytes: number };
+    /**
+     * Download one attachment of an event it emitted (`RelayEvent.files`), `maxBytes` at most: Pi gets it as a file in
+     * its session's folder. Without it, attachments are only described.
+     */
+    fetch?(
+        context: Pick<RelayContext, "values" | "signal" | "log">,
+        file: RelayFile,
+        maxBytes: number,
+    ): Promise<{ data: Uint8Array; type?: string }>;
     /** Send a reply. Without it, the connector only listens. Returns the id the service gave it, if any. */
     reply?(
         context: Pick<RelayContext, "values" | "signal" | "log">,

@@ -5,6 +5,7 @@ import {
     type RelayConnector,
     type RelayContext,
     type RelayEvent,
+    type RelayFile,
     type RelayValues,
 } from "../types.ts";
 
@@ -77,7 +78,13 @@ interface Message {
     webhook_id?: string;
     author?: User;
     mentions?: { id: string }[];
-    attachments?: { filename?: string; content_type?: string; size?: number }[];
+    attachments?: {
+        id?: string;
+        filename?: string;
+        content_type?: string;
+        size?: number;
+        url?: string;
+    }[];
 }
 
 interface Channel {
@@ -198,15 +205,16 @@ async function api(
     soft = false,
 ): Promise<unknown> {
     const base = (text(values.apiUrl) || API).replace(/\/+$/, "");
+    const form = body instanceof FormData;
     const response = await fetch(`${base}${path}`, {
         method,
         headers: {
             Authorization: `Bot ${secretOf(values)}`,
             "User-Agent": USER_AGENT,
-            ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...(body === undefined || form ? {} : { "Content-Type": "application/json" }),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+        body: body === undefined ? undefined : form ? body : JSON.stringify(body),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(form ? 110_000 : 20_000)]),
     });
     const where = `${method} ${path.split("?")[0]}`;
 
@@ -230,6 +238,10 @@ async function api(
 
     if (soft && (response.status === 403 || response.status === 404)) {
         return undefined;
+    }
+
+    if (response.status === 413) {
+        throw new Error(`Discord refused ${where}: the files are larger than this server takes.`);
     }
 
     if (response.status === 401) {
@@ -281,6 +293,23 @@ function toEvent(
         (file) =>
             `${file.filename ?? "file"} (${file.content_type ?? "unknown type"}, ${file.size ?? 0} bytes)`,
     );
+    const files: RelayFile[] = (message.attachments ?? []).flatMap((file) =>
+        typeof file.url === "string" && typeof file.id === "string"
+            ? [
+                  {
+                      name: file.filename ?? "file",
+                      ...(file.content_type === undefined ? {} : { type: file.content_type }),
+                      ...(typeof file.size === "number" ? { size: file.size } : {}),
+                      ref: JSON.stringify({
+                          url: file.url,
+                          id: file.id,
+                          channel: message.channel_id,
+                          message: message.id,
+                      }),
+                  },
+              ]
+            : [],
+    );
     const at = message.timestamp === undefined ? NaN : Date.parse(message.timestamp);
 
     return {
@@ -297,7 +326,115 @@ function toEvent(
         url: `https://discord.com/channels/${guild ?? "@me"}/${message.channel_id}/${message.id}`,
         ...(Number.isFinite(at) ? { at } : {}),
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(files.length > 0 ? { files } : {}),
     };
+}
+
+/** Discord's file hosts, and the API's own (a mock's): the relay downloads only from these, without the token. */
+function fileHost(url: string, values: RelayValues): boolean {
+    const parsed = URL.canParse(url) ? new URL(url) : undefined;
+    const api = new URL(text(values.apiUrl) || API);
+
+    return (
+        parsed !== undefined &&
+        ((parsed.protocol === "https:" &&
+            ["cdn.discordapp.com", "media.discordapp.net"].includes(parsed.hostname)) ||
+            (text(values.apiUrl) !== "" && parsed.origin === api.origin))
+    );
+}
+
+/** At most `max` bytes of a response, or an error: a larger file is never read to its end. */
+async function bytesOf(response: Response, max: number): Promise<Uint8Array> {
+    if (Number(response.headers.get("content-length") ?? 0) > max) {
+        await response.body?.cancel();
+
+        throw new Error(`the file is larger than ${Math.round(max / 1048576)} MB`);
+    }
+
+    const parts: Uint8Array[] = [];
+    let size = 0;
+
+    for await (const part of (response.body ?? []) as AsyncIterable<Uint8Array>) {
+        size += part.byteLength;
+
+        if (size > max) {
+            throw new Error(`the file is larger than ${Math.round(max / 1048576)} MB`);
+        }
+
+        parts.push(part);
+    }
+
+    const data = new Uint8Array(size);
+    let at = 0;
+
+    for (const part of parts) {
+        data.set(part, at);
+        at += part.byteLength;
+    }
+
+    return data;
+}
+
+async function download(
+    context: Pick<RelayContext, "values" | "signal">,
+    file: RelayFile,
+    max: number,
+): Promise<{ data: Uint8Array; type?: string }> {
+    const ref = JSON.parse(file.ref) as {
+        url?: unknown;
+        id?: unknown;
+        channel?: unknown;
+        message?: unknown;
+    };
+
+    const get = async (url: string) => {
+        if (!fileHost(url, context.values)) {
+            throw new Error("the attachment is not on Discord's file host");
+        }
+
+        return fetch(url, {
+            headers: { "User-Agent": USER_AGENT },
+            redirect: "error",
+            signal: AbortSignal.any([context.signal, AbortSignal.timeout(110_000)]),
+        });
+    };
+
+    let response = await get(String(ref.url));
+
+    // A link Discord signed has expired: the message gives a fresh one.
+    if (
+        [403, 404, 410].includes(response.status) &&
+        snowflake(ref.channel) &&
+        snowflake(ref.message)
+    ) {
+        await response.body?.cancel();
+
+        const message = (await api(
+            context.values,
+            context.signal,
+            "GET",
+            `/channels/${ref.channel}/messages/${ref.message}`,
+            undefined,
+            true,
+        )) as Message | undefined;
+        const fresh = message?.attachments?.find((each) => each.id === ref.id)?.url;
+
+        if (typeof fresh !== "string") {
+            throw new Error("Discord no longer has the attachment");
+        }
+
+        response = await get(fresh);
+    }
+
+    if (!response.ok) {
+        await response.body?.cancel();
+
+        throw new Error(`Discord's file host answered ${response.status}`);
+    }
+
+    const type = response.headers.get("content-type") ?? undefined;
+
+    return { data: await bytesOf(response, max), ...(type === undefined ? {} : { type }) };
 }
 
 async function run(context: RelayContext): Promise<void> {
@@ -860,6 +997,9 @@ const discord: RelayConnector = {
     kind: "discord",
     label: "Discord",
     idempotentReply: true,
+    // Discord's own limits: 10 files a message; 10 MB each in a server without boosts.
+    files: { max: 10, maxBytes: 10 * 1024 * 1024 },
+    fetch: download,
     description:
         "A Discord bot: it hears messages in your servers and direct messages, and replies.",
     shape: "stream",
@@ -938,20 +1078,41 @@ const discord: RelayConnector = {
             throw new Error("The reply has no Discord channel: name one, or set Reply channel.");
         }
 
+        const files = reply.files ?? [];
+        const payload = {
+            content: cut(reply.text, LIMIT),
+            allowed_mentions: { parse: [], replied_user: false },
+            nonce: createHash("sha256").update(reply.key).digest("base64url").slice(0, 25),
+            enforce_nonce: true,
+            ...(reply.to !== undefined && snowflake(reply.to.id)
+                ? { message_reference: { message_id: reply.to.id, fail_if_not_exists: false } }
+                : {}),
+            ...(files.length === 0
+                ? {}
+                : { attachments: files.map((file, id) => ({ id, filename: file.name })) }),
+        };
+        let body: unknown = payload;
+
+        if (files.length > 0) {
+            const form = new FormData();
+
+            form.append("payload_json", JSON.stringify(payload));
+            files.forEach((file, index) =>
+                form.append(
+                    `files[${index}]`,
+                    new Blob([file.data as Uint8Array<ArrayBuffer>], { type: file.type }),
+                    file.name,
+                ),
+            );
+            body = form;
+        }
+
         const message = (await api(
             context.values,
             context.signal,
             "POST",
             `/channels/${target}/messages`,
-            {
-                content: cut(reply.text, LIMIT),
-                allowed_mentions: { parse: [], replied_user: false },
-                nonce: createHash("sha256").update(reply.key).digest("base64url").slice(0, 25),
-                enforce_nonce: true,
-                ...(reply.to !== undefined && snowflake(reply.to.id)
-                    ? { message_reference: { message_id: reply.to.id, fail_if_not_exists: false } }
-                    : {}),
-            },
+            body,
         )) as { id?: unknown };
 
         return typeof message.id === "string" ? { id: message.id } : {};

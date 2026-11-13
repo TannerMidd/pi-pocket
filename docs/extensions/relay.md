@@ -139,6 +139,14 @@ interface RelayEvent {
     url?: string;
     at?: number;
     attachments?: string[];
+    files?: RelayFile[];
+}
+
+interface RelayFile {
+    name: string;
+    type?: string;
+    size?: number;
+    ref: string;
 }
 ```
 
@@ -147,6 +155,7 @@ interface RelayEvent {
 - `channel` is where the event came from, and where a reply goes (a channel, a chat, a room). `thread` is a thread in it. `channelName` is for Pi to read.
 - `mentioned` is `true` when the event names the connector's own account, or came in a direct message.
 - `at` is in milliseconds since 1970. `url` is a link. `attachments` are one-line descriptions (a name, a type, a size), never content.
+- `files` are attachments Pi can download, for a connector with `fetch`. The relay keeps 10 for each event and lists them by number. `ref` is yours (a URL, a file id): it stays on the server, and Pi never sees it.
 
 ### The context
 
@@ -181,6 +190,7 @@ interface RelayReply {
     channel?: string;
     thread?: string;
     key: string;
+    files?: { name: string; type: string; data: Uint8Array }[];
 }
 ```
 
@@ -192,7 +202,20 @@ Pi calls `relay_reply` with `text`, and usually `reply_to`, the event id. The re
 
 Return `{ id }`, the id the service gave, or nothing. A call that takes more than 30 seconds is aborted: pass `context.signal` to your requests. A thrown error goes to Pi as an error, with secrets taken out. The `reply` gets only `values`, `signal`, and `log`.
 
-`relay_reply` is a deferred tool: it is offered only in sessions that a connector delivers to. The relay adds it to the session's `modelTools` when a connector is saved, and takes it out when no connector delivers there any more. Pi gives `connector` (the name) when more than one connector delivers to the session.
+### Files
+
+A connector that sends files declares `files: { max, maxBytes }`: `max` files of `maxBytes` each at most in one reply. Pi gives paths in `relay_reply`'s `files`. The relay reads each one and gives your `reply` the bytes in `reply.files`. The relay refuses a path outside the session's folder (after it follows links), a path with a hidden part (a name that starts with `.`, except the `.relay` folder), a file in the server's data folder, and a file over the caps. A connector without `files` refuses a reply with files, and nothing is sent. With files, a reply has 120 seconds.
+
+A connector that downloads attachments has `fetch(context, file, maxBytes)`. It returns `{ data, type }`, with `maxBytes` (25 MB) at most. Pi calls `relay_fetch` with the event id and the attachment's number. The relay writes the file to `.relay/<event>/<number>-<name>` in the session's folder, with a safe name. It refuses a file over the cap, and a web page (`text/html`) in place of a file that did not name that type. Errors go to Pi without secrets and without links. Download only from the service's own file hosts, and never send the token to a host that is not the service's.
+
+| Kind                    | Sends files                            | Fetches attachments                     |
+| ----------------------- | -------------------------------------- | --------------------------------------- |
+| Discord                 | Yes: 10 files, 10 MB each              | Yes                                     |
+| Slack, Telegram, Matrix | Not yet: a reply with files is refused | Not yet: attachments are only described |
+| HTTP                    | No                                     | No                                      |
+| RSS                     | No: it only listens                    | No                                      |
+
+`relay_reply` and `relay_fetch` are deferred tools: they are offered only in sessions that a connector delivers to. The relay adds them to the session's `modelTools` when a connector is saved, and takes them out when no connector delivers there any more. Pi gives `connector` (the name) when more than one connector delivers to the session.
 
 ### Errors
 
