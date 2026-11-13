@@ -33,6 +33,7 @@ import {
     uid,
 } from "./store.js";
 import { useDock } from "./dock.js";
+import { ExtensionComposerBars } from "./extension-ui.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
@@ -1503,6 +1504,7 @@ export function Composer() {
         return html`<footer class="composer-wrap" data-part="composer">
             <div class="dock" data-part="dock" ref=${dock}>
                 <${TypingLine} where="pi" />
+                <${ExtensionComposerBars} canSteer=${false} />
                 <${SubagentsBar} />
             </div>
             <${ParentSessionButton} />
@@ -1623,6 +1625,7 @@ export function Composer() {
             ${collab() && html`<${DriverBar} />`}
             <${PlanBar} blocked=${blocked} />
             <${GoalBar} />
+            <${ExtensionComposerBars} canSteer=${canSteer() && !blocked} />
             <${WatchBar} />
             <${SubagentsBar} />
             <${TrustBar} />

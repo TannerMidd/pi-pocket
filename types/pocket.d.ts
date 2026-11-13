@@ -2028,6 +2028,27 @@ export type TopbarSpec = Action &
 export type ComposerButtonSpec = TopbarSpec;
 
 /**
+ * A bar above the message box, in the dock where the app's own bars show.
+ * @since 0.28.2
+ * @experimental
+ */
+export interface ComposerBarSpec {
+    /**
+     * The bar's id in the module.
+     */
+    id: string;
+    /**
+     * The bar's title: the first word of the line that says it failed.
+     */
+    title: string;
+    /**
+     * What the bar shows. It gets {@link ComposerBarProps}. A component that shows
+     * nothing takes no room.
+     */
+    component: ComponentType<ComposerBarProps>;
+}
+
+/**
  * One of Pi's answers, as an action under it gets it.
  * @since 0.19.0
  * @experimental
@@ -2639,6 +2660,28 @@ export interface FenceProps {
 }
 
 /**
+ * What a `pocket.composerBar` component gets.
+ * @since 0.28.2
+ * @experimental
+ */
+export interface ComposerBarProps {
+    /**
+     * The `pocket` of the module's version that added the bar.
+     */
+    pocket: Pocket;
+    /**
+     * The session whose message box the bar sits on, a number as in its address (`/s/12`).
+     */
+    conversationId: number;
+    /**
+     * Whether the person in this tab may act in this session now: their role, and whether
+     * someone else holds the turn. A read-only help for the module's UI: grey its controls
+     * from it. The server still checks what the person does.
+     */
+    canSteer: boolean;
+}
+
+/**
  * The props of `pocket.Switch`.
  * @since 0.14.0
  */
@@ -2924,6 +2967,13 @@ export interface Pocket {
      * @experimental
      */
     composerButton(spec: ComposerButtonSpec): Added<ComposerButtonSpec>;
+    /**
+     * Adds a bar above the message box in an ordinary session's composer, after the app's
+     * own bars. Its component gets the session and whether the person may act in it.
+     * @since 0.28.2
+     * @experimental
+     */
+    composerBar(spec: ComposerBarSpec): Added<ComposerBarSpec>;
     /**
      * Adds an action under Pi's answers.
      * @since 0.19.0
