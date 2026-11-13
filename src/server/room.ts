@@ -277,13 +277,15 @@ function cutQueued(text: string): string {
  */
 function reportNames(text: string): string[] | undefined {
     // Only a message that starts with a report is one: a person's own may begin "[subagent " too.
-    if (!/^\[subagent \S+ (?:answered|failed)/.test(text)) {
+    if (!/^\[subagent \S+ (?:answered|failed|stalled|stopped)/.test(text)) {
         return undefined;
     }
 
     return [
         ...new Set(
-            [...text.matchAll(/\[subagent (\S+) (?:answered|failed)/g)].map((match) => match[1]!),
+            [...text.matchAll(/\[subagent (\S+) (?:answered|failed|stalled|stopped)/g)].map(
+                (match) => match[1]!,
+            ),
         ),
     ];
 }

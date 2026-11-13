@@ -438,6 +438,37 @@ Makes a top-level session and, when `message` is given, sends that text as its f
 - A source past its spend limit, a person invited to one session, and a PiP source are refused, and nothing is made.
 - A blank `message` is refused, and nothing is made. A `message` is also refused when the session gets no model: no `model` and no default model.
 
+## Outside data
+
+### `inbox`
+
+```ts
+readonly inbox?: InboxApi;
+```
+
+Since 0.29.0 · Experimental
+
+Gives data from outside the app (a chat message, a feed's item, a service's event) to a session that exists, or to PiP, as a message from one person. Webhooks use the same path. It is `undefined` on a server older than 0.29.0: check `host.inbox?.deliver` first. [Delivering outside data](../inbox.md) tells how to use it.
+
+#### `inbox.deliver`
+
+```ts
+deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+```
+
+Since 0.29.0 · Experimental
+
+Sends one message to `target`, as `[via <via>]`. Pi reads the person's `instructions` first, then whether the sender is trusted, then the payload between `<tag>` tags, then a line that says the payload is data.
+
+- `by`: the id of the person Pi works for on it. The person must be able to see and steer the session, and not be a viewer.
+- `payload`: the text that came. Core makes it safe between the tags (no closing tag survives) and cuts it to 8,000 characters.
+- `key`: delivers once. A second delivery with the same key sends nothing and returns `{ sent: false }`, also after a restart. Use the source's own id for the event.
+- `tag` and `attributes`: the fence's tag (default `outside-data`) and up to 8 attributes, each made one line without quotes.
+- `sender`: who sent it. The name and the id go in the fence's tag, as `from` and `from-id`, because they came from outside. Outside the fence, one line says only whether the owner marked the id as trusted (`trusted: true`). This is guidance to the model, not a boundary: an id can be spoofed on some services.
+- `limit`: a cap of messages in an hour for one `bucket`, kept in memory. A restart resets it. The cap is 600 at most.
+
+It throws an error with a `status`: 400 for a delivery that cannot be right, 410 when the session is gone or its person cannot see it, 503 when PiP is off, 429 when the bucket's limit is reached, and 409 when the session does not take messages now. Try again later after a 409 or a 503, with the same key.
+
 ## Linked sessions
 
 ### `linkedSessions`
@@ -824,4 +855,7 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
+- `toolNames`: the names of the tools that the modules that are on give now (built-in and drop-in), for codemode's Only mode.
+- `stopToolCall`, `waitsForLimit`, `alertOwner` (since 0.29.0): for the stall watches of Subagents and Agent Teams. They stop one running call, say whether a run waits for a provider's limit, and tell the owner (a notice and a push).
+- `linkedSessions.activity`, `linkedSessions.stopCall`, `linkedSessions.onLedRun` (since 0.29.0): for the stall watch of Agent Teams. They give the led sessions at work, stop a stuck call of a led session, and call back when a led session starts a run.
 - `updates`: updates of Pi Pocket itself, for the Updates module's routes. Its status says how the copy was installed (`installKind`: `git`, `npm-global`, `npm-local`, `npx`, or `unknown`) and what stands in the way of an update from the app.

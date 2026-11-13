@@ -80,7 +80,10 @@ type Internal =
     | "goals"
     | "browsers"
     | "memory"
-    | "toolNames";
+    | "toolNames"
+    | "stopToolCall"
+    | "waitsForLimit"
+    | "alertOwner";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 

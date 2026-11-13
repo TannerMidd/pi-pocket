@@ -1379,6 +1379,7 @@ export class Commands {
 
         // Subagents' reports go: a person meant the work stopped.
         await this.#discardReports(id);
+        await this.#stoppedByPerson(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
@@ -1392,6 +1393,24 @@ export class Commands {
                     : `stopped the run; ${held} queued ${held === 1 ? "message waits" : "messages wait"} to be sent`,
             );
         }
+    }
+
+    /** A subagent a person stops: its report to its parent says a person did, not that it failed. */
+    async #stoppedByPerson(id: ConversationId): Promise<void> {
+        const parent = this.#app.parentOf(id);
+
+        if (parent === undefined || !this.#app.isBusy(id)) {
+            return;
+        }
+
+        await this.#app.harness.commit(async (tx) => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+            const name = Object.keys(agents).find((each) => agents[each]!.conversationId === id);
+
+            if (name !== undefined) {
+                agents[name]!.stoppedBy = "person";
+            }
+        }, context);
     }
 
     /**
@@ -1798,6 +1817,8 @@ export class Commands {
         const conversation = await app.conversation(id);
         // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
         const requests = new Map<number, string | undefined>();
+
+        await this.#stoppedByPerson(id);
 
         for (let attempt = 0; ; attempt++) {
             const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];

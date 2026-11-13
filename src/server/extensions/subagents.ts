@@ -34,12 +34,15 @@ import {
     type ModelRef,
     section,
     type SubmissionId,
+    type SettledSubmissionRecord,
     type SubmissionRecord,
     type TaskRuntime,
     type ToolRegistration,
     type Tx,
 } from "@earendil-works/pi-durable";
 import {
+    HeldDoc,
+    InterruptsDoc,
     type PendingReport,
     PlanDoc,
     REPORT_PREFIX,
@@ -52,6 +55,15 @@ import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
+import {
+    callTimeoutMs,
+    clock,
+    hardLimitOf,
+    progressOf,
+    span,
+    STALL_LOOK,
+    waitingOn,
+} from "../stall-facts.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
 
 /** Pi Pocket's options on a tool definition, beside Pi Durable's own. */
@@ -101,17 +113,191 @@ type ReporterInput = {
     followUp: boolean;
     requestedBy?: string;
 };
-type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
+/**
+ * "follow": a Stop took the message out of the queue; it goes again as `request` (`key`: its old submission). `held`:
+ * a Stop held it, until a person sends or drops it (else an interrupt sends it again at once).
+ */
+type ReporterState =
+    | { phase: "deliver" }
+    | { phase: "report"; report?: string }
+    | { phase: "follow"; request: string; key: string; held?: boolean };
+
+/** How a message to a subagent ended: settled, or dropped by a person from the queue a Stop held it in. */
+type Settled =
+    | SettledSubmissionRecord
+    | { status: "unanswered"; reason: "dropped"; detail?: undefined; type?: undefined };
+
+/** What a reporter concludes from a message that a person took out of the queue for good. */
+const DROPPED = { status: "unanswered", reason: "dropped" } as const;
+
+/** What a reporter concludes from a message an interrupt took out of the queue and did not send again. */
+const STOPPED_AGAIN = { status: "unanswered", reason: "aborted" } as unknown as Settled;
+
+/** How often a reporter looks at a message a Stop held, until it goes again or is dropped. */
+const FOLLOW_MS = 3_000;
+
+/** The request id a message a Stop held goes again under (`commands.ts` `#hold`, `submitInterrupt`). */
+export function heldRequest(request: string, submission: SubmissionId | number): string {
+    return `${request.replace(/(~\d+)+$/, "")}~${String(submission)}`;
+}
+
+/** Whether a message a Stop took out of `conversationId`'s queue still waits to go again: held, or being re-queued. */
+async function heldAgain(
+    runtime: TaskRuntime<ReporterInput, ReporterState, null, object>,
+    conversationId: ConversationId,
+    key: string,
+    context: Context,
+): Promise<{ held: boolean; pending: boolean }> {
+    const items = (await runtime.snapshot(HeldDoc, conversationId, context))?.items ?? [];
+    const interrupts = (await runtime.snapshot(InterruptsDoc, conversationId, context))?.pending;
+    const held = items.some((item) => item.key === key);
+
+    return { held, pending: held || Object.keys(interrupts ?? {}).length > 0 };
+}
 
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent, through `Courier`. */
 function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
+    /**
+     * Report how a message ended, or follow it when a Stop held it to go again (`sent`: its submission and request).
+     * A stop is no failure: it says who stopped it. The stall watch reported its own stop already.
+     */
+    const conclude = async (
+        reporter: { input: ReporterInput },
+        runtime: TaskRuntime<ReporterInput, ReporterState, null, object>,
+        context: Context,
+        settled: Settled,
+        withdrawn: boolean,
+        sent: { id: SubmissionId; request: string } | undefined,
+    ): Promise<void> => {
+        const { name, conversationId } = reporter.input;
+        // A failure of its model or provider (a sign-in, a model that is gone, a quota): named, with the model.
+        const modelFailed =
+            !withdrawn &&
+            settled.status === "unanswered" &&
+            modelFailure(settled.reason, settled.detail);
+        const ran = modelFailed
+            ? (await runtime.snapshot(AgentDoc, conversationId, context))?.model
+            : undefined;
+        const ranOn = ran === undefined ? "" : `${ran.provider}/${ran.modelId}: `;
+        const stopped =
+            !withdrawn && settled.status === "unanswered" && settled.reason === "aborted";
+        // Only a message still in the queue can be held and sent again: one the run took (`entry`) ended with it.
+        const queued = (settled as { entry?: unknown }).entry === undefined;
+        const again =
+            stopped && queued && sent !== undefined
+                ? heldRequest(sent.request, sent.id)
+                : undefined;
+        const waits =
+            again === undefined
+                ? { held: false, pending: false }
+                : await heldAgain(runtime, conversationId, String(sent!.id), context);
+
+        await runtime.commit(async (tx) => {
+            const next = (report?: string) =>
+                ({ status: "running", checkpoint: { phase: "report", report } }) as const;
+            // Reads first: a commit reads the tables only before it writes one.
+            const resent =
+                again === undefined
+                    ? undefined
+                    : await tx.submissionByRequest(conversationId, again);
+
+            if (again !== undefined && (waits.pending || resent !== undefined)) {
+                // Held until a person acts, which can take long: the parent hears now that its answer comes later.
+                if (waits.held && resent === undefined) {
+                    await putReports(tx, runtime.conversationId, Courier, [
+                        {
+                            name,
+                            text: `${REPORT_PREFIX}${name} stopped: a person stopped it. Your message waits, held, until a person sends it or drops it; its answer then comes by itself]`,
+                        },
+                    ]);
+                }
+
+                return {
+                    status: "running",
+                    checkpoint: {
+                        phase: "follow",
+                        request: again,
+                        key: String(sent!.id),
+                        ...(waits.held ? { held: true } : {}),
+                    },
+                } as const;
+            }
+
+            const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
+
+            if (settled.status === "unanswered") {
+                const why = withdrawn
+                    ? IDLE
+                    : settled.reason === "dropped"
+                      ? STOPPED
+                      : `${ranOn}${whyUnanswered(settled.reason, settled.detail)}`;
+                const by = agent?.stoppedBy;
+
+                if (agent !== undefined) {
+                    agent.answeredAt = Date.now();
+                    agent.failed = true;
+                    agent.error = why;
+                }
+
+                if (settled.reason === "dropped") {
+                    return next(
+                        `${REPORT_PREFIX}${name} stopped: a person stopped it, and took your message out of its queue]`,
+                    );
+                }
+
+                // A stop by someone known is no failure; the stall watch reported its own already.
+                if (stopped && by !== undefined) {
+                    return by === "deadline"
+                        ? next()
+                        : next(
+                              `${REPORT_PREFIX}${name} stopped: ${by === "parent" ? "you stopped it" : "a person stopped it"} before it answered]`,
+                          );
+                }
+
+                // Pi may be waiting for its answer, and is told none comes. One its model failed tells Pi to stop and
+                // tell its person, not to try again on another model.
+                return next(
+                    `${REPORT_PREFIX}${name} failed: ${why}]${modelFailed ? ` ${MODEL_FAILED}` : ""}`,
+                );
+            }
+
+            if (settled.type !== "input") {
+                return next();
+            }
+
+            if (agent === undefined || agent.reported.includes(settled.answer)) {
+                return next();
+            }
+
+            agent.reported.push(settled.answer);
+            agent.answeredAt = Date.now();
+            agent.failed = false;
+            delete agent.error;
+            // It answered: the stall watch may stop its work again.
+            delete agent.stops;
+            const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
+                AssistantMessage | undefined;
+
+            return next(`${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`);
+        }, context);
+
+        // The people in the session see it at once, as well as in its report.
+        if (modelFailed && settled.status === "unanswered") {
+            host.notice(
+                "warning",
+                `Subagent ${name} failed: ${ranOn}${whyUnanswered(settled.reason, settled.detail)}. Pi was told to stop and tell you, not to switch models.`,
+                runtime.conversationId,
+            );
+        }
+    };
+
     return defineTask<ReporterInput, ReporterState, null>({
         name: "pocket.subagent-reporter",
         version: 1,
         initial: () => ({ phase: "deliver" }),
         phases: {
             deliver: async (reporter, runtime, context) => {
-                const { name, conversationId, message, followUp, requestedBy } = reporter.input;
+                const { conversationId, message, followUp, requestedBy } = reporter.input;
                 const subagent = (await runtime.conversation(conversationId, context))!;
                 const request = {
                     type: "input",
@@ -164,67 +350,60 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                     await withdrawing.catch(() => {});
                 }
 
-                // A failure of its model or provider (a sign-in, a model that is gone, a quota): named, with the model.
-                const modelFailed =
-                    !withdrawn &&
-                    settled.status === "unanswered" &&
-                    modelFailure(settled.reason, settled.detail);
-                const ran = modelFailed
-                    ? (await runtime.snapshot(AgentDoc, conversationId, context))?.model
-                    : undefined;
-                const ranOn = ran === undefined ? "" : `${ran.provider}/${ran.modelId}: `;
+                await conclude(reporter, runtime, context, settled, withdrawn, {
+                    id: submission.id,
+                    request: requestId,
+                });
+            },
+            // A message a person's Stop took from the subagent's queue, to go again later under the next request id
+            // (`commands.ts`): followed to its answer, which is reported as any other. Dropped, it is reported so.
+            follow: async (reporter, runtime, context) => {
+                const checkpoint = reporter.state.checkpoint as Extract<
+                    ReporterState,
+                    { phase: "follow" }
+                >;
+                const child = reporter.input.conversationId;
+                const signals = [runtime.signal, context.abortSignal].filter(
+                    (signal): signal is AbortSignal => signal !== undefined,
+                );
 
-                await runtime.commit(async (tx) => {
-                    const next = (report?: string) =>
-                        ({ status: "running", checkpoint: { phase: "report", report } }) as const;
+                let held = checkpoint.held === true;
 
-                    const agent = (await tx.doc(SubagentsDoc, runtime.conversationId)).agents[name];
+                for (;;) {
+                    let found: SubmissionRecord | undefined;
 
-                    if (settled.status === "unanswered") {
-                        const why = withdrawn
-                            ? IDLE
-                            : `${ranOn}${whyUnanswered(settled.reason, settled.detail)}`;
+                    await runtime.commit(async (tx) => {
+                        found = await tx.submissionByRequest(child, checkpoint.request);
 
-                        if (agent !== undefined) {
-                            agent.answeredAt = Date.now();
-                            agent.failed = true;
-                            agent.error = why;
-                        }
+                        return undefined;
+                    }, context);
 
-                        // Stopped too: Pi may be waiting for its answer, and is told none comes. One its model failed
-                        // tells Pi to stop and tell its person, not to try again on another model.
-                        return next(
-                            `${REPORT_PREFIX}${name} failed: ${why}]${modelFailed ? ` ${MODEL_FAILED}` : ""}`,
+                    const record = found as SubmissionRecord | undefined;
+
+                    if (record?.status === "done" || record?.status === "unanswered") {
+                        return conclude(reporter, runtime, context, record as never, false, {
+                            id: record.id,
+                            request: checkpoint.request,
+                        });
+                    }
+
+                    const now = await heldAgain(runtime, child, checkpoint.key, context);
+
+                    held ||= now.held;
+
+                    // Gone: a person dropped what was held; an interrupt that sent nothing again stopped it.
+                    if (record === undefined && !now.pending) {
+                        return conclude(
+                            reporter,
+                            runtime,
+                            context,
+                            held ? DROPPED : STOPPED_AGAIN,
+                            false,
+                            undefined,
                         );
                     }
 
-                    if (settled.type !== "input") {
-                        return next();
-                    }
-
-                    if (agent === undefined || agent.reported.includes(settled.answer)) {
-                        return next();
-                    }
-
-                    agent.reported.push(settled.answer);
-                    agent.answeredAt = Date.now();
-                    agent.failed = false;
-                    delete agent.error;
-                    const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
-                        AssistantMessage | undefined;
-
-                    return next(
-                        `${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`,
-                    );
-                }, context);
-
-                // The people in the session see it at once, as well as in its report.
-                if (modelFailed && settled.status === "unanswered") {
-                    host.notice(
-                        "warning",
-                        `Subagent ${name} failed: ${ranOn}${whyUnanswered(settled.reason, settled.detail)}. Pi was told to stop and tell you, not to switch models.`,
-                        runtime.conversationId,
-                    );
+                    await pause(FOLLOW_MS, AbortSignal.any(signals));
                 }
             },
             // The report waits with the others for the courier, which this starts when none is at work. A batch still in the
@@ -244,28 +423,9 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                         )) !== undefined;
 
                     if (report !== undefined && !sentBefore) {
-                        const id = runtime.conversationId;
-                        const state = await tx.doc(SubagentsDoc, id);
-                        // Reads first: a commit reads the tables only before it writes one.
-                        const queued = await queuedBatch(tx, id, state.sending?.request);
-                        const idle = !(await working(tx, state.courier));
-                        const taken = queued === undefined ? [] : (state.sending?.reports ?? []);
-
-                        if (queued !== undefined) {
-                            await unqueue(tx, id, queued);
-                            delete state.sending;
-                        }
-
-                        // Assigned whole: a document keeps its own copy of what is assigned to it.
-                        state.outbox = [
-                            ...taken,
-                            ...(state.outbox ?? []),
+                        await putReports(tx, runtime.conversationId, Courier, [
                             { name: reporter.input.name, text: report },
-                        ];
-
-                        if (idle) {
-                            state.courier = await tx.createTask(Courier, null, BACKGROUND);
-                        }
+                        ]);
                     }
 
                     return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -323,6 +483,35 @@ async function unqueue(tx: Tx, conversationId: ConversationId, id: SubmissionId)
     }
 
     tx.settleSubmission(id, { status: "unanswered", reason: "merged" });
+}
+
+/**
+ * Add reports for the parent: they wait with the others for the courier, which this starts when none is at work. A
+ * batch still in the parent's queue takes them too: it is taken back out, and goes again with these, so the queue holds
+ * one message of reports, with all of them. Reads come first in it: call it before the commit writes a table.
+ */
+async function putReports(
+    tx: Tx,
+    id: ConversationId,
+    Courier: CourierTask,
+    reports: readonly PendingReport[],
+): Promise<void> {
+    const state = await tx.doc(SubagentsDoc, id);
+    const queued = await queuedBatch(tx, id, state.sending?.request);
+    const idle = !(await working(tx, state.courier));
+    const taken = queued === undefined ? [] : (state.sending?.reports ?? []);
+
+    if (queued !== undefined) {
+        await unqueue(tx, id, queued);
+        delete state.sending;
+    }
+
+    // Assigned whole: a document keeps its own copy of what is assigned to it.
+    state.outbox = [...taken, ...(state.outbox ?? []), ...reports];
+
+    if (idle) {
+        state.courier = await tx.createTask(Courier, null, BACKGROUND);
+    }
 }
 
 /** Whether a task is there and can still take reports. */
@@ -821,39 +1010,315 @@ const STALLED_MINUTES = 30;
 
 const ACTIVITY_ENTRIES = 20;
 
-function span(ms: number): string {
-    const seconds = Math.max(0, Math.round(ms / 1000));
-
-    if (seconds < 60) {
-        return `${seconds} s`;
-    }
-
-    const minutes = Math.round(seconds / 60);
-
-    if (minutes < 60) {
-        return `${minutes} min`;
-    }
-
-    const hours = Math.round(minutes / 60);
-
-    return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
-}
-
 /** The time of the newest message in a transcript: output that a running tool call streams does not count. */
 async function lastActivity(tx: Tx, conversationId: ConversationId): Promise<number | undefined> {
+    return (await recentOf(tx, conversationId)).at;
+}
+
+/** When a transcript's newest message came, and the start of the newest text Pi wrote there. */
+async function recentOf(
+    tx: Tx,
+    conversationId: ConversationId,
+    callId?: string,
+): Promise<{ at?: number; words?: string; timeoutMs?: number }> {
     const page = await tx.scanEntries({ conversationId, order: "descending" }, ACTIVITY_ENTRIES);
+    let at: number | undefined;
+    let words: string | undefined;
+    const timeoutMs =
+        callId === undefined
+            ? undefined
+            : callTimeoutMs(
+                  page.items.flatMap((entry) => entry.model ?? []),
+                  callId,
+              );
 
     for (const entry of page.items) {
         const times = (entry.model ?? [])
             .map((message) => message.timestamp)
-            .filter((at) => typeof at === "number" && Number.isFinite(at));
+            .filter((time) => typeof time === "number" && Number.isFinite(time));
 
-        if (times.length > 0) {
-            return Math.max(...times);
+        if (at === undefined && times.length > 0) {
+            at = Math.max(...times);
+        }
+
+        if (words === undefined) {
+            const text = (entry.model ?? [])
+                .flatMap((message) =>
+                    message.role === "assistant" ? [textOf(message as AssistantMessage)] : [],
+                )
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            if (text !== "") {
+                words = text.length > 600 ? `${text.slice(0, 599)}…` : text;
+            }
+        }
+
+        if (at !== undefined && words !== undefined) {
+            break;
         }
     }
 
-    return undefined;
+    return {
+        ...(at === undefined ? {} : { at }),
+        ...(words === undefined ? {} : { words }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    };
+}
+
+/** The default hard limit: past it with no progress, the stuck call is stopped. Twice the soft one, as a margin. */
+const STOP_MINUTES = 60;
+
+/** How often the stall watch stops a subagent's work by itself until it answers again; after that, a person decides. */
+export const MAX_STOPS = 2;
+
+type StallAction =
+    | { kind: "tool"; conversationId: ConversationId; callId: string }
+    | { kind: "run"; conversationId: ConversationId; taskId: number };
+
+/** `seen`: each subagent's progress, as last seen, and since when it is so. */
+type StallState =
+    | { phase: "look"; seen?: Record<string, { print: string; at: number }> }
+    | {
+          phase: "act";
+          seen: Record<string, { print: string; at: number }>;
+          actions: StallAction[];
+          alerts: string[];
+      };
+
+/**
+ * Looks at a parent's subagents at work, once a minute, without a model call. One with no progress past the soft limit
+ * (`stalledMinutes`) is reported to the parent, once a quiet spell, with what it waits on and since when; those of one
+ * look go as one message. Past the hard limit, the stuck call is stopped (or the run, when no call runs), the parent is
+ * told, and so is the owner; at most `MAX_STOPS` times until it answers again, then a person decides. It ends when none is at
+ * work, and the next message to a subagent starts it again.
+ */
+function stallWatchFor(
+    Courier: CourierTask,
+    host: PocketHost,
+    limits: () => { soft: number; hard: number },
+) {
+    return defineTask<null, StallState, null>({
+        name: "pocket.subagent-stall-watch",
+        version: 1,
+        initial: () => ({ phase: "look" }),
+        phases: {
+            look: async (watch, runtime, context) => {
+                const parent = runtime.conversationId;
+                const { soft, hard: limit } = limits();
+                const at = runtime.now();
+                const doc = await runtime.snapshot(SubagentsDoc, parent, context);
+                const before = watch.state.checkpoint.seen ?? {};
+                const busy: { name: string; record: SubagentRecord; live: LiveState }[] = [];
+
+                for (const [name, record] of Object.entries(doc?.agents ?? {})) {
+                    const live = await runtime.snapshot(LiveDoc, record.conversationId, context);
+
+                    if (live?.run !== undefined) {
+                        busy.push({ name, record, live });
+                    }
+                }
+
+                const seen: Record<string, { print: string; at: number }> = {};
+
+                for (const { name, live } of busy) {
+                    const print = progressOf(live);
+                    const prev = Object.hasOwn(before, name) ? before[name] : undefined;
+
+                    seen[name] = { print, at: prev?.print === print ? prev.at : at };
+                }
+
+                const actions: StallAction[] = [];
+                const alerts: string[] = [];
+
+                await runtime.commit(async (tx) => {
+                    // Reads first: a commit reads the tables only before it writes one.
+                    const recent = new Map<string, Awaited<ReturnType<typeof recentOf>>>();
+
+                    for (const { name, record, live } of busy) {
+                        recent.set(
+                            name,
+                            await recentOf(tx, record.conversationId, waitingOn(live).callId),
+                        );
+                    }
+
+                    const state = await tx.doc(SubagentsDoc, parent);
+                    // A message on its way to a subagent not at work yet keeps the watch: the newest reporters.
+                    let waiting = false;
+
+                    for (const reporter of Object.values(state.reporters).slice(-20)) {
+                        waiting ||= await working(tx, reporter);
+                    }
+
+                    const reports: PendingReport[] = [];
+
+                    for (const { name, record: was, live } of busy) {
+                        const record = state.agents[name];
+
+                        if (record === undefined || record.conversationId !== was.conversationId) {
+                            continue;
+                        }
+
+                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall, and
+                        // no quiet time: the quiet time starts again when that wait ends.
+                        if (
+                            host.approvals.forConversation(record.conversationId).length > 0 ||
+                            host.waitsForLimit?.(record.conversationId) === true
+                        ) {
+                            seen[name] = { print: seen[name]!.print, at };
+                            delete record.stall;
+                            continue;
+                        }
+
+                        // A message to it starts the wait over: a nudge is no reason to say it again at once.
+                        const since = Math.max(
+                            recent.get(name)?.at ?? 0,
+                            seen[name]!.at,
+                            record.askedAt ?? 0,
+                        );
+                        const quiet = at - since;
+
+                        if (record.stall?.since !== since) {
+                            record.stall = { since };
+                        }
+
+                        const stall = record.stall!;
+                        const on = waitingOn(live);
+                        // A call with its own timeout runs until then: no stall before it, no stop.
+                        const own = recent.get(name)?.timeoutMs;
+                        const hard = limit <= 0 ? 0 : hardLimitOf(limit, own);
+
+                        if (quiet >= Math.max(soft, own ?? 0) && stall.told !== true) {
+                            stall.told = true;
+                            reports.push({
+                                name,
+                                text: `${REPORT_PREFIX}${name} stalled: no progress for ${span(quiet)}, waiting on ${on.what} since ${clock(since)}.${hard > 0 ? ` Pi Pocket stops that ${on.callId === undefined ? "run" : "call"} at ${span(hard)} with no progress.` : ""} Its report still comes by itself]`,
+                            });
+                        }
+
+                        if (hard <= 0 || quiet < hard || stall.stopped === true) {
+                            continue;
+                        }
+
+                        stall.stopped = true;
+                        const count = record.stops ?? 0;
+
+                        if (count >= MAX_STOPS) {
+                            reports.push({
+                                name,
+                                text: `${REPORT_PREFIX}${name} stalled again: no progress for ${span(quiet)}, waiting on ${on.what} since ${clock(since)}. Pi Pocket stopped its work ${MAX_STOPS} times already and stops it no more: stop it, or ask the user what to do]`,
+                            });
+                            alerts.push(
+                                `Subagent ${name} made no progress for ${span(quiet)}, waiting on ${on.what}. It was stopped ${MAX_STOPS} times already, so it is left for you to decide.`,
+                            );
+                            continue;
+                        }
+
+                        record.stops = count + 1;
+                        const which = `stop ${count + 1} of ${MAX_STOPS}`;
+
+                        if (on.callId !== undefined && typeof host.stopToolCall === "function") {
+                            actions.push({
+                                kind: "tool",
+                                conversationId: record.conversationId,
+                                callId: on.callId,
+                            });
+                            reports.push({
+                                name,
+                                text: `${REPORT_PREFIX}${name} stalled: Pi Pocket stopped ${on.what}, which made no progress for ${span(quiet)} (${which}). The subagent goes on with that call's partial output; its report comes by itself]`,
+                            });
+                        } else {
+                            record.stoppedBy = "deadline";
+                            actions.push({
+                                kind: "run",
+                                conversationId: record.conversationId,
+                                taskId: Number(live.run!.taskId),
+                            });
+                            const words = recent.get(name)?.words;
+
+                            reports.push({
+                                name,
+                                text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}). Send it the work again, or ask the user]${words === undefined ? "" : ` Its last words: “${words}”.`}`,
+                            });
+                        }
+
+                        alerts.push(
+                            `Pi Pocket stopped ${on.what} of subagent ${name}: no progress for ${span(quiet)} (${which}).`,
+                        );
+                    }
+
+                    if (reports.length > 0) {
+                        await putReports(tx, parent, Courier, reports);
+                    }
+
+                    if (busy.length === 0 && !waiting) {
+                        delete state.stallWatch;
+
+                        return {
+                            status: "terminal",
+                            outcome: { status: "completed", result: null },
+                        };
+                    }
+
+                    if (actions.length > 0 || alerts.length > 0) {
+                        return {
+                            status: "running",
+                            checkpoint: { phase: "act", seen, actions, alerts },
+                        };
+                    }
+
+                    return {
+                        status: "sleeping",
+                        until: at + STALL_LOOK.ms,
+                        checkpoint: { phase: "look", seen },
+                    };
+                }, context);
+            },
+            // What a look decided, done once its marks are stored: a restart here does it again, which stops nothing twice.
+            act: async (watch, runtime, context) => {
+                const checkpoint = watch.state.checkpoint as Extract<StallState, { phase: "act" }>;
+
+                for (const action of checkpoint.actions) {
+                    if (action.kind === "tool") {
+                        await host
+                            .stopToolCall(action.conversationId, action.callId)
+                            .catch(() => false);
+                        continue;
+                    }
+
+                    const live = await runtime.snapshot(LiveDoc, action.conversationId, context);
+
+                    if (Number(live?.run?.taskId) === action.taskId) {
+                        await (
+                            await runtime.conversation(action.conversationId, context)
+                        )?.abort(context);
+                    }
+                }
+
+                for (const alert of checkpoint.alerts) {
+                    if (typeof host.alertOwner === "function") {
+                        host.alertOwner(runtime.conversationId, "Subagent stalled", alert);
+                    }
+                }
+
+                await runtime.commit(
+                    () => ({
+                        status: "sleeping",
+                        until: runtime.now() + STALL_LOOK.ms,
+                        checkpoint: { phase: "look", seen: checkpoint.seen },
+                    }),
+                    context,
+                );
+            },
+        },
+        abort: (_watch, runtime, context) =>
+            runtime.commit(async (tx) => {
+                delete (await tx.doc(SubagentsDoc, runtime.conversationId)).stallWatch;
+
+                return { status: "terminal", outcome: { status: "aborted" } };
+            }, context),
+    });
 }
 
 function ending(record: SubagentRecord): "done" | "failed" | "stopped" | "idle" {
@@ -888,8 +1353,11 @@ function statusLine(
         .filter((tool) => tool.status === "running")
         .map((tool) => tool.name);
 
+    // A call starts with the answer that made it: the newest message, unless one came since.
     if (running.length > 0) {
-        parts.push(`running ${running.join(", ")}`);
+        parts.push(
+            `waiting on ${running.join(", ")}${lastAt === undefined ? "" : ` since ${clock(lastAt)}`}`,
+        );
     }
 
     if (live.generation?.retry !== undefined) {
@@ -948,22 +1416,37 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             name: "stalledMinutes",
             label: "Stalled after (minutes)",
             description:
-                "A subagent at work with no new message, tool call, or tool result for this long is called stalled when Pi asks for the status of its subagents.",
+                "A subagent at work with no progress for this long (no new message, tool call, tool result, or output) is stalled: its parent gets one message about it, with what it waits on, and status says so. Nothing is stopped yet.",
             type: "number",
             default: STALLED_MINUTES,
             min: 1,
             max: 10080,
         },
+        {
+            name: "stopMinutes",
+            label: "Stop a stalled call after (minutes)",
+            description:
+                "With no progress for this long, Pi Pocket stops the subagent's stuck call (or its run, when no call runs), and its parent and you are told. At most 2 times until it answers again: after that, a person decides. A call with its own timeout runs until then. 0: never stop.",
+            type: "number",
+            default: STOP_MINUTES,
+            min: 0,
+            max: 10080,
+        },
     ]);
 
-    const stalledMs = () => {
-        const value = web?.setting("stalledMinutes");
+    const minutes = (name: string, fallback: number) => {
+        const value = web?.setting(name);
 
-        return (typeof value === "number" ? value : STALLED_MINUTES) * 60_000;
+        return (typeof value === "number" ? value : fallback) * 60_000;
     };
 
+    const stalledMs = () => minutes("stalledMinutes", STALLED_MINUTES);
     const Courier = courierFor(host);
     const Reporter = reporterFor(Courier, host);
+    const StallWatch = stallWatchFor(Courier, host, () => ({
+        soft: stalledMs(),
+        hard: minutes("stopMinutes", STOP_MINUTES),
+    }));
     // Read as the module is built: the app builds it again when the owner changes the models subagents may use, so the
     // tool offers Pi a model only while some are allowed. Its call checks the list as it is then, whatever it offered.
     const choosing = allowedModels(host).length > 0;
@@ -1130,6 +1613,14 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
             }
 
             if (action === "stop") {
+                // Its report says the parent stopped it, not a person.
+                await api.commit(async (tx) => {
+                    const record = (await tx.doc(SubagentsDoc, api.conversationId)).agents[name];
+
+                    if (record !== undefined) {
+                        record.stoppedBy = "parent";
+                    }
+                }, context);
                 await (await api.conversation(agent!.conversationId, context))!.abort(context);
 
                 return reply(`Stopped ${name}.`, agent!.conversationId);
@@ -1270,6 +1761,8 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 (await api.snapshot(LiveDoc, agent!.conversationId, context))?.run !== undefined;
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
+                // Reads first: a commit reads the tables only before it writes one.
+                const watched = await working(tx, state.stallWatch);
 
                 if (action === "spawn") {
                     if (Object.hasOwn(state.agents, name)) {
@@ -1328,6 +1821,12 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 // For the subagents bar: what it works on now, and since when.
                 record.asked = message.trim().slice(0, 300);
                 record.askedAt = Date.now();
+                delete record.stoppedBy;
+
+                if (!watched) {
+                    state.stallWatch = await tx.createTask(StallWatch, null, BACKGROUND);
+                }
+
                 const input = {
                     name,
                     conversationId,
@@ -1368,7 +1867,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
     const SubagentTools: Extension = defineExtension({
         name: "pocket-subagents",
-        tasks: [Anchor, Reporter, Courier],
+        tasks: [Anchor, Reporter, Courier, StallWatch],
         tools: [subagent],
         sections: [section("subagents", ({ agent }) => guide(host, agent.model))],
     });

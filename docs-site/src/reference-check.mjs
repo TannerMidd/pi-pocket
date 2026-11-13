@@ -29,6 +29,7 @@ const HEADED = new Map([
     ["SafeText", "text."],
     ["LinkedSessions", "linkedSessions."],
     ["Sessions", "sessions."],
+    ["InboxApi", "inbox."],
 ]);
 
 /** Which types each page describes. */
@@ -40,6 +41,7 @@ export const PAGES = {
         "LinkedSessions",
         "LinkedSession",
         "Sessions",
+        "InboxApi",
         "AskRequest",
         "AskField",
         "AskAnswer",

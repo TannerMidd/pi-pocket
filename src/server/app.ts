@@ -107,6 +107,7 @@ import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
+import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
@@ -136,6 +137,7 @@ import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { withQuietLimit } from "./deadline.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
 import { ask, browserFor, checkValues } from "./extension-points.ts";
@@ -427,6 +429,8 @@ export class PocketApp {
     readonly repoWatches = new RepoWatches(this);
     /** Webhooks: addresses other services post to, each a message to a session or PiP (`hooks.ts`). */
     readonly hooks = new Hooks(this);
+    /** Outside data delivered to a session as a person's message: webhooks, and extensions (`inbox.ts`). */
+    readonly inbox = new Inbox(this);
     /** Lessons Pi keeps across sessions, for a project or everywhere. */
     readonly memory = new Memory(this);
     /** Each person's favorite working folders, shared by their devices. */
@@ -925,7 +929,16 @@ export class PocketApp {
                     options?.open === true,
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
+            stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
+            waitsForLimit: (conversationId) =>
+                this.limits.waits().some((wait) => wait.conversationId === Number(conversationId)),
+            alertOwner: (conversationId, title, body) =>
+                this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
+            inbox: Object.freeze({
+                deliver: (target: ConversationId, delivery: InboxDelivery) =>
+                    this.inbox.deliver(target, delivery),
+            }),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
             sessions: this.extensionSessions,
@@ -1625,7 +1638,10 @@ export class PocketApp {
         // Each command hides core's secrets as they are now.
         this.secrets.sync();
 
-        return wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden);
+        return withQuietLimit(
+            wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
+            () => this.background.commandQuietMs,
+        );
     }
 
     #env(cwd: string): ExecutionEnv {
@@ -1674,6 +1690,22 @@ export class PocketApp {
                 client.send("notice", { level, message });
             }
         }
+    }
+
+    /** Stop one running tool call, alone: its task is aborted, and its run goes on with the result that says so. */
+    async stopToolCall(id: ConversationId, callId: string): Promise<boolean> {
+        const live = await this.harness.snapshot(LiveDoc, id, context);
+        const slot = [...(live?.tools ?? []), ...(live?.nestedTools ?? [])].find(
+            (each) => each.callId === callId && each.status === "running",
+        );
+
+        if (slot?.taskId === undefined) {
+            return false;
+        }
+
+        await this.harness.abortTask(slot.taskId, context);
+
+        return true;
     }
 
     /** A notice for the owner's tabs alone: about what only they may change. */

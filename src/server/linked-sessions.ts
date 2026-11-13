@@ -11,12 +11,18 @@ import {
     type AgentState,
     AssistantEntry,
     type ConversationId,
+    LiveDoc,
     type ModelRef,
     type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
-import type { HumanLinkedSessions, LinkedSession, LinkedSessionsApi } from "./host.ts";
+import type {
+    HumanLinkedSessions,
+    LinkedActivity,
+    LinkedSession,
+    LinkedSessionsApi,
+} from "./host.ts";
 import type { RequestActor } from "./extension-request.ts";
 import {
     LinkedSessionCallsDoc,
@@ -29,6 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
+import { callTimeoutMs, progressOf, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -393,6 +400,34 @@ export class LinkedSessions implements LinkedSessionsApi {
         });
     }
 
+    /**
+     * Call `start` with the lead of a session that starts a run, whoever woke it, when the lead takes its answers and is
+     * not archived (as `watch`): for a stall watch, with a commit to start one. Until the returned function is called.
+     */
+    onLedRun(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void {
+        return this.#app.events.on("run.started", (run) => {
+            const id = run.conversationId as unknown as ConversationId;
+            const lead = this.#app.sessionMeta(id)?.linkedFrom?.id as ConversationId | undefined;
+
+            if (
+                run.conversationId !== run.session ||
+                lead === undefined ||
+                this.#app.sessionMeta(lead)?.archived === true ||
+                !this.#leads(lead, id)
+            ) {
+                return;
+            }
+
+            return start(lead, this.#app.harness, context);
+        });
+    }
+
     /** The report of `id`'s run to `lead`, keyed by what the run left, so a run reports once. */
     async #report(
         id: ConversationId,
@@ -496,6 +531,88 @@ export class LinkedSessions implements LinkedSessionsApi {
 
     async #address(source: ConversationId, target: number, actor?: RequestActor): Promise<string> {
         return (await this.#addresses(source, [target], actor)).get(target)!;
+    }
+
+    /**
+     * The sessions `source` started and takes the answers of, while they are at work, for a stall watch: how far each
+     * got (`progress` changes while it makes any), when its newest message came, and what it waits on. By address only.
+     */
+    async activity(source: ConversationId): Promise<LinkedActivity[]> {
+        const app = this.#app;
+        const led = this.#family(source, this.#person(source)).filter(
+            (each) =>
+                each.busy === true && this.#leads(source, each.id as unknown as ConversationId),
+        );
+        const addresses = await this.#addresses(
+            source,
+            led.map((each) => each.id),
+        );
+        const found: LinkedActivity[] = [];
+
+        for (const each of led) {
+            const id = each.id as unknown as ConversationId;
+            const live = await app.harness.snapshot(LiveDoc, id, context);
+
+            if (live?.run === undefined) {
+                continue;
+            }
+
+            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall; it is still at work.
+            if (
+                app.approvals.forConversation(id).length > 0 ||
+                app.limits.waits().some((wait) => wait.conversationId === Number(id))
+            ) {
+                found.push({
+                    address: addresses.get(each.id)!,
+                    progress: "",
+                    waiting: "an approval or a limit",
+                    paused: true,
+                });
+                continue;
+            }
+
+            const on = waitingOn(live);
+            const { at, timeoutMs } = await app.harness.commit(async (tx) => {
+                const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
+                const messages = page.items.flatMap((entry) => entry.model ?? []);
+                const times = messages
+                    .map((message) => message.timestamp)
+                    .filter((time) => typeof time === "number" && Number.isFinite(time));
+
+                return {
+                    at: times.length === 0 ? undefined : Math.max(...times),
+                    timeoutMs:
+                        on.callId === undefined ? undefined : callTimeoutMs(messages, on.callId),
+                };
+            }, context);
+
+            found.push({
+                address: addresses.get(each.id)!,
+                progress: progressOf(live),
+                ...(at === undefined ? {} : { at }),
+                waiting: on.what,
+                ...(on.callId === undefined ? {} : { callId: on.callId }),
+                ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            });
+        }
+
+        return found;
+    }
+
+    /** Stop one stuck call of a session `source` leads, by its address; its run goes on. False: no such call runs. */
+    async stopCall(
+        source: ConversationId,
+        request: { to: string; callId: string },
+    ): Promise<boolean> {
+        const peers =
+            (await this.#app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
+        const target = Object.hasOwn(peers, request.to) ? peers[request.to] : undefined;
+
+        if (target === undefined || !this.#leads(source, target as unknown as ConversationId)) {
+            return false;
+        }
+
+        return this.#app.stopToolCall(target as unknown as ConversationId, request.callId);
     }
 
     /** Only visible sessions connect a family. Names show only when the source's whole audience sees them. */
