@@ -127,6 +127,14 @@ export interface LinkedSessionsApi {
     activity?(source: ConversationId): Promise<LinkedActivity[]>;
     /** Stop one stuck call of a session `source` leads; its run goes on. False when no such call runs. */
     stopCall?(source: ConversationId, request: { to: string; callId: string }): Promise<boolean>;
+    /** Call `start` with the lead each time a session it leads starts a run, whoever woke it: for a stall watch. */
+    onLedRun?(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void;
 }
 
 /**
