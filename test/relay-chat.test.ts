@@ -561,6 +561,46 @@ test(
 );
 
 for (const connector of [telegram, matrix]) {
+    test(
+        `${connector.label} waits when a long poll answers at once with nothing`,
+        { timeout: 3000 },
+        async (t) => {
+            let polls = 0;
+            const mock = await mockServer((request) => {
+                if (request.url!.includes("getMe")) {
+                    return { json: { ok: true, result: { id: 1 } } };
+                }
+
+                if (request.url!.includes("whoami")) {
+                    return { json: { user_id: "@relay:local" } };
+                }
+
+                polls += 1;
+
+                return { json: { ok: true, result: [], next_batch: `b${polls}` } };
+            });
+
+            cleanup(t, mock);
+
+            const fake = context(
+                { apiUrl: mock.url, homeserver: mock.url, token: "fake" },
+                { offset: 1, since: "old" },
+            );
+            let waits = 0;
+
+            fake.context.sleep = async () => {
+                waits += 1;
+
+                if (waits === 3) {
+                    fake.controller.abort();
+                }
+            };
+
+            await connector.run!(fake.context).catch(() => {});
+            assert.ok(polls <= 4, `${polls} polls`);
+        },
+    );
+
     test(`${connector.label} abort stops an active long poll`, { timeout: 3000 }, async (t) => {
         let entered: () => void = () => {};
 

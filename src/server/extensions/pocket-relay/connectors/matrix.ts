@@ -158,6 +158,7 @@ const matrix: RelayConnector = {
 
         while (!context.signal.aborted) {
             const query = new URLSearchParams({ since: String(since), timeout: "25000" });
+            const asked = Date.now();
             const sync: Sync = await request<Sync>(context, `sync?${query}`, undefined, true);
             const events: RelayEvent[] = [];
 
@@ -176,6 +177,11 @@ const matrix: RelayConnector = {
             await context.emit(events);
             since = batchOf(sync);
             context.save({ since });
+
+            // A long poll that answers at once with nothing (a server that ignores the timeout) must not spin.
+            if (events.length === 0 && Date.now() - asked < 1000) {
+                await context.sleep(1000);
+            }
         }
     },
     async reply(context, reply) {

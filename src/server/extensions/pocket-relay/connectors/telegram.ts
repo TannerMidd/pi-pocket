@@ -189,6 +189,7 @@ const telegram: RelayConnector = {
                 timeout: "25",
                 allowed_updates: JSON.stringify(["message"]),
             });
+            const asked = Date.now();
             const updates: Update[] = await request<Update[]>(
                 context,
                 "getUpdates",
@@ -207,6 +208,11 @@ const telegram: RelayConnector = {
             await context.emit(events);
             offset = updates.reduce((last, update) => Math.max(last, update.update_id + 1), offset);
             context.save({ offset });
+
+            // A long poll that answers at once with nothing (a server that ignores the timeout) must not spin.
+            if (updates.length === 0 && Date.now() - asked < 1000) {
+                await context.sleep(1000);
+            }
         }
     },
     async reply(context, reply) {
