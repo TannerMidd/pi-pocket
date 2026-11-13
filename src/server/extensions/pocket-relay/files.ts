@@ -5,6 +5,9 @@ import { basename, extname, relative, resolve, sep } from "node:path";
 import { workspaceScheme } from "../../paths.ts";
 import type { RelayOutFile } from "./types.ts";
 
+/** What one reply sends in all, whatever the connector's caps: the relay holds it in memory while it sends. */
+export const MAX_REPLY_BYTES = 100 * 1024 * 1024;
+
 /** Where a fetched attachment goes, in the session's folder. */
 export const FETCH_FOLDER = ".relay";
 
@@ -68,6 +71,7 @@ export async function readFiles(
     const root = await folderOf(cwd);
     const data = await realpath(dataDir).catch(() => resolve(dataDir));
     const files: RelayOutFile[] = [];
+    let total = 0;
 
     for (const path of paths) {
         const shown = JSON.stringify(path).slice(0, 120);
@@ -114,12 +118,22 @@ export async function readFiles(
                 );
             }
 
+            total += stat.size;
+
+            if (total > MAX_REPLY_BYTES) {
+                throw new Error(
+                    `These files are more than ${MAX_REPLY_BYTES / 1048576} MB in all: the relay sends that much in one reply at most. Nothing was sent.`,
+                );
+            }
+
             const name = safeName(basename(real));
+            const data = await handle.readFile();
 
             files.push({
                 name,
                 type: TYPES[extname(name).toLowerCase()] ?? "application/octet-stream",
-                data: new Uint8Array(await handle.readFile()),
+                // The file's own bytes, not a copy.
+                data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
             });
         } finally {
             await handle.close();

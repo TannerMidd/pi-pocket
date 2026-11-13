@@ -1,5 +1,6 @@
 /** Discord: a bot that hears messages over the gateway (v10) and replies over REST. */
 import { createHash } from "node:crypto";
+import { bytesOf } from "../download.ts";
 import {
     RelayError,
     type RelayConnector,
@@ -341,38 +342,6 @@ function fileHost(url: string, values: RelayValues): boolean {
             ["cdn.discordapp.com", "media.discordapp.net"].includes(parsed.hostname)) ||
             (text(values.apiUrl) !== "" && parsed.origin === api.origin))
     );
-}
-
-/** At most `max` bytes of a response, or an error: a larger file is never read to its end. */
-async function bytesOf(response: Response, max: number): Promise<Uint8Array> {
-    if (Number(response.headers.get("content-length") ?? 0) > max) {
-        await response.body?.cancel();
-
-        throw new Error(`the file is larger than ${Math.round(max / 1048576)} MB`);
-    }
-
-    const parts: Uint8Array[] = [];
-    let size = 0;
-
-    for await (const part of (response.body ?? []) as AsyncIterable<Uint8Array>) {
-        size += part.byteLength;
-
-        if (size > max) {
-            throw new Error(`the file is larger than ${Math.round(max / 1048576)} MB`);
-        }
-
-        parts.push(part);
-    }
-
-    const data = new Uint8Array(size);
-    let at = 0;
-
-    for (const part of parts) {
-        data.set(part, at);
-        at += part.byteLength;
-    }
-
-    return data;
 }
 
 async function download(

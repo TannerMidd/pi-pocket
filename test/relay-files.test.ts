@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -74,6 +74,14 @@ test("files go only from the session's folder: no escape, no link out, no hidden
     await assert.rejects(
         readFiles(root, outside, ["a.png", "a.png", "a.png"], caps),
         /2 files at most/,
+    );
+
+    // Whatever the connector's caps, one reply holds 100 MB at most.
+    writeFileSync(join(root, "half.bin"), "");
+    truncateSync(join(root, "half.bin"), 60 * 1048576);
+    await assert.rejects(
+        readFiles(root, outside, ["half.bin", "half.bin"], { max: 2, maxBytes: 70 * 1048576 }),
+        /100 MB in all/,
     );
 });
 
