@@ -33,11 +33,12 @@ export function withQuietLimit(base: ExecutionEnv, quietMs: () => number): Execu
         }
 
         const { context: inner, cancel } = withCancel(context);
-        let last = Date.now();
+        // A monotonic clock: a step of the wall clock, or a machine that wakes from sleep, is no quiet time.
+        let last = performance.now();
         let quiet = false;
         const look = setInterval(
             () => {
-                if (Date.now() - last >= limit) {
+                if (performance.now() - last >= limit) {
                     quiet = true;
                     cancel(new Error("quiet"));
                 }
@@ -53,7 +54,7 @@ export function withQuietLimit(base: ExecutionEnv, quietMs: () => number): Execu
                 {
                     ...options,
                     onOutput: (text, context, info) => {
-                        last = Date.now();
+                        last = performance.now();
                         options?.onOutput?.(text, context, info);
                     },
                 },

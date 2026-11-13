@@ -740,7 +740,7 @@ export class BackgroundTasks {
         let looked = Date.now();
         let runaway: string | undefined;
         // When its output last grew: one quiet for longer than its limit is stopped, and Pi is told.
-        let grew = Date.now();
+        let grew = performance.now();
         const quietMs = watched.quietMs ?? 0;
 
         for (;;) {
@@ -780,10 +780,10 @@ export class BackgroundTasks {
             }
 
             if (now !== written) {
-                grew = Date.now();
+                grew = performance.now();
             }
 
-            if (quietMs > 0 && Date.now() - grew >= quietMs) {
+            if (quietMs > 0 && performance.now() - grew >= quietMs) {
                 runaway = `it printed nothing for ${duration(quietMs)}, its quiet limit`;
                 await this.#kill(conversationId, watched);
                 break;
