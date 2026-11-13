@@ -811,7 +811,17 @@ export type Hook = {
     reply?: {
         url: string;
         secret: string;
-        /** A post was accepted and its answer is not yet sent: the next run's answer goes out. */
+        /** Per-post receipts. Keys are the hashed client request keys, never user-controlled object paths. */
+        requests?: Record<
+            string,
+            {
+                request: string;
+                submissionRequest: string;
+                done?: boolean;
+                pending?: { entry: string; text: string; attempts: number; nextAt: number };
+            }
+        >;
+        /** Legacy uncorrelated state. Kept for stored-data compatibility; new delivery ignores it. */
         asked?: boolean;
         /** The answer's entry id that was last delivered: the same answer is never sent twice. */
         sent?: string;

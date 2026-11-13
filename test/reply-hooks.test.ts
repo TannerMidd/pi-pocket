@@ -29,7 +29,13 @@ test("a reply address is https, or http to this machine only", () => {
 test("a signature passes only with the same secret, timestamp, and body", () => {
     const secret = "s".repeat(32);
     const now = 1_800_000_000_000;
-    const body = replyBody({ hook: "h", session: 3, entry: "e1", text: "answer" });
+    const body = replyBody({
+        hook: "h",
+        request: "request",
+        session: 3,
+        entry: "e1",
+        text: "answer",
+    });
     const sig = signReply(secret, now, body);
 
     assert.match(sig, /^sha256=[0-9a-f]{64}$/);
@@ -52,10 +58,27 @@ test("an old or future timestamp is refused, so a payload cannot be replayed", (
 });
 
 test("a long answer is cut and marked, a short one is whole", () => {
-    const short = JSON.parse(replyBody({ hook: "h", session: 1, entry: "e", text: "hi" }));
-    assert.deepEqual(short, { hook: "h", session: 1, entry: "e", text: "hi", truncated: false });
+    const short = JSON.parse(
+        replyBody({ hook: "h", request: "request", session: 1, entry: "e", text: "hi" }),
+    );
+    assert.deepEqual(short, {
+        hook: "h",
+        request: "request",
+        session: 1,
+        entry: "e",
+        text: "hi",
+        truncated: false,
+    });
 
-    const long = JSON.parse(replyBody({ hook: "h", session: 1, entry: "e", text: "x".repeat(MAX_REPLY_TEXT + 5) }));
+    const long = JSON.parse(
+        replyBody({
+            hook: "h",
+            request: "request",
+            session: 1,
+            entry: "e",
+            text: "x".repeat(MAX_REPLY_TEXT + 5),
+        }),
+    );
     assert.equal(long.text.length, MAX_REPLY_TEXT);
     assert.equal(long.truncated, true);
 });

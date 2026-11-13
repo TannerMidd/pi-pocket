@@ -75,9 +75,10 @@ export function verifyReply(
     return expected.length === given.length && timingSafeEqual(expected, given);
 }
 
-/** What a reply carries. `entry` is the answer's stable entry id: a receiver deduplicates on it. */
+/** A reply names the original delivery key and the exact answer entry. Receivers match `request` and deduplicate. */
 export type ReplyPayload = {
     hook: string;
+    request: string;
     session: number;
     entry: string;
     text: string;

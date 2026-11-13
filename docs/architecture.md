@@ -79,6 +79,23 @@ A PR watch (`watches.ts`) is a `WatchDoc` in its session and a durable task ther
 
 A repository watch (`repo-watches.ts`) is an item of the app-wide `RepoWatchesDoc` and a durable task in the conversation it messages (PiP's, or a session's), with the same wait, look, and send phases as a PR watch: a look puts the message in the task's checkpoint, and the send's request id is the task's and its count's, so it goes once. It reads the repository's issues, pulls, workflow runs, releases, and comments through `gh api`, and keeps the ids it told. PiP's tools (`repo_watch`, `session_watch_pr`, `session_start` with `repo`) act through `Pip` as its person; a repository is worked on or watched only where `gh`'s account can push, and `Pip.checkout` finds a session's checkout whose `origin` is the repository, or clones it once into `repos/`.
 
+### Signed replies from webhooks
+
+The owner can add a reply URL to a webhook. `hooks.ts` stores a receipt before it submits each post.
+The receipt binds the original delivery key to the durable submission request ID.
+`reply-delivery.ts` reads that submission's answer entry, not the session's latest answer.
+It stores the payload before sending and sweeps unfinished receipts after startup and every second.
+Separate posts keep separate receipts, even when Durable answers them together.
+Failed submissions get a fixed notice with no provider error details.
+The signed JSON body includes `request`, the original `Idempotency-Key` or GitHub delivery ID.
+Receivers must match the request and hook before completing work, and deduplicate callbacks.
+Legacy uncorrelated state remains readable but does not trigger new delivery.
+
+Reply HTTP URLs can name only literal loopback addresses or localhost, which delivery pins to 127.0.0.1.
+Other URLs use the public-address fetch guard, including connection-time DNS checks. Redirects are refused.
+Only the owner can configure outgoing replies. Hook views omit operational receipts and answer text.
+Each hook keeps at most 1000 receipts before pruning completed receipts; active receipts are never discarded.
+
 ## Who chooses models
 
 Only people choose models; Pi, PiP, and Pi Pocket itself never pick one on the side. Everything that runs a model uses one a person chose:

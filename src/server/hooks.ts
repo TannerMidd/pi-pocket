@@ -371,11 +371,15 @@ export class Hooks {
 
     /** A hook as its people see it. */
     view(hook: Hook): HookView {
-        const { secret, ...rest } = hook;
+        const { secret, reply, ...rest } = hook;
+        const visible = {
+            ...rest,
+            ...(reply === undefined ? {} : { reply: { url: reply.url, secret: reply.secret } }),
+        };
 
         return hook.signed === true
-            ? { ...rest, path: `/hook/${hook.id}`, secret }
-            : { ...rest, path: `/hook/${hook.id}/${secret}` };
+            ? { ...visible, path: `/hook/${hook.id}`, secret }
+            : { ...visible, path: `/hook/${hook.id}/${secret}` };
     }
 
     /** The hooks a person may see and remove: their own; the owner's sees every one. Newest first. */
@@ -425,6 +429,10 @@ export class Hooks {
         }
 
         if (request.replyUrl !== undefined && request.replyUrl !== "") {
+            if (user.role !== "owner") {
+                throw new HttpError(403, "Only the owner can configure outgoing replies.");
+            }
+
             const problem = replyUrlProblem(request.replyUrl);
 
             if (problem !== undefined) {
@@ -637,13 +645,47 @@ export class Hooks {
         }
 
         const delivery = header(post, "x-github-delivery") ?? header(post, "idempotency-key");
+        if (
+            hook.reply !== undefined &&
+            delivery !== undefined &&
+            (delivery.length === 0 || delivery.length > 256)
+        ) {
+            throw new HttpError(400, "The delivery key must contain 1 to 256 characters.");
+        }
+
+        const request = delivery ?? randomBytes(18).toString("base64url");
         const key = clientKey(
-            `hook-${hook.id}-${delivery === undefined ? randomBytes(9).toString("base64url") : createHash("sha256").update(delivery).digest("base64url").slice(0, 32)}`,
+            `hook-${hook.id}-${createHash("sha256").update(request).digest("base64url").slice(0, 32)}`,
         );
         let sent = false;
 
         await app.harness.commit(async (tx) => {
             sent = (await tx.submissionByRequest(target, requestFor(person.id, key))) !== undefined;
+            const item = (await tx.doc(HooksDoc)).items[hook.id];
+
+            if (item?.reply !== undefined) {
+                item.reply.requests ??= {};
+                const receipts = item.reply.requests;
+
+                // Preserve active receipts. Completed receipts can be reconstructed from durable submissions.
+                if (receipts[key] === undefined && Object.keys(receipts).length >= 1000) {
+                    for (const [oldKey, receipt] of Object.entries(receipts)) {
+                        if (receipt.done) {
+                            delete receipts[oldKey];
+                        }
+                    }
+                }
+
+                if (receipts[key] === undefined && Object.keys(receipts).length >= 1000) {
+                    throw new HttpError(429, "Too many replies are pending for this webhook.");
+                }
+
+                receipts[key] ??= {
+                    request,
+                    submissionRequest: requestFor(person.id, key),
+                    ...(sent ? { done: true } : {}),
+                };
+            }
         }, context);
 
         if (sent) {
@@ -692,10 +734,6 @@ export class Hooks {
             if (item !== undefined) {
                 item.count += 1;
                 item.lastAt = now;
-
-                if (item.reply !== undefined) {
-                    item.reply.asked = true;
-                }
             }
         }, context);
 
