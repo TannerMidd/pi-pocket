@@ -219,7 +219,7 @@ A connector that downloads attachments has `fetch(context, file, maxBytes)`. It 
 
 Limits of the built-in kinds:
 
-- Slack and Telegram have no idempotency key. A reply with files that a restart or an error cuts off can stay partly sent (the text without a file, or some of the files). The relay does not send it again.
+- Slack and Telegram have no idempotency key. The relay does not send again a reply that a restart or an error cut off. Slack shares the text and all the files in one call, so it sends all or nothing. Telegram sends each part on its own, so a cut-off reply can stay partly sent (the text without a file, or some of the files).
 - Telegram sends each file as its own message. A short text (1,024 characters or fewer) is the first file's caption. A photo that Telegram refuses goes again as a document. A local Bot API server in `--local` mode gives paths on its disk: the relay cannot fetch from it.
 - Matrix sends the text and each file as separate events, each with its own transaction id. A homeserver keeps transaction ids for a limited time (Synapse about 30 minutes): a replay after a longer stop can show the reply twice. A replay uploads the files again.
 
