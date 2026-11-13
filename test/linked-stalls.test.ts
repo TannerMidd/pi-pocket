@@ -36,8 +36,8 @@ before(async () => {
             );
         }
 
-        // A stuck call that a person asks for.
-        if (role === "user" && /WAKE_AND_HANG/.test(text)) {
+        // A stuck call that a person asks for, in a linked session or its lead.
+        if (role === "user" && /WAKE_AND_HANG|HANG_LEAD/.test(text)) {
             return fauxAssistantMessage(
                 [fauxToolCall("bash", { command: "exec tail -f /dev/null" })],
                 { stopReason: "toolUse" },
@@ -125,4 +125,27 @@ test("a linked session that another wakes after its lead's watch ended is watche
             ).includes("stalled: no progress"),
         "the lead told",
     );
+});
+
+test("a started session cannot stop a call of its lead", async () => {
+    const lead = await newSession(app);
+
+    await say(app, lead, "START_A_TEAM");
+    const child = app.sessions().find((each) => each.linkedFrom?.id === Number(lead))!
+        .id as unknown as ConversationId;
+
+    await until(() => !app.isBusy(child), "the child idle");
+    void app.commands.submit(lead, owner(app), { text: "HANG_LEAD", requestId: "leads" });
+    const running = async () =>
+        (await app.harness.snapshot(LiveDoc, lead, context))?.tools?.find(
+            (tool) => tool.status === "running",
+        )?.callId;
+
+    await until(async () => (await running()) !== undefined, "the lead's call");
+    const callId = (await running())!;
+    const up = (await app.linkedSessions.list(child))[0]!;
+
+    assert.equal(await app.linkedSessions.stopCall(child, { to: up.address, callId }), false);
+    assert.equal(await running(), callId, "the lead's call still runs");
+    await app.commands.abort(lead, owner(app));
 });
