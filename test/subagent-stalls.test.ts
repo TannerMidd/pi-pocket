@@ -29,8 +29,11 @@ const HANG = "exec tail -f /dev/null";
 /** How far the app's clock is ahead of the real one. */
 let offset = 0;
 
-const hang = () =>
-    fauxAssistantMessage([fauxToolCall("bash", { command: HANG })], { stopReason: "toolUse" });
+const hang = (own = false) =>
+    fauxAssistantMessage(
+        [fauxToolCall("bash", { command: HANG, ...(own ? { timeout: 7200 } : {}) })],
+        { stopReason: "toolUse" },
+    );
 
 const route: FauxResponseStep = (request) => {
     const all = JSON.stringify((request as { messages: unknown[] }).messages);
@@ -40,8 +43,9 @@ const route: FauxResponseStep = (request) => {
 
     if (subagent !== undefined) {
         // "loop-": a new stuck call after each stopped one. Others hang once, then answer.
-        if (subagent.startsWith("loop-") || (role === "user" && text.startsWith("Check "))) {
-            return hang();
+        // "own-": a call with its own timeout of 2 h.
+        if (/^(loop|own)-/.test(subagent) || (role === "user" && text.startsWith("Check "))) {
+            return hang(subagent.startsWith("own-"));
         }
 
         return fauxAssistantMessage([fauxText(`result of ${subagent}: ${text.slice(0, 40)}`)]);
@@ -140,6 +144,12 @@ async function call(id: ConversationId, name: string): Promise<string | undefine
     return live?.tools?.find((tool) => tool.status === "running")?.callId;
 }
 
+/** Stop a subagent's run. */
+const stop = async (id: ConversationId, name: string) =>
+    (await app.harness.conversation((await agent(id, name)).conversationId, context))!.abort(
+        context,
+    );
+
 const settings = (stalledMinutes: number, stopMinutes: number) =>
     app.setExtensionSettings(owner(app), "subagents", { stalledMinutes, stopMinutes });
 
@@ -183,10 +193,7 @@ test("helpers past the soft limit cost the parent one message, with what each wa
     assert.equal((await inbox(id)).filter((text) => text.includes(" stalled: ")).length, 1);
 
     for (const name of ["soft-a", "soft-b"]) {
-        await (await app.harness.conversation(
-            (await agent(id, name)).conversationId,
-            context,
-        ))!.abort(context);
+        await stop(id, name);
     }
 });
 
@@ -228,10 +235,7 @@ test("the hard limit stops the stuck call, 2 times until it answers, then leaves
 
     assert.equal(alerts.length, 3, "the owner hears of each pass of the hard limit");
     assert.match(alerts[2]!, /left for you to decide/);
-    await (await app.harness.conversation(
-        (await agent(id, "loop-x")).conversationId,
-        context,
-    ))!.abort(context);
+    await stop(id, "loop-x");
 });
 
 test("a person's Stop is said as such, and the message it held reaches the parent with its answer", async () => {
@@ -264,4 +268,42 @@ test("a person's Stop is said as such, and the message it held reaches the paren
         "the answer to the held message",
     );
     assert.ok(!(await inbox(id)).join("\n").includes("held failed"), "a Stop is no failure");
+});
+
+test("a wait for a provider's limit is no quiet time once it ends", async () => {
+    settings(30, 60);
+    alerts.length = 0;
+    const id = await session();
+
+    await say(id, "spawn wait-w");
+    await until(async () => (await call(id, "wait-w")) !== undefined, "the call");
+    const stuck = await call(id, "wait-w");
+    const child = Number((await agent(id, "wait-w")).conversationId);
+    const waits = app.limits.waits.bind(app.limits);
+
+    app.limits.waits = () => [...waits(), { conversationId: child, view: {} as never }];
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 120 * 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    app.limits.waits = waits;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.deepEqual(alerts, [], "no stop just after the wait");
+    assert.equal(await call(id, "wait-w"), stuck);
+    await stop(id, "wait-w");
+});
+
+test("a call with its own timeout is neither stalled nor stopped before it", async () => {
+    settings(30, 60);
+    const id = await session();
+
+    await say(id, "spawn own-x");
+    await until(async () => (await call(id, "own-x")) !== undefined, "the call");
+    const stuck = await call(id, "own-x");
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 61 * 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(await call(id, "own-x"), stuck, "still the same call");
+    assert.equal((await agent(id, "own-x")).stall?.told, undefined, "no stall before it");
+    await stop(id, "own-x");
 });

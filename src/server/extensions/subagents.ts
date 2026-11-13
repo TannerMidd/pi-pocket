@@ -1160,6 +1160,17 @@ function stallWatchFor(
                             continue;
                         }
 
+                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall, and
+                        // no quiet time: the quiet time starts again when that wait ends.
+                        if (
+                            host.approvals.forConversation(record.conversationId).length > 0 ||
+                            host.waitsForLimit?.(record.conversationId) === true
+                        ) {
+                            seen[name] = { print: seen[name]!.print, at };
+                            delete record.stall;
+                            continue;
+                        }
+
                         // A message to it starts the wait over: a nudge is no reason to say it again at once.
                         const since = Math.max(
                             recent.get(name)?.at ?? 0,
@@ -1172,21 +1183,13 @@ function stallWatchFor(
                             record.stall = { since };
                         }
 
-                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall.
-                        if (
-                            host.approvals.forConversation(record.conversationId).length > 0 ||
-                            host.waitsForLimit?.(record.conversationId) === true
-                        ) {
-                            continue;
-                        }
-
                         const stall = record.stall!;
                         const on = waitingOn(live);
-                        // A call with its own timeout runs until then.
-                        const hard =
-                            limit <= 0 ? 0 : hardLimitOf(limit, recent.get(name)?.timeoutMs);
+                        // A call with its own timeout runs until then: no stall before it, no stop.
+                        const own = recent.get(name)?.timeoutMs;
+                        const hard = limit <= 0 ? 0 : hardLimitOf(limit, own);
 
-                        if (quiet >= soft && stall.told !== true) {
+                        if (quiet >= Math.max(soft, own ?? 0) && stall.told !== true) {
                             stall.told = true;
                             reports.push({
                                 name,
@@ -1236,7 +1239,7 @@ function stallWatchFor(
 
                             reports.push({
                                 name,
-                                text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}).${words === undefined ? "" : ` Its last words: “${words}”.`} Send it the work again, or ask the user]`,
+                                text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}). Send it the work again, or ask the user]${words === undefined ? "" : ` Its last words: “${words}”.`}`,
                             });
                         }
 
