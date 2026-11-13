@@ -1640,7 +1640,7 @@ export class PocketApp {
 
         return withQuietLimit(
             wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
-            () => this.background.limits.commandQuietMs,
+            () => this.background.commandQuietMs,
         );
     }
 

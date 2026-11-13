@@ -494,6 +494,19 @@ export class BackgroundTasks {
         return this.#app.loader.extensionNames().includes(BACKGROUND_EXTENSION);
     }
 
+    /** The quiet limit of Pi's commands (`deadline.ts`): the owner's setting, kept while this extension is off too. */
+    get commandQuietMs(): number {
+        if (this.running) {
+            return this.limits.commandQuietMs;
+        }
+
+        const stored = this.#app.config.extensionSettings("background").commandQuietMinutes;
+
+        return typeof stored === "number"
+            ? stored * 60_000
+            : DEFAULT_BACKGROUND_LIMITS.commandQuietMs;
+    }
+
     /** The sweep runs while the server does; it only reads a folder until a log there passes its limit. */
     #sweeping(): void {
         if (this.#sweeper === undefined) {
