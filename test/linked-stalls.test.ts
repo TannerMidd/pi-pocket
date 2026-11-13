@@ -67,41 +67,45 @@ after(async () => {
     cleanUp();
 });
 
-test("a lead hears once of a stalled linked session, and the hard limit stops its stuck call", async () => {
+/** The call a session waits on now, if any. */
+const running = async (id: ConversationId) =>
+    (await app.harness.snapshot(LiveDoc, id, context))?.tools?.find(
+        (tool) => tool.status === "running",
+    )?.callId;
+
+/** What a lead was told: its messages from people and from Pi Pocket. */
+async function told(id: ConversationId): Promise<string> {
+    const messages = (await (await app.harness.conversation(id, context))!.context(context))
+        .messages;
+
+    return JSON.stringify(messages.filter((message) => message.role === "user"));
+}
+
+/** A new lead and the linked session it started, at its first answer. */
+async function team(): Promise<[ConversationId, ConversationId]> {
     const id = await newSession(app);
 
     await say(app, id, "START_A_TEAM");
     const started = app.sessions().find((session) => session.linkedFrom?.id === Number(id))!;
-    const target = started.id as unknown as ConversationId;
-    const running = async () =>
-        (await app.harness.snapshot(LiveDoc, target, context))?.tools?.find(
-            (tool) => tool.status === "running",
-        );
 
-    await until(async () => (await running()) !== undefined, "the stuck call");
+    return [id, started.id as unknown as ConversationId];
+}
+
+test("a lead hears once of a stalled linked session, and the hard limit stops its stuck call", async () => {
+    const [id, target] = await team();
+
+    await until(async () => (await running(target)) !== undefined, "the stuck call");
     await new Promise((resolve) => setTimeout(resolve, 300));
     offset += 61 * 60_000;
-
-    const told = async () => {
-        const messages = (await (await app.harness.conversation(id, context))!.context(context))
-            .messages;
-
-        return JSON.stringify(messages.filter((message) => message.role === "user"));
-    };
-
-    await until(async () => (await told()).includes("stalled: no progress for 1 h"), "the stall");
-    await until(async () => (await running()) === undefined, "the call stopped");
+    await until(async () => (await told(id)).includes("stalled: no progress for 1 h"), "the stall");
+    await until(async () => (await running(target)) === undefined, "the call stopped");
     await until(() => !app.isBusy(target), "its run on to its answer");
-    assert.match(await told(), /stop 1 of 2/);
-    assert.equal(((await told()).match(/\[linked sessions\]/g) ?? []).length, 1, "one message");
+    assert.match(await told(id), /stop 1 of 2/);
+    assert.equal(((await told(id)).match(/\[linked sessions\]/g) ?? []).length, 1, "one message");
 });
 
 test("a linked session that another wakes after its lead's watch ended is watched again", async () => {
-    const id = await newSession(app);
-
-    await say(app, id, "START_A_TEAM");
-    const target = app.sessions().find((each) => each.linkedFrom?.id === Number(id))!
-        .id as unknown as ConversationId;
+    const [id, target] = await team();
 
     await until(() => !app.isBusy(target), "its first answer");
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -109,43 +113,22 @@ test("a linked session that another wakes after its lead's watch ended is watche
     // None at work for 3 min: the watch ends. A person wakes it, not its lead.
     await new Promise((resolve) => setTimeout(resolve, 600));
     await app.commands.submit(target, owner(app), { text: "WAKE_AND_HANG", requestId: "w3" });
-    await until(
-        async () =>
-            (await app.harness.snapshot(LiveDoc, target, context))?.tools?.some(
-                (t) => t.status === "running",
-            ) === true,
-        "the stuck call",
-    );
+    await until(async () => (await running(target)) !== undefined, "the stuck call");
     await new Promise((resolve) => setTimeout(resolve, 300));
     offset += 61 * 60_000;
-    await until(
-        async () =>
-            JSON.stringify(
-                (await (await app.harness.conversation(id, context))!.context(context)).messages,
-            ).includes("stalled: no progress"),
-        "the lead told",
-    );
+    await until(async () => (await told(id)).includes("stalled: no progress"), "the lead told");
 });
 
 test("a started session cannot stop a call of its lead", async () => {
-    const lead = await newSession(app);
-
-    await say(app, lead, "START_A_TEAM");
-    const child = app.sessions().find((each) => each.linkedFrom?.id === Number(lead))!
-        .id as unknown as ConversationId;
+    const [lead, child] = await team();
 
     await until(() => !app.isBusy(child), "the child idle");
     void app.commands.submit(lead, owner(app), { text: "HANG_LEAD", requestId: "leads" });
-    const running = async () =>
-        (await app.harness.snapshot(LiveDoc, lead, context))?.tools?.find(
-            (tool) => tool.status === "running",
-        )?.callId;
-
-    await until(async () => (await running()) !== undefined, "the lead's call");
-    const callId = (await running())!;
+    await until(async () => (await running(lead)) !== undefined, "the lead's call");
+    const callId = (await running(lead))!;
     const up = (await app.linkedSessions.list(child))[0]!;
 
     assert.equal(await app.linkedSessions.stopCall(child, { to: up.address, callId }), false);
-    assert.equal(await running(), callId, "the lead's call still runs");
+    assert.equal(await running(lead), callId, "the lead's call still runs");
     await app.commands.abort(lead, owner(app));
 });

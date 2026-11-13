@@ -144,6 +144,12 @@ async function call(id: ConversationId, name: string): Promise<string | undefine
     return live?.tools?.find((tool) => tool.status === "running")?.callId;
 }
 
+/** Stop a subagent's run. */
+const stop = async (id: ConversationId, name: string) =>
+    (await app.harness.conversation((await agent(id, name)).conversationId, context))!.abort(
+        context,
+    );
+
 const settings = (stalledMinutes: number, stopMinutes: number) =>
     app.setExtensionSettings(owner(app), "subagents", { stalledMinutes, stopMinutes });
 
@@ -187,10 +193,7 @@ test("helpers past the soft limit cost the parent one message, with what each wa
     assert.equal((await inbox(id)).filter((text) => text.includes(" stalled: ")).length, 1);
 
     for (const name of ["soft-a", "soft-b"]) {
-        await (await app.harness.conversation(
-            (await agent(id, name)).conversationId,
-            context,
-        ))!.abort(context);
+        await stop(id, name);
     }
 });
 
@@ -232,10 +235,7 @@ test("the hard limit stops the stuck call, 2 times until it answers, then leaves
 
     assert.equal(alerts.length, 3, "the owner hears of each pass of the hard limit");
     assert.match(alerts[2]!, /left for you to decide/);
-    await (await app.harness.conversation(
-        (await agent(id, "loop-x")).conversationId,
-        context,
-    ))!.abort(context);
+    await stop(id, "loop-x");
 });
 
 test("a person's Stop is said as such, and the message it held reaches the parent with its answer", async () => {
@@ -289,10 +289,7 @@ test("a wait for a provider's limit is no quiet time once it ends", async () => 
     await new Promise((resolve) => setTimeout(resolve, 600));
     assert.deepEqual(alerts, [], "no stop just after the wait");
     assert.equal(await call(id, "wait-w"), stuck);
-    await (await app.harness.conversation(
-        (await agent(id, "wait-w")).conversationId,
-        context,
-    ))!.abort(context);
+    await stop(id, "wait-w");
 });
 
 test("a call with its own timeout is neither stalled nor stopped before it", async () => {
@@ -308,8 +305,5 @@ test("a call with its own timeout is neither stalled nor stopped before it", asy
     await new Promise((resolve) => setTimeout(resolve, 800));
     assert.equal(await call(id, "own-x"), stuck, "still the same call");
     assert.equal((await agent(id, "own-x")).stall?.told, undefined, "no stall before it");
-    await (await app.harness.conversation(
-        (await agent(id, "own-x")).conversationId,
-        context,
-    ))!.abort(context);
+    await stop(id, "own-x");
 });
