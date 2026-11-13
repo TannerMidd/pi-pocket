@@ -753,7 +753,7 @@ export async function conversationRoutes(
             throw new HttpError(404, "No such background task here.");
         }
 
-        await app.background.stop(id, item.id);
+        await app.background.stop(id, item.id, "person");
 
         return json(response, 200, { ok: true });
     }

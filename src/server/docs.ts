@@ -348,6 +348,12 @@ export type SubagentRecord = {
      * a later time, so it needs them again.
      */
     dealtAt?: number;
+    /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
+    stall?: { since: number; told?: true; stopped?: true };
+    /** How often the stall watch stopped its work since it last answered: 2 at most, then a person decides. */
+    stops?: number;
+    /** Who stopped its run: a person, its parent (`subagent stop`), or the stall watch. A new message clears it. */
+    stoppedBy?: "person" | "parent" | "deadline";
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
@@ -372,6 +378,8 @@ export const SubagentsDoc = defineDoc<{
     outbox?: PendingReport[];
     /** The task sending them, while there is one. */
     courier?: TaskId;
+    /** The task that looks for subagents at work that make no progress, while any is at work. */
+    stallWatch?: TaskId;
     /**
      * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
      * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.
@@ -585,8 +593,12 @@ export type BackgroundTask = {
     code?: number;
     /** `split`'s exit code, when writing its log failed (a full disk): its output may stop short. */
     logFailed?: number;
-    /** Why Pi Pocket stopped it, when it did of itself (its output came too fast to keep). */
+    /** Why Pi Pocket stopped it, when it did of itself (its output came too fast to keep, or nothing for too long). */
     why?: string;
+    /** "person": a person stopped it, and Pi is told, as Pi may wait for it. */
+    by?: "person";
+    /** How long it may print nothing before Pi Pocket stops it; 0 or absent (a task from before 0.29): no limit. */
+    quietMs?: number;
     /** Processes it started that left its group and still ran when it ended (a daemon): a stop ends them. */
     left?: number[];
     /** The machine's boot it started in: a task of another boot has no process left. */

@@ -53,6 +53,21 @@ export interface LinkedSession {
     failed?: string;
 }
 
+/** A linked session at work, as a stall watch sees it (`LinkedSessionsApi.activity`). */
+export interface LinkedActivity {
+    address: string;
+    /** Changes while it makes any progress: a new message, a call, output, its answer as it streams. */
+    progress: string;
+    /** When its newest message came. */
+    at?: number;
+    /** What it waits on, in words: "its bash call", "its model". */
+    waiting: string;
+    /** The call it waits on, when one runs. */
+    callId?: string;
+    /** The `timeout` that call gave itself, in ms: it runs until then. */
+    timeoutMs?: number;
+}
+
 /**
  * Sessions that a session starts and messages (`linked-sessions.ts`). Each acts as the person Pi works for in `source`,
  * with their checks; a call made again with the same `key` acts once, and returns what the first did.
@@ -108,6 +123,10 @@ export interface LinkedSessionsApi {
     ): Promise<{ take: boolean }>;
     /** The sessions linked to `source`, at any distance, that the person Pi works for there sees. */
     list(source: ConversationId): Promise<LinkedSession[]>;
+    /** The sessions `source` started and takes the answers of, while they are at work: for a stall watch. */
+    activity?(source: ConversationId): Promise<LinkedActivity[]>;
+    /** Stop one stuck call of a session `source` leads; its run goes on. False when no such call runs. */
+    stopCall?(source: ConversationId, request: { to: string; callId: string }): Promise<boolean>;
 }
 
 /**
@@ -549,6 +568,15 @@ export interface PocketHost {
         message: string,
         conversationId?: ConversationId,
     ): void;
+    /**
+     * Stop one running tool call of a conversation, by its call id: its result says it was aborted, with what it
+     * printed, and the run goes on. False when no such call runs.
+     */
+    stopToolCall(conversationId: ConversationId, callId: string): Promise<boolean>;
+    /** Whether a run of the conversation waits for a provider's limit to clear (`limit-gate.ts`): no stall. */
+    waitsForLimit(conversationId: ConversationId): boolean;
+    /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
+    alertOwner(conversationId: ConversationId, title: string, body: string): void;
     /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.

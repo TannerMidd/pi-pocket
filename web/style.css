@@ -3168,6 +3168,11 @@ pre.diff .del {
     border-color: var(--err-line);
 }
 
+.report.stalled,
+.report.stopped {
+    border-color: var(--warn-line);
+}
+
 /* Reports that arrived together, as one message to Pi: a card each. */
 .report-group {
     display: flex;
@@ -3210,6 +3215,12 @@ pre.diff .del {
     color: var(--err);
     font-size: 13px;
     overflow-wrap: anywhere;
+}
+
+/* A stalled or stopped subagent is no failure: its words are in the warning color. */
+.report.stalled .report-why,
+.report.stopped .report-why {
+    color: var(--warn);
 }
 
 /* Lancet Guard asks before a call: at the end of the turn, until someone answers. */

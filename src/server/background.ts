@@ -41,6 +41,7 @@ import {
     type TaskRuntime,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import { DEFAULT_QUIET_MINUTES, DEFAULT_TASK_QUIET_MINUTES } from "./deadline.ts";
 import { BackgroundDoc, type BackgroundTask } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang, quoted } from "./fence.ts";
@@ -58,8 +59,16 @@ export const BACKGROUND_PREFIX = "[background] ";
 export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
 
 /** What the owner can change in Extensions: how many tasks may run at once in one session. */
-export type BackgroundLimits = { running: number };
-export const DEFAULT_BACKGROUND_LIMITS: Readonly<BackgroundLimits> = { running: 10 };
+/**
+ * `commandQuietMs`: how long a command Pi runs (bash) may print nothing before it is stopped (`deadline.ts`).
+ * `taskQuietMs`: the same for a background task, unless its start says otherwise. 0: no limit.
+ */
+export type BackgroundLimits = { running: number; commandQuietMs: number; taskQuietMs: number };
+export const DEFAULT_BACKGROUND_LIMITS: Readonly<BackgroundLimits> = {
+    running: 10,
+    commandQuietMs: DEFAULT_QUIET_MINUTES * 60_000,
+    taskQuietMs: DEFAULT_TASK_QUIET_MINUTES * 60_000,
+};
 
 /** A part of a task's output, in bytes from its very start. */
 export type ByteRange = { from: number; to: number };
@@ -118,6 +127,8 @@ export class StartCutOff extends Error {}
 
 export type BackgroundStart = {
     command: string;
+    /** How long it may print nothing before it is stopped; 0: no limit. Left out: the owner's setting. */
+    quietMinutes?: number;
     /** Whether Pi gets a message when it ends: true unless Pi says otherwise. */
     notify?: boolean;
     /** Whom Pi works for. */
@@ -309,6 +320,10 @@ function ending(item: BackgroundTask): string {
         case "running":
             return "running";
         case "stopped":
+            if (item.by === "person") {
+                return "stopped by a person";
+            }
+
             return item.why === undefined ? "stopped" : `stopped by Pi Pocket: ${item.why}`;
         case "lost":
             return item.pid === 0
@@ -677,9 +692,14 @@ export class BackgroundTasks {
             item = await this.#stored(conversationId, id);
         }
 
-        // Ended elsewhere (a stop), or gone.
+        // Ended elsewhere (a stop), or gone. A person's stop is still to be told (`stop`).
         if (item === undefined || item.status !== "running") {
-            return runtime.commit(() => finished, context);
+            const tell = item?.notify === true && item.untold === true;
+
+            return runtime.commit(
+                () => (tell ? { status: "running", checkpoint: { phase: "tell" } } : finished),
+                context,
+            );
         }
 
         const watched = item;
@@ -706,6 +726,9 @@ export class BackgroundTasks {
         const history: { at: number; end: number }[] = [{ at: measured, end: written }];
         let looked = Date.now();
         let runaway: string | undefined;
+        // When its output last grew: one quiet for longer than its limit is stopped, and Pi is told.
+        let grew = Date.now();
+        const quietMs = watched.quietMs ?? 0;
 
         for (;;) {
             stop();
@@ -740,6 +763,16 @@ export class BackgroundTasks {
                     await wait(50);
                 }
 
+                break;
+            }
+
+            if (now !== written) {
+                grew = Date.now();
+            }
+
+            if (quietMs > 0 && Date.now() - grew >= quietMs) {
+                runaway = `it printed nothing for ${duration(quietMs)}, its quiet limit`;
+                await this.#kill(conversationId, watched);
                 break;
             }
 
@@ -1356,6 +1389,10 @@ export class BackgroundTasks {
                 startedAt: app.now(),
                 status: "starting",
                 notify: request.notify !== false,
+                quietMs:
+                    request.quietMinutes === undefined
+                        ? this.limits.taskQuietMs
+                        : Math.max(0, request.quietMinutes) * 60_000,
                 ...(request.requestedBy === undefined ? {} : { requestedBy: request.requestedBy }),
                 taskId,
                 ...(request.key === undefined ? {} : { key: request.key }),
@@ -1644,8 +1681,15 @@ export class BackgroundTasks {
         };
     }
 
-    /** Stop a task's processes. Returns it as it ends up; undefined when there is no such task. */
-    async stop(conversationId: ConversationId, id: string): Promise<BackgroundTask | undefined> {
+    /**
+     * Stop a task's processes. Returns it as it ends up; undefined when there is no such task. A person's stop (`by`)
+     * tells Pi, as an end does: Pi may wait for that task. Pi's own needs no message.
+     */
+    async stop(
+        conversationId: ConversationId,
+        id: string,
+        by: "pi" | "person" = "pi",
+    ): Promise<BackgroundTask | undefined> {
         const item = await this.#stored(conversationId, id);
 
         if (item === undefined) {
@@ -1688,6 +1732,26 @@ export class BackgroundTasks {
                     stored.status = "stopped";
                     stored.endedAt = this.#app.now();
                 }
+            }, context);
+            now = await this.#stored(conversationId, id);
+        }
+
+        if (by === "person" && item.notify && now?.status === "stopped") {
+            await this.#app.harness.commit(async (tx) => {
+                const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
+
+                if (stored?.status !== "stopped" || stored.toldAt !== undefined) {
+                    return;
+                }
+
+                stored.by = "person";
+                stored.notify = true;
+                stored.untold = true;
+                stored.taskId = await tx.createTask(
+                    this.task,
+                    { backgroundId: id },
+                    { ownership: { kind: "conversation" }, background: true, conversationId },
+                );
             }, context);
             now = await this.#stored(conversationId, id);
         }

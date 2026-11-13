@@ -27,6 +27,8 @@ export type PushPrefs = {
     mention: boolean;
     /** A run began to wait a long while for a provider's limit to clear (`limit-gate.ts`). */
     limit: boolean;
+    /** Work passed a hard limit with no progress (a stalled subagent): for the owner. */
+    stalled: boolean;
 };
 export const DEFAULT_PREFS: PushPrefs = Object.freeze({
     done: true,
@@ -34,6 +36,7 @@ export const DEFAULT_PREFS: PushPrefs = Object.freeze({
     chat: true,
     mention: true,
     limit: true,
+    stalled: true,
 });
 export type StoredSubscription = PushSubscriptionJson & {
     userId: string;

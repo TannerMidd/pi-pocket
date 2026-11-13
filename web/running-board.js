@@ -1100,9 +1100,14 @@ function Row({
                                   }${task.label}
                               </span>
                               <span
-                                  class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
+                                  class=${`rb-status ${task.stalled ? "warn" : task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
+                                  title=${
+                                      task.stalled
+                                          ? `No progress since ${new Date(task.stalled).toLocaleTimeString()}`
+                                          : undefined
+                                  }
                               >
-                                  ${task.status}
+                                  ${task.stalled ? "stalled" : task.status}
                               </span>
                               <span class="rb-elapsed">
                                   ${task.since ? elapsed(now - task.since) : ""}
