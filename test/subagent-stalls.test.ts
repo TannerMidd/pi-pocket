@@ -265,3 +265,28 @@ test("a person's Stop is said as such, and the message it held reaches the paren
     );
     assert.ok(!(await inbox(id)).join("\n").includes("held failed"), "a Stop is no failure");
 });
+
+test("a wait for a provider's limit is no quiet time once it ends", async () => {
+    settings(30, 60);
+    alerts.length = 0;
+    const id = await session();
+
+    await say(id, "spawn wait-w");
+    await until(async () => (await call(id, "wait-w")) !== undefined, "the call");
+    const stuck = await call(id, "wait-w");
+    const child = Number((await agent(id, "wait-w")).conversationId);
+    const waits = app.limits.waits.bind(app.limits);
+
+    app.limits.waits = () => [...waits(), { conversationId: child, view: {} as never }];
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 120 * 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    app.limits.waits = waits;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.deepEqual(alerts, [], "no stop just after the wait");
+    assert.equal(await call(id, "wait-w"), stuck);
+    await (await app.harness.conversation(
+        (await agent(id, "wait-w")).conversationId,
+        context,
+    ))!.abort(context);
+});

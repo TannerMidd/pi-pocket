@@ -1160,6 +1160,17 @@ function stallWatchFor(
                             continue;
                         }
 
+                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall, and
+                        // no quiet time: the quiet time starts again when that wait ends.
+                        if (
+                            host.approvals.forConversation(record.conversationId).length > 0 ||
+                            host.waitsForLimit?.(record.conversationId) === true
+                        ) {
+                            seen[name] = { print: seen[name]!.print, at };
+                            delete record.stall;
+                            continue;
+                        }
+
                         // A message to it starts the wait over: a nudge is no reason to say it again at once.
                         const since = Math.max(
                             recent.get(name)?.at ?? 0,
@@ -1170,14 +1181,6 @@ function stallWatchFor(
 
                         if (record.stall?.since !== since) {
                             record.stall = { since };
-                        }
-
-                        // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall.
-                        if (
-                            host.approvals.forConversation(record.conversationId).length > 0 ||
-                            host.waitsForLimit?.(record.conversationId) === true
-                        ) {
-                            continue;
                         }
 
                         const stall = record.stall!;
