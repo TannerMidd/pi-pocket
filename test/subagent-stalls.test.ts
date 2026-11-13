@@ -29,8 +29,11 @@ const HANG = "exec tail -f /dev/null";
 /** How far the app's clock is ahead of the real one. */
 let offset = 0;
 
-const hang = () =>
-    fauxAssistantMessage([fauxToolCall("bash", { command: HANG })], { stopReason: "toolUse" });
+const hang = (own = false) =>
+    fauxAssistantMessage(
+        [fauxToolCall("bash", { command: HANG, ...(own ? { timeout: 7200 } : {}) })],
+        { stopReason: "toolUse" },
+    );
 
 const route: FauxResponseStep = (request) => {
     const all = JSON.stringify((request as { messages: unknown[] }).messages);
@@ -40,8 +43,9 @@ const route: FauxResponseStep = (request) => {
 
     if (subagent !== undefined) {
         // "loop-": a new stuck call after each stopped one. Others hang once, then answer.
-        if (subagent.startsWith("loop-") || (role === "user" && text.startsWith("Check "))) {
-            return hang();
+        // "own-": a call with its own timeout of 2 h.
+        if (/^(loop|own)-/.test(subagent) || (role === "user" && text.startsWith("Check "))) {
+            return hang(subagent.startsWith("own-"));
         }
 
         return fauxAssistantMessage([fauxText(`result of ${subagent}: ${text.slice(0, 40)}`)]);
@@ -287,6 +291,25 @@ test("a wait for a provider's limit is no quiet time once it ends", async () => 
     assert.equal(await call(id, "wait-w"), stuck);
     await (await app.harness.conversation(
         (await agent(id, "wait-w")).conversationId,
+        context,
+    ))!.abort(context);
+});
+
+test("a call with its own timeout is neither stalled nor stopped before it", async () => {
+    settings(30, 60);
+    const id = await session();
+
+    await say(id, "spawn own-x");
+    await until(async () => (await call(id, "own-x")) !== undefined, "the call");
+    const stuck = await call(id, "own-x");
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    offset += 61 * 60_000;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(await call(id, "own-x"), stuck, "still the same call");
+    assert.equal((await agent(id, "own-x")).stall?.told, undefined, "no stall before it");
+    await (await app.harness.conversation(
+        (await agent(id, "own-x")).conversationId,
         context,
     ))!.abort(context);
 });

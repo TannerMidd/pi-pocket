@@ -1185,11 +1185,11 @@ function stallWatchFor(
 
                         const stall = record.stall!;
                         const on = waitingOn(live);
-                        // A call with its own timeout runs until then.
-                        const hard =
-                            limit <= 0 ? 0 : hardLimitOf(limit, recent.get(name)?.timeoutMs);
+                        // A call with its own timeout runs until then: no stall before it, no stop.
+                        const own = recent.get(name)?.timeoutMs;
+                        const hard = limit <= 0 ? 0 : hardLimitOf(limit, own);
 
-                        if (quiet >= soft && stall.told !== true) {
+                        if (quiet >= Math.max(soft, own ?? 0) && stall.told !== true) {
                             stall.told = true;
                             reports.push({
                                 name,

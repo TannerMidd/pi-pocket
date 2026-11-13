@@ -166,7 +166,8 @@ function stallWatchFor(
 
                         const hard = limit <= 0 ? 0 : hardLimitOf(limit, each.timeoutMs);
 
-                        if (quiet >= soft && spell.told !== true) {
+                        // A call with its own timeout runs until then: no stall before it.
+                        if (quiet >= Math.max(soft, each.timeoutMs ?? 0) && spell.told !== true) {
                             spell.told = true;
                             lines.push(
                                 `Linked session ${each.address} stalled: no progress for ${span(quiet)}, waiting on ${each.waiting} since ${clock(since)}.${hard > 0 && each.callId !== undefined ? ` Pi Pocket stops that call at ${span(hard)} with no progress.` : ""}`,
