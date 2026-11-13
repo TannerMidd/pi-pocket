@@ -1928,6 +1928,7 @@ export class Commands {
             instructions?: unknown;
             signed?: unknown;
             anyone?: unknown;
+            replyUrl?: unknown;
         },
     ) {
         const app = this.#app;

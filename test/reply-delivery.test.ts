@@ -163,3 +163,12 @@ test("an answer to a person's own message, which no hook asked for, is not sent"
 
     assert.equal(received.length, before, "nothing was sent for it");
 });
+
+test("a reply address that is not https or this machine is refused when the hook is made", async () => {
+    const id = await newSession(app);
+
+    await assert.rejects(
+        app.commands.addHook(owner(app), { target: Number(id), name: "Bad", replyUrl: "http://example.com/x" }),
+        (error: unknown) => (error as { status?: number }).status === 400,
+    );
+});

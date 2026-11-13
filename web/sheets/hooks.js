@@ -117,6 +117,7 @@ export function HooksSheet() {
     const [target, setTarget] = useState(here ? "here" : "pip");
     const [github, setGithub] = useState(true);
     const [anyone, setAnyone] = useState(false);
+    const [replyUrl, setReplyUrl] = useState("");
     const [making, setMaking] = useState(false);
     const makingNow = useRef(false);
     const [fresh, setFresh] = useState(null);
@@ -143,11 +144,13 @@ export function HooksSheet() {
                 instructions: instructions.trim(),
                 signed: github,
                 anyone: github && anyone,
+                replyUrl: github ? "" : replyUrl.trim(),
             });
 
             setName("");
             setInstructions("");
             setAnyone(false);
+            setReplyUrl("");
             setFresh(hook.id);
             await load();
         }).finally(() => {
@@ -244,6 +247,25 @@ export function HooksSheet() {
                         onInput=${(event) => setInstructions(event.currentTarget.value)}
                     ></textarea>
                 </div>
+                ${
+                    github
+                        ? ""
+                        : html`
+                              <div class="field">
+                                  <div class="label">Send answers to (optional)</div>
+                                  <input
+                                      aria-label="Send answers to"
+                                      type="url"
+                                      placeholder="https://example.com/pi-replies"
+                                      value=${replyUrl}
+                                      onInput=${(event) => setReplyUrl(event.currentTarget.value)}
+                                  />
+                                  <div class="muted small">
+                                      Each answer to a post is sent here, signed. Use https, or http on this machine only.
+                                  </div>
+                              </div>
+                          `
+                }
                 <div class="field">
                     <div class="label">Posted by</div>
                     <div class="segmented">
