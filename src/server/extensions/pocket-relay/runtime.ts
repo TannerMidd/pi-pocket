@@ -13,6 +13,8 @@ import {
     type RelayContext,
     type RelayEvent,
     type RelayField,
+    type RelayFile,
+    type RelayOutFile,
     type RelayValues,
     relayErrorOf,
 } from "./types.ts";
@@ -43,6 +45,8 @@ interface Heard {
     thread?: string;
     author: string;
     at: number;
+    /** Its attachments that Pi can fetch, refs and all: they stay in this folder. */
+    files?: RelayFile[];
 }
 
 interface ConnectorState {
@@ -92,6 +96,10 @@ const MAX_PENDING = 200;
 const MAX_RECENT = 200;
 const MAX_REPLIES = 2000;
 const MAX_OWN_STATE = 64 * 1024;
+
+/** Attachments kept for each event, and the most one fetch downloads. */
+export const MAX_FILES = 10;
+export const MAX_FETCH = 25 * 1024 * 1024;
 const HOUR = 3_600_000;
 /** setTimeout's longest wait: a longer one fires at once. */
 const TIMER_MAX = 2_147_483_647;
@@ -816,7 +824,8 @@ export class Relay {
 
             if (
                 (typeof event.text !== "string" || event.text.trim() === "") &&
-                (Array.isArray(event.attachments) ? event.attachments : []).length === 0
+                (Array.isArray(event.attachments) ? event.attachments : []).length === 0 &&
+                filesOf(event.files).length === 0
             ) {
                 continue;
             }
@@ -857,7 +866,11 @@ export class Relay {
                 state.dropped += 1;
             }
 
-            state.pending.push(JSON.parse(JSON.stringify(event)) as RelayEvent);
+            const copy = JSON.parse(JSON.stringify(event)) as RelayEvent;
+            const files = filesOf(copy.files);
+
+            delete copy.files;
+            state.pending.push(files.length === 0 ? copy : { ...copy, files });
             state.lastEventAt = now;
             changed = true;
         }
@@ -914,6 +927,9 @@ export class Relay {
                         ...(event.thread === undefined ? {} : { thread: event.thread }),
                         author: event.author.id,
                         at: this.now(),
+                        ...(event.files === undefined || event.files.length === 0
+                            ? {}
+                            : { files: event.files }),
                     },
                 ].slice(-MAX_RECENT);
             } else {
@@ -930,7 +946,7 @@ export class Relay {
 
         // An event it cannot render (a connector's odd field) is dropped: tried again, it would hold up the queue.
         try {
-            payload = payloadOf(event);
+            payload = payloadOf(event, typeof this.#kinds.get(config.kind)?.fetch === "function");
         } catch (error) {
             this.failed(
                 config.id,
@@ -1010,7 +1026,7 @@ export class Relay {
 
     async reply(
         config: ConnectorConfig,
-        request: { text: string; replyTo?: string; key: string },
+        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
         signal: AbortSignal,
     ): Promise<string> {
         await this.ready;
@@ -1023,6 +1039,23 @@ export class Relay {
 
         if (typeof connector.reply !== "function") {
             throw new Error(`The ${connector.label} connector only listens: it cannot reply.`);
+        }
+
+        const files = request.files ?? [];
+
+        if (files.length > 0 && connector.files === undefined) {
+            throw new Error(
+                `The ${connector.label} connector cannot send files yet: send text only, and nothing was sent.`,
+            );
+        }
+
+        if (
+            files.length > (connector.files?.max ?? 0) ||
+            files.some((file) => file.data.byteLength > (connector.files?.maxBytes ?? 0))
+        ) {
+            throw new Error(
+                `The ${connector.label} connector sends ${connector.files?.max ?? 0} files of ${mb(connector.files?.maxBytes ?? 0)} each at most: nothing was sent.`,
+            );
         }
 
         if (this.#stopped) {
@@ -1054,7 +1087,7 @@ export class Relay {
     async #send(
         config: ConnectorConfig,
         connector: RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
-        request: { text: string; replyTo?: string; key: string },
+        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
         signal: AbortSignal,
     ): Promise<string> {
         const state = this.stateOf(config.id);
@@ -1112,7 +1145,7 @@ export class Relay {
                     signal: AbortSignal.any([
                         signal,
                         this.#replies.signal,
-                        AbortSignal.timeout(30_000),
+                        AbortSignal.timeout(request.files?.length ? 120_000 : 30_000),
                     ]),
                     log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
                 },
@@ -1122,6 +1155,7 @@ export class Relay {
                     ...(to?.channel === undefined ? {} : { channel: to.channel }),
                     ...(to?.thread === undefined ? {} : { thread: to.thread }),
                     key: request.key,
+                    ...(request.files?.length ? { files: request.files } : {}),
                 },
             );
         } catch (error) {
@@ -1149,6 +1183,94 @@ export class Relay {
         await this.persist();
 
         return "Sent.";
+    }
+
+    /** Download attachment `index` (from 1) of a recent event. Its errors have no secrets and no links. */
+    async fetch(
+        config: ConnectorConfig,
+        eventId: string,
+        index: number,
+        signal: AbortSignal,
+    ): Promise<{ name: string; type: string; data: Uint8Array }> {
+        await this.ready;
+
+        const connector = this.#kinds.get(config.kind);
+
+        if (typeof connector?.fetch !== "function") {
+            throw new Error(
+                `The ${connector?.label ?? config.kind} connector cannot fetch attachments yet.`,
+            );
+        }
+
+        if (this.#stopped || !this.#safe) {
+            throw new Error("The relay cannot fetch now. Try again in a moment.");
+        }
+
+        const heard = this.stateOf(config.id).recent.find((each) => each.id === eventId);
+
+        if (heard === undefined) {
+            throw new Error(
+                `No recent event ${JSON.stringify(eventId).slice(0, 80)} on connector "${config.name}".`,
+            );
+        }
+
+        const file = Number.isInteger(index) ? heard.files?.[index - 1] : undefined;
+
+        if (file === undefined) {
+            throw new Error(
+                `Event ${heard.id} has ${heard.files?.length ?? 0} attachments to fetch: give a number from 1.`,
+            );
+        }
+
+        if ((file.size ?? 0) > MAX_FETCH) {
+            throw new Error(
+                `${file.name} is ${mb(file.size ?? 0)}: the relay fetches ${mb(MAX_FETCH)} at most.`,
+            );
+        }
+
+        let got: { data: Uint8Array; type?: string };
+
+        try {
+            got = await connector.fetch(
+                {
+                    values: valuesOf(config, connector.fields),
+                    signal: AbortSignal.any([
+                        signal,
+                        this.#replies.signal,
+                        AbortSignal.timeout(120_000),
+                    ]),
+                    log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
+                },
+                file,
+                MAX_FETCH,
+            );
+        } catch (error) {
+            throw new Error(
+                `${file.name} could not be fetched: ${this.scrub(config, message(error)).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[link]")}`,
+            );
+        }
+
+        if (!(got?.data instanceof Uint8Array) || got.data.byteLength > MAX_FETCH) {
+            throw new Error(
+                `${file.name} is larger than ${mb(MAX_FETCH)}, or empty: it was not kept.`,
+            );
+        }
+
+        const type = (got.type ?? file.type ?? "application/octet-stream")
+            .split(";")[0]!
+            .trim()
+            .toLowerCase();
+
+        if (
+            !/^[a-z]+\/[a-z0-9.+-]+$/.test(type) ||
+            (type === "text/html" && file.type !== "text/html")
+        ) {
+            throw new Error(
+                `${file.name} came as ${type.slice(0, 60) || "no type"}, not as the file it named: it was not kept.`,
+            );
+        }
+
+        return { name: file.name, type, data: got.data };
     }
 
     async put(config: ConnectorConfig): Promise<void> {
@@ -1292,7 +1414,32 @@ export class Relay {
 /** The latest time a Date holds, in ms. */
 const MAX_DATE = 8.64e15;
 
-function payloadOf(event: RelayEvent): string {
+const mb = (bytes: number): string => `${Math.round((bytes / 1024 / 1024) * 10) / 10} MB`;
+
+/** What a connector gave as `files`, checked: a name, a ref, and nothing odd. */
+function filesOf(files: unknown): RelayFile[] {
+    return (Array.isArray(files) ? files : [])
+        .filter(
+            (file): file is RelayFile =>
+                typeof file?.name === "string" &&
+                typeof file.ref === "string" &&
+                file.ref !== "" &&
+                file.ref.length <= 4096,
+        )
+        .slice(0, MAX_FILES)
+        .map((file) => ({
+            name: file.name.replace(/\s+/g, " ").trim().slice(0, 120) || "file",
+            ...(typeof file.type === "string" ? { type: file.type.slice(0, 100) } : {}),
+            ...(typeof file.size === "number" && Number.isFinite(file.size)
+                ? { size: file.size }
+                : {}),
+            ref: file.ref,
+        }));
+}
+
+function payloadOf(event: RelayEvent, fetchable: boolean): string {
+    const files = fetchable ? filesOf(event.files) : [];
+
     const lines = [
         `event: ${event.id}`,
         ...(event.channelName !== undefined || event.channel !== undefined
@@ -1305,14 +1452,23 @@ function payloadOf(event: RelayEvent): string {
             ? [`sent: ${new Date(event.at).toISOString()}`]
             : []),
         ...(event.url === undefined ? [] : [`link: ${event.url}`]),
-        ...(!Array.isArray(event.attachments) || event.attachments.length === 0
-            ? []
-            : [
-                  `attachments: ${event.attachments
-                      .slice(0, 10)
-                      .map((each) => String(each).replace(/\s+/g, " ").slice(0, 120))
+        ...(files.length > 0
+            ? [
+                  `attachments (fetch one with relay_fetch, by its number): ${files
+                      .map(
+                          (file, index) =>
+                              `${index + 1}. ${file.name} (${file.type ?? "unknown type"}, ${file.size ?? "?"} bytes)`,
+                      )
                       .join("; ")}`,
-              ]),
+              ]
+            : !Array.isArray(event.attachments) || event.attachments.length === 0
+              ? []
+              : [
+                    `attachments: ${event.attachments
+                        .slice(0, 10)
+                        .map((each) => String(each).replace(/\s+/g, " ").slice(0, 120))
+                        .join("; ")}`,
+                ]),
     ];
     const text = String(event.text ?? "").slice(0, 6000);
 
