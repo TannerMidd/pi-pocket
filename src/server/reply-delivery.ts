@@ -11,6 +11,7 @@ import { createPublicFetch } from "./public-fetch.ts";
 import { replyBody, signReply } from "./reply-hooks.ts";
 
 const context = BACKGROUND_CONTEXT;
+
 export const SWEEP_MS = 1_000;
 export const MAX_ATTEMPTS = 10;
 export const MAX_BACKOFF_MS = 10 * 60_000;
@@ -35,6 +36,7 @@ export class ReplyDelivery {
     start(): () => void {
         const stop = this.#app.events.on("run.ended", () => this.#wake());
         const timer = setInterval(() => this.#wake(), SWEEP_MS);
+
         timer.unref();
         this.#wake();
 
@@ -196,6 +198,7 @@ export class ReplyDelivery {
                 },
                 body,
             });
+
             await response.body?.cancel();
             ok = response.status >= 200 && response.status < 300;
         } catch {

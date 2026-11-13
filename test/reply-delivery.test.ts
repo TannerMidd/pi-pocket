@@ -38,6 +38,7 @@ const received: Received[] = [];
 function readBody(request: IncomingMessage): Promise<string> {
     return new Promise((resolve) => {
         const chunks: Buffer[] = [];
+
         request.on("data", (chunk: Buffer) => chunks.push(chunk));
         request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     });
@@ -54,6 +55,7 @@ before(async () => {
         const timestamp = Number(request.headers["x-pocket-timestamp"]);
         const signature = String(request.headers["x-pocket-signature"] ?? "");
         const ok = verifyReply(replySecret, timestamp, body, signature, Date.now());
+
         received.push({ body, hook: String(request.headers["x-pocket-hook"]), ok });
         response.writeHead(accepting ? 200 : 500);
         response.end();
@@ -83,6 +85,7 @@ async function hookedSession(name: string) {
         name,
         replyUrl: receiverUrl,
     });
+
     replySecret = (view as unknown as { reply: { secret: string } }).reply.secret;
 
     return { id: id as ConversationId, path: view.path, hook: view.id };
@@ -95,6 +98,7 @@ async function post(path: string, text: string, key = text): Promise<number> {
         headers: { "content-type": "application/json", "idempotency-key": key },
         body: JSON.stringify({ text }),
     });
+
     await response.body?.cancel();
 
     return response.status;
@@ -108,6 +112,7 @@ test("a post's answer goes to the reply address, signed, once", async () => {
     await until(() => received.length > before, "the reply arrives");
 
     const reply = received[before]!;
+
     assert.equal(reply.ok, true, "the signature checks");
     assert.equal(reply.hook, hook);
     const payload = JSON.parse(reply.body) as {
@@ -117,6 +122,7 @@ test("a post's answer goes to the reply address, signed, once", async () => {
         text: string;
         truncated: boolean;
     };
+
     assert.equal(payload.request, "hello from the chat");
     assert.equal(payload.session, Number(id));
     assert.ok(payload.entry.length > 0);
@@ -132,6 +138,7 @@ test("a post's answer goes to the reply address, signed, once", async () => {
 test("a failed send is kept and sent again with the same entry", async () => {
     const { id, path } = await hookedSession("Flaky");
     const before = received.length;
+
     accepting = false;
 
     assert.equal(await post(path, "first try"), 202);
@@ -142,6 +149,7 @@ test("a failed send is kept and sent again with the same entry", async () => {
     const stored = Object.values(
         (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))?.items ?? {},
     );
+
     assert.ok(
         stored.some((item) =>
             Object.values(item.reply?.requests ?? {}).some(
@@ -173,6 +181,7 @@ test("a failed send is kept and sent again with the same entry", async () => {
 
 test("an answer to a person's own message, which no hook asked for, is not sent", async () => {
     const id = await newSession(app);
+
     await app.commands.addHook(owner(app), {
         target: Number(id),
         name: "Quiet",
@@ -191,9 +200,12 @@ test("a run can finish before submit returns without losing its reply", async ()
     const { path } = await hookedSession("Fast");
     const before = received.length;
     const submit = app.commands.submit.bind(app.commands);
+
     app.commands.submit = async (...args) => {
         const result = await submit(...args);
+
         await until(() => received.length > before, "reply before submit returns");
+
         return result;
     };
 
@@ -208,20 +220,25 @@ test("a run can finish before submit returns without losing its reply", async ()
 test("a receipt saved before failed admission retries with the same durable request", async () => {
     const { path, hook } = await hookedSession("Admission");
     const submit = app.commands.submit.bind(app.commands);
+
     app.commands.submit = async () => {
         throw new Error("simulated failure before admission");
     };
+
     try {
         assert.equal(await post(path, "retry admission", "admission-key"), 409);
     } finally {
         app.commands.submit = submit;
     }
+
     const item = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
     const requestId = Object.values(item.reply!.requests!)[0]!.submissionRequest;
     const before = received.length;
+
     assert.equal(await post(path, "retry admission", "admission-key"), 202);
     await until(() => received.length > before, "answer after admission retry");
     const stored = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
+
     assert.equal(Object.keys(stored.reply!.requests!).length, 1);
     assert.equal(Object.values(stored.reply!.requests!)[0]!.submissionRequest, requestId);
 });
@@ -233,15 +250,18 @@ test("concurrent duplicate posts create only one durable submission and receipt"
         post(path, "same post", "concurrent-key"),
         post(path, "same post", "concurrent-key"),
     ]);
+
     assert.ok(statuses.every((status) => status === 200 || status === 202));
     await until(() => received.length > before, "one concurrent answer");
     const item = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
     const receipts = Object.values(item.reply!.requests!);
+
     assert.equal(receipts.length, 1);
     const submission = await app.harness.commit(
         (tx) => tx.submissionByRequest(id, receipts[0]!.submissionRequest),
         BACKGROUND_CONTEXT,
     );
+
     assert.equal(submission!.status, "done");
     await app.replies.sweep();
     assert.equal(received.length, before + 1);
@@ -258,13 +278,16 @@ test("a duplicate post never creates a new reply receipt", async () => {
     await app.replies.sweep();
     assert.equal(received.length, before + 1);
     const item = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
+
     assert.equal(Object.keys(item.reply!.requests!).length, 1);
     const view = (await app.hooks.list(owner(app))).find((item) => item.id === hook)!;
+
     assert.equal("requests" in view.reply!, false, "operational data stays private");
 });
 
 test("multiple posts retain separate receipts while an older reply waits", async () => {
     const { id, path, hook } = await hookedSession("Separate");
+
     accepting = false;
     const before = received.length;
 
@@ -279,6 +302,7 @@ test("multiple posts retain separate receipts while an older reply waits", async
 
     const items = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items;
     const receipts = Object.values(items[hook]!.reply!.requests!);
+
     assert.equal(receipts.length, 2);
     assert.match(
         receipts.find((item) => item.request === "first-key")!.pending!.text,
@@ -307,6 +331,7 @@ test("multiple posts retain separate receipts while an older reply waits", async
 test("restart recovers a completed submission even when its completion event was missed", async () => {
     const { id, path, hook } = await hookedSession("Restart");
     const before = received.length;
+
     assert.equal(await post(path, "persisted answer", "restart-key"), 202);
     await until(() => received.length > before, "initial answer");
 
@@ -314,12 +339,14 @@ test("restart recovers a completed submission even when its completion event was
     // Recreate the durable state before collection, with a newer unrelated answer in the session.
     await app.harness.commit(async (tx) => {
         const receipt = Object.values((await tx.doc(HooksDoc)).items[hook]!.reply!.requests!)[0]!;
+
         delete receipt.done;
         delete receipt.pending;
     }, BACKGROUND_CONTEXT);
     await new Promise<void>((resolve) => pocket.close(() => resolve()));
     await app.close();
     const start = received.length;
+
     model = scriptedModel();
     app = await openApp(model, join(root, "reply-data"));
     pocket = createServer(
@@ -330,6 +357,7 @@ test("restart recovers a completed submission even when its completion event was
     await app.replies.sweep();
     await until(() => received.length > start, "answer recovered on restart");
     const payload = JSON.parse(received[start]!.body);
+
     assert.equal(payload.request, "restart-key");
     assert.match(payload.text, /persisted answer/);
     assert.doesNotMatch(payload.text, /a newer unrelated answer/);
@@ -346,13 +374,16 @@ test("an aborted submission ends its receipt with a fixed notice and no private 
     );
     const { path, hook } = await hookedSession("Aborted");
     const before = received.length;
+
     assert.equal(await post(path, "abort test", "abort-key"), 202);
     await until(() => received.length > before, "terminal failure notice");
     const payload = JSON.parse(received[before]!.body);
+
     assert.equal(payload.request, "abort-key");
     assert.equal(payload.text, "[Pi could not answer this message. Try again later.]");
     await until(async () => {
         const item = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
+
         return Object.values(item.reply!.requests!)[0]!.done === true;
     }, "receipt is terminal");
 });

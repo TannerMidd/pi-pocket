@@ -51,8 +51,10 @@ test("an old or future timestamp is refused, so a payload cannot be replayed", (
     const now = 1_800_000_000_000;
     const body = "{}";
     const old = now - REPLY_SKEW_MS - 1;
+
     assert.equal(verifyReply(secret, old, body, signReply(secret, old, body), now), false);
     const later = now + REPLY_SKEW_MS + 1;
+
     assert.equal(verifyReply(secret, later, body, signReply(secret, later, body), now), false);
     assert.equal(verifyReply(secret, Number.NaN, body, "sha256=x", now), false);
 });
@@ -61,6 +63,7 @@ test("a long answer is cut and marked, a short one is whole", () => {
     const short = JSON.parse(
         replyBody({ hook: "h", request: "request", session: 1, entry: "e", text: "hi" }),
     );
+
     assert.deepEqual(short, {
         hook: "h",
         request: "request",
@@ -79,6 +82,7 @@ test("a long answer is cut and marked, a short one is whole", () => {
             text: "x".repeat(MAX_REPLY_TEXT + 5),
         }),
     );
+
     assert.equal(long.text.length, MAX_REPLY_TEXT);
     assert.equal(long.truncated, true);
 });

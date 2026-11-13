@@ -645,6 +645,7 @@ export class Hooks {
         }
 
         const delivery = header(post, "x-github-delivery") ?? header(post, "idempotency-key");
+
         if (
             hook.reply !== undefined &&
             delivery !== undefined &&
