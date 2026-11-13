@@ -208,12 +208,14 @@ A connector that sends files declares `files: { max, maxBytes }`: `max` files of
 
 A connector that downloads attachments has `fetch(context, file, maxBytes)`. It returns `{ data, type }`, with `maxBytes` (25 MB) at most. Pi calls `relay_fetch` with the event id and the attachment's number. The relay writes the file to `.relay/<event>/<number>-<name>` in the session's folder, with a safe name. It refuses a file over the cap, and a web page (`text/html`) in place of a file that did not name that type. Errors go to Pi without secrets and without links. Download only from the service's own file hosts, and never send the token to a host that is not the service's.
 
-| Kind                    | Sends files                            | Fetches attachments                     |
-| ----------------------- | -------------------------------------- | --------------------------------------- |
-| Discord                 | Yes: 10 files, 10 MB each              | Yes                                     |
-| Slack, Telegram, Matrix | Not yet: a reply with files is refused | Not yet: attachments are only described |
-| HTTP                    | No                                     | No                                      |
-| RSS                     | No: it only listens                    | No                                      |
+| Kind     | Sends files                                                                             | Fetches attachments                                                           |
+| -------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Discord  | Yes: 10 files, 10 MB each                                                               | Yes                                                                           |
+| Slack    | Yes: 10 files, 50 MB each, in one message with the text (needs the `files:write` scope) | Yes, from `files.slack.com` only (needs the `files:read` scope)               |
+| Telegram | Yes: 10 files, 50 MB each; an image of 10 MB or less goes as a photo                    | Yes: photos, documents, video, and sound, 20 MB at most (the Bot API's limit) |
+| Matrix   | Yes: 10 files, 50 MB each (or the homeserver's lower limit), each as its own event      | Yes, from the homeserver only; not from an encrypted room                     |
+| HTTP     | No                                                                                      | No                                                                            |
+| RSS      | No: it only listens                                                                     | No                                                                            |
 
 `relay_reply` and `relay_fetch` are deferred tools: they are offered only in sessions that a connector delivers to. The relay adds them to the session's `modelTools` when a connector is saved, and takes them out when no connector delivers there any more. Pi gives `connector` (the name) when more than one connector delivers to the session.
 

@@ -538,7 +538,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
     const relayReply = defineTool({
         name: REPLY_TOOL,
         description:
-            "Answer a message that came through the relay, in the place it came from (a chat, a channel). The people there read it. Give reply_to: the event id of the message you answer. Give connector when more than one delivers to this session. Give files to send images or files from this session's folder, where the connector can (Discord).",
+            "Answer a message that came through the relay, in the place it came from (a chat, a channel). The people there read it. Give reply_to: the event id of the message you answer. Give connector when more than one delivers to this session. Give files to send images or files from this session's folder, where the connector can (Discord, Slack, Telegram, Matrix).",
         parameters: obj(
             {
                 text: str({ description: "What to send: plain text, short." }),
