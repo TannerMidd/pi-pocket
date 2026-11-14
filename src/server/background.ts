@@ -41,7 +41,7 @@ import {
     type TaskRuntime,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
-import { BackgroundDoc, type BackgroundTask } from "./docs.ts";
+import { BackgroundDoc, type BackgroundTask, type ReplyOrigins } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang, quoted } from "./fence.ts";
 import { requestFor } from "./requests.ts";
@@ -108,7 +108,49 @@ function segmentIndex(name: string): number {
 }
 
 type WatchInput = { backgroundId: string };
-type WatchState = { phase: "watch" } | { phase: "tell" };
+type WatchState = { phase: "watch" } | { phase: "tell" } | { phase: "retryTell" };
+
+/** Preserve only valid version-1 checkpoints when task version 2 reserves an old background task. */
+export function migrateBackgroundV1(
+    input: unknown,
+    checkpoint: unknown,
+    fromVersion: number,
+): { input: WatchInput; checkpoint: WatchState } {
+    if (fromVersion !== 1) {
+        throw new Error(`Cannot migrate pocket.background task version ${fromVersion}.`);
+    }
+
+    if (
+        input === null ||
+        typeof input !== "object" ||
+        typeof (input as { backgroundId?: unknown }).backgroundId !== "string"
+    ) {
+        throw new Error("Cannot migrate pocket.background task with an invalid input.");
+    }
+
+    const phase =
+        checkpoint !== null && typeof checkpoint === "object"
+            ? (checkpoint as { phase?: unknown }).phase
+            : undefined;
+
+    if (phase !== "watch" && phase !== "tell") {
+        throw new Error(
+            "Cannot migrate pocket.background task with an invalid version-1 checkpoint.",
+        );
+    }
+
+    return {
+        input: { backgroundId: (input as { backgroundId: string }).backgroundId },
+        checkpoint: { phase },
+    };
+}
+
+/** A full reply receipt set is temporary. Keep the notification durable until receipt capacity returns. */
+const TELL_RETRY_MS = 5_000;
+
+/** The reply service supplies canonical origin arrays. Their JSON form partitions mixed background completions safely. */
+const replyOriginsKey = (origins: ReplyOrigins | undefined) => JSON.stringify(origins ?? []);
+
 type Runtime = TaskRuntime<WatchInput, WatchState, null, object>;
 
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
@@ -124,6 +166,8 @@ export type BackgroundStart = {
     requestedBy?: string;
     /** The same key starts the same task once: a tool call replayed after a restart finds the one it started. */
     key?: string;
+    /** The exact hook receipts that started this work, if every model-run input was rooted. */
+    replyOrigins?: ReplyOrigins;
 };
 
 // ─── Processes ──────────────────────────────────────────────────────────────
@@ -432,13 +476,19 @@ export class BackgroundTasks {
         this.#sweeping();
         this.task = defineTask<WatchInput, WatchState, null>({
             name: "pocket.background",
-            version: 1,
+            version: 2,
             initial: () => ({ phase: "watch" }),
+            migrate: migrateBackgroundV1,
             phases: {
                 watch: (task, runtime, context) =>
                     this.#watch(task.input.backgroundId, runtime, context),
                 tell: (task, runtime, context) =>
                     this.#tell(task.input.backgroundId, runtime, context),
+                retryTell: (_task, runtime, context) =>
+                    runtime.commit(
+                        () => ({ status: "running", checkpoint: { phase: "tell" } }),
+                        context,
+                    ),
             },
             // Stopped from Pi's tool or Running now: the processes go too.
             abort: async (task, runtime, context) => {
@@ -963,7 +1013,10 @@ export class BackgroundTasks {
                 saved === undefined
                     ? ended.filter(
                           (item) =>
-                              item.batch === undefined && item.requestedBy === own.requestedBy,
+                              item.batch === undefined &&
+                              item.requestedBy === own.requestedBy &&
+                              replyOriginsKey(item.replyOrigins) ===
+                                  replyOriginsKey(own.replyOrigins),
                       )
                     : ended.filter((item) => item.batch === saved);
             // Read after the commit: the stored items are its transaction's proxies.
@@ -995,6 +1048,25 @@ export class BackgroundTasks {
         }, context);
 
         if (sent.length > 0) {
+            const reservation = await app.replies.reserve(
+                conversationId,
+                requestId,
+                sent[0]!.replyOrigins,
+            );
+
+            if (reservation === "capacity") {
+                await runtime.commit(
+                    () => ({
+                        status: "sleeping",
+                        until: runtime.now() + TELL_RETRY_MS,
+                        checkpoint: { phase: "retryTell" },
+                    }),
+                    context,
+                );
+
+                return;
+            }
+
             await conversation.submit(
                 {
                     type: "input",
@@ -1357,6 +1429,9 @@ export class BackgroundTasks {
                 status: "starting",
                 notify: request.notify !== false,
                 ...(request.requestedBy === undefined ? {} : { requestedBy: request.requestedBy }),
+                ...(request.replyOrigins === undefined
+                    ? {}
+                    : { replyOrigins: request.replyOrigins }),
                 taskId,
                 ...(request.key === undefined ? {} : { key: request.key }),
                 read: 0,

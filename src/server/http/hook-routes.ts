@@ -83,6 +83,7 @@ export async function hookRoute(
         }
     }
 
+    // `deliver` reads the authenticated `X-Pocket-Reply-Protocol` capability from these unchanged headers.
     const answer = await app.hooks.deliver(id, {
         ...(secret === undefined ? {} : { secret }),
         headers: request.headers,

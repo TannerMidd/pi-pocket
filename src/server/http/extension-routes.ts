@@ -67,7 +67,7 @@ export async function extensionRoute(
     }
 
     const id = source === undefined ? undefined : (Number(source) as unknown as ConversationId);
-    const scope = new ExtensionRequest(app, user.id, route.access, id);
+    const scope = new ExtensionRequest(app, user.id, route.access, part.module, id);
     const clientCancelled = new AbortController();
 
     // Preserve the existing signal's disconnect-only lifetime, including while the answer is being sent.
@@ -128,6 +128,10 @@ export async function extensionRoute(
             commit: scope.commit,
             createSession: (request: { cwd: string; title?: string }) =>
                 scope.createSession(request),
+            provisionReplySession: (
+                request: Parameters<ExtensionRequest["provisionReplySession"]>[0],
+            ) => scope.provisionReplySession(request),
+            availableModels: () => scope.availableModels(),
             // Read when the handler asks, as the person is then: a copy, so the handler cannot change the list.
             sessions: (): WebSession[] =>
                 app.sessions(scope.current()).map((session) => ({

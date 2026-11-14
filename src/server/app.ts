@@ -25,6 +25,7 @@ import {
     type Conversation,
     type ConversationId,
     type Cursor,
+    type TaskId,
     createRegistry,
     defineExtension,
     type DocumentCommitChange,
@@ -70,6 +71,7 @@ import {
     DecisionsDoc,
     FolderFavoritesDoc,
     MemoryDoc,
+    type ReplyOrigins,
     RunFailureDoc,
     type SessionMeta,
     SessionsDoc,
@@ -107,6 +109,7 @@ import { expandHome, workspaceScheme } from "./paths.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
+import { ReplyDelivery, type ReplyReservation } from "./reply-delivery.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
@@ -426,6 +429,9 @@ export class PocketApp {
     readonly repoWatches = new RepoWatches(this);
     /** Webhooks: addresses other services post to, each a message to a session or PiP (`hooks.ts`). */
     readonly hooks = new Hooks(this);
+    /** Answers that go to webhooks' reply addresses when a run ends (`reply-delivery.ts`). */
+    readonly replies = new ReplyDelivery(this);
+    #stopReplies: (() => void) | undefined;
     /** Lessons Pi keeps across sessions, for a project or everywhere. */
     readonly memory = new Memory(this);
     /** Each person's favorite working folders, shared by their devices. */
@@ -840,6 +846,7 @@ export class PocketApp {
         const registry = createRegistry();
 
         registry.install(CodingTools);
+        this.#stopReplies = this.replies.start();
         // Durable work of the app itself, whatever extension modules are on.
         registry.install(
             defineExtension({
@@ -863,7 +870,20 @@ export class PocketApp {
                 ],
             }),
         );
-        const host: PocketHost = {
+        // These two methods are private compatibility hooks for built-in follow-up producers. They stay out of
+        // `PocketHost`, so drop-ins cannot use hook receipt provenance as an extension API.
+        const host: PocketHost & {
+            readonly replyDeliveryProtocol: 2;
+            replyOriginForTool: (
+                conversationId: ConversationId,
+                taskId: TaskId,
+            ) => Promise<ReplyOrigins | undefined>;
+            reserveReply: (
+                conversationId: ConversationId,
+                request: string,
+                origins: ReplyOrigins | undefined,
+            ) => Promise<ReplyReservation>;
+        } = {
             guard: this.guard,
             approvals: this.approvals,
             agentDir: getAgentDir(),
@@ -898,6 +918,11 @@ export class PocketApp {
             },
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
+            replyDeliveryProtocol: 2,
+            replyOriginForTool: (conversationId, taskId) =>
+                this.replies.originForTool(conversationId, taskId),
+            reserveReply: (conversationId, request, origin) =>
+                this.replies.reserve(conversationId, request, origin),
             roleOf: (personId) => this.config.userById(personId)?.role,
             on: (event, listener) => this.events.on(event, listener),
             ask: (request, askContext) => ask(this.approvals, request, askContext),
@@ -4183,6 +4208,7 @@ export class PocketApp {
             this.#unsubscribeRunEnds?.();
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
+            this.#stopReplies?.();
             this.guard.close();
 
             // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.

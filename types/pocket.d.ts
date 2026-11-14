@@ -1065,6 +1065,25 @@ export type WebAccess = "owner" | "steer" | "view";
  */
 export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** Input for an owner-created session and one private signed reply hook. @since 0.29.0 @experimental */
+export interface ProvisionReplySessionRequest {
+    /** Stable within the owner and module. A changed input for this operation is refused. */
+    operation: string;
+    cwd: string;
+    title?: string;
+    /** Exact configured `provider/model` value from `availableModels()`. */
+    model: string;
+    thinking: ModelThinkingLevel;
+    /** An `http` loopback URL that ends in `/v1/reply`. */
+    replyUrl: string;
+}
+
+/** A private result. Route code must never return `replySecret` to browser code. @since 0.29.0 @experimental */
+export interface ProvisionedReplySession {
+    sessionId: number;
+    hook: { id: string; path: string; replySecret: string };
+}
+
 /**
  * A request to a route, as its handler gets it.
  * @since 0.14.0
@@ -1076,6 +1095,25 @@ export interface WebRequest {
      * @experimental
      */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    /** Creates one session and one signed reply hook in an owner/module/operation receipt.
+     * @since 0.29.0
+     * @experimental
+     */
+    provisionReplySession(request: ProvisionReplySessionRequest): Promise<ProvisionedReplySession>;
+    /** Models that the owner can select for `provisionReplySession`.
+     * @since 0.29.0
+     * @experimental
+     */
+    availableModels(): Promise<
+        readonly {
+            provider: string;
+            id: string;
+            name: string;
+            reasoning: boolean;
+            levels: readonly string[];
+            signIn?: true;
+        }[]
+    >;
     /**
      * The request's method.
      * @since 0.14.0

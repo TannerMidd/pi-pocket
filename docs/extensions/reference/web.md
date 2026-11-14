@@ -252,6 +252,17 @@ Answers the requests of a route. The value that it returns goes back as JSON, an
 ```ts
 interface WebRequest {
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    provisionReplySession(request: ProvisionReplySessionRequest): Promise<ProvisionedReplySession>;
+    availableModels(): Promise<
+        readonly {
+            provider: string;
+            id: string;
+            name: string;
+            reasoning: boolean;
+            levels: readonly string[];
+            signIn?: true;
+        }[]
+    >;
     readonly method: WebMethod;
     readonly params: Readonly<Record<string, string>>;
     readonly query: URLSearchParams;
@@ -280,6 +291,7 @@ What a handler gets.
 - An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
 - Since 0.20.0 (experimental), `sessions()` gives the sessions that the person who asked can see now, as their session list shows them, archived ones too. See [`WebSession`](#websession). Use it to check the ids that a browser sends, and to keep data about sessions from people who cannot see them. Each call reads the list again.
 - Since 0.28.0 (experimental), `createSession` starts an ordinary session on owner-only routes. It refuses anyone but the owner. See [Execution environments for workspaces](../workspaces.md).
+- Since 0.29.0 (experimental), `availableModels()` lists the configured owner-selectable models with their supported thinking levels. `provisionReplySession()` is owner-only. It makes one session with an explicit folder, model, and thinking level, plus one signed reply hook. It does not submit a message or start a model request. The caller supplies a stable `operation`; the owner, module, and operation form an idempotency key. A retry with the same fields returns the immutable session and hook. A changed field returns a conflict. The reply URL must be an HTTP loopback `/v1/reply` URL. The result contains a reply secret only for server route code. A route must never send that secret to browser code.
 
 ### `WebSession`
 

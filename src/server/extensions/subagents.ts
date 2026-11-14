@@ -36,13 +36,44 @@ import {
     type TaskRuntime,
     type Tx,
 } from "@earendil-works/pi-durable";
-import { type PendingReport, PlanDoc, REPORT_PREFIX, SubagentsDoc } from "../docs.ts";
+import {
+    type PendingReport,
+    PlanDoc,
+    REPORT_PREFIX,
+    type ReplyOrigins,
+    SubagentsDoc,
+} from "../docs.ts";
 import { describe } from "../errors.ts";
+import type { ReplyReservation } from "../reply-delivery.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
 import { whyUnanswered } from "../subagent-runs.ts";
+
+type ReplyOriginsHost = {
+    replyDeliveryProtocol?: number;
+    replyOriginForTool?: (
+        conversationId: number,
+        taskId: number,
+    ) => Promise<ReplyOrigins | undefined>;
+    reserveReply?: (
+        conversationId: ConversationId,
+        submissionRequest: string,
+        origins: ReplyOrigins | undefined,
+    ) => Promise<ReplyReservation>;
+};
+
+/** An older live core cannot safely send a derived receipt. */
+function replyOrigins(host: PocketHost | ReplyOriginsHost): ReplyOriginsHost | undefined {
+    const found = host as ReplyOriginsHost;
+
+    return found.replyDeliveryProtocol === 2 &&
+        typeof found.replyOriginForTool === "function" &&
+        typeof found.reserveReply === "function"
+        ? found
+        : undefined;
+}
 
 // Exclude Agent Teams by name even while it is off; enabling it later must not give nested agents delegation.
 const AgentTeams = defineExtension({ name: "pocket-agent-teams" });
@@ -84,6 +115,7 @@ type ReporterInput = {
     message: string;
     followUp: boolean;
     requestedBy?: string;
+    replyOrigins?: ReplyOrigins;
 };
 type ReporterState = { phase: "deliver" } | { phase: "report"; report?: string };
 
@@ -244,7 +276,13 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                         state.outbox = [
                             ...taken,
                             ...(state.outbox ?? []),
-                            { name: reporter.input.name, text: report },
+                            {
+                                name: reporter.input.name,
+                                text: report,
+                                ...(reporter.input.replyOrigins === undefined
+                                    ? {}
+                                    : { replyOrigins: reporter.input.replyOrigins }),
+                            },
                         ];
 
                         if (idle) {
@@ -361,10 +399,58 @@ type CourierState =
     | { phase: "gather" }
     | { phase: "next" }
     | { phase: "hold" }
+    | { phase: "capacity" }
     | { phase: "send"; batch?: number; text?: string };
 
+/** Preserve only valid version-1 checkpoints when task version 2 reserves an old courier task. */
+export function migrateCourierV1(
+    input: unknown,
+    checkpoint: unknown,
+    fromVersion: number,
+): { input: null; checkpoint: CourierState } {
+    if (fromVersion !== 1) {
+        throw new Error(`Cannot migrate pocket.subagent-courier task version ${fromVersion}.`);
+    }
+
+    if (
+        input !== null ||
+        checkpoint === null ||
+        typeof checkpoint !== "object" ||
+        Array.isArray(checkpoint)
+    ) {
+        throw new Error(
+            "Cannot migrate pocket.subagent-courier task with an invalid version-1 record.",
+        );
+    }
+
+    const state = checkpoint as { phase?: unknown; batch?: unknown; text?: unknown };
+
+    if (state.phase === "gather" || state.phase === "next" || state.phase === "hold") {
+        return { input: null, checkpoint: { phase: state.phase } };
+    }
+
+    if (
+        state.phase === "send" &&
+        (state.batch === undefined || typeof state.batch === "number") &&
+        (state.text === undefined || typeof state.text === "string")
+    ) {
+        return {
+            input: null,
+            checkpoint: {
+                phase: "send",
+                ...(state.batch === undefined ? {} : { batch: state.batch }),
+                ...(state.text === undefined ? {} : { text: state.text }),
+            },
+        };
+    }
+
+    throw new Error(
+        "Cannot migrate pocket.subagent-courier task with an invalid version-1 checkpoint.",
+    );
+}
+
 /** What the courier asks Pi Pocket about spend limits. */
-type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice">;
+type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice"> & ReplyOriginsHost;
 
 type CourierTask = ReturnType<typeof courierFor>;
 
@@ -383,6 +469,23 @@ const RETRY_MS = 5_000;
  * gone if a person did that (the queue's ×, or Stop, which mark it `discarded`), and otherwise (a spend limit's stop, a
  * new context) its reports wait again, first.
  */
+function replyOriginsKey(origins: ReplyOrigins | undefined): string {
+    return (origins ?? [])
+        .map((origin) => `${origin.hookId}\0${origin.key}\0${origin.request}`)
+        .join("\n");
+}
+
+/** A courier batch has one root set after `next` partitions its reports. */
+function commonReplyOrigins(reports: readonly PendingReport[]): ReplyOrigins | undefined {
+    const origins = reports[0]?.replyOrigins;
+
+    return reports.every(
+        (report) => replyOriginsKey(report.replyOrigins) === replyOriginsKey(origins),
+    )
+        ? origins
+        : undefined;
+}
+
 function settleBatch(
     state: { outbox?: PendingReport[]; sending?: { reports: PendingReport[]; discarded?: true } },
     record: SubmissionRecord | undefined,
@@ -485,8 +588,9 @@ function courierFor(limits: Limits) {
 
     return defineTask<null, CourierState, null>({
         name: "pocket.subagent-courier",
-        version: 1,
+        version: 2,
         initial: () => ({ phase: "gather" }),
+        migrate: migrateCourierV1,
         phases: {
             // A parent that is idle would start a turn for the first report alone: subagents started together often finish
             // a moment apart, so it waits that moment for theirs. A busy parent takes the batch at its next pause, and
@@ -557,13 +661,23 @@ function courierFor(limits: Limits) {
                         // A batch taken and not sent yet goes first, under its own id.
                         if (state.sending === undefined) {
                             const reports = state.outbox ?? [];
+                            const first = reports[0];
+                            const selected = reports.filter(
+                                (report) =>
+                                    replyOriginsKey(report.replyOrigins) ===
+                                    replyOriginsKey(first?.replyOrigins),
+                            );
                             const batch = (state.batches ?? 0) + 1;
 
                             state.batches = batch;
-                            state.outbox = [];
+                            state.outbox = reports.filter(
+                                (report) =>
+                                    replyOriginsKey(report.replyOrigins) !==
+                                    replyOriginsKey(first?.replyOrigins),
+                            );
                             state.sending = {
                                 request: `subagent-reports:${courier.id}:${batch}`,
-                                reports,
+                                reports: selected,
                             };
                         }
 
@@ -594,6 +708,12 @@ function courierFor(limits: Limits) {
                     context,
                 );
             },
+            // A full reply receipt set must not admit the report without a durable derived receipt.
+            capacity: (_courier, runtime, context) =>
+                runtime.commit(
+                    () => ({ status: "running", checkpoint: { phase: "next" } }),
+                    context,
+                ),
             send: (courier, runtime, context) =>
                 orRetry(courier, runtime, context, async () => {
                     const checkpoint = courier.state.checkpoint as Extract<
@@ -611,6 +731,26 @@ function courierFor(limits: Limits) {
 
                     if (sending !== undefined) {
                         const parent = (await runtime.conversation(parentId, context))!;
+
+                        const reservation = await replyOrigins(limits)?.reserveReply?.(
+                            parentId,
+                            sending.request,
+                            commonReplyOrigins(sending.reports),
+                        );
+
+                        if (reservation === "capacity") {
+                            await runtime.commit(
+                                () => ({
+                                    status: "sleeping",
+                                    until: runtime.now() + RETRY_MS,
+                                    checkpoint: { phase: "capacity" },
+                                }),
+                                context,
+                            );
+
+                            return;
+                        }
+
                         // Under its own id: a batch sent before is not sent again, and its submission is what it was.
                         const submission = await parent.submit(
                             {
@@ -1030,6 +1170,10 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 }
             }
 
+            const origins = await replyOrigins(host)?.replyOriginForTool?.(
+                api.conversationId,
+                api.taskId,
+            );
             const result = await api.commit(async (tx) => {
                 const state = await tx.doc(SubagentsDoc, api.conversationId);
 
@@ -1076,6 +1220,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                     message,
                     followUp: action === "send" && followUp === true,
                     ...(requestedBy === undefined ? {} : { requestedBy }),
+                    ...(origins === undefined ? {} : { replyOrigins: origins }),
                 };
 
                 state.reporters[api.taskId] = await tx.createTask(Reporter, input, BACKGROUND);

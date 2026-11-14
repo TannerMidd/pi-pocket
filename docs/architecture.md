@@ -92,6 +92,39 @@ Webhook edits require steering rights. `Hooks.update` checks creator-or-owner ac
 
 A repository watch (`repo-watches.ts`) is an item of the app-wide `RepoWatchesDoc` and a durable task in the conversation it messages (PiP's, or a session's), with the same wait, look, and send phases as a PR watch: a look puts the message in the task's checkpoint, and the send's request id is the task's and its count's, so it goes once. It reads the repository's issues, pulls, workflow runs, releases, and comments through `gh api`, and keeps the ids it told. PiP's tools (`repo_watch`, `session_watch_pr`, `session_start` with `repo`) act through `Pip` as its person; a repository is worked on or watched only where `gh`'s account can push, and `Pip.checkout` finds a session's checkout whose `origin` is the repository, or clones it once into `repos/`.
 
+### Signed replies from webhooks
+
+The owner can add a reply URL to a webhook. `hooks.ts` stores a receipt before it submits each post.
+The receipt binds the original delivery key to the durable submission request ID.
+`reply-delivery.ts` reads that submission's answer entry, not the session's latest answer.
+It stores the payload before sending and sweeps unfinished receipts after startup and every second.
+Separate posts keep separate receipts, even when Durable answers them together.
+Failed submissions get a fixed notice with no provider error details.
+The signed JSON body includes `request`, the original `Idempotency-Key` or GitHub delivery ID.
+Receivers must match the request and hook before completing work, and deduplicate callbacks.
+Legacy uncorrelated state remains readable but does not trigger new delivery.
+
+Reply HTTP URLs can name only literal loopback addresses or localhost, which delivery pins to 127.0.0.1.
+Other URLs use the public-address fetch guard, including connection-time DNS checks. Redirects are refused.
+Only the owner can configure outgoing replies. Hook views omit operational receipts and answer text.
+Each hook keeps at most 1000 receipts before pruning completed receipts; active receipts are never discarded.
+
+A background task or subagent report can create a derived receipt before its notification enters the parent conversation.
+Pocket records the root set only when the live core declares reply delivery protocol 2 and every active run input has a hook root with the authenticated `X-Pocket-Reply-Protocol: 2` capability.
+The hook stores this capability only on a new root receipt; a duplicate post never upgrades an older receipt.
+This gate keeps a newly reloaded extension from creating receipts for an older live sender.
+A run with an owner input gets no derived receipt; fully rooted inputs retain every root.
+The reply sweep still reads only the derived receipt's exact terminal submission answer.
+Root receipts use the legacy callback body for receiver compatibility.
+Derived receipts add `protocol: 2`; receivers append them to the original bridge request and deduplicate the terminal entry.
+Derived receipts for one original request wait until every earlier receipt is complete.
+
+Derived reservation returns `reserved`, `suppressed`, or `capacity`. `suppressed` means no eligible root remains, such as when an owner removed a hook or moved it to another session; Pocket may still admit the local notification. `capacity` means one or more roots have 1000 unfinished receipts. Pocket creates no part of a multi-root receipt set in that case. It prunes completed receipts only after every root can admit the same source.
+
+A `capacity` result does not admit the notification. A background watch saves a sleeping `retryTell` checkpoint and retries the same deterministic request at its deadline. A subagent courier leaves its batch in `SubagentsDoc.sending`, saves a sleeping `capacity` checkpoint, and retries the same deterministic batch request at its deadline. These durable phases release their invocation and resume after a restart. Reports partition by their exact canonical root set before the courier reserves or submits a batch.
+
+`pocket.background` and `pocket.subagent-courier` use task definition version 2 for these new phases. Their version-1 migration preserves only known old checkpoints. A server rollback after either task saves `retryTell` or `capacity` is not supported: Pi Durable blocks the newer task before phase dispatch. The subagent extension can hot reload and register courier version 2 before a core restart. The reply protocol gate still disables derived follow-up delivery until the live core exposes protocol 2.
+
 ## Who chooses models
 
 Only people choose models; Pi, PiP, and Pi Pocket itself never pick one on the side. Everything that runs a model uses one a person chose:

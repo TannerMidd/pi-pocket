@@ -246,11 +246,13 @@ test("the skills setting's exclusions, inclusions, and relative paths work as in
     const ours = found(loadSessionSkills(cwd, { ...sources, settingsPaths }));
 
     assert.deepEqual(ours, found(await cliSkills(cwd, own, agentDir, false)));
+    // Pi CLI 1.5.2 keeps "off" for this mixed pattern set. The CLI comparison above
+    // remains the compatibility contract for exclusions and explicit paths.
     assert.deepEqual(
         ours
             .map((each) => each.name)
             .filter((name) => !["pi-user", "from-settings"].includes(name)),
-        ["back", "from-agent-dir", "teach"],
+        ["back", "from-agent-dir", "off", "teach"],
     );
 });
 

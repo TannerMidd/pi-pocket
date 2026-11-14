@@ -23,13 +23,21 @@ export class ExtensionRequest implements RequestActor {
     readonly #app: PocketApp;
     readonly #by: string;
     readonly #access: WebAccess;
+    readonly #module: string;
     readonly #source?: ConversationId;
     #settings: string | undefined;
 
-    constructor(app: PocketApp, by: string, access: WebAccess, source?: ConversationId) {
+    constructor(
+        app: PocketApp,
+        by: string,
+        access: WebAccess,
+        module: string,
+        source?: ConversationId,
+    ) {
         this.#app = app;
         this.#by = by;
         this.#access = access;
+        this.#module = module;
         this.#source = source;
         this.context = withAbortSignal(this.#stopped.signal, BACKGROUND_CONTEXT);
     }
@@ -51,6 +59,31 @@ export class ExtensionRequest implements RequestActor {
             cwd: request.cwd,
             ...(request.title === undefined ? {} : { title: request.title }),
         });
+    }
+
+    async provisionReplySession(request: Parameters<WebRequest["provisionReplySession"]>[0]) {
+        if (this.#access !== "owner" || this.current().role !== "owner") {
+            throw new HttpError(403, "Only the owner can provision a reply session here.");
+        }
+
+        return this.#app.hooks.provisionReplySession(this.current(), this.#module, request);
+    }
+
+    async availableModels() {
+        if (this.#access !== "owner" || this.current().role !== "owner") {
+            throw new HttpError(403, "Only the owner can list app-wide models here.");
+        }
+
+        return (await this.#app.modelList()).map(
+            ({ provider, id, name, reasoning, levels, signIn }) => ({
+                provider,
+                id,
+                name,
+                reasoning,
+                levels,
+                ...(signIn === true ? { signIn: true as const } : {}),
+            }),
+        );
     }
 
     close = (): void => {
