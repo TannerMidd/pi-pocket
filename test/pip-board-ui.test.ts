@@ -81,10 +81,12 @@ const floating = (what: string) =>
 /** PiP in neither place. */
 const shut = (what: string) =>
     see(`!${PIP}.pipShown() && document.querySelector('.pip-panel') === null`, what);
-/** `id` back in the session's place. */
+/** `id` back in the session's place, with its view and composer ready. */
 const backTo = (id: ConversationId, what: string) =>
     see(
         `${STORE}.store.state.conversationId === ${Number(id)} &&
+            ${STORE}.store.state.view.conversation?.id === ${Number(id)} &&
+            document.querySelector('${BOX}') !== null &&
             location.pathname === '/s/${Number(id)}'`,
         what,
     );
