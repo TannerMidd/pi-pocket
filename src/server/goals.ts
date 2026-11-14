@@ -9,6 +9,7 @@ import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { type Goal, type GoalCheck, GoalDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
+import { ObjectiveGoalDoc } from "./objective-goals.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -79,6 +80,10 @@ export class Goals {
         };
 
         await app.harness.commit(async (tx) => {
+            if ((await tx.doc(ObjectiveGoalDoc, id)).goal?.status === "active") {
+                throw new HttpError(409, "Pause the active /goal before starting an /until check.");
+            }
+
             (await tx.doc(GoalDoc, id)).goal = goal;
         }, context);
 

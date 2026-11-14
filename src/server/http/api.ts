@@ -609,6 +609,26 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
             app.requireSee(user, id);
 
+            if (third === "objective-goal" && fourth === undefined && method === "POST") {
+                const { args, requestId } = await readJson<{ args?: unknown; requestId?: unknown }>(
+                    request,
+                );
+
+                if (
+                    typeof args !== "string" ||
+                    typeof requestId !== "string" ||
+                    !/^[a-zA-Z0-9_-]{1,64}$/.test(requestId)
+                ) {
+                    throw new HttpError(400, "Goal arguments and a valid requestId are required.");
+                }
+
+                return json(
+                    response,
+                    200,
+                    await app.objectiveGoals.command(id, user, args, requestId),
+                );
+            }
+
             if (third === "browser") {
                 return browserRoutes(route, id, fourth, options.listen.port);
             }

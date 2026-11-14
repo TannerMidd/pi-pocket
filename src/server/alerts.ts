@@ -9,6 +9,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { AuthorsDoc, ChatDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
+import { ObjectiveGoalDoc } from "./objective-goals.ts";
 import { entryText, projectEntry, snippet } from "./projection.ts";
 import { span, type WaitView } from "./limit-gate.ts";
 import { DEFAULT_PREFS, type EmbedderMessage, type PushMessage, type PushPrefs } from "./push.ts";
@@ -24,6 +25,8 @@ const DONE_DELAY_MS = 3000;
 const MAX_NOTIFIED_CALL = 120;
 /** Characters that break a line, are invisible, or reorder text: a call with any of them may not read as it runs. */
 const DISGUISING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** The body of a goal alert when no reason was stored, as for a start a restart left without a run. */
+const GOAL_NEEDS_YOU = "The goal stopped and needs a person to go on.";
 
 export class Alerts {
     readonly #app: PocketApp;
@@ -119,6 +122,43 @@ export class Alerts {
         const conversation = await app.harness.conversation(id, context);
 
         if (conversation === undefined) {
+            return;
+        }
+
+        // A goal changes what the end of a run says. One that stopped by itself — a block, the budget, a failure —
+        // asks for a person, also with no answer to show, as when a restart left its start without a run. Stored
+        // before `needsAttention` existed, a block or a reached budget was always an automatic stop: those ask too.
+        // A pause may have been someone's own, so an old one without the mark stays an ordinary end.
+        const goal = (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal;
+        const needsAttention =
+            goal?.needsAttention ?? (goal?.status === "blocked" || goal?.status === "budget");
+
+        if (goal !== undefined && needsAttention && goal.status !== "active") {
+            const title = await app.conversationTitle(id);
+            const message: PushMessage = {
+                title: `Goal needs you · ${title}`,
+                body: snippet(app.hidden.replace(goal.reason ?? GOAL_NEEDS_YOU, id), 400),
+                url: `/s/${String(id)}`,
+                tag: `done-${String(id)}`,
+            };
+
+            for (const userId of await this.participants(id)) {
+                // Their PiP follows this run and tells them what came of it: one notification, not two.
+                if (await app.pip.reportsOn(id, userId).catch(() => false)) {
+                    continue;
+                }
+
+                // A stopped goal waits for a person, as a failure does: it goes out at once, also to a phone that
+                // saves its battery.
+                void this.push(userId, id, "done", message, "high");
+            }
+
+            return;
+        }
+
+        // An active goal has not finished: it waits for what continues it (a subagent, a queued message), and
+        // "Pi finished" would say otherwise. A failure still goes out, as before.
+        if (failure === undefined && goal?.status === "active") {
             return;
         }
 

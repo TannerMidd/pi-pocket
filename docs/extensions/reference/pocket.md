@@ -1,6 +1,6 @@
 # pocket
 
-`pocket` is the app's API for a browser module: the argument of the browser module's default export. With it, a browser module adds rail buttons, menu rows, launcher actions, pages, sheets, panels, and status-line items, and sets how the calls of its tools show. It also calls its module's routes and gets its module's events. [Browser modules](../browser-modules.md) tells you how to write one, and what happens when it fails.
+`pocket` is the app's API for a browser module: the argument of the browser module's default export. With it, a browser module adds rail buttons, menu rows, launcher actions, pages, sheets, panels, status-line items, and bars above the message box, and sets how the calls of its tools show. It also calls its module's routes and gets its module's events. [Browser modules](../browser-modules.md) tells you how to write one, and what happens when it fails.
 
 The types are `Pocket` and the types that it uses, in [types/pocket.d.ts](../../../types/pocket.d.ts). A browser module is JavaScript: [Types for your editor](types.md) tells you how to use the types in JSDoc.
 
@@ -492,6 +492,18 @@ Since 0.19.0 · Experimental
 
 Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. In a narrow message box (a phone's), where they would push Send or Stop out of it, these buttons take a line of their own under the row: two or more up to 480 px wide, one up to 340 px. A single button in a box from 341 to 480 px wide stays in the row, and steps aside while Pi works, as the model chip does, so Stop stays in the row; it comes back when Pi stops. See [`ComposerButtonSpec`](#composerbuttonspec).
 
+### `composerBar`
+
+```ts
+composerBar(spec: ComposerBarSpec): Added<ComposerBarSpec>;
+```
+
+Since 0.28.2 · Experimental
+
+Adds a bar above the message box, in the dock where the app's own bars show (Plan mode, a PR watch), after them. It shows only in an ordinary session: a subagent's message box and PiP's get none, and neither does a session whose view is not the one the tab shows. Use it for a line that stays while the person writes: the progress of work the module runs on the server. The work stays in the module: the app gives the bar its place, nothing more.
+
+Its `component` gets [`ComposerBarProps`](#composerbarprops) and draws what it wants there; one that shows nothing takes no room. Each session starts with a fresh component, so no bar shows the state of the session before. Change what the bar shows from an event, a timer, or an effect, and not while a component draws. What the call returns changes or removes it, as [`Added`](#added) says. On an older app, check for it first: `typeof pocket.composerBar === "function"`.
+
 ### `replyAction`
 
 ```ts
@@ -953,6 +965,24 @@ type ComposerButtonSpec = TopbarSpec;
 Since 0.19.0 · Experimental
 
 A button in the message box's row, with the same fields as a top bar button.
+
+### `ComposerBarSpec`
+
+```ts
+interface ComposerBarSpec {
+    id: string;
+    title: string;
+    component: ComponentType<ComposerBarProps>;
+}
+```
+
+Since 0.28.2 · Experimental
+
+A bar above the message box.
+
+- `id`: the bar's id in the module.
+- `title`: the bar's name: the first word of the line that says it failed.
+- `component`: what the bar shows. It gets [`ComposerBarProps`](#composerbarprops).
 
 ### `Reply`
 
@@ -1416,6 +1446,24 @@ interface FenceProps {
 Since 0.28.0 · Experimental
 
 The exact props the app passes to a `pocket.fence` component. `source` is the code text, `lang` is the language label from the fence, and `streaming` says whether the Markdown is still streaming.
+
+### `ComposerBarProps`
+
+```ts
+interface ComposerBarProps {
+    pocket: Pocket;
+    conversationId: number;
+    canSteer: boolean;
+}
+```
+
+Since 0.28.2 · Experimental
+
+The exact props the app passes to a `pocket.composerBar` component.
+
+- `pocket`: the `pocket` of the version that added the bar.
+- `conversationId`: the session whose message box the bar sits on, a number as in its address (`/s/12`).
+- `canSteer`: whether the person in this tab may act in this session now: their role, and whether someone else holds the turn. It is a read-only help for the bar's UI: grey the bar's controls from it. The server still checks what the person does.
 
 ### `SwitchProps`
 

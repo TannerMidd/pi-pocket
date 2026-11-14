@@ -333,6 +333,18 @@ What a browser shows is its person's choice of theme (`look`) and colors (`theme
 
 A release with a warning (or notes that could not be read) is never installed by itself and is not rolled back by itself, whatever the kind. The browser module (`extensions/updates/index.js`) only shows `installKind` in words and the blockers the server gives: it holds no rule of its own.
 
+## Goal controls and extension composer bars
+
+Goal's visible bar and management sheet belong to the `objective-goal` extension browser module, not to the core composer. The generic `pocket.composerBar` registers an extension component above the message box. It receives the ordinary session id and read-only steering state (role and turn), renders under its own error boundary, and resets on a session or component change. PiP and subagents get no such bars. An extension component that returns nothing takes no room.
+
+The browser module follows one session, polls only while the document is visible, ignores stale reads, and aborts its scope when that session changes or the module goes. Controls wait for committed server answers. Lost mutation responses reuse their request key. Goal edits and deletion carry the observed revision; the workflow checks it inside its transaction before writing. The sheet keeps unsaved text when another tab changes the objective.
+
+A goal is Active only while a real driver can continue it. `ObjectiveGoals.checkTurn` evaluates after each answer and gives the following run its continuation. The drivers are Pi's run in flight, a kickoff currently being admitted (not an orphan `pending`), a running child, a report on its way (reporter or courier), and a background command still running or a watch that has not delivered its report. A queued message keeps its priority over continuation, but a queue that never started is no driver. Plan mode never lets the loop past its approval: the goal becomes blocked instead of evaluating on. When the run ends and no driver is left, the workflow stores `paused`, `blocked`, or `budget` with its reason and marks the stop as needing attention. A pause or Stop a person chose stores the same statuses without that mark.
+
+Reconciliation never repeats paid work. Startup closes an Active goal whose session is idle, and an orphan `pending` kickoff, with their reason; a queue that did not start does not keep the goal Active. An evaluation whose start was memoized without a verdict becomes `unavailable` instead of running again. `Alerts.#pushDone` reads the attention mark, and also counts a stored `blocked` or `budget` without the mark (data from before the field), never inferring it for `paused`. It holds “Pi finished” back while the goal is Active. For a stop that needs attention it sends a “Goal needs you” push with the reason under the `done` preference, as visibility, PiP's follow, and watching decide.
+
+The extension's routes bind the source conversation and use the normal visibility, role, and turn checks. The existing internal `ObjectiveGoals` service supplies a small UI projection and commands; the service resolves the actor afresh. This bridge is temporary. The evaluator workflow remains where the original PR put it until the maintainer agrees on the [generic backend capabilities](../contrib/goals/host-api-proposal.md). No proposed backend API in that document is implemented by the UI follow-up, and the drivers, stops, and notices above add no route, host API, or document kind of their own.
+
 ## Checking a change
 
 - **Every change:** `npm run check` (types, and no unused imports or locals in the TypeScript), `npm run lint`, and `npm test`.

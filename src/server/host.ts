@@ -14,6 +14,7 @@ import type { Browsers } from "./browser.ts";
 import type { Gallery } from "./gallery.ts";
 import type { Role, User } from "./config.ts";
 import type { Goals } from "./goals.ts";
+import type { ObjectiveGoals } from "./objective-goals.ts";
 import type { LancetGuard } from "./lancet.ts";
 import type { Memory } from "./memory.ts";
 import type { Pip } from "./pip.ts";
@@ -538,6 +539,11 @@ export interface PocketHost {
     >;
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
+    /** Built-in goal extension. */
+    readonly objectiveGoals: Pick<
+        ObjectiveGoals,
+        "activeObjective" | "checkTurn" | "view" | "command"
+    >;
     /** The built-in browser: a page per conversation, which the people in it watch and use too. */
     readonly browsers: Pick<Browsers, "open">;
     /** PiP, the owner's assistant: what its tools do, each as PiP's person (`pip.ts`). */

@@ -41,8 +41,8 @@ import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/p
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
 import { addLayer, goBack, removeLayer } from "./back.js";
-import { actions, api, signOut, store } from "./store.js";
-import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
+import { actions, api, closeSheet, signOut, store } from "./store.js";
+import { Boundary, html, Icon, Sheet, SheetBack, SheetInfo, usePresence } from "./ui.js";
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
@@ -339,6 +339,11 @@ function sheetBody(sheet) {
             break;
         case "schedules":
             body = view.conversation ? html`<${SchedulesSheet} />` : null;
+            break;
+        case "objective-goal":
+            body = html`<${Sheet} title="Goal" onClose=${closeSheet}>
+                <div style="white-space: pre-wrap; overflow-wrap: anywhere;">${sheet.message}</div>
+            </${Sheet}>`;
             break;
         case "hooks":
             body = html`<${HooksSheet} />`;

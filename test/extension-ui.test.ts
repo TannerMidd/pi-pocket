@@ -71,6 +71,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     status: true,
     topbar: true,
     composerButton: true,
+    composerBar: true,
     replyAction: true,
     sessionChips: true,
     sessionAction: true,
@@ -721,7 +722,7 @@ test(
                 const row = document.querySelector(".composer-row");
                 const stop = row.querySelector(".stop-button")?.getBoundingClientRect();
                 const send = row.querySelector(".send-button")?.getBoundingClientRect();
-                const shown = [...row.querySelectorAll(".ext-composer-button")].filter((each) => each.offsetWidth > 0);
+                const shown = [...row.querySelectorAll('.ext-composer-button[title^="Tool "]')].filter((each) => each.offsetWidth > 0);
                 const end = (stop ?? send).bottom;
 
                 return JSON.stringify({
@@ -758,7 +759,13 @@ test(
 
                     return "null";
                 `);
-                await until(() => has(".ext-composer-button"), "the extension's buttons");
+                await until(
+                    () =>
+                        inPage<boolean>(
+                            `return JSON.stringify(document.querySelectorAll('.ext-composer-button[title^="Tool "]').length === 3)`,
+                        ),
+                    "all three test extension buttons",
+                );
 
                 // Idle: three buttons would push Send out of a phone's box: they take a line under it.
                 const idle = await fit();
@@ -1238,6 +1245,156 @@ test(
         assert.deepEqual(shown, { error: true, source: "the source", after: true });
     },
 );
+
+test(
+    "a composer bar shows above the message box, gets its props, updates, and goes",
+    real,
+    async () => {
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".composer"), "the session");
+
+        const noComponent = await withMeter<string>(`
+            try {
+                pocket.composerBar({ id: "bad", title: "Bad", component: "no" });
+                return JSON.stringify("accepted");
+            } catch (error) {
+                return JSON.stringify(error.message);
+            }
+        `);
+
+        assert.match(noComponent, /give it a component to show/);
+
+        const noTitle = await withMeter<string>(`
+            try {
+                pocket.composerBar({ id: "no-title", component: () => null });
+                return JSON.stringify("accepted");
+            } catch (error) {
+                return JSON.stringify(error.message);
+            }
+        `);
+
+        assert.match(noTitle, /give it a title/);
+
+        await withMeter(`
+            globalThis.barHandle = pocket.composerBar({
+                id: "progress",
+                title: "Progress",
+                component: ({ conversationId, canSteer }) =>
+                    html\`<div class="bar-probe" data-session="\${conversationId}" data-steer="\${canSteer}">Progress v1</div>\`,
+            });
+            return "null";
+        `);
+
+        const where = () =>
+            inPage<{ above: boolean; session: string | null; steer: string | null }>(`
+                const bar = document.querySelector(".dock .bar-probe")?.getBoundingClientRect();
+                const row = document.querySelector(".composer-row")?.getBoundingClientRect();
+                const probe = document.querySelector(".dock .bar-probe");
+
+                return JSON.stringify({
+                    above: bar !== undefined && row !== undefined && bar.bottom <= row.top,
+                    session: probe?.dataset.session ?? null,
+                    steer: probe?.dataset.steer ?? null,
+                });
+            `);
+
+        await until(async () => (await where()).session !== null, "the bar above the message box");
+        const placed = await where();
+
+        assert.equal(placed.above, true, "the bar sits above the message box's row");
+        assert.equal(placed.session, `${session}`);
+        assert.equal(placed.steer, "true", "the owner may steer");
+
+        const driver = app.config.addUser("Bar driver", "guest").user;
+
+        await app.collab.turns(session, owner(app), { action: "on" });
+        await app.collab.turns(session, owner(app), { action: "handover", to: driver.id });
+        await until(
+            async () => (await where()).steer === "false",
+            "the turn blocks the bar controls",
+        );
+        await app.collab.turns(session, owner(app), { action: "off" });
+        await until(async () => (await where()).steer === "true", "steering restored");
+
+        await withMeter(`
+            globalThis.barHandle.update({
+                component: ({ conversationId }) =>
+                    html\`<div class="bar-probe" data-session="\${conversationId}">Progress v2</div>\`,
+            });
+            return "null";
+        `);
+        await until(
+            async () => (await text(".dock .bar-probe")) === "Progress v2",
+            "the updated bar",
+        );
+
+        await withMeter(`globalThis.barHandle.remove(); return "null";`);
+        await until(async () => !(await has(".dock .bar-probe")), "the removed bar");
+    },
+);
+
+test("a composer bar that fails fails alone, and a new session starts it fresh", real, async () => {
+    await page.navigate(`${base}/s/${session}`);
+    await until(() => has(".composer"), "the session");
+    await withMeter(`
+            globalThis.goodBar = pocket.composerBar({
+                id: "good",
+                title: "Good",
+                component: () => html\`<div class="bar-good">Fine</div>\`,
+            });
+            globalThis.badBar = pocket.composerBar({
+                id: "bad",
+                title: "Bad bar",
+                component: () => {
+                    throw new Error("bar broke");
+                },
+            });
+            return "null";
+        `);
+    await until(
+        async () => /Bad bar failed: bar broke/.test(await text(".dock .error-box")),
+        "the failure's line",
+    );
+    assert.equal(await has(".dock .bar-good"), true, "the other bar stays");
+    assert.equal(await has(".composer textarea"), true, "the message box stays");
+
+    await withMeter(`
+        globalThis.badBar.update({ component: () => html\`<div class="bar-recovered">Recovered</div>\` });
+        return "null";
+    `);
+    await until(() => has(".dock .bar-recovered"), "a replacement component retries after failure");
+    assert.equal(await has(".dock .error-box"), false);
+    await withMeter(`globalThis.badBar.remove(); return "null";`);
+    await until(async () => !(await has(".dock .bar-recovered")), "the replacement removed");
+
+    // A new session starts the bar's component fresh: no state of the session before.
+    const other = await newSession(app);
+
+    await withMeter(`
+            globalThis.barStep = "first";
+            globalThis.stepBar = pocket.composerBar({
+                id: "step",
+                title: "Step",
+                component: () => {
+                    const [step] = pocket.useState(globalThis.barStep);
+
+                    return html\`<div class="bar-step">\${step}</div>\`;
+                },
+            });
+            return "null";
+        `);
+    await until(async () => (await text(".dock .bar-step")) === "first", "the bar's state");
+    await inPage(`globalThis.barStep = "second"; return "null";`);
+    await inPage(`(await import("/store.js")).navigate(${other}); return "null";`);
+    await until(async () => (await text(".dock .bar-step")) === "second", "a fresh start");
+
+    await withMeter(`
+            globalThis.stepBar.remove();
+            globalThis.goodBar.remove();
+            return "null";
+        `);
+    await until(async () => !(await has(".dock .bar-step")), "the removed bar");
+});
 
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);

@@ -76,6 +76,7 @@ type Internal =
     | "schedules"
     | "background"
     | "goals"
+    | "objectiveGoals"
     | "browsers"
     | "memory"
     | "toolNames";

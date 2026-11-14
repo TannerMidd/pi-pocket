@@ -1,6 +1,6 @@
 # Browser modules
 
-A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, panels, status-line items, menu rows, launcher actions, and chips, filters, and actions in the session list to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
+A browser module is JavaScript that the app loads in the tabs of the people that it is for. It adds rail buttons, pages, sheets, panels, status-line items, bars above the message box, menu rows, launcher actions, and chips, filters, and actions in the session list to the app. It gets `pocket`, the app's API for extensions. The members of `pocket` are in [the pocket reference](reference/pocket.md).
 
 ## Add a browser module
 
@@ -127,6 +127,8 @@ These, and slots, came in 0.19.0, and are experimental: they can change in a min
 
 **`composerButton({ id, title, icon or iconPath, … })`** adds a button on the left of the message box's row. **`insertText(text)`** puts text into the message box for the person to send: a prompt template, a snippet, a screenshot's description. It never sends.
 
+**`composerBar({ id, title, component })`** adds a bar above the message box, in the dock where the app's own bars show, after them: a line that stays while the person writes, such as the progress of work the module runs on the server. It shows only in an ordinary session, and its component gets `{ pocket, conversationId, canSteer }`: the session, and whether the person may act in it now (their role, and the turn they hold). `canSteer` is a read-only help for the bar's UI: the server still checks what the person does. A component that shows nothing takes no room. It came in 0.28.2, and is experimental: check for it first, as for a panel.
+
 **`pip.ask(text, { send })`** gives the person's PiP, their assistant, a message of the module's: the findings of an analyser, a question about what the module shows. By default it opens PiP and puts the text in its message box, for the person to read, edit, and send. With `send: true` it sends at once, but only just after the person tapped or pressed a key anywhere in the app (so send only from their own action, such as a button's `run`); elsewhere the answer is `{ ok: false, reason }`. It never throws for a person who has no PiP, and resolves with `{ ok: false, reason: "PiP is not available" }`. The text starts with a line that names the module, and PiP reads it as the person's own message, so fence what the module did not write (a session's title, a web page) as untrusted data. It came in 0.26.0, and is experimental. Check for it first: `pocket.pip?.ask`.
 
 **`composerKey({ id, keys, label, run(box) })`** adds a key in the message boxes, the session's and PiP's: Ctrl+W to delete a word, Alt+Backspace, keys of an editor you are used to. It comes before the box's own keys. `run` gets the box's `text`, its selection (`start`, `end`), and `set(text, caret)`, which edits the box as typing does. It came in 0.20.0, and is experimental. A browser tab never gets some keys, such as Ctrl+W, which closes the tab: they reach the page only in an installed app's window, if at all.
@@ -165,7 +167,7 @@ To show data from a service on your network, read it in a route on the server ([
 
 - Each thing that a module adds has an `id` of its own: letters, digits, `.`, `_`, `:`, and `-`, that starts with a letter or a digit, up to a [length](reference/limits.md#names).
 - To add a thing with the same `id` again replaces it.
-- Each `rail`, `menu`, `launcher`, `page`, `sheet`, `panel`, `status`, `topbar`, `composerButton`, `replyAction`, `sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch` returns `{ update(patch), remove() }`. `update` takes an object.
+- Each `rail`, `menu`, `launcher`, `page`, `sheet`, `panel`, `status`, `topbar`, `composerButton`, `composerBar`, `replyAction`, `sessionChips`, `sessionAction`, `sessionFilter`, and `sessionSearch` returns `{ update(patch), remove() }`. `update` takes an object.
 
 ## Redraws
 
