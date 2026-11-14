@@ -5,7 +5,7 @@ import { branchAvailable } from "./sheets/branch.js";
 import { memoryAvailable, remember } from "./sheets/memory.js";
 import { togglePeeks } from "./peeks.js";
 import { askPip, openPip, pipAvailable } from "./pip.js";
-import { actions, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
+import { actions, api, collab, navigate, notify, openSheet, scoped, store } from "./store.js";
 import {
     BASE_LOOK,
     chooseLook,
@@ -328,6 +328,31 @@ const COMMANDS = [
                     ? "Remembered. Pi uses it once the owner approves it."
                     : "Remembered. Pi gets it from its next message.",
             );
+        },
+    },
+    {
+        name: "goal",
+        args: "[objective | edit | pause | resume | clear | budget | judge]",
+        description: "Set or manage an objective that Pi works toward across turns",
+        available: isSession,
+        idempotent: true,
+        run: async (args, requestId) => {
+            const id = store.state.conversationId;
+            const { message } = await api(`c/${id}/objective-goal`, { args, requestId });
+
+            if (typeof message !== "string") {
+                throw new Error("The goal command's answer could not be read. Send it again.");
+            }
+
+            if (store.state.conversationId !== id) {
+                return;
+            }
+
+            if (args === "" || args === "status" || args === "show") {
+                openSheet({ type: "objective-goal", message });
+            } else {
+                notify("info", message);
+            }
         },
     },
     {

@@ -7,7 +7,12 @@
 import { copyJson } from "@earendil-works/chord/json";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import { type ConversationId, UsageDoc, type UsageState } from "@earendil-works/pi-durable";
+import {
+    type ConversationId,
+    type Tx,
+    UsageDoc,
+    type UsageState,
+} from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { SessionsDoc, SpendDoc } from "./docs.ts";
@@ -131,52 +136,61 @@ export class Spend {
         payer: string,
         message: AssistantMessage,
     ): Promise<void> {
-        await this.#app.harness.commit(async (tx) => {
-            const models = (await tx.doc(UsageDoc, id)).models as Record<string, Usage>;
-            const key = `${message.provider}/${message.model}`;
-            const usage = message.usage;
-            const total = Object.hasOwn(models, key) ? models[key] : undefined;
+        await this.#app.harness.commit(
+            (tx) =>
+                this.recordModelUsageIn(
+                    tx,
+                    id,
+                    payer,
+                    { provider: message.provider, modelId: message.model },
+                    message.usage,
+                ),
+            context,
+        );
+        this.#stopOverLimit();
+    }
 
-            if (total === undefined) {
-                // The provider/model key contains a slash, so it cannot be a prototype setter.
-                models[key] = copyJson(usage, {
-                    omitUndefinedProperties: true,
-                }) as unknown as Usage;
-            } else {
-                for (const field of [
-                    "input",
-                    "output",
-                    "cacheRead",
-                    "cacheWrite",
-                    "totalTokens",
-                ] as const) {
-                    total[field] += usage[field];
-                }
+    /** Record usage and its captured payer inside the caller's transaction. */
+    async recordModelUsageIn(
+        tx: Tx,
+        id: ConversationId,
+        payer: string,
+        model: { provider: string; modelId: string },
+        usage: Usage,
+    ): Promise<void> {
+        const models = (await tx.doc(UsageDoc, id)).models as Record<string, Usage>;
+        const key = `${model.provider}/${model.modelId}`;
+        const total = Object.hasOwn(models, key) ? models[key] : undefined;
 
-                for (const field of ["cacheWrite1h", "reasoning"] as const) {
-                    if (usage[field] !== undefined) {
-                        total[field] = (total[field] ?? 0) + usage[field];
-                    }
-                }
+        if (total === undefined) {
+            // The provider/model key contains a slash, so it cannot be a prototype setter.
+            models[key] = copyJson(usage, { omitUndefinedProperties: true }) as unknown as Usage;
+        } else {
+            for (const field of [
+                "input",
+                "output",
+                "cacheRead",
+                "cacheWrite",
+                "totalTokens",
+            ] as const) {
+                total[field] += usage[field];
+            }
 
-                for (const field of [
-                    "input",
-                    "output",
-                    "cacheRead",
-                    "cacheWrite",
-                    "total",
-                ] as const) {
-                    total.cost[field] += usage.cost[field];
+            for (const field of ["cacheWrite1h", "reasoning"] as const) {
+                if (usage[field] !== undefined) {
+                    total[field] = (total[field] ?? 0) + usage[field];
                 }
             }
 
-            // Atomic with usage: a restart cannot lose the payer or charge this request twice.
-            const spend = await tx.doc(SpendDoc);
+            for (const field of ["input", "output", "cacheRead", "cacheWrite", "total"] as const) {
+                total.cost[field] += usage.cost[field];
+            }
+        }
 
-            spend.counted[String(id)] = (spend.counted[String(id)] ?? 0) + usage.cost.total;
-            spend.people[payer] = (spend.people[payer] ?? 0) + usage.cost.total;
-        }, context);
-        this.#stopOverLimit();
+        const spend = await tx.doc(SpendDoc);
+
+        spend.counted[String(id)] = (spend.counted[String(id)] ?? 0) + usage.cost.total;
+        spend.people[payer] = (spend.people[payer] ?? 0) + usage.cost.total;
     }
 
     /** Who pays for a conversation's work: whoever asked for it, else whoever started the session, else the owner. */
@@ -292,12 +306,13 @@ export class Spend {
     #reached(
         id: ConversationId,
         userId: string,
+        uncommittedCost = 0,
     ): { budget: number; person?: User; team?: true } | undefined {
         const app = this.#app;
         const root = app.rootOf(id);
         const budget = app.sessionMeta(root)?.budget;
 
-        if (budget !== undefined && this.sessionSpent(root) >= budget) {
+        if (budget !== undefined && this.sessionSpent(root) + uncommittedCost >= budget) {
             return { budget };
         }
 
@@ -305,14 +320,14 @@ export class Spend {
         const top = this.teamRoot(root);
         const team = app.sessionMeta(top)?.budget;
 
-        if (team !== undefined && this.#teamSpent(top) >= team) {
+        if (team !== undefined && this.#teamSpent(top) + uncommittedCost >= team) {
             return top === root ? { budget: team } : { budget: team, team: true };
         }
 
         const person = app.config.userById(userId);
         const limit = person === undefined || person.role === "owner" ? undefined : person.budget;
 
-        if (limit !== undefined && this.personSpent(userId) >= limit) {
+        if (limit !== undefined && this.personSpent(userId) + uncommittedCost >= limit) {
             return { budget: limit, person };
         }
 
@@ -342,10 +357,11 @@ export class Spend {
 
     /**
      * Why work Pi starts with nobody asking (a scheduled message, the next round toward a goal) may not start: a limit
-     * the session or its payer reached. `userId` pays when given, else whoever asked last.
+     * the session or its payer reached. `userId` pays when given, else whoever asked last. Include a provider
+     * response's cost here when a hook is deciding whether to make another request before the response is committed.
      */
-    heldBack(id: ConversationId, userId = this.payer(id)): string | undefined {
-        const reached = this.#reached(id, userId);
+    heldBack(id: ConversationId, userId = this.payer(id), uncommittedCost = 0): string | undefined {
+        const reached = this.#reached(id, userId, uncommittedCost);
 
         if (reached === undefined) {
             return undefined;

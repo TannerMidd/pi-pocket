@@ -85,6 +85,7 @@ import { defang, quoted } from "./fence.ts";
 import { FolderFavorites } from "./folder-favorites.ts";
 import { Gallery } from "./gallery.ts";
 import { Goals } from "./goals.ts";
+import { ObjectiveGoals } from "./objective-goals.ts";
 import {
     type ApprovalRequest,
     Approvals,
@@ -406,6 +407,7 @@ export class PocketApp {
     /** Commands Pi runs in the background, watched until they end (`background.ts`). */
     readonly background = new BackgroundTasks(this);
     readonly goals = new Goals(this);
+    readonly objectiveGoals = new ObjectiveGoals(this);
     readonly shell = new Shell(this);
     readonly spend = new Spend(this);
     /** Who Pi works for in each conversation, and who wrote and queued each message. */
@@ -919,6 +921,7 @@ export class PocketApp {
             schedules: this.schedules,
             background: this.background,
             goals: this.goals,
+            objectiveGoals: this.objectiveGoals,
             browsers: this.browsers,
             pip: this.pip,
             pipCompaction: this.pipCompaction,
@@ -1326,6 +1329,7 @@ export class PocketApp {
                     // No request follows the last tool call of a run that ended or was stopped (PiP's runs too).
                     this.cacheKeeper.runEnded(Number(id));
                     this.pipCompaction.runEnded(id);
+                    this.objectiveGoals.runEnded(id, outcome);
 
                     if (this.#sessions[String(id)] !== undefined) {
                         this.#endedAt.set(id, Date.now());

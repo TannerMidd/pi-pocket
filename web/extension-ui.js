@@ -70,6 +70,7 @@ const KINDS = [
     "status",
     "topbar",
     "composerButton",
+    "composerBar",
     "replyAction",
     "sessionChips",
     "sessionAction",
@@ -723,9 +724,16 @@ function check(kind, spec) {
     }
 
     if (
-        ["rail", "page", "sheet", "panel", "topbar", "composerButton", "sessionFilter"].includes(
-            kind,
-        )
+        [
+            "rail",
+            "page",
+            "sheet",
+            "panel",
+            "topbar",
+            "composerButton",
+            "composerBar",
+            "sessionFilter",
+        ].includes(kind)
     ) {
         text("title");
     } else if (kind === "status") {
@@ -788,7 +796,7 @@ function check(kind, spec) {
         }
     }
 
-    if (kind === "page" || kind === "sheet" || kind === "panel") {
+    if (kind === "page" || kind === "sheet" || kind === "panel" || kind === "composerBar") {
         if (typeof spec.component !== "function") {
             throw new Error(`${name} ${spec.id}: give it a component to show`);
         }
@@ -1237,6 +1245,7 @@ function pocketFor(record) {
         status: (spec) => add("status", spec),
         topbar: (spec) => add("topbar", spec),
         composerButton: (spec) => add("composerButton", spec),
+        composerBar: (spec) => add("composerBar", spec),
         replyAction: (spec) => add("replyAction", spec),
         sessionChips: (spec) => add("sessionChips", spec),
         sessionAction: (spec) => add("sessionAction", spec),
@@ -2876,4 +2885,45 @@ export function ExtensionPanel({ leaving = false }) {
             <${Body} record=${record} spec=${spec} title=${title} props=${{}} close=${close} />
         </div>
     </section>`;
+}
+
+/**
+ * The bars that extensions added above the message box, in the dock after the app's own bars (Plan mode, a goal, a PR
+ * watch). Only an ordinary session's composer gets them: a subagent's message box and PiP's get none, and neither does
+ * a session whose view is not the one the tab shows. Each bar is the module's own component under a Guard, keyed by its
+ * session: one that failed tries again in another session, and none starts with the state of the session before. No
+ * wrapper around a bar, so a component that shows nothing takes no room. Its props are the module's `pocket`, the
+ * session's `conversationId`, and `canSteer` (from the composer, which knows the turn): whether the person may act in
+ * this session now. That is a read-only help for the module's UI; the server still checks what the person does.
+ */
+export function ExtensionComposerBars({ canSteer }) {
+    const { conversationId, view } = store.state;
+
+    if (
+        typeof conversationId !== "number" ||
+        view.conversation?.kind !== "session" ||
+        view.conversation.id !== conversationId
+    ) {
+        return null;
+    }
+
+    const bars = added("composerBar");
+
+    if (bars.length === 0) {
+        return null;
+    }
+
+    return html`<${Fragment}>
+        ${bars.map(
+            ({ record, spec }) => html`<${Guard}
+                key=${`${record.module}:${spec.id}:${record.url}:${componentId(spec.component)}:${conversationId}`}
+                name=${spec.title}
+            >
+                <${Drawn}
+                    component=${spec.component}
+                    props=${Object.freeze({ pocket: record.pocket, conversationId, canSteer })}
+                />
+            <//>`,
+        )}
+    <//>`;
 }
