@@ -49,9 +49,13 @@ type ObjectiveGoal = {
     reason?: string;
     lastTask?: number;
     continuation?: string;
+    /** An automatic stop needs a person's help, rather than reporting ordinary completion. */
+    needsAttention?: boolean;
 };
 
 type Kickoff = { revision: string; objective: string; resumed: boolean; revised?: true };
+type RunOutcome = "done" | "failed" | "aborted";
+type IdleCheck = { handle: NodeJS.Immediate; outcome?: RunOutcome; recoveryRevision?: string };
 
 export const ObjectiveGoalDoc = defineDoc<{
     goal?: ObjectiveGoal;
@@ -118,6 +122,7 @@ function stop(
     state: Exclude<Status, "active">,
     reason: string,
     now: number,
+    needsAttention = state !== "completed",
 ): void {
     if (goal.activeSince !== undefined) {
         goal.activeMs += Math.max(0, now - goal.activeSince);
@@ -127,6 +132,12 @@ function stop(
     goal.status = state;
     goal.reason = reason;
     delete goal.continuation;
+
+    if (needsAttention) {
+        goal.needsAttention = true;
+    } else {
+        delete goal.needsAttention;
+    }
 }
 
 /** Make an in-flight verdict stale while retaining the goal's identity and usage. */
@@ -134,6 +145,7 @@ function revise(goal: ObjectiveGoal): void {
     goal.id ??= goal.revision;
     goal.revision = randomUUID();
     delete goal.continuation;
+    delete goal.needsAttention;
 }
 
 function budgetValue(text: string): number | null {
@@ -197,6 +209,8 @@ function evidenceLine(message: Message): string {
 
 export class ObjectiveGoals {
     readonly #app: PocketApp;
+    readonly #idleChecks = new Map<ConversationId, IdleCheck>();
+    #closed = false;
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -336,7 +350,7 @@ export class ObjectiveGoals {
                 if (goal?.status === "active") {
                     goal.tokens = usedByGoal(goal, ledger);
                     revise(goal);
-                    stop(goal, "paused", "Paused by the user.", now);
+                    stop(goal, "paused", "Paused by the user.", now, false);
                 }
             } else if (
                 verb === "edit" ||
@@ -432,6 +446,10 @@ export class ObjectiveGoals {
                         if (run !== undefined) {
                             goal.lastTask = Number(run.taskId);
                         }
+                    } else if (run === undefined) {
+                        // An explicit resume of an idle active goal supersedes startup's old revision.
+                        revise(goal);
+                        delete goal.reason;
                     }
 
                     doc.lastRequest = request;
@@ -540,6 +558,7 @@ export class ObjectiveGoals {
                         delete doc.pending;
                     }
                 }, context);
+                this.activityChanged(id);
             } catch (error) {
                 await this.#pause(
                     id,
@@ -554,53 +573,244 @@ export class ObjectiveGoals {
         return this.#status(id);
     }
 
-    async #pause(id: ConversationId, reason: string, revision?: string): Promise<void> {
+    #announceStop(
+        id: ConversationId,
+        status: Status,
+        reason: string,
+        needsAttention: boolean,
+    ): void {
         const app = this.#app;
 
-        await app.harness.commit(async (tx) => {
+        app.notice(
+            needsAttention ? "warning" : "info",
+            `Goal ${label[status].toLowerCase()}. ${reason}`,
+            id,
+        );
+
+        if (!app.isBusy(id) && needsAttention) {
+            app.alerts.runChanged(id, false);
+        }
+    }
+
+    async #pause(
+        id: ConversationId,
+        reason: string,
+        revision?: string,
+        needsAttention = true,
+    ): Promise<void> {
+        const app = this.#app;
+        const changed = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(ObjectiveGoalDoc, id);
             const goal = doc.goal;
 
             if (
-                goal?.status === "active" &&
-                (revision === undefined || revision === goal.revision)
+                goal?.status !== "active" ||
+                (revision !== undefined && revision !== goal.revision)
             ) {
-                delete doc.pending;
-                goal.tokens = usedByGoal(goal, used(await tx.doc(UsageDoc, id)));
-                revise(goal);
-                stop(goal, "paused", reason, app.now());
+                return false;
             }
+
+            delete doc.pending;
+            goal.tokens = usedByGoal(goal, used(await tx.doc(UsageDoc, id)));
+            revise(goal);
+            stop(goal, "paused", reason, app.now(), needsAttention);
+
+            return true;
         }, context);
+
+        if (changed) {
+            this.#announceStop(id, "paused", reason, needsAttention);
+        }
     }
 
     async stoppedByUser(id: ConversationId): Promise<void> {
         const goal = (await this.#app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal;
 
         if (goal?.status === "active") {
-            await this.#pause(id, "The run was stopped.", goal.revision);
+            await this.#pause(id, "The run was stopped.", goal.revision, false);
         }
     }
 
-    runEnded(id: ConversationId, outcome: "done" | "failed" | "aborted"): void {
-        if (outcome === "done") {
+    /** Check outside the commit observer. Never replay paid work to repair an idle goal. */
+    activityChanged(id: ConversationId, outcome?: RunOutcome, recoveryRevision?: string): void {
+        const app = this.#app;
+        const meta = app.sessionMeta(id);
+
+        if (this.#closed || meta === undefined || meta.pip !== undefined) {
             return;
         }
 
+        const pending = this.#idleChecks.get(id);
+
+        if (pending !== undefined) {
+            pending.outcome = outcome ?? pending.outcome;
+            pending.recoveryRevision ??= recoveryRevision;
+
+            return;
+        }
+
+        const check: IdleCheck = {
+            handle: setImmediate(() => {
+                this.#idleChecks.delete(id);
+                void this.#reconcileIdle(id, check.outcome, check.recoveryRevision).catch(
+                    (error: unknown) => app.log(`Could not reconcile a goal: ${describe(error)}`),
+                );
+            }),
+            outcome,
+            recoveryRevision,
+        };
+
+        this.#idleChecks.set(id, check);
+    }
+
+    runStarted(id: ConversationId): void {
+        const pending = this.#idleChecks.get(id);
+
+        if (pending !== undefined) {
+            clearImmediate(pending.handle);
+            this.#idleChecks.delete(id);
+        }
+    }
+
+    runEnded(id: ConversationId, outcome: RunOutcome): void {
+        this.activityChanged(id, outcome);
+
+        const root = this.#app.rootOf(id);
+
+        if (root !== id) {
+            this.activityChanged(root);
+        }
+    }
+
+    async recover(ids: readonly ConversationId[]): Promise<void> {
         const app = this.#app;
 
-        void (async () => {
+        for (const id of ids) {
+            const meta = app.sessionMeta(id);
+
+            if (meta === undefined || meta.pip !== undefined) {
+                continue;
+            }
+
             const goal = (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal;
 
-            if (goal?.status === "active" && !app.isBusy(id)) {
-                await this.#pause(
-                    id,
-                    outcome === "aborted"
-                        ? "The run was stopped."
-                        : "The run failed. Fix the issue, then resume the goal.",
-                    goal.revision,
-                );
+            if (goal?.status === "active") {
+                this.activityChanged(id, undefined, goal.revision);
             }
-        })().catch((error: unknown) => app.log(`Could not pause a goal: ${describe(error)}`));
+        }
+    }
+
+    close(): void {
+        this.#closed = true;
+
+        for (const { handle } of this.#idleChecks.values()) {
+            clearImmediate(handle);
+        }
+
+        this.#idleChecks.clear();
+    }
+
+    async #reconcileIdle(
+        id: ConversationId,
+        outcome?: RunOutcome,
+        recoveryRevision?: string,
+    ): Promise<void> {
+        const app = this.#app;
+
+        if (this.#closed) {
+            return;
+        }
+
+        const observed = (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal;
+
+        if (this.#closed || observed?.status !== "active") {
+            return;
+        }
+
+        const result = await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ObjectiveGoalDoc, id);
+            const goal = doc.goal;
+
+            // A successor run and its selected inputs are committed together. Check the durable run, not a stale view.
+            if (
+                this.#closed ||
+                goal?.status !== "active" ||
+                goal.revision !== observed.revision ||
+                (recoveryRevision !== undefined && goal.revision !== recoveryRevision) ||
+                (doc.pending !== undefined && recoveryRevision === undefined) ||
+                (await tx.doc(LiveDoc, id)).run !== undefined
+            ) {
+                return undefined;
+            }
+
+            const planning = (await tx.doc(PlanDoc, id)).on;
+            const held = app.spend.heldBack(id);
+            const subagents = await tx.doc(SubagentsDoc, id);
+
+            if (
+                !planning &&
+                held === undefined &&
+                subagents.held === undefined &&
+                outcome !== "failed" &&
+                outcome !== "aborted"
+            ) {
+                for (const agent of Object.values(subagents.agents)) {
+                    if ((await tx.doc(LiveDoc, agent.conversationId)).run !== undefined) {
+                        return undefined;
+                    }
+                }
+
+                // A reporter can still be preparing the courier's batch after the last child ended.
+                const background = await tx.doc(BackgroundDoc, id);
+                const drivers = [
+                    ...(app.loader.extensionNames().includes("pocket-subagents")
+                        ? [subagents.courier, ...Object.values(subagents.reporters)]
+                        : []),
+                    ...(app.background.running
+                        ? Object.values(background.items)
+                              .filter((item) => item.notify)
+                              .map((item) => item.taskId)
+                        : []),
+                ];
+
+                for (const task of drivers) {
+                    if (task !== undefined) {
+                        const status = (await tx.task(task))?.state.status;
+
+                        if (status !== undefined && status !== "terminal") {
+                            return undefined;
+                        }
+                    }
+                }
+            }
+
+            const queued = (await tx.doc(InboxDoc, id)).items.some((item) => item.mode !== "write");
+            const reason = planning
+                ? "The goal needs plan approval. Approve the plan or turn off Plan mode, then resume the goal."
+                : (held ??
+                  subagents.held ??
+                  (outcome === "failed"
+                      ? "The run failed. Fix the issue, then resume the goal."
+                      : outcome === "aborted"
+                        ? "The run stopped before the goal could continue. Review the session, then resume the goal."
+                        : queued
+                          ? "Queued work did not start. Review the queue, then resume the goal."
+                          : "Automatic work stopped before the goal was resolved. Review the session, then resume the goal."));
+            const status = planning ? "blocked" : "paused";
+
+            delete doc.pending;
+            goal.tokens = usedByGoal(goal, used(await tx.doc(UsageDoc, id)));
+            revise(goal);
+            const safeReason = app.hidden.replace(reason, id);
+
+            stop(goal, status, safeReason, app.now());
+
+            return { status, reason: safeReason } as const;
+        }, context);
+
+        if (result !== undefined && !this.#closed) {
+            this.#announceStop(id, result.status, result.reason, true);
+        }
     }
 
     async checkTurn(
@@ -763,6 +973,7 @@ export class ObjectiveGoals {
                   continuation: string | undefined;
                   status: Status;
                   reason: string | undefined;
+                  needsAttention: boolean;
               }
             | undefined
         >(async (tx) => {
@@ -801,6 +1012,7 @@ export class ObjectiveGoals {
                     continuation: goal.continuation,
                     status: goal.status,
                     reason: goal.reason,
+                    needsAttention: goal.needsAttention === true,
                 };
             }
 
@@ -845,15 +1057,16 @@ export class ObjectiveGoals {
                 }
             }
 
-            return { continuation: goal.continuation, status: goal.status, reason: goal.reason };
+            return {
+                continuation: goal.continuation,
+                status: goal.status,
+                reason: goal.reason,
+                needsAttention: goal.needsAttention === true,
+            };
         }, context);
 
         if (result !== undefined && result.status !== "active") {
-            app.notice(
-                "info",
-                `Goal ${label[result.status].toLowerCase()}. ${result.reason ?? ""}`,
-                id,
-            );
+            this.#announceStop(id, result.status, result.reason ?? "", result.needsAttention);
         }
 
         const held =

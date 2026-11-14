@@ -70,6 +70,7 @@ import {
     DecisionsDoc,
     FolderFavoritesDoc,
     MemoryDoc,
+    PlanDoc,
     RunFailureDoc,
     type SessionMeta,
     SessionsDoc,
@@ -1061,6 +1062,7 @@ export class PocketApp {
         }
 
         await this.pip.tuneAll((line) => this.#log(line));
+        await this.objectiveGoals.recover(conversations);
         // Work a previous process left unfinished continues now.
         this.harness.resume();
     }
@@ -1201,6 +1203,13 @@ export class PocketApp {
                 if (this.#documentCommitted(change, failedNow, abortedNow)) {
                     sessionsChanged = true;
                 }
+            } else if (
+                change.type === "task" &&
+                change.value.background &&
+                change.value.state.status === "terminal"
+            ) {
+                // A reporter or background watch can be the last driver of an idle goal.
+                this.objectiveGoals.activityChanged(this.rootOf(change.value.conversationId));
             } else if (change.type === "submission") {
                 this.attribution.submissionCommitted(change.value);
 
@@ -1278,6 +1287,15 @@ export class PocketApp {
             sessionsChanged = true;
         }
 
+        if (
+            id !== undefined &&
+            (kind === BackgroundDoc.definition.kind ||
+                kind === SubagentsDoc.definition.kind ||
+                kind === PlanDoc.definition.kind)
+        ) {
+            this.objectiveGoals.activityChanged(this.rootOf(id));
+        }
+
         if (kind === "pi.live" && id !== undefined) {
             const busy = (value as LiveState | null)?.run !== undefined;
 
@@ -1310,6 +1328,7 @@ export class PocketApp {
 
                 if (busy) {
                     this.#busy.add(id);
+                    this.objectiveGoals.runStarted(id);
                     // A new run starts over: whether it fails is its own to say.
                     this.#failed.delete(id);
                     this.#storeRunFailure(id, undefined);
@@ -4177,6 +4196,7 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
+            this.objectiveGoals.close();
             this.alerts.close();
             this.themes.close();
             await this.cacheKeeper.close();

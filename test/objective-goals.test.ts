@@ -14,12 +14,15 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { createAssistantMessageEventStream, type Context } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { SubagentsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
+import { ObjectiveGoalDoc } from "../src/server/objective-goals.ts";
 
 const evaluatorMarker = "[Pi Pocket Goal Evaluator]";
 
@@ -396,7 +399,7 @@ test("a queued user message takes precedence over the evaluator's continuation",
     assert.match(await goal(app, id, "status"), /Completed/);
 });
 
-test("a goal stays active without evaluation until the user approves the plan", async (t) => {
+test("a goal waiting for plan approval blocks with a reason and waits for explicit resume", async (t) => {
     let work = 0;
     let evaluations = 0;
     const model = scriptedModel((request) => {
@@ -419,14 +422,334 @@ test("a goal stays active without evaluation until the user approves the plan", 
     await goal(app, id, "Finish the plan fixture when approved.");
     await until(() => work > 0, "the planning turn to start");
     await waitForIdle(app, id);
+    await until(
+        async () => /Blocked/.test(await goal(app, id, "status")),
+        "the goal to wait for plan approval",
+    );
     assert.equal(evaluations, 0);
-    assert.match(await goal(app, id, "status"), /Active/);
+    assert.match(await goal(app, id, "status"), /Approve the plan.*resume the goal/);
+    assert.equal(
+        (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal?.needsAttention,
+        true,
+    );
 
     await app.commands.approvePlan(id, owner(app));
-    await until(() => evaluations > 0, "the approved plan to be evaluated");
+    await until(() => work >= 2, "the approved plan's work");
+    await waitForIdle(app, id);
+    assert.equal(evaluations, 0, "approval does not silently resume a stopped goal");
+    assert.match(await goal(app, id, "status"), /Blocked/);
+
+    await goal(app, id, "resume");
+    await until(() => evaluations > 0, "the resumed goal to be evaluated");
     await waitForIdle(app, id);
     assert.equal(evaluations, 1);
     assert.match(await goal(app, id, "status"), /Completed/);
+});
+
+test("a reset that rejects automatic continuation pauses the goal and announces the reason", async (t) => {
+    const gate = Promise.withResolvers<void>();
+    let work = 0;
+    let evaluations = 0;
+    const model = scriptedModel(async (request) => {
+        if (!isEvaluator(request)) {
+            work++;
+
+            return fauxAssistantMessage("Work needs another turn.");
+        }
+
+        evaluations++;
+
+        if (evaluations === 1) {
+            await gate.promise;
+
+            return verdict("continue", "A verification is still missing.");
+        }
+
+        return verdict("met", "The verification is present.");
+    });
+    const app = await openApp(model, join(root, "objective-goal-reset-continuation"));
+
+    t.after(() => app.close());
+    const id = await session(app);
+    const notices: { level: string; text: string; id?: ConversationId }[] = [];
+
+    app.notice = (level, text, conversationId) => {
+        notices.push({ level, text, id: conversationId });
+    };
+
+    try {
+        await goal(app, id, "Finish and verify the reset fixture.");
+        await until(() => evaluations === 1, "evaluation before a queued reset");
+        await app.commands.reset(id, owner(app), "Keep the objective, but start a fresh context.");
+    } finally {
+        gate.resolve();
+    }
+
+    await until(
+        async () => /Paused/.test(await goal(app, id, "status")),
+        "the lost continuation to pause",
+    );
+    await waitForIdle(app, id);
+    await until(
+        () =>
+            notices.some(
+                (notice) =>
+                    notice.id === id &&
+                    notice.level === "warning" &&
+                    /resume the goal/.test(notice.text),
+            ),
+        "a warning about the paused goal",
+    );
+    assert.equal(work, 1, "the repair must not submit extra paid work");
+    assert.equal(evaluations, 1, "the repair must not replay the evaluator");
+    const stopped = (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal;
+
+    assert.equal(stopped?.needsAttention, true);
+    assert.equal(stopped?.continuation, undefined);
+    assert.match(stopped?.reason ?? "", /Automatic work stopped.*resume the goal/);
+
+    await goal(app, id, "resume");
+    await until(
+        async () => /Completed/.test(await goal(app, id, "status")),
+        "explicit resume to finish",
+    );
+    await waitForIdle(app, id);
+    assert.equal(work, 2);
+    assert.equal(evaluations, 2);
+    assert.equal(
+        (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal?.needsAttention,
+        undefined,
+    );
+});
+
+async function idleGoal(app: App, id: ConversationId, pending = false): Promise<void> {
+    await app.harness.commit(async (tx) => {
+        const doc = await tx.doc(ObjectiveGoalDoc, id);
+        const revision = crypto.randomUUID();
+
+        doc.goal = {
+            revision,
+            objective: "Recover an idle goal without replaying paid work.",
+            status: "active",
+            budget: null,
+            turns: 0,
+            emptyTurns: 0,
+            tokens: 0,
+            tokenBase: 0,
+            startEntry: 0,
+            lastEvidence: 0,
+            activeMs: 0,
+            activeSince: app.now(),
+        };
+
+        if (pending) {
+            doc.pending = { revision, objective: doc.goal.objective, resumed: false };
+        }
+    }, context);
+}
+
+test("a kickoff still being submitted is not mistaken for an orphan", async (t) => {
+    const gate = Promise.withResolvers<void>();
+    let work = 0;
+    const app = await openApp(
+        scriptedModel((request) => {
+            if (isEvaluator(request)) {
+                return verdict("met", "Work finished after admission.");
+            }
+
+            work++;
+
+            return fauxAssistantMessage("Finished the fixture.");
+        }),
+        join(root, "objective-goal-pending-admission"),
+    );
+
+    t.after(() => {
+        gate.resolve();
+
+        return app.close();
+    });
+    const id = await session(app);
+    const submit = app.commands.submit.bind(app.commands);
+
+    app.commands.submit = async (...args) => {
+        await gate.promise;
+
+        return submit(...args);
+    };
+
+    const starting = goal(app, id, "Start the fixture after delayed admission.");
+
+    try {
+        await until(
+            async () =>
+                (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.pending !== undefined,
+            "the pending kickoff",
+        );
+        const revision = (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal
+            ?.revision;
+
+        app.objectiveGoals.activityChanged(id);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await app.harness.commit(() => {}, context);
+        const doc = await app.harness.snapshot(ObjectiveGoalDoc, id, context);
+
+        assert.equal(doc?.goal?.status, "active");
+        assert.equal(doc?.pending?.revision, revision);
+        assert.equal(work, 0);
+    } finally {
+        gate.resolve();
+        await starting;
+    }
+
+    await until(
+        async () => /Completed/.test(await goal(app, id, "status")),
+        "the admitted goal to finish",
+    );
+    assert.equal(work, 1);
+});
+
+test("a background report remains a real driver and resumes goal evaluation when it arrives", async (t) => {
+    let evaluations = 0;
+    const app = await openApp(
+        scriptedModel((request) => {
+            if (isEvaluator(request)) {
+                evaluations++;
+
+                return verdict("met", "The background report supplies the missing evidence.");
+            }
+
+            return fauxAssistantMessage("The background command's evidence was received.");
+        }),
+        join(root, "objective-goal-background-driver"),
+    );
+    const release = join(root, "objective-goal-background-release");
+    const id = await session(app);
+    const item = await app.background.start(id, {
+        command: `while [ ! -f '${release}' ]; do sleep 0.02; done; echo BACKGROUND_GOAL_OK`,
+        requestedBy: owner(app).id,
+    });
+
+    t.after(async () => {
+        await writeFile(release, "release");
+        await app.background.stop(id, item.id).catch(() => {});
+        await app.close();
+    });
+    await idleGoal(app, id);
+    app.objectiveGoals.runEnded(id, "done");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await app.harness.commit(() => {}, context);
+    assert.match(await goal(app, id, "status"), /Active/);
+    assert.equal(evaluations, 0);
+    await writeFile(release, "release");
+    await until(
+        async () => /Completed/.test(await goal(app, id, "status")),
+        "the background report to complete the goal",
+    );
+    assert.equal(evaluations, 1);
+});
+
+test("startup pauses an active goal with an orphan kickoff without submitting or evaluating it", async (t) => {
+    let calls = 0;
+    const model = scriptedModel(() => {
+        calls++;
+
+        return verdict("met", "No recovery request should run.");
+    });
+    const data = join(root, "objective-goal-orphan-kickoff");
+    let app = await openApp(model, data);
+
+    t.after(() => app.close());
+    const id = await session(app);
+
+    await idleGoal(app, id, true);
+    await app.close();
+    app = await openApp(model, data);
+    await until(
+        async () => /Paused/.test(await goal(app, id, "status")),
+        "startup to stop an orphan kickoff",
+    );
+    const doc = await app.harness.snapshot(ObjectiveGoalDoc, id, context);
+
+    assert.equal(doc?.pending, undefined);
+    assert.equal(doc?.goal?.needsAttention, true);
+    assert.equal(calls, 0);
+});
+
+test("a child that is still working keeps the goal active, and its end reconciles a missing driver", async (t) => {
+    const gate = Promise.withResolvers<void>();
+    const app = await openApp(
+        scriptedModel(async () => {
+            await gate.promise;
+
+            return fauxAssistantMessage("The child ended.");
+        }),
+        join(root, "objective-goal-idle-child"),
+    );
+
+    t.after(() => app.close());
+    const id = await session(app);
+    const child = await session(app);
+
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(SubagentsDoc, id)).agents.child = { conversationId: child, reported: [] };
+    }, context);
+    await app.commands.submit(child, owner(app), {
+        text: "Wait until released.",
+        requestId: crypto.randomUUID(),
+    });
+    await until(() => app.isBusy(child), "the child to work");
+    await idleGoal(app, id);
+    app.objectiveGoals.runEnded(id, "done");
+    // A mutation-line barrier follows the scheduled check, without relying on a fixed timeout.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await app.harness.commit(() => {}, context);
+    assert.match(await goal(app, id, "status"), /Active/);
+    gate.resolve();
+    await until(
+        async () => /Paused/.test(await goal(app, id, "status")),
+        "the finished child with no reporter to stop the idle goal",
+    );
+    assert.equal(
+        (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal?.needsAttention,
+        true,
+    );
+});
+
+test("a new run supersedes a stale failure check without pausing the active goal", async (t) => {
+    const gate = Promise.withResolvers<void>();
+    const app = await openApp(
+        scriptedModel(async (request) => {
+            if (isEvaluator(request)) {
+                return verdict("met", "The new run finished normally.");
+            }
+
+            await gate.promise;
+
+            return fauxAssistantMessage("Fresh work.");
+        }),
+        join(root, "objective-goal-stale-run-end"),
+    );
+
+    t.after(() => app.close());
+    const id = await session(app);
+
+    await idleGoal(app, id);
+    app.objectiveGoals.runEnded(id, "failed");
+    await app.commands.submit(id, owner(app), {
+        text: "Start fresh work.",
+        requestId: crypto.randomUUID(),
+    });
+    assert.match(await goal(app, id, "status"), /Active/);
+    gate.resolve();
+    await until(
+        async () => /Completed/.test(await goal(app, id, "status")),
+        "the fresh run to finish the goal",
+    );
+    assert.equal(
+        (await app.harness.snapshot(ObjectiveGoalDoc, id, context))?.goal?.needsAttention,
+        undefined,
+    );
 });
 
 test("ordinary sessions never call the evaluator and a blocked verdict stops a goal", async (t) => {
