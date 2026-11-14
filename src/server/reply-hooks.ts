@@ -75,8 +75,10 @@ export function verifyReply(
     return expected.length === given.length && timingSafeEqual(expected, given);
 }
 
-/** A reply names the original delivery key and the exact answer entry. Receivers match `request` and deduplicate. */
+/** A reply names the original delivery key and the exact answer entry. Derived replies set `protocol: 2`. */
 export type ReplyPayload = {
+    /** Present only for a derived follow-up receipt. */
+    protocol?: 2;
     hook: string;
     request: string;
     session: number;

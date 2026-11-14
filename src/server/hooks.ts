@@ -645,6 +645,8 @@ export class Hooks {
         }
 
         const delivery = header(post, "x-github-delivery") ?? header(post, "idempotency-key");
+        // The hook request is authenticated before `deliver` runs. This capability applies only to a new root receipt.
+        const followUp = header(post, "x-pocket-reply-protocol") === "2";
 
         if (
             hook.reply !== undefined &&
@@ -685,6 +687,7 @@ export class Hooks {
                     request,
                     submissionRequest: requestFor(person.id, key),
                     ...(sent ? { done: true } : {}),
+                    ...(followUp && !sent ? { followUp: true as const } : {}),
                 };
             }
         }, context);

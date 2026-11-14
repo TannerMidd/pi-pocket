@@ -92,10 +92,14 @@ async function hookedSession(name: string) {
 }
 
 /** Posts to a hook's address, as an outside service does. */
-async function post(path: string, text: string, key = text): Promise<number> {
+async function post(path: string, text: string, key = text, followUp = false): Promise<number> {
     const response = await fetch(`${pocketBase}${path}`, {
         method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": key },
+        headers: {
+            "content-type": "application/json",
+            "idempotency-key": key,
+            ...(followUp ? { "x-pocket-reply-protocol": "2" } : {}),
+        },
         body: JSON.stringify({ text }),
     });
 
@@ -194,6 +198,28 @@ test("an answer to a person's own message, which no hook asked for, is not sent"
     await app.replies.sweep();
 
     assert.equal(received.length, before, "nothing was sent for it");
+});
+
+test("follow-up capability is fresh-only and does not upgrade a duplicate receipt", async () => {
+    const { path, hook } = await hookedSession("Capability");
+    const before = received.length;
+
+    assert.equal(await post(path, "legacy capability", "legacy-capability"), 202);
+    await until(() => received.length > before, "the legacy reply");
+    const duplicate = await post(path, "legacy capability", "legacy-capability", true);
+
+    assert.ok(duplicate === 200 || duplicate === 202);
+    assert.equal(await post(path, "new capability", "new-capability", true), 202);
+    await until(() => received.length > before + 1, "the capable reply");
+    const receipts = Object.values(
+        (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!.reply!.requests!,
+    );
+
+    assert.equal(
+        receipts.find((receipt) => receipt.request === "legacy-capability")!.followUp,
+        undefined,
+    );
+    assert.equal(receipts.find((receipt) => receipt.request === "new-capability")!.followUp, true);
 });
 
 test("a run can finish before submit returns without losing its reply", async () => {
@@ -361,6 +387,178 @@ test("restart recovers a completed submission even when its completion event was
     assert.equal(payload.request, "restart-key");
     assert.match(payload.text, /persisted answer/);
     assert.doesNotMatch(payload.text, /a newer unrelated answer/);
+});
+
+test("derived receipts follow the root receipt capacity policy", async () => {
+    const { id, hook } = await hookedSession("Derived capacity");
+    const origin = [
+        { hookId: hook, key: "root", request: "root-request", followUp: true as const },
+    ];
+
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(HooksDoc)).items[hook]!.reply!.requests = Object.fromEntries(
+            Array.from({ length: 1000 }, (_, index) => [
+                `busy-${index}`,
+                {
+                    request: `busy-request-${index}`,
+                    submissionRequest: `busy-submission-${index}`,
+                },
+            ]),
+        );
+    }, BACKGROUND_CONTEXT);
+    await app.replies.reserve(id, "capacity-source", origin);
+    let receipts = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!.reply!
+        .requests!;
+
+    assert.equal(Object.keys(receipts).length, 1000, "unfinished receipts keep the cap");
+    assert.equal(
+        Object.values(receipts).some((receipt) => receipt.submissionRequest === "capacity-source"),
+        false,
+    );
+
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(HooksDoc)).items[hook]!.reply!.requests!["busy-0"]!.done = true;
+    }, BACKGROUND_CONTEXT);
+    await app.replies.reserve(id, "capacity-source", origin);
+    receipts = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!.reply!
+        .requests!;
+
+    assert.equal(Object.keys(receipts).length, 1000, "a completed receipt gives one place back");
+    assert.equal(
+        Object.values(receipts).some((receipt) => receipt.submissionRequest === "capacity-source"),
+        true,
+    );
+});
+
+test("a derived receipt keeps its original request and sends protocol 2", async () => {
+    const { id, path, hook } = await hookedSession("Follow-up");
+    const before = received.length;
+
+    assert.equal(await post(path, "root work", "root-request", true), 202);
+    await until(() => received.length > before, "the root reply");
+    const root = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
+    const [rootKey, rootReceipt] = Object.entries(root.reply!.requests!)[0]!;
+    const requestId = "test-derived-follow-up";
+
+    await app.replies.reserve(id, requestId, [
+        {
+            hookId: hook,
+            key: rootKey,
+            request: rootReceipt.request,
+            followUp: true,
+        },
+    ]);
+    const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+    const submission = await conversation.submit(
+        {
+            type: "input",
+            content: "later result",
+            whenBusy: "followUp",
+            requestId,
+        },
+        BACKGROUND_CONTEXT,
+    );
+
+    await submission.wait(BACKGROUND_CONTEXT);
+    await app.replies.sweep();
+    await until(() => received.length > before + 1, "the derived reply");
+    const payload = JSON.parse(received[before + 1]!.body);
+
+    assert.equal(payload.request, "root-request");
+    assert.equal(payload.protocol, 2);
+    assert.ok(payload.entry.length > 0);
+    assert.match(payload.text, /later result/);
+    assert.equal(JSON.parse(received[before]!.body).protocol, undefined, "root stays legacy");
+});
+
+test("a derived source sends one receipt for each retained root", async () => {
+    const { id, path, hook } = await hookedSession("Many roots");
+    const before = received.length;
+
+    assert.equal(await post(path, "first root", "many-first", true), 202);
+    await until(() => received.length > before, "the first root reply");
+    assert.equal(await post(path, "second root", "many-second", true), 202);
+    await until(() => received.length > before + 1, "the second root reply");
+    const receipts = Object.entries(
+        (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!.reply!.requests!,
+    );
+    const origins = receipts
+        .filter(
+            ([, receipt]) => receipt.request === "many-first" || receipt.request === "many-second",
+        )
+        .map(([key, receipt]) => ({
+            hookId: hook,
+            key,
+            request: receipt.request,
+            followUp: true as const,
+        }));
+
+    await app.replies.reserve(id, "many-derived", origins);
+    const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+    const submission = await conversation.submit(
+        {
+            type: "input",
+            content: "shared derived result",
+            whenBusy: "followUp",
+            requestId: "many-derived",
+        },
+        BACKGROUND_CONTEXT,
+    );
+
+    await submission.wait(BACKGROUND_CONTEXT);
+    await app.replies.sweep();
+    await until(() => received.length > before + 3, "both derived receipts");
+    const derived = received.slice(before + 2, before + 4).map((item) => JSON.parse(item.body));
+
+    assert.deepEqual(derived.map((item) => item.request).sort(), ["many-first", "many-second"]);
+    assert.ok(derived.every((item) => item.protocol === 2));
+    assert.equal(derived[0]!.entry, derived[1]!.entry, "one terminal entry serves both roots");
+});
+
+test("a later derived receipt waits for an earlier receipt", async () => {
+    const { id, path, hook } = await hookedSession("Ordered follow-up");
+    const before = received.length;
+
+    assert.equal(await post(path, "ordered root", "ordered-root", true), 202);
+    await until(() => received.length > before, "the root reply");
+    const root = (await app.harness.snapshot(HooksDoc, BACKGROUND_CONTEXT))!.items[hook]!;
+    const [rootKey, rootReceipt] = Object.entries(root.reply!.requests!)[0]!;
+    const origins = [
+        { hookId: hook, key: rootKey, request: rootReceipt.request, followUp: true as const },
+    ];
+
+    await app.replies.reserve(id, "ordered-first", origins);
+    await app.replies.reserve(id, "ordered-second", origins);
+    const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+    const second = await conversation.submit(
+        {
+            type: "input",
+            content: "second derived result",
+            whenBusy: "followUp",
+            requestId: "ordered-second",
+        },
+        BACKGROUND_CONTEXT,
+    );
+
+    await second.wait(BACKGROUND_CONTEXT);
+    await app.replies.sweep();
+    assert.equal(received.length, before + 1, "the later receipt waits");
+
+    const first = await conversation.submit(
+        {
+            type: "input",
+            content: "first derived result",
+            whenBusy: "followUp",
+            requestId: "ordered-first",
+        },
+        BACKGROUND_CONTEXT,
+    );
+
+    await first.wait(BACKGROUND_CONTEXT);
+    await app.replies.sweep();
+    await until(() => received.length > before + 2, "both ordered replies");
+    assert.match(JSON.parse(received[before + 1]!.body).text, /first derived result/);
+    assert.match(JSON.parse(received[before + 2]!.body).text, /second derived result/);
 });
 
 test("an aborted submission ends its receipt with a fixed notice and no private error", async () => {

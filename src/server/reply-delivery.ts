@@ -1,11 +1,12 @@
 /**
- * Deliver signed replies for exact durable submissions. Receipts exist before admission, so fast completion and
- * missed events are safe. Sweeps recover answers from submission records, never from the session's latest answer.
+ * Deliver signed replies for exact durable submissions. Root receipts exist before admission. Derived receipts exist
+ * before a background or subagent notification enters the conversation. Sweeps read only their named submission.
  */
+import { createHash } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { type ConversationId, LiveDoc, type TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
-import { type Hook, HooksDoc } from "./docs.ts";
+import { type Hook, HooksDoc, type ReplyOrigin, type ReplyOrigins } from "./docs.ts";
 import { projectEntry } from "./projection.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { replyBody, signReply } from "./reply-hooks.ts";
@@ -20,8 +21,39 @@ export const SEND_TIMEOUT_MS = 10_000;
 type Receipt = NonNullable<NonNullable<Hook["reply"]>["requests"]>[string];
 type Pending = NonNullable<Receipt["pending"]>;
 
+/** The durable result of reserving all derived receipts for one source submission. */
+export type ReplyReservation = "reserved" | "suppressed" | "capacity";
+
 export function backoffMs(attempts: number): number {
     return Math.min(MAX_BACKOFF_MS, 2_000 * 2 ** Math.min(attempts, 20));
+}
+
+/** A safe object key for one source submission under one root receipt. */
+function derivedKey(origin: ReplyOrigin, request: string): string {
+    return `reply-${createHash("sha256")
+        .update(`${origin.key}\0${request}`)
+        .digest("base64url")
+        .slice(0, 32)}`;
+}
+
+/** The root origin of a receipt with the authenticated follow-up capability. */
+function originOf(hook: Hook, key: string, receipt: Receipt): ReplyOrigin | undefined {
+    if (receipt.followUp !== true) {
+        return undefined;
+    }
+
+    return { hookId: hook.id, key: receipt.root ?? key, request: receipt.request, followUp: true };
+}
+
+function originKey(origin: ReplyOrigin): string {
+    return `${origin.hookId}\0${origin.key}\0${origin.request}`;
+}
+
+/** Drop duplicate roots and give every durable root set one stable order. */
+function canonicalOrigins(origins: readonly ReplyOrigin[]): ReplyOrigins {
+    return [...new Map(origins.map((origin) => [originKey(origin), origin])).entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([, origin]) => origin);
 }
 
 export class ReplyDelivery {
@@ -44,6 +76,147 @@ export class ReplyDelivery {
             stop();
             clearInterval(timer);
         };
+    }
+
+    /**
+     * Find trusted hook roots while a model tool call runs. Every input must name one or more eligible roots.
+     * A mixed run or an unrooted owner input is deliberately not attributable.
+     */
+    async originForTool(
+        conversationId: ConversationId,
+        taskId: TaskId,
+    ): Promise<ReplyOrigins | undefined> {
+        const [live, tool, hooks] = await Promise.all([
+            this.#app.harness.snapshot(LiveDoc, conversationId, context),
+            this.#app.harness.commit((tx) => tx.task(taskId), context),
+            this.#app.harness.snapshot(HooksDoc, context),
+        ]);
+
+        if (
+            live?.run === undefined ||
+            tool?.conversationId !== conversationId ||
+            tool.kind !== "pi.tool" ||
+            tool.owner !== live.run.taskId
+        ) {
+            return undefined;
+        }
+
+        const records = await Promise.all(
+            live.run.inputs.map(async (id) => {
+                const submission = await this.#app.harness.submission(id, context);
+
+                return submission?.status(context);
+            }),
+        );
+        const all = Object.values(hooks?.items ?? {});
+        const found: ReplyOrigin[] = [];
+
+        for (const record of records) {
+            if (record?.type !== "input" || record.requestId === undefined) {
+                return undefined;
+            }
+
+            const matches = all.flatMap((hook) =>
+                hook.target !== Number(conversationId)
+                    ? []
+                    : Object.entries(hook.reply?.requests ?? {})
+                          .filter(([, receipt]) => receipt.submissionRequest === record.requestId)
+                          .map(([key, receipt]) => originOf(hook, key, receipt))
+                          .filter((origin): origin is ReplyOrigin => origin !== undefined),
+            );
+
+            if (matches.length === 0) {
+                return undefined;
+            }
+
+            found.push(...matches);
+        }
+
+        const roots = canonicalOrigins(found);
+
+        return roots.length === 0 ? undefined : roots;
+    }
+
+    /**
+     * Save one derived receipt before its notification submission. Its deterministic key makes a retry retain the
+     * original bridge request, source request, and sequence.
+     */
+    async reserve(
+        conversationId: ConversationId,
+        submissionRequest: string,
+        origins: ReplyOrigins | undefined,
+    ): Promise<ReplyReservation> {
+        const roots = canonicalOrigins(origins ?? []);
+
+        if (roots.length === 0) {
+            return "suppressed";
+        }
+
+        return this.#app.harness.commit(async (tx) => {
+            const items = (await tx.doc(HooksDoc)).items;
+            const planned = new Map<string, number>();
+
+            // Check every root before writing any receipt. One full or removed hook leaves this source unreserved.
+            for (const origin of roots) {
+                const hook = items[origin.hookId];
+
+                if (hook?.target !== Number(conversationId) || hook.reply === undefined) {
+                    return "suppressed";
+                }
+
+                const receipts = hook.reply.requests ?? {};
+                const key = derivedKey(origin, submissionRequest);
+
+                if (receipts[key] !== undefined) {
+                    continue;
+                }
+
+                const active = Object.values(receipts).filter((receipt) => !receipt.done).length;
+                const count = planned.get(origin.hookId) ?? 0;
+
+                if (active + count >= 1000) {
+                    return "capacity";
+                }
+
+                planned.set(origin.hookId, count + 1);
+            }
+
+            for (const origin of roots) {
+                const hook = items[origin.hookId]!;
+                const receipts = (hook.reply!.requests ??= {});
+                const key = derivedKey(origin, submissionRequest);
+
+                if (receipts[key] !== undefined) {
+                    continue;
+                }
+
+                if (Object.keys(receipts).length >= 1000) {
+                    for (const [oldKey, receipt] of Object.entries(receipts)) {
+                        if (receipt.done) {
+                            delete receipts[oldKey];
+                        }
+                    }
+                }
+
+                const sequence =
+                    Math.max(
+                        0,
+                        ...Object.values(receipts)
+                            .filter((receipt) => receipt.request === origin.request)
+                            .map((receipt) => receipt.sequence ?? 0),
+                    ) + 1;
+
+                receipts[key] = {
+                    request: origin.request,
+                    submissionRequest,
+                    root: origin.key,
+                    followUp: true,
+                    sequence,
+                };
+            }
+
+            return "reserved";
+        }, context);
     }
 
     #wake(): void {
@@ -69,20 +242,39 @@ export class ReplyDelivery {
 
             for (const hook of hooks) {
                 for (const [key, receipt] of Object.entries(hook.reply?.requests ?? {})) {
-                    if (receipt.done) {
+                    if (receipt.done || this.#waitsForEarlier(hook, key, receipt)) {
                         continue;
                     }
 
                     const pending = receipt.pending ?? (await this.#collect(hook, key, receipt));
 
                     if (pending !== undefined && pending.nextAt <= Date.now()) {
-                        await this.#send(hook, key, receipt.request, pending);
+                        await this.#send(
+                            hook,
+                            key,
+                            receipt.request,
+                            receipt.root !== undefined,
+                            pending,
+                        );
                     }
                 }
             }
         } finally {
             this.#busy = false;
         }
+    }
+
+    /** A later receipt cannot overtake an earlier pending receipt for one original bridge request. */
+    #waitsForEarlier(hook: Hook, key: string, receipt: Receipt): boolean {
+        const sequence = receipt.sequence ?? 0;
+
+        return Object.entries(hook.reply?.requests ?? {}).some(
+            ([otherKey, other]) =>
+                otherKey !== key &&
+                other.request === receipt.request &&
+                !other.done &&
+                (other.sequence ?? 0) < sequence,
+        );
     }
 
     async #collect(hook: Hook, key: string, receipt: Receipt): Promise<Pending | undefined> {
@@ -142,7 +334,13 @@ export class ReplyDelivery {
         return saved;
     }
 
-    async #send(hook: Hook, key: string, request: string, pending: Pending): Promise<void> {
+    async #send(
+        hook: Hook,
+        key: string,
+        request: string,
+        derived: boolean,
+        pending: Pending,
+    ): Promise<void> {
         const current = (await this.#app.harness.snapshot(HooksDoc, context))?.items[hook.id];
         const receipt = current?.reply?.requests?.[key];
 
@@ -171,6 +369,7 @@ export class ReplyDelivery {
             session: hook.target,
             entry: pending.entry,
             text: pending.text,
+            ...(derived ? { protocol: 2 as const } : {}),
         });
         let ok = false;
 

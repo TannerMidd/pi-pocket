@@ -291,8 +291,13 @@ export type SubagentRecord = {
     dealtAt?: number;
 };
 
+/** The exact reply-hook receipt that started work later reported to a hook. */
+export type ReplyOrigin = { hookId: string; key: string; request: string; followUp: true };
+/** The complete hook roots of one model run. Their stored order is stable. */
+export type ReplyOrigins = ReplyOrigin[];
+
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
-export type PendingReport = { name: string; text: string };
+export type PendingReport = { name: string; text: string; replyOrigins?: ReplyOrigins };
 
 /** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
 export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({
@@ -533,6 +538,8 @@ export type BackgroundTask = {
     taskId: TaskId;
     /** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */
     key?: string;
+    /** The exact reply-hook receipts that started this task, when every model-run input was rooted. */
+    replyOrigins?: ReplyOrigins;
     /** The size of its log's segments, in bytes: a segment's place in the output follows from its number. */
     segment?: number;
     /** How much of its output Pi has read, in bytes from its very start (counting what a sweep removed). */
@@ -817,6 +824,12 @@ export type Hook = {
             {
                 request: string;
                 submissionRequest: string;
+                /** A derived receipt's root receipt key. Absent for a webhook's original receipt. */
+                root?: string;
+                /** The authenticated v2 capability of a root, or a derived receipt that inherited it. */
+                followUp?: true;
+                /** The stable order of replies for one original bridge request. */
+                sequence?: number;
                 done?: boolean;
                 pending?: { entry: string; text: string; attempts: number; nextAt: number };
             }
