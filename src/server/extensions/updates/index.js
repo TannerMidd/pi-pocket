@@ -1,4 +1,4 @@
-// Updates' browser module, for the owner: a menu row and a launcher action that open the Update Pi Pocket sheet (the running
+// Updates' browser module, for the owner: a Menu row that shows the version and checks for updates, and a launcher action that open the Update Pi Pocket sheet (the running
 // version and how it was installed, the newest release and its notes, what stands in the way, and Update and restart), a notice once for each
 // new version, and one for how an update ended, after its restart. It uses only `pocket`.
 export const pocketApi = 1;
@@ -67,7 +67,25 @@ export default function setup(pocket) {
     let failure = null;
     const listeners = new Set();
 
-    const menu = pocket.menu({ id: "updates", label: "Update Pi Pocket", sheet: "updates" });
+    // The Menu's App group: the running version, and a check that opens the sheet when a new version is out.
+    const menu = pocket.menu({
+        id: "updates",
+        label: "Check for updates",
+        group: "app",
+        run: async () => {
+            const next = await pocket.api("check", {});
+
+            publish(next);
+
+            if (next.available && next.latest) {
+                pocket.openSheet("updates");
+            } else if (next.error) {
+                pocket.notify("warning", `Could not check for updates: ${next.error}`);
+            } else {
+                pocket.notify("info", `Pi Pocket ${next.version} is the newest version.`);
+            }
+        },
+    });
     const launcher = pocket.launcher({
         id: "updates",
         label: "Update Pi Pocket",
@@ -130,7 +148,9 @@ export default function setup(pocket) {
 
         const hint =
             next.step ??
-            (next.available && next.latest ? `${named(next.latest)} is out` : undefined);
+            (next.available && next.latest
+                ? `${named(next.latest)} is out`
+                : `Pi Pocket ${next.version}`);
 
         menu.update({ hint });
         launcher.update(
@@ -146,7 +166,7 @@ export default function setup(pocket) {
             remember(TOLD, next.latest.version);
             pocket.notify(
                 "info",
-                `Pi Pocket ${named(next.latest)} is out: Menu → Update Pi Pocket.`,
+                `Pi Pocket ${named(next.latest)} is out: Menu → Check for updates.`,
             );
         }
 

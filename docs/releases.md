@@ -37,7 +37,7 @@ A pre-release on GitHub is not the repository's latest release, and the version 
 
 ## Running betas
 
-- **From the app**: turn on **Beta updates** in Menu → Extensions → Installed → Pi Pocket updates (since 0.27.0). Menu → Update Pi Pocket then offers betas too, marked **Beta**. Turn it off to wait for the next stable release: the app never offers an older version. With **Install new versions by themselves** on too, betas install by themselves.
+- **From the app**: turn on **Beta updates** in Menu → Extensions → Installed → Pi Pocket updates (since 0.27.0). Menu → Check for updates then offers betas too, marked **Beta**. Turn it off to wait for the next stable release: the app never offers an older version. With **Install new versions by themselves** on too, betas install by themselves.
 - **A global npm install**: `npm install -g pi-pocket@beta`. Go back with `npm install -g pi-pocket@latest`.
 - **A git checkout**: `git checkout v0.27.0-beta.1`, then `npm install`.
 
