@@ -10,6 +10,48 @@ import * as picker from "../web/folder-paths.js";
 type Crumb = { name: string; path: string };
 
 const crumbs = picker.crumbsOf as (path: string, home: string) => Crumb[];
+const startFolder = picker.startFolder as (input: {
+    picking?: boolean;
+    changing?: boolean;
+    start?: string | null;
+    runner?: string | null;
+    sessionRunner?: string | null;
+    sessionCwd?: string | null;
+    alwaysDefault?: boolean;
+    defaultCwd?: string | null;
+}) => string;
+
+test("the folder picker opens in the session's folder only on that session's computer", () => {
+    const windows = { sessionRunner: "monolith", sessionCwd: "C:\\Users\\vital" };
+
+    // In a session on a Windows computer: this server opens in its own default, not in the Windows folder.
+    assert.equal(startFolder({ ...windows, runner: null, defaultCwd: "/home/ann" }), "/home/ann");
+    assert.equal(startFolder({ ...windows, runner: null }), "~");
+    // Another computer opens in its home, as before.
+    assert.equal(startFolder({ ...windows, runner: "macbook" }), "~");
+    assert.equal(startFolder({ ...windows, runner: "monolith" }), "~");
+    // Moving that session keeps its folder: the computer is its own.
+    assert.equal(
+        startFolder({ ...windows, runner: "monolith", changing: true }),
+        "C:\\Users\\vital",
+    );
+
+    // In a session on this server, as before.
+    const local = { sessionRunner: null, sessionCwd: "/srv/app", defaultCwd: "/home/ann" };
+
+    assert.equal(startFolder({ ...local, runner: null }), "/srv/app");
+    assert.equal(startFolder({ ...local, runner: null, alwaysDefault: true }), "/home/ann");
+    assert.equal(
+        startFolder({ ...local, runner: null, alwaysDefault: true, changing: true }),
+        "/srv/app",
+    );
+    assert.equal(startFolder({ ...local, runner: "macbook" }), "~");
+    // With no session open, and a pick (the copy sheet names the folder).
+    assert.equal(startFolder({ runner: null, defaultCwd: "/home/ann" }), "/home/ann");
+    assert.equal(startFolder({ runner: null }), "~");
+    assert.equal(startFolder({ ...windows, picking: true, start: "/srv/copy" }), "/srv/copy");
+    assert.equal(startFolder({ ...windows, picking: true }), "~");
+});
 const HOME = "C:\\Users\\Ann";
 
 test("a Windows server lists each drive that is there, and Linux and macOS the root", async () => {

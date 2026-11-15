@@ -27,6 +27,7 @@ import {
     recentLabels,
     rootName,
     separatorOf,
+    startFolder,
 } from "../folder-paths.js";
 import { APPLE, html, Icon, Sheet, shortPath } from "../ui.js";
 import { piSessionsAvailable } from "./pi-sessions.js";
@@ -164,16 +165,18 @@ export function CwdSheet({
     const [alwaysDefault, setAlwaysDefault] = useState(
         () => localStorage.getItem(ALWAYS_DEFAULT_KEY) === "1",
     );
-    // Where it opens: default workspace if pinned, else the folder of the session you are in (Issue #96).
-    const initial = picking
-        ? (start ?? "~")
-        : runner
-          ? changing
-              ? (view.agent?.cwd ?? "~")
-              : "~"
-          : !changing && alwaysDefault && server?.defaultCwd
-            ? server.defaultCwd
-            : (view.agent?.cwd ?? server?.defaultCwd ?? "~");
+    // Where it opens: default workspace if pinned, else the folder of the session you are in (Issue #96), when that
+    // session is on the computer whose folders show.
+    const initial = startFolder({
+        picking,
+        changing,
+        start,
+        runner,
+        sessionRunner: view.conversation?.runner ?? null,
+        sessionCwd: view.agent?.cwd ?? null,
+        alwaysDefault,
+        defaultCwd: server?.defaultCwd ?? null,
+    });
     const [listing, setListing] = useState(null);
     const [failed, setFailed] = useState(null);
     // The folder a click selected (mouse only): Open takes it over the one you are in.
@@ -202,8 +205,11 @@ export function CwdSheet({
     const target = selected ?? folder;
     const here = changing && target !== null && target === view.agent?.cwd;
 
-    /** Show a folder; `select`, a folder in it to select (the one stepped up from, with a mouse). */
-    const load = (path, { showHidden = hidden, select = null } = {}) => {
+    /**
+     * Show a folder; `select`, a folder in it to select (the one stepped up from, with a mouse). `keepMissing`: the
+     * banner for a folder that is not there stays over this one.
+     */
+    const load = (path, { showHidden = hidden, select = null, keepMissing = false } = {}) => {
         const ask = ++asked.current;
 
         const where = runner ? `runners/${encodeURIComponent(runner)}/fs` : "fs";
@@ -219,7 +225,11 @@ export function CwdSheet({
                 setListing(result);
                 setFailed(null);
                 setSelected(touch ? null : select);
-                setMissing(null);
+
+                if (!keepMissing) {
+                    setMissing(null);
+                }
+
                 setEditing(null);
                 setNaming(false);
             },
@@ -233,6 +243,11 @@ export function CwdSheet({
                     setMissing(path);
                     setMissingWhy(notThere(error, path) ? null : error.message);
                     setEditing(null);
+
+                    // The folder it opens in is gone: home shows under the banner, not an empty list that waits.
+                    if (listing === null && path !== "~") {
+                        load("~", { showHidden, keepMissing: true });
+                    }
                 } else if (listing) {
                     notify("error", error.message);
                 } else {
@@ -504,8 +519,14 @@ export function CwdSheet({
             return;
         }
 
+        // Nothing of the computer it leaves stays: its folder, a banner for one not there, a path being typed.
         setSelected(null);
         setListing(null);
+        setFailed(null);
+        setMissing(null);
+        setMissingWhy(null);
+        setEditing(null);
+        setNaming(false);
         setPicked(id);
     };
 

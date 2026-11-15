@@ -41,6 +41,34 @@ export function shortPath(path, home) {
 }
 
 /** The name a root folder shows: `D:` for a drive, `\\server\share` for a share, `/` for the root. */
+/**
+ * Where the folder picker opens. `start`: the folder a pick was given. `runner`: the computer whose folders show
+ * (`null`, this server). The folder of the session you are in counts only when that session is on the same computer:
+ * a path on another one means nothing here (a Windows folder, on a Linux server).
+ */
+export function startFolder({
+    picking = false,
+    changing = false,
+    start = null,
+    runner = null,
+    sessionRunner = null,
+    sessionCwd = null,
+    alwaysDefault = false,
+    defaultCwd = null,
+}) {
+    if (picking) {
+        return start ?? "~";
+    }
+
+    const here = (sessionRunner ?? null) === (runner ?? null) ? sessionCwd : null;
+
+    if (runner) {
+        return changing ? (here ?? "~") : "~";
+    }
+
+    return !changing && alwaysDefault && defaultCwd ? defaultCwd : (here ?? defaultCwd ?? "~");
+}
+
 export const rootName = (root) => root.replace(/[\\/]+$/, "") || "/";
 
 /** A folder's name: the last part of its path, or ~ for home and the root's name for a root. */
