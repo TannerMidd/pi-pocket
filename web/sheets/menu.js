@@ -41,6 +41,20 @@ import { copyText, html, Icon, item, PlaceTile, Sheet, shortPath } from "../ui.j
 const touch = matchMedia("(pointer: coarse)").matches;
 
 /** The Extensions row's hint: that this tab loads none of their browser parts (safe mode), and Lancet Guard. */
+/** The menu's word on the session's schedules: how many go out, and how many are paused. */
+function schedulesHint(schedules) {
+    const paused = schedules.filter((each) => each.paused !== undefined).length;
+    const coming = schedules.length - paused;
+
+    if (schedules.length === 0) {
+        return "none";
+    }
+
+    return [coming > 0 && `${coming} coming`, paused > 0 && `${paused} paused`]
+        .filter(Boolean)
+        .join(" · ");
+}
+
 function extensionsHint() {
     const { guard } = store.state;
 
@@ -489,7 +503,7 @@ export function MenuSheet({ places = true }) {
             ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
             ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
             ${conversation && memoryAvailable() && item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory))}
-            ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), view.schedules.length === 0 ? "none" : `${view.schedules.length} coming`)}
+            ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), schedulesHint(view.schedules))}
             ${
                 watchAvailable() &&
                 steer &&

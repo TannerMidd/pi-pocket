@@ -11,12 +11,18 @@ import {
     type AgentState,
     AssistantEntry,
     type ConversationId,
+    LiveDoc,
     type ModelRef,
     type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
-import type { HumanLinkedSessions, LinkedSession, LinkedSessionsApi } from "./host.ts";
+import type {
+    HumanLinkedSessions,
+    LinkedActivity,
+    LinkedSession,
+    LinkedSessionsApi,
+} from "./host.ts";
 import type { RequestActor } from "./extension-request.ts";
 import {
     LinkedSessionCallsDoc,
@@ -29,6 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
+import { callTimeoutMs, progressOf, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -64,7 +71,10 @@ function tooLong(message: string): void {
     }
 }
 
-type CallOutcome = { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
+type CallOutcome =
+    | { busy: boolean; stopping?: boolean }
+    | { archived: boolean; repeating: number }
+    | { take: boolean };
 type CallRecord = { conversationId?: number; by?: string; at: number; result?: CallOutcome };
 
 /** The record of call `token` in `calls`, made when there is none, the oldest pruned to make room. */
@@ -360,7 +370,8 @@ export class LinkedSessions implements LinkedSessionsApi {
      * Carry each linked session's end of run to the session that started it: its final answer, or why it failed or
      * stopped. Until the returned function is called. The report goes as a message from the linked session, once for
      * each run, and lands at its lead's next pause; a lead that cannot take it now (plan mode, a spend limit, someone
-     * else's turn) is told in a notice instead, so nothing waits in silence.
+     * else's turn) is told in a notice instead, so nothing waits in silence. An archived lead, or one that turned its
+     * answers off (`reports`), gets nothing: read when the run ends, so it holds for every linked session it started.
      */
     watch(): () => void {
         return this.#app.events.on("run.ended", (run) => {
@@ -373,7 +384,9 @@ export class LinkedSessions implements LinkedSessionsApi {
 
             const lead = meta.linkedFrom.id as unknown as ConversationId;
 
-            if (this.#app.sessionMeta(lead)?.archived === true) {
+            const leadMeta = this.#app.sessionMeta(lead);
+
+            if (leadMeta?.archived === true || leadMeta?.linkedReports === false) {
                 return;
             }
 
@@ -384,6 +397,34 @@ export class LinkedSessions implements LinkedSessionsApi {
                     lead,
                 );
             });
+        });
+    }
+
+    /**
+     * Call `start` with the lead of a session that starts a run, whoever woke it, when the lead takes its answers and is
+     * not archived (as `watch`): for a stall watch, with a commit to start one. Until the returned function is called.
+     */
+    onLedRun(
+        start: (
+            lead: ConversationId,
+            api: { commit: <T>(change: (tx: Tx) => Promise<T>, context: Context) => Promise<T> },
+            context: Context,
+        ) => Promise<unknown>,
+    ): () => void {
+        return this.#app.events.on("run.started", (run) => {
+            const id = run.conversationId as unknown as ConversationId;
+            const lead = this.#app.sessionMeta(id)?.linkedFrom?.id as ConversationId | undefined;
+
+            if (
+                run.conversationId !== run.session ||
+                lead === undefined ||
+                this.#app.sessionMeta(lead)?.archived === true ||
+                !this.#leads(lead, id)
+            ) {
+                return;
+            }
+
+            return start(lead, this.#app.harness, context);
         });
     }
 
@@ -492,6 +533,88 @@ export class LinkedSessions implements LinkedSessionsApi {
         return (await this.#addresses(source, [target], actor)).get(target)!;
     }
 
+    /**
+     * The sessions `source` started and takes the answers of, while they are at work, for a stall watch: how far each
+     * got (`progress` changes while it makes any), when its newest message came, and what it waits on. By address only.
+     */
+    async activity(source: ConversationId): Promise<LinkedActivity[]> {
+        const app = this.#app;
+        const led = this.#family(source, this.#person(source)).filter(
+            (each) =>
+                each.busy === true && this.#leads(source, each.id as unknown as ConversationId),
+        );
+        const addresses = await this.#addresses(
+            source,
+            led.map((each) => each.id),
+        );
+        const found: LinkedActivity[] = [];
+
+        for (const each of led) {
+            const id = each.id as unknown as ConversationId;
+            const live = await app.harness.snapshot(LiveDoc, id, context);
+
+            if (live?.run === undefined) {
+                continue;
+            }
+
+            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall; it is still at work.
+            if (
+                app.approvals.forConversation(id).length > 0 ||
+                app.limits.waits().some((wait) => wait.conversationId === Number(id))
+            ) {
+                found.push({
+                    address: addresses.get(each.id)!,
+                    progress: "",
+                    waiting: "an approval or a limit",
+                    paused: true,
+                });
+                continue;
+            }
+
+            const on = waitingOn(live);
+            const { at, timeoutMs } = await app.harness.commit(async (tx) => {
+                const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
+                const messages = page.items.flatMap((entry) => entry.model ?? []);
+                const times = messages
+                    .map((message) => message.timestamp)
+                    .filter((time) => typeof time === "number" && Number.isFinite(time));
+
+                return {
+                    at: times.length === 0 ? undefined : Math.max(...times),
+                    timeoutMs:
+                        on.callId === undefined ? undefined : callTimeoutMs(messages, on.callId),
+                };
+            }, context);
+
+            found.push({
+                address: addresses.get(each.id)!,
+                progress: progressOf(live),
+                ...(at === undefined ? {} : { at }),
+                waiting: on.what,
+                ...(on.callId === undefined ? {} : { callId: on.callId }),
+                ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            });
+        }
+
+        return found;
+    }
+
+    /** Stop one stuck call of a session `source` leads, by its address; its run goes on. False: no such call runs. */
+    async stopCall(
+        source: ConversationId,
+        request: { to: string; callId: string },
+    ): Promise<boolean> {
+        const peers =
+            (await this.#app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
+        const target = Object.hasOwn(peers, request.to) ? peers[request.to] : undefined;
+
+        if (target === undefined || !this.#leads(source, target as unknown as ConversationId)) {
+            return false;
+        }
+
+        return this.#app.stopToolCall(target as unknown as ConversationId, request.callId);
+    }
+
     /** Only visible sessions connect a family. Names show only when the source's whole audience sees them. */
     async list(source: ConversationId): Promise<LinkedSession[]> {
         const app = this.#app;
@@ -569,7 +692,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }> {
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }> {
         return this.#start(source, request, key);
     }
 
@@ -584,7 +707,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         },
         key: string,
         actor?: RequestActor,
-    ): Promise<{ session: ConversationId; address: string }> {
+    ): Promise<{ session: ConversationId; address: string; answers: boolean }> {
         const app = this.#app;
 
         actor?.current();
@@ -649,7 +772,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         );
         actor?.current();
 
-        return { session, address };
+        return { session, address, answers: this.#leads(source, session) };
     }
 
     /** Use the normal folder-picker validation for an explicit working directory. */
@@ -866,8 +989,8 @@ export class LinkedSessions implements LinkedSessionsApi {
     /**
      * Send a message to a linked session, by the source's address for it. Taken, not answered: no reply waits. It lands
      * at the target's next pause (`steer`, the default), or after its run (`steer: false`). `answers` says whether the
-     * target's final answer comes back to the source by itself: only when the source started it. Otherwise the message
-     * asks the target to reply when an answer is needed.
+     * target's final answer comes back to the source by itself: only when the source started it, and did not turn its
+     * answers off (`reports`). Otherwise the message asks the target to reply when an answer is needed.
      */
     async send(
         source: ConversationId,
@@ -953,9 +1076,86 @@ export class LinkedSessions implements LinkedSessionsApi {
         return { answers: this.#leads(source, id) };
     }
 
-    /** Whether `source` started `target`: then `target`'s end of run reports to `source` by itself (`watch`). */
+    /**
+     * Whether `source` started `target` and takes its answers: then `target`'s end of run reports to `source` by itself
+     * (`watch`). False when `source` turned its answers off (`reports`).
+     */
     #leads(source: ConversationId, target: ConversationId): boolean {
+        if (this.#app.sessionMeta(source)?.linkedReports === false) {
+            return false;
+        }
+
         return this.#app.sessionMeta(target)?.linkedFrom?.id === Number(source);
+    }
+
+    /**
+     * Set whether `source`, as a lead, takes the run-end answers of the sessions it started. The switch is on the lead
+     * (`linkedReports` in its meta), so it holds for every one: old, new, archived. The checks of `archive`, on `source`
+     * itself. A repeat with the same `key` changes nothing again, and returns what the first call set.
+     */
+    async reports(
+        source: ConversationId,
+        request: { take: boolean },
+        key: string,
+    ): Promise<{ take: boolean }> {
+        const take = (request as { take?: unknown } | undefined)?.take;
+
+        if (typeof take !== "boolean") {
+            throw new TypeError("reports needs `take`: true or false.");
+        }
+
+        const app = this.#app;
+        const token = callKey(source, key);
+        const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
+            ?.items[token];
+        const user = this.#person(source, previous?.by);
+
+        app.requireSteer(user);
+
+        if (previous?.conversationId !== undefined && previous.conversationId !== Number(source)) {
+            throw new HttpError(409, "This call already refers to another linked session.");
+        }
+
+        if (previous?.result !== undefined && "take" in previous.result) {
+            return { take: previous.result.take };
+        }
+
+        await this.#maySend(source, user);
+
+        // The switch and its receipt are one commit: a crash leaves neither.
+        return app.harness.commit(async (tx) => {
+            const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
+
+            if (record.conversationId !== undefined && record.conversationId !== Number(source)) {
+                throw new HttpError(409, "This call already refers to another linked session.");
+            }
+
+            if (record.result !== undefined && !("take" in record.result)) {
+                throw new HttpError(409, "This call already did something else.");
+            }
+
+            if (record.result !== undefined) {
+                return { take: record.result.take };
+            }
+
+            const meta = (await tx.doc(SessionsDoc)).items[String(source)];
+
+            if (meta === undefined) {
+                throw new HttpError(404, "Not a session");
+            }
+
+            if (take) {
+                delete meta.linkedReports;
+            } else {
+                meta.linkedReports = false;
+            }
+
+            record.conversationId = Number(source);
+            record.by ??= user.id;
+            record.result = { take };
+
+            return { take };
+        }, context);
     }
 
     /**
@@ -1025,7 +1225,9 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         await this.#mayAct(source, id, user);
         const repeating = archived
-            ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+            ? (await app.schedules.list(id)).filter(
+                  (item) => item.every !== undefined && item.paused === undefined,
+              ).length
             : 0;
 
         // The archive and its receipt are one commit: a crash leaves neither, and a key for another session is refused

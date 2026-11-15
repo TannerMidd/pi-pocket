@@ -104,13 +104,16 @@ async function readForm(request: IncomingMessage, token: string): Promise<Record
     // Past its time, the form is let go of without closing the connection, so the person gets a page that says why;
     // the answer closes the connection after it (`linkRoute`).
     let timer: NodeJS.Timeout | undefined;
+    // Ends the read's own deadline when this one wins: nothing waits for that read anymore.
+    const stop = new AbortController();
     const tooLate = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
             request.pause();
+            stop.abort();
             reject(new HttpError(408, "The form took too long to arrive."));
         }, linkReads.timeoutMs);
     });
-    const read = readBody(request, MAX_FORM);
+    const read = readBody(request, MAX_FORM, stop.signal);
     let body: Buffer;
 
     // The read that lost the race ends when the connection does; that is no error of anyone's.

@@ -1156,7 +1156,7 @@ function pocketFor(record) {
             return undefined;
         },
         /** Open through the app's normal navigation; the server checks access on connection. */
-        openConversation: (id) => {
+        openConversation: (id, options) => {
             tick(record);
 
             const value = typeof id === "string" && /^[1-9]\d*$/.test(id) ? Number(id) : id;
@@ -1165,7 +1165,22 @@ function pocketFor(record) {
                 throw new Error("pocket.openConversation: give a positive conversation id");
             }
 
-            navigate(value);
+            // The artifact option names one of that session's artifacts; anything else in it is ignored.
+            const artifact = typeof options?.artifact === "string" ? options.artifact : "";
+            const version = options?.version;
+
+            navigate(
+                value,
+                artifact === ""
+                    ? undefined
+                    : {
+                          sheet: {
+                              type: "viewer",
+                              id: artifact,
+                              ...(Number.isSafeInteger(version) && version > 0 ? { version } : {}),
+                          },
+                      },
+            );
         },
         /**
          * Call one of the module's routes: `api("status")` gets, `api("items", { name })` posts, and

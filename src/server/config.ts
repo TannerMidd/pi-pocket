@@ -58,6 +58,16 @@ export interface User {
     avatar?: number;
 }
 
+/** Who is signed in, as `hello` says it to a tab, and as the app page carries it (`serveApp`). */
+export function helloUser(user: User) {
+    return {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        ...(user.sessions === undefined ? {} : { sessions: user.sessions.map(Number) }),
+    };
+}
+
 /** An invite not yet used, kept by its code's sha256 (the code itself is only shown to whoever made it). */
 export interface StoredInvite {
     codeHash: string;
@@ -218,6 +228,11 @@ export class ConfigStore {
     /** The owner's values for a module's settings (`web.settings`): a copy, by name. */
     extensionSettings(module: string): Record<string, string | number | boolean> {
         return { ...(this.#config.extensionSettings?.[module] ?? {}) };
+    }
+
+    /** The modules the owner set values for, on or off. */
+    extensionSettingModules(): string[] {
+        return Object.keys(this.#config.extensionSettings ?? {});
     }
 
     /** Keep a module's values, all of them at once; none drops its entry. */

@@ -65,7 +65,15 @@ export function json(response: ServerResponse, status: number, value: unknown): 
 /** How long a JSON or form body may take to arrive: a client that stops sending must not hold the connection. */
 const BODY_TIMEOUT_MS = 60_000;
 
-export async function readBody(request: IncomingMessage, limit: number): Promise<Buffer> {
+/**
+ * A request's body, up to `limit` bytes. `signal` is for a caller that stops waiting for it: its abort ends the body's
+ * own deadline, which would otherwise keep the process alive and close the connection a minute later.
+ */
+export async function readBody(
+    request: IncomingMessage,
+    limit: number,
+    signal?: AbortSignal,
+): Promise<Buffer> {
     if (Number(request.headers["content-length"] ?? 0) > limit) {
         throw new HttpError(413, "Request too large");
     }
@@ -74,6 +82,8 @@ export async function readBody(request: IncomingMessage, limit: number): Promise
         () => request.destroy(new HttpError(408, "The request body took too long")),
         BODY_TIMEOUT_MS,
     );
+
+    signal?.addEventListener("abort", () => clearTimeout(timer), { once: true });
 
     try {
         const chunks: Buffer[] = [];

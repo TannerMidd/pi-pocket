@@ -94,6 +94,20 @@ export interface Module {
     pocketApi?: number;
 }
 
+/**
+ * Pi Pocket's options on a tool definition, beside Pi Durable's own. See the Tools guide.
+ * @since 0.29.0
+ * @experimental
+ */
+export interface ToolOptions {
+    /**
+     * Give this tool to every subagent, even one started with a tool list, while its extension runs there.
+     * @since 0.29.0
+     * @experimental
+     */
+    readonly subagents?: "always";
+}
+
 // ─── The host ────────────────────────────────────────────────────────────────
 
 /**
@@ -261,6 +275,14 @@ export interface Host {
      * @since 0.12.0
      */
     onLimitsChanged(listener: () => void): () => void;
+    /**
+     * Delivers data from outside (a chat message, a feed's item) to an existing session, or to PiP, as a message from a
+     * person: fenced, with their instructions first, once for each key, within a limit. Webhooks use the same path.
+     * Undefined on an older server.
+     * @since 0.29.0
+     * @experimental
+     */
+    readonly inbox?: InboxApi;
     /**
      * Sessions that a session starts and sends messages to, as Agent Teams does.
      * @since 0.14.0
@@ -873,6 +895,47 @@ export interface PublicFetchInit {
     timeoutMs?: number;
 }
 
+/** What `host.inbox.deliver` delivers. */
+export interface InboxDelivery {
+    /** The id of the person Pi works for on it: they must be able to steer in the session. */
+    by: string;
+    /** One short line: the message shows as `[via <via>]`. */
+    via: string;
+    /** What came, as text: core makes it safe between tags and cuts it to 8,000 characters. */
+    payload: string;
+    /** Delivers once: a delivery again with the same key, also after a restart, sends nothing. */
+    key: string;
+    /** The person's own instructions, first and outside the fence. Default: say what it is, and whether to act. */
+    instructions?: string;
+    /** The fence's tag: a lowercase word with `-`, such as `chat-message`. Default `outside-data`. */
+    tag?: string;
+    /** Attributes of the fence's opening tag, up to 8 (not `from` or `from-id`), each made one line without quotes. */
+    attributes?: Readonly<Record<string, string>>;
+    /**
+     * Who sent it: the fence's `from` and `from-id`, inside it. Outside it, only `trusted`: the id is one the owner marked
+     * (guidance to the model, not a boundary).
+     */
+    sender?: { name: string; id?: string; trusted?: boolean };
+    /** A cap of messages an hour for one source (`bucket`), counted in memory across every caller; at most 600. */
+    limit?: { bucket: string; perHour: number };
+}
+
+/**
+ * Outside data delivered to sessions. An error's `status` says why it did not go: 400 a delivery that cannot be right,
+ * 410 the session is gone or its person cannot see it, 503 PiP is off, 429 the bucket's limit, 409 the session does not
+ * take messages now (try again later).
+ * @since 0.29.0
+ * @experimental
+ */
+export interface InboxApi {
+    /**
+     * Delivers to `target`. `sent: false`: its key delivered it before.
+     * @since 0.29.0
+     * @experimental
+     */
+    deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+}
+
 /**
  * Sessions that a session starts and sends messages to. Each call acts as the person that Pi works for in `source`,
  * with that person's checks. A call again with the same `key` acts once, and returns what the first call returned.
@@ -884,7 +947,9 @@ export interface LinkedSessions {
      * Starts a session linked to `source`, in `cwd` or the source's folder, and sends it `message` as its first
      * message. `model` is `provider/modelId`; `thinking` is any level (since 0.25.0; before, no higher than the source's). `cwd` is since 0.19.0:
      * an older Pi Pocket ignores it, and starts the session in the source's folder. A blank `cwd` counts as none; a
-     * relative one resolves against the server process's folder, not the source's.
+     * relative one resolves against the server process's folder, not the source's. `answers` (since 0.29.0) says
+     * whether its final answer comes back to the source by itself: false when the source turned its answers off with
+     * `reports`. An older Pi Pocket does not return it.
      * @since 0.14.0
      * @experimental
      */
@@ -898,12 +963,12 @@ export interface LinkedSessions {
             cwd?: string;
         },
         key: string,
-    ): Promise<{ session: ConversationId; address: string }>;
+    ): Promise<{ session: ConversationId; address: string; answers?: boolean }>;
     /**
      * Sends `message` to the linked session at the address `to`: at its next pause (since 0.28.0; before, only with
      * `steer: true`), or with `steer: false` after its run. `answers` (since 0.28.0) says whether its final answer comes
      * back to the source by itself, which it does when the source started it; otherwise the message asks it to reply
-     * when an answer is needed.
+     * when an answer is needed. An older Pi Pocket does not return it.
      * @since 0.14.0
      * @experimental
      */
@@ -911,7 +976,7 @@ export interface LinkedSessions {
         source: ConversationId,
         request: { to: string; message: string; steer?: boolean },
         key: string,
-    ): Promise<{ answers: boolean }>;
+    ): Promise<{ answers?: boolean }>;
     /**
      * Stops the run of the linked session at the address `to`, and withdraws what waits in its queue. When it is idle,
      * it has no run to stop, and the call only withdraws the queue. `busy` says whether it was working.
@@ -930,6 +995,21 @@ export interface LinkedSessions {
         request: { to: string; archived?: boolean },
         key: string,
     ): Promise<{ archived: boolean; repeating: number }>;
+    /**
+     * Sets whether `source`, as a lead, takes the final answers of the sessions it started when their runs end.
+     * `take: false` turns them off for every one: old, new, archived. Then `send` from `source` returns
+     * `answers: false`, and its message asks the target to send the answer. `take: true` turns them back on, the
+     * default. `take` says the state now. It needs the same access as `archive`, on `source` itself. A repeat with
+     * the same `key` changes nothing again. A `take` that is not a boolean throws a `TypeError`. An older Pi Pocket
+     * has no `reports`: check for it.
+     * @since 0.29.0
+     * @experimental
+     */
+    reports(
+        source: ConversationId,
+        request: { take: boolean },
+        key: string,
+    ): Promise<{ take: boolean }>;
     /**
      * The sessions linked to `source`, at any distance, that the person Pi works for there can see.
      * @since 0.14.0
@@ -2802,10 +2882,13 @@ export interface Pocket {
      */
     conversationId(): number | null;
     /**
-     * Opens a conversation through normal navigation. The server still checks access.
+     * Opens a conversation through normal navigation. The server still checks access. With `options.artifact`, it then
+     * opens the app's viewer on that artifact of the conversation (at `options.version`, a positive integer, or the
+     * latest). It does not say whether the artifact exists: a missing one fails as in the Artifacts sheet. A bad
+     * `artifact` or `version` is ignored.
      * @since 0.16.0
      */
-    openConversation(id: number | string): void;
+    openConversation(id: number | string, options?: { artifact?: string; version?: number }): void;
     /**
      * Hears which session the tab shows: the listener gets its id, or null, now and on each change. Returns how to stop.
      * @since 0.20.0

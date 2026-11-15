@@ -989,7 +989,9 @@ export class Pip {
             .all()
             .filter((request) => app.rootOf(request.conversationId) === id)
             .map((request) => `- ${request.id}: ${request.tool} ${snippet(request.subject, 200)}`);
-        const schedules = await app.schedules.list(id);
+        const schedules = (await app.schedules.list(id)).filter(
+            (item) => item.paused === undefined,
+        );
         const state = app.approvals
             .all()
             .some((request) => app.rootOf(request.conversationId) === id)
