@@ -2031,8 +2031,8 @@ export function popAnchor(selector) {
         return null;
     }
 
-    const top = visualViewport?.offsetTop ?? 0;
-    const bottom = top + (visualViewport?.height ?? innerHeight);
+    const top = window.visualViewport?.offsetTop ?? 0;
+    const bottom = top + (window.visualViewport?.height ?? innerHeight);
 
     // Scrolled away above. One under a phone's keyboard opens from the keyboard's top edge.
     if (rect.bottom < top) {

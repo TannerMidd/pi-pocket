@@ -61,7 +61,7 @@ function selected() {
     // The button must stay inside the scrolling area, not over the top bar or the message box.
     const view = from.closest(".scroller")?.getBoundingClientRect() ?? {
         top: 0,
-        bottom: visualViewport?.height ?? innerHeight,
+        bottom: window.visualViewport?.height ?? innerHeight,
     };
     const above = first.top - HEIGHT - 8;
     // On a touch screen the system's selection handle hangs under the last line: sit below it.

@@ -152,7 +152,7 @@ export function ModelPicker() {
         const onKey = (event) => event.key === "Escape" && closeSheet();
 
         addEventListener("resize", place);
-        visualViewport?.addEventListener("resize", place);
+        window.visualViewport?.addEventListener("resize", place);
         addEventListener("keydown", onKey);
         // Keys go to the picker, not the message box behind it. Phones keep their keyboard down until the search is tapped.
         (searchable && !coarsePointer ? search.current : box.current)?.focus({
@@ -161,7 +161,7 @@ export function ModelPicker() {
 
         return () => {
             removeEventListener("resize", place);
-            visualViewport?.removeEventListener("resize", place);
+            window.visualViewport?.removeEventListener("resize", place);
             removeEventListener("keydown", onKey);
         };
     }, []);

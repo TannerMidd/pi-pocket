@@ -255,7 +255,8 @@ function MenuFrame({ title, children }) {
             const rect = button?.getBoundingClientRect();
             const top = (rect?.bottom ?? 58) + 6;
             const bottom =
-                (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? innerHeight);
+                (window.visualViewport?.offsetTop ?? 0) +
+                (window.visualViewport?.height ?? innerHeight);
             const left = Math.max(
                 8,
                 Math.min((rect?.right ?? innerWidth - 8) - 360, innerWidth - 368),
@@ -275,11 +276,11 @@ function MenuFrame({ title, children }) {
 
         place();
         addEventListener("resize", place);
-        visualViewport?.addEventListener("resize", place);
+        window.visualViewport?.addEventListener("resize", place);
 
         return () => {
             removeEventListener("resize", place);
-            visualViewport?.removeEventListener("resize", place);
+            window.visualViewport?.removeEventListener("resize", place);
 
             // Another sheet open now: the menu is going back under it, not closing.
             if (store.state.sheet) {

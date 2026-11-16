@@ -2793,7 +2793,17 @@ function Rail({ foldable = false, folded = false }) {
                 >
                     π
                 </button>`
-                : html`<span class="rail-brand" data-part="brand-mark" aria-hidden="true">π</span>`
+                : html`<button
+                    class="rail-brand"
+                    data-part="brand-mark"
+                    title="Menu"
+                    aria-label="Menu"
+                    aria-haspopup="dialog"
+                    aria-expanded=${store.state.sheet?.type === "menu"}
+                    onClick=${() => openSheet({ type: "menu" })}
+                >
+                    π
+                </button>`
         }
         <span class="rail-gap"></span>
         ${

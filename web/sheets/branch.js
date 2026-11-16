@@ -125,14 +125,14 @@ export function BranchPicker() {
         const onKey = (event) => event.key === "Escape" && closeSheet();
 
         addEventListener("resize", place);
-        visualViewport?.addEventListener("resize", place);
+        window.visualViewport?.addEventListener("resize", place);
         addEventListener("keydown", onKey);
         // Keys go to the picker, not the message box behind it. Phones keep their keyboard down until the search is tapped.
         (coarsePointer ? box.current : search.current)?.focus({ preventScroll: true });
 
         return () => {
             removeEventListener("resize", place);
-            visualViewport?.removeEventListener("resize", place);
+            window.visualViewport?.removeEventListener("resize", place);
             removeEventListener("keydown", onKey);
         };
     }, []);
