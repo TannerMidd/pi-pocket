@@ -31,8 +31,10 @@ type Request = {
 type Handle = { scope?: SessionScope; path: string; directory: boolean; readOnly: boolean };
 
 /**
- * Every request pi-env 1.5.0's client sends (protocol 1). Anything else is refused, so an op a later pi-env adds, with
- * a path in a field this gate does not read, cannot pass its folder check unseen.
+ * The requests of pi-env's client (protocol 1) that Pi Pocket uses. Anything else is refused, so an op a later pi-env
+ * adds, with a path in a field this gate does not read, cannot pass its folder check unseen. pi-env 1.5.2 added
+ * `process`, `processWrite` and `processCloseStdin` (a program with plain pipes, for MCP servers): Pi Pocket starts
+ * none, so they stay refused until something here needs them and this gate checks their fields.
  */
 const KNOWN_OPS = new Set([
     "hello",

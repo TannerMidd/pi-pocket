@@ -275,6 +275,21 @@ describe("runner RequestGate", () => {
         assert.equal(sent.length, 0);
     });
 
+    it("refuses pi-env 1.5.2's program requests, which Pi Pocket does not use", async (t) => {
+        const { request, sent, folder } = await fixture(t);
+
+        // A program with plain pipes runs anywhere its `argv` says: no field here is checked against the folder.
+        for (const json of [
+            { op: "process", argv: ["cat", "/etc/passwd"], cwd: folder, env: {}, inheritEnv: true },
+            { op: "processWrite", target: 1 },
+            { op: "processCloseStdin", target: 1 },
+        ]) {
+            refused(await request(json), new RegExp(`does not know the request "${json.op}"`));
+        }
+
+        assert.equal(sent.length, 0);
+    });
+
     it("lets only the request's own session cancel it", async (t) => {
         const { gate, request, a, b, sent } = await fixture(t);
         const running = await request({ op: "exec", command: "printf ok" });
