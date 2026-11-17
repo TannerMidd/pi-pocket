@@ -167,6 +167,27 @@ test("a ChatGPT Business admin cap never waits, even with a retry time", () => {
     }
 });
 
+test("a transient server failure may be about one conversation, not model load", () => {
+    for (const message of [
+        "Previous response owner account is unavailable; retry later.",
+        "Invalid conversation ID",
+    ]) {
+        assert.equal(ask(message, 502, { "retry-after": "30" }).type, "request");
+        assert.equal(ask(message, 400).type, "other");
+    }
+
+    for (const [message, status] of [
+        ["Bad Gateway", 502],
+        ["conversation service unavailable", 503],
+        ["529 overloaded_error", 529],
+        ["Too many requests", 429],
+    ] as const) {
+        const verdict = ask(message, status);
+
+        assert.ok(verdict.type === "limit" && verdict.scope === "model", message);
+    }
+});
+
 test("only limit headers are kept from a response, never a key or a token", () => {
     const kept = responseFacts(
         429,

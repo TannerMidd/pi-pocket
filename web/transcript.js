@@ -418,20 +418,6 @@ function span(ms) {
     return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
 }
 
-/** Who a wait for a limit is for: the provider by the name people know it by, and the model when only it waits. */
-function limitWho({ provider, modelId, scope }) {
-    const names = {
-        anthropic: "Claude",
-        "openai-codex": "ChatGPT",
-        openai: "OpenAI",
-        "opencode-go": "OpenCode Go",
-        openrouter: "OpenRouter",
-    };
-    const name = names[provider] ?? provider;
-
-    return scope === "model" && modelId ? `${name} ${modelId}'s limit` : `${name}'s limit`;
-}
-
 /** When a message was sent, from the server's time: "10:42" today, "Oct 3 10:42" before. */
 const clock = (at) => clockTime(new Date(fromServer(at)));
 
@@ -3319,7 +3305,7 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
 
     const partial = live.generation?.message?.blocks ?? [];
     const retry = live.generation?.retry;
-    // Pi's request waits for the provider's limit to clear (`limit-gate.ts`): until a time, or a try.
+    // The request waits to retry (`limit-gate.ts`), with a fixed reason from the server.
     const limit = live.limit;
     const working = (live.tools ?? []).some((slot) => slot.status !== "done");
     const waiting = approvals.length > 0;
@@ -3338,7 +3324,7 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
               ? "Waiting for an answer"
               : "Waiting for approval";
     } else if (limit) {
-        state = `Waiting for ${limitWho(limit)}`;
+        state = "Waiting to retry";
     } else if (retry) {
         state = "Retrying";
     } else if ((live.compactions ?? []).length > 0) {

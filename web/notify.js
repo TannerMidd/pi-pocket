@@ -118,11 +118,7 @@ const KINDS = [
         "Approvals",
         "when Lancet Guard asks before a command; allow or deny it from the notification",
     ],
-    [
-        "limit",
-        "Waiting for a limit",
-        "when a run waits more than ten minutes for a provider's limit to clear",
-    ],
+    ["limit", "Waiting to retry", "when a model request waits ten minutes or more to retry"],
     [
         "stalled",
         "Stalled work",
