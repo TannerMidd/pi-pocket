@@ -5,6 +5,7 @@
  *
  *   pi-pocket [--access local|lan|cloudflare|tailscale|tailscale-serve] [-y] [--port 8787] [--cwd DIR] [--data DIR]
  *   [--rotate-token]
+ *   pi-pocket --socket PATH [--cwd DIR] [--data DIR] [--rotate-token]   (behind a reverse proxy, no access mode)
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -375,7 +376,8 @@ async function ensureCloudflared(): Promise<string | undefined> {
 
 // ─── State ──────────────────────────────────────────────────────────────
 
-type Mode = AccessMode | "custom";
+/** `socket`: listening on a Unix socket for a reverse proxy (`--socket`), which no browser opens directly. */
+type Mode = AccessMode | "custom" | "socket";
 
 const state = {
     mode: "local" as Mode,
@@ -434,6 +436,10 @@ function localUrl(): string {
 }
 
 function modeLabel(): string {
+    if (state.mode === "socket") {
+        return "Reverse proxy (Unix socket)";
+    }
+
     if (state.mode === "custom") {
         return `Listening on ${state.host}`;
     }
@@ -456,6 +462,8 @@ function modeNote(): string {
             return "devices on your tailnet";
         case "tailscale-serve":
             return state.accessUrl === undefined ? "serve not up yet" : "https on your tailnet";
+        case "socket":
+            return options.socket!;
         default:
             return "";
     }
@@ -492,7 +500,10 @@ function sendAccess(): void {
 
 // ─── The panel ──────────────────────────────────────────────────────────
 
-const KEYS_HINT = "q quit · r restart server · a access · o open here · s sign-in QR";
+const KEYS_HINT =
+    options.socket === undefined
+        ? "q quit · r restart server · a access · o open here · s sign-in QR"
+        : "q quit · r restart server · s sign-in path";
 
 async function showPanel(withQr: boolean): Promise<void> {
     const width = columns();
@@ -500,7 +511,9 @@ async function showPanel(withQr: boolean): Promise<void> {
     const lines = ["", `  ${accent("π")} ${bold("Pi Pocket")}  ${green("● running")}`, ""];
 
     lines.push(row("Access", `${modeLabel()}${modeNote() ? dim(` · ${modeNote()}`) : ""}`));
-    lines.push(row("Open", cyan(appUrl())));
+    lines.push(
+        row("Open", state.mode === "socket" ? dim("your reverse proxy's address") : cyan(appUrl())),
+    );
 
     if (state.mode === "lan") {
         for (const address of lanAddresses().slice(1)) {
@@ -516,7 +529,11 @@ async function showPanel(withQr: boolean): Promise<void> {
     const base = (reachable() ? appUrl() : localUrl()).replace(/\/+$/, "");
     const login = state.loginPath === undefined ? undefined : `${base}${state.loginPath}`;
 
-    if (login !== undefined) {
+    // No http link reaches a Unix socket: show the path to open at the reverse proxy's address, with no QR code.
+    if (state.mode === "socket" && state.loginPath !== undefined) {
+        lines.push(row("Sign in", `${state.loginPath} ${dim("at your reverse proxy's address")}`));
+        lines.push("");
+    } else if (login !== undefined) {
         if (withQr && reachable()) {
             lines.push(
                 `  ${bold("Scan to sign in on your phone.")} ${dim("It is your owner link: keep it private.")}`,
@@ -575,10 +592,9 @@ function startServer(first: boolean): void {
 
     const args = [
         SERVER,
-        "--host",
-        state.host,
-        "--port",
-        String(options.port),
+        ...(state.mode === "socket"
+            ? ["--socket", options.socket!]
+            : ["--host", state.host, "--port", String(options.port)]),
         "--cwd",
         options.cwd,
         "--data",
@@ -1000,7 +1016,7 @@ async function changeAccess(): Promise<void> {
     log("");
 
     try {
-        const current = state.mode === "custom" ? undefined : state.mode;
+        const current = state.mode === "custom" || state.mode === "socket" ? undefined : state.mode;
         const next = await pickAccess(current);
 
         if (next === undefined || next === state.mode) {
@@ -1051,11 +1067,11 @@ function onRunKey(key: string): void {
         void quit(0);
     } else if (key === "r") {
         restartServer();
-    } else if (key === "o" && state.loginPath !== undefined) {
+    } else if (key === "o" && state.loginPath !== undefined && state.mode !== "socket") {
         openInBrowser(`${localUrl()}${state.loginPath}`);
     } else if (key === "s") {
         void showPanel(true);
-    } else if (key === "a") {
+    } else if (key === "a" && state.mode !== "socket") {
         busyWithKey = true;
         void changeAccess().finally(() => {
             busyWithKey = false;
@@ -1124,6 +1140,7 @@ async function main(): Promise<void> {
     // are problems to report when serve is prepared, not reasons to refuse to launch. `--host` alone never uses serve,
     // so a saved choice is not a reason to refuse to start there either.
     if (
+        options.socket === undefined &&
         serveBailOut({
             access: options.access,
             saved: settings.access,
@@ -1135,7 +1152,8 @@ async function main(): Promise<void> {
         fail(TAILSCALE_MISSING_MESSAGE);
     }
 
-    let mode: Mode | undefined = options.access;
+    // A socket replaces the access modes: the launcher runs no tunnel and no `tailscale serve` for it.
+    let mode: Mode | undefined = options.socket === undefined ? options.access : "socket";
 
     if (mode === undefined && options.host !== undefined) {
         mode = loopback(options.host) ? "local" : wildcard(options.host) ? "lan" : "custom";
@@ -1152,7 +1170,7 @@ async function main(): Promise<void> {
     try {
         let binary: string | undefined;
 
-        if (mode !== "custom") {
+        if (mode !== "custom" && mode !== "socket") {
             const chosen = await chooseAccess({
                 given: mode,
                 saved: settings.access,
@@ -1179,9 +1197,9 @@ async function main(): Promise<void> {
         }
 
         state.mode = mode;
-        state.host = listenHost(mode, options.host);
+        state.host = mode === "socket" ? "127.0.0.1" : listenHost(mode, options.host);
 
-        if (mode !== "custom") {
+        if (mode !== "custom" && mode !== "socket") {
             saveSettings(mode);
         }
 
@@ -1189,7 +1207,9 @@ async function main(): Promise<void> {
         // answering 502. Clear it before this run needs the port, whichever mode it starts in. Only a mount with a
         // receipt is ours: a port alone proves nothing, since 0.27's docs had owners point `tailscale serve` at
         // `--access local` themselves. Never for `tailscale-serve` itself, whose mount prepareServe() made or adopted.
-        const stalePorts = staleServePorts(mode, savedServeMountPort());
+        // On a socket no `tailscale serve` runs, not even to clear a stale mount: the node's Serve route may now be the
+        // one that reaches this socket. The receipt stays for a later start on a port.
+        const stalePorts = mode === "socket" ? [] : staleServePorts(mode, savedServeMountPort());
 
         if (stalePorts.length > 0) {
             const tailscale = findTailscale();

@@ -14,8 +14,11 @@ export const SVG_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 
 export interface HttpOptions {
     app: PocketApp;
-    /** Where the server listens, to offer reachable invite links when the browser uses a loopback address. */
-    listen: { host: string; port: number };
+    /**
+     * Where the server listens: a TCP address, to offer reachable invite links when the browser uses a loopback address,
+     * or a Unix socket behind a reverse proxy, which has no address of its own to offer.
+     */
+    listen: { host: string; port: number } | { socket: string };
     /** Restart the process (exit code 75 under the launcher). */
     restart(): void;
 }

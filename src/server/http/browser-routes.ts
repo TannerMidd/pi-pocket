@@ -39,7 +39,8 @@ export async function browserRoutes(
     api: ApiRequest,
     id: ConversationId,
     action: string | undefined,
-    port: number,
+    /** Pi Pocket's own TCP port, left out of the local servers offered; none on a Unix socket. */
+    port: number | undefined,
 ): Promise<void> {
     const { app, request, response, url, user } = api;
     const method = request.method ?? "GET";
@@ -107,7 +108,9 @@ export async function browserRoutes(
             return json(response, 200, { servers: [] });
         }
 
-        return json(response, 200, { servers: await localServers([port]) });
+        return json(response, 200, {
+            servers: await localServers(port === undefined ? [] : [port]),
+        });
     }
 
     if (method !== "POST" || action === undefined || !BROWSER_ACTIONS.has(action)) {
