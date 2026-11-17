@@ -1,7 +1,7 @@
 /** Remote project files stay on their computer. Design runs here, in a bounded, per-session copy. */
 import { lstat, mkdir, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { basename, dirname, join, posix, sep, win32 } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { remoteAccess, type FolderAccess } from "../folder-access.ts";

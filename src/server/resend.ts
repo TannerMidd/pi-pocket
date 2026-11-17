@@ -3,7 +3,7 @@
  * the message went out cannot leave the fork without it. Whoever sends it again sends it right away as well; with one
  * request id per fork, it goes out once either way.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
     defineTask,

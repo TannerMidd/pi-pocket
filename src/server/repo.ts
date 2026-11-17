@@ -5,7 +5,7 @@
  * (`commands.ts` `copyPlace`). Looking it up never holds anything up: it has a short time limit, and any failure (no
  * git, no remote, a computer that is offline) is no repository.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { git } from "./git.ts";
 

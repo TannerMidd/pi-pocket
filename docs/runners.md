@@ -270,6 +270,8 @@ Offline is offline. While a linked computer is offline, its sessions are offline
 | The runner quits, or the computer restarts               | Commands and runner-owned background tasks stop. Commands come back as interrupted; task logs and exit codes remain. The session continues when the runner is back. |
 | The server restarts                                      | Running commands return as interrupted. Background tasks keep running on the computer, and the session picks up their output when the runner reconnects.            |
 
+The quiet limit of commands (a bash command that prints nothing for 15 minutes is stopped) applies on a linked computer too. Time the computer is offline does not count toward it.
+
 Panels that show the computer's files (Files, Changes, the folder picker) say that the computer is offline instead of waiting. A new session, a fork, or a move to another folder on an offline computer cannot start: the computer must answer whether it allows the folder.
 
 Removing a computer in **Runners** stops its runner and cancels its key. A runner that the server removed exits with code 3, except in macOS service mode, where it exits with code 0 so launchd does not restart it. The desktop app does not restart it.

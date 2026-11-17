@@ -47,7 +47,7 @@ The types file imports types from Pi Durable, Pi AI, and Preact by package name.
 - [`Web`](web.md) and the types that it uses: `WebAccess`, `WebMethod`, `WebHandler`, and `WebRequest`.
 - [`Command`, `CommandContext`, and `CommandResult`](command-context.md).
 - [`Pocket`](pocket.md) and the types that it uses: `BrowserModule`, `Action`, the objects that you give (`RailSpec`, `MenuSpec`, `LauncherSpec`, `PageSpec`, `SheetSpec`, `ToolCallSpec`, `CallSummary`), `Added`, `PageProps`, `SheetProps`, and the props of the pieces.
-- `Module`, `Person`, `Role`, and `NoticeLevel`, on this page.
+- `Module`, `ToolOptions`, `Person`, `Role`, and `NoticeLevel`, on this page.
 - Since 0.22.0, experimental: `PublicPageHandler`, `PublicPageRequest`, `PublicPageAnswer`, `PublicLinks`, `PublicLinkRequest`, and `PublicLinkInfo` ([Public pages](../public-pages.md)); `AskRequest`, `AskField`, `AskAnswer`, `HiddenValue`, `CommandRun`, `CommandEnvProvider`, `BrowserPageHandle`, `BrowserControl`, and `BrowserTarget` ([People's values](../people-values.md)); `AppEvents`, `AppEventName`, `SettingField`, and `SettingValue` ([Events, services, and settings](../services-settings.md)).
 
 The types file does not have the internal members of the host. It does not have Pi Durable's own API either: import `defineExtension`, `defineTool`, and the rest from `@earendil-works/pi-durable`.
@@ -99,6 +99,24 @@ remoteSessions?: boolean;
 Since 0.28.0 · Stable
 
 `true`: the module's extensions also load in sessions on another computer. Without it, a drop-in loads only in sessions on the server. Its tools must reach the session's files and commands through `api.env`, which is that computer's. What the module itself does with Node (`node:fs`, `node:child_process`) runs on the server. See [Sessions on another computer](../../runners.md#extensions).
+
+## Tool options
+
+### `ToolOptions`
+
+```ts
+interface ToolOptions {
+    readonly subagents?: "always";
+}
+```
+
+Since 0.29.0 · Experimental
+
+Pi Pocket's options on a tool definition, beside Pi Durable's own. Add them with `Object.assign` after `defineTool` ([Tools](../tools.md#tools-for-every-subagent)).
+
+- `subagents: "always"`: give the tool to every subagent whose extensions include it, when the session enables it, even when its `tools` list leaves it out. It is added once. A deferred tool is offered at once with a tool list; a tool that only scripts call brings codemode. Without a list, or on send, nothing changes. It does not add its extension. The tool's prompt and spawn result do not mention the marker or the tools it adds.
+
+Older Pi Pocket ignores the field. The API version stays 2: this is an addition, not a break.
 
 ## Shared types
 

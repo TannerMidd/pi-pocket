@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
     AgentDoc,
@@ -989,7 +989,9 @@ export class Pip {
             .all()
             .filter((request) => app.rootOf(request.conversationId) === id)
             .map((request) => `- ${request.id}: ${request.tool} ${snippet(request.subject, 200)}`);
-        const schedules = await app.schedules.list(id);
+        const schedules = (await app.schedules.list(id)).filter(
+            (item) => item.paused === undefined,
+        );
         const state = app.approvals
             .all()
             .some((request) => app.rootOf(request.conversationId) === id)

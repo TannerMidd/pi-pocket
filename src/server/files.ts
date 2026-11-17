@@ -311,12 +311,17 @@ export async function viewFile(
 /**
  * The files `@` mentions in a message name, as the message box writes them: `@src/app.ts`, or `@"my file.txt"` with
  * spaces. Each comes with the paths it may mean, best first: as written, then without the punctuation that may end a
- * sentence after it ("look at @app.ts.").
+ * sentence after it ("look at @app.ts."). One in a quote ("> …" lines, a passage Reply quoted) is the passage's, not a
+ * file the person asks to send along.
  */
 export function mentionedPaths(text: string): { written: string; candidates: string[] }[] {
     const found: { written: string; candidates: string[] }[] = [];
+    const own = text
+        .split("\n")
+        .filter((line) => !/^ {0,3}>/.test(line))
+        .join("\n");
 
-    for (const match of text.matchAll(/(?:^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g)) {
+    for (const match of own.matchAll(/(?:^|[\s([{])@(?:"([^"\n]+)"|([^\s"]+))/g)) {
         const written = match[1] ?? match[2]!;
 
         if (found.some((each) => each.written === written)) {

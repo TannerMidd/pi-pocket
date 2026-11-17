@@ -36,8 +36,9 @@ import { Workspace } from "../src/server/workspace.ts";
 
 const there = join(root, "computer");
 const outside = join(root, "server-only.png");
+// A whole 1x1 PNG with right checksums: Pi's read tool decodes an image before it sends it.
 const PNG = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=",
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNoYGj4DwAEBAIAXHop6wAAAABJRU5ErkJggg==",
     "base64",
 );
 const SVG =

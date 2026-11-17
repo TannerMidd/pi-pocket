@@ -63,7 +63,7 @@ test("a session file downloads as it is, as an attachment that no browser runs",
     assert.doesNotMatch(odd.headers.get("content-disposition")!, /\n|"name"/);
 });
 
-test("a download needs a sign-in, a file, and, for a viewer, a file in the session's folder", async () => {
+test("a download needs a sign-in, a file, and the right to steer", async () => {
     const anonymous = await fetch(
         `http://127.0.0.1:${port}/api/c/${id}/download?path=exports/deck-v2.pptx`,
     );
@@ -83,6 +83,6 @@ test("a download needs a sign-in, a file, and, for a viewer, a file in the sessi
 
     const viewer = app.config.addUser("Viewer", "viewer").token;
 
-    assert.equal((await download("exports/deck-v2.pptx", viewer)).status, 200);
-    assert.equal((await download(outside, viewer)).status, 404);
+    assert.equal((await download("exports/deck-v2.pptx", viewer)).status, 403);
+    assert.equal((await download(outside, viewer)).status, 403);
 });

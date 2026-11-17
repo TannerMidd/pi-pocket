@@ -3,7 +3,7 @@
  * JSON value for each artifact, person, and session, kept apart from the artifact's versions and from Pi's context.
  * A page names a schema to tell old values from new ones: a value saved under another schema reads as none.
  */
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";

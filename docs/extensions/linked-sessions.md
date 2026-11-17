@@ -52,6 +52,8 @@ Since 0.28.0, when a linked session's run ends, Pi Pocket sends the session that
 
 So a tool that starts linked sessions need not ask them to report, and need not poll: the lead ends its turn, and the answers wake it. The report's fence shows as a linked session's card, like a message. Only the session that started one hears its end of run: a linked session that asks its lead, or a sibling, gets an answer only when that session sends one, and the message tells it to.
 
+A lead can turn this off with `host.linkedSessions.reports(lead, { take: false }, key)`. Then no run end of a session it started reaches it: old ones, archived ones, from any start path. A message from it then asks the target to send the answer, and `send` returns `answers: false`. `take: true` turns the answers back on. An older Pi Pocket has no `reports`: check for it.
+
 ## Stop a run
 
 `stop(source, { to }, key)` stops the run of the linked session at the address `to`, and withdraws what waits in its queue. Stopping is the safe direction: it needs the same access as `send`, including the turn and room under the spend limit.

@@ -131,6 +131,8 @@
                         return;
                     }
 
+                    // A signed-in page waits out its device-cache check hidden. A startup failure must still show.
+                    boot.parentElement.hidden = false;
                     boot.classList.add("failed");
                     boot.querySelector(".boot-caption").textContent = "could not start";
 

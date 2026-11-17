@@ -1,5 +1,5 @@
-// The viewer's Download in a real Chromium: a plain browser download of the session's file, which an app around the
-// page (a desktop app) may save itself.
+// The viewer's Download in a real Chromium: a plain link to the session's file, which an app around the page (a desktop
+// app) may save itself; also for a file on a linked computer.
 import {
     type App,
     cleanUp,
@@ -208,27 +208,23 @@ test(
     },
 );
 
-test("Download is a plain browser download, also inside an app around the page", real, async () => {
+test("Download is a plain link to the file, also inside an app around the page", real, async () => {
     // Also when an app around the page offers capabilities: the page asks it nothing for a download.
     for (const capabilities of [[], ["newSession"]]) {
         const page = await filePage(capabilities);
 
         try {
-            await page.evaluate(`(() => {
-                window.browserDownloads = [];
-                HTMLAnchorElement.prototype.click = function () {
-                    window.browserDownloads.push({ url: this.getAttribute("href"), name: this.download });
-                };
-            })()`);
-            await page.evaluate(
-                `document.querySelector('.file-viewer [aria-label="Download"]').click()`,
-            );
-            assert.deepEqual(await page.evaluate<Json>("window.browserDownloads"), [
+            assert.deepEqual(
+                await page.evaluate<Json>(`(() => {
+                    const link = document.querySelector('.file-viewer a[aria-label="Download"]');
+
+                    return { url: link.getAttribute("href"), download: link.hasAttribute("download") };
+                })()`),
                 {
                     url: `/api/c/${page.id}/download?path=${encodeURIComponent(page.path)}`,
-                    name: "download-notes.txt",
+                    download: true,
                 },
-            ]);
+            );
         } finally {
             await page.close();
         }

@@ -1497,3 +1497,47 @@ test("Pi's tool lists, reads, and stops its tasks", { skip }, async () => {
     assert.equal((await one(id)).status, "stopped");
     assert.equal(app.background.alive(id, item), false);
 });
+
+test(
+    "a task that prints nothing for its quiet limit is stopped, and Pi is told",
+    { skip },
+    async () => {
+        const id = await session();
+        const item = await app.background.start(id, {
+            command: "echo begun; exec tail -f /dev/null",
+            quietMinutes: 0.005,
+        });
+
+        await until(async () => (await one(id)).status !== "running", "the quiet limit");
+        assert.equal((await one(id)).status, "stopped");
+        assert.equal(app.background.alive(id, item), false);
+        await until(
+            async () => (await userTexts(id)).some((text) => text.includes("its quiet limit")),
+            "Pi's message about it",
+        );
+        assert.match((await userTexts(id)).join("\n"), /stopped by Pi Pocket: it printed nothing/);
+    },
+);
+
+test(
+    "a person's stop tells Pi once, as an end does; Pi's own stop does not",
+    { skip },
+    async () => {
+        const id = await session();
+        const theirs = await app.background.start(id, { command: "exec tail -f /dev/null" });
+        const mine = await app.background.start(id, { command: "exec tail -f /dev/null" });
+
+        await app.background.stop(id, mine.id);
+        await app.background.stop(id, theirs.id, "person");
+        await until(
+            async () => (await userTexts(id)).some((text) => text.includes("stopped by a person")),
+            "Pi's message about the person's stop",
+        );
+        await until(() => !app.isBusy(id), "Pi to answer");
+
+        const told = (await userTexts(id)).filter((text) => text.includes("[background] Task"));
+
+        assert.equal(told.length, 1);
+        assert.match(told[0]!, new RegExp(`Task ${theirs.id} stopped by a person`));
+    },
+);

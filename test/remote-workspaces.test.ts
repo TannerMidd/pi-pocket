@@ -128,7 +128,12 @@ test("after a restart without its provider, a remote session opens and runs noth
 
 test("the last provider wins; a disposer removes its own; a stale answer fails", async () => {
     const app = await openApp(scriptedModel());
-    const [env1, env2] = [{ cwd: uri }, { cwd: uri }] as ExecutionEnv[];
+    // Each env says which it is: core hides its secrets in every env's output, so a session's env wraps the provider's.
+    const [env1, env2] = [
+        { cwd: uri, which: "first" },
+        { cwd: uri, which: "second" },
+    ] as unknown as ExecutionEnv[];
+    const which = (env: ExecutionEnv) => (env as unknown as { which: string }).which;
     const first = app.registerWorkspaceProvider(
         "ssh",
         provider(() => env1!),
@@ -142,7 +147,7 @@ test("the last provider wins; a disposer removes its own; a stale answer fails",
         const { id } = await app.commands.createSession(owner(app), { cwd: uri });
 
         first();
-        assert.equal(app.envFor(id), env2);
+        assert.equal(which(app.envFor(id)), "second");
         second();
         assert.throws(() => app.envFor(id), /No workspace provider/);
         await assert.rejects(app.resolveCwd(uri), { status: 400 });

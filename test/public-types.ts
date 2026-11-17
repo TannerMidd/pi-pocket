@@ -30,7 +30,9 @@ import type {
     PublicPageRequest as RealPublicPageRequest,
     WebRequest as RealWebRequest,
 } from "../src/server/host.ts";
+import type { ToolOptions as RealToolOptions } from "../src/server/extensions/subagents.ts";
 import type {
+    ToolOptions,
     Command,
     CommandContext,
     CommandResult,
@@ -80,7 +82,10 @@ type Internal =
     | "goals"
     | "browsers"
     | "memory"
-    | "toolNames";
+    | "toolNames"
+    | "stopToolCall"
+    | "waitsForLimit"
+    | "alertOwner";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 
@@ -89,6 +94,9 @@ export const hostBack = (types: Host): PublicHost => types;
 /** A member of the real host that is neither public nor internal. */
 export const hostMembers = (member: Exclude<keyof PocketHost, keyof Host | Internal>): never =>
     member;
+
+export const toolOptions = (real: RealToolOptions): ToolOptions => real;
+export const toolOptionsBack = (types: ToolOptions): RealToolOptions => types;
 
 export const web = (real: ExtensionWeb): Web => real;
 export const webBack = (types: Web): ExtensionWeb => types;

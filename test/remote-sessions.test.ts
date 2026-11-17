@@ -924,8 +924,12 @@ describe("a session on another computer", () => {
     });
 
     it("offline is offline: a message waits for the computer, Stop ends the wait, and it goes on when back", async () => {
+        // Online, nothing outside the session holds it up.
+        assert.equal(app.waitsOutside(id as never), false);
         await runner.stop();
         await until(() => app.runners.list()[0]?.online === false, "the runner to go");
+        // Offline, its work waits for the computer: the stall watches count that as no stall and no quiet time.
+        assert.equal(app.waitsOutside(id as never), true);
 
         // Stop while it waits: the turn ends, and nothing failed on the server.
         const first = await app.commands.submit(id as never, owner(app), {
@@ -957,6 +961,7 @@ describe("a session on another computer", () => {
             await lastToolText(id),
             new RegExp(there.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
         );
+        assert.equal(app.waitsOutside(id as never), false);
     });
 });
 
