@@ -1152,7 +1152,7 @@ export function peekLines(
     }
 
     if (live.limit !== undefined) {
-        lines.push({ kind: "event", text: `Waiting for ${live.limit.provider}'s limit to clear` });
+        lines.push({ kind: "event", text: `Waiting to retry: ${live.limit.reason}` });
     }
 
     return lines.slice(-count);
