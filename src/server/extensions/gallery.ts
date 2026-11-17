@@ -46,23 +46,18 @@ const askGh = (): Promise<string | undefined> =>
 /**
  * The token of the GitHub CLI's account on github.com (`gh auth token --hostname github.com`), or undefined: no `gh`,
  * no sign-in, or no answer within 5 seconds. A token is kept for `GH_TOKEN_MS`, no token for `GH_MISS_MS` only; asked
- * once at a time, and never while the server starts. `found` hears each new token, to hide it. `ask` and `now` stand in
- * for `gh` and the clock in tests.
+ * once at a time, and never while the server starts. `found` hears each new token, to hide it.
  */
-export function ghToken(
-    ask = askGh,
-    now = Date.now,
-    found: (token: string) => void = () => {},
-): () => Promise<string | undefined> {
+function ghToken(found: (token: string) => void): () => Promise<string | undefined> {
     let kept: { token: string | undefined; until: number } | undefined;
     let asking: Promise<string | undefined> | undefined;
 
     return () => {
-        if (kept !== undefined && now() < kept.until) {
+        if (kept !== undefined && Date.now() < kept.until) {
             return Promise.resolve(kept.token);
         }
 
-        asking ??= ask()
+        asking ??= askGh()
             .then(
                 (stdout) => /^[\w-]{20,255}$/.exec(stdout?.trim() ?? "")?.[0],
                 () => undefined,
@@ -72,7 +67,10 @@ export function ghToken(
                     found(token);
                 }
 
-                kept = { token, until: now() + (token === undefined ? GH_MISS_MS : GH_TOKEN_MS) };
+                kept = {
+                    token,
+                    until: Date.now() + (token === undefined ? GH_MISS_MS : GH_TOKEN_MS),
+                };
                 asking = undefined;
 
                 return token;
@@ -113,7 +111,7 @@ export default function createGallery(host: PocketHost, web: ExtensionWeb) {
         ]);
         // gh's token is no setting, so core does not hide it: hide each one, for as long as the module runs.
         const hidden: (() => void)[] = [];
-        const fromGh = ghToken(askGh, Date.now, (token) => {
+        const fromGh = ghToken((token) => {
             if (typeof host.hide === "function") {
                 hidden.push(host.hide({ value: token, label: "GitHub token from gh" }));
             }
