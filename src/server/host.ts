@@ -675,6 +675,7 @@ export interface PocketHost {
     readonly gallery: Pick<
         Gallery,
         | "settings"
+        | "useGithubToken"
         | "setIndex"
         | "listing"
         | "installed"

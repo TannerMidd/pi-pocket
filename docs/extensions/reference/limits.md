@@ -157,6 +157,7 @@ All the numbers that limit a module, in one place. Each group links to the guide
 [Publishing to the gallery](../publishing.md), [Gallery entry](gallery-entry.md)
 
 - **The index:** 4 MB at most, with 2000 entries at most.
+- **The GitHub CLI's token** ([A private index](../publishing.md#a-private-index)): `gh auth token` has 5 seconds to answer. A token is kept 10 minutes, and no token 30 seconds, before `gh` is asked again.
 - **The index's `name`:** 80 characters at most. Its `repo`: 160 characters at most.
 - **An extension's files:** 50 at most, of 512 KB each at most, and 2 MB together at most.
 - **A theme's files:** 200 at most, and 16 MB together at most. `theme.json`, `colors.toml`, and `colors-light.toml`: 8 KB each at most. Its CSS: 256 KB together at most. A font or an image: 4 MB at most.

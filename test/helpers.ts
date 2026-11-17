@@ -1,8 +1,8 @@
 // What the server tests share: an isolated Pi install and data folder, a scripted model, and small helpers. Import
 // this before anything from src/: it points Pi's config at a temporary folder first.
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
@@ -21,6 +21,13 @@ process.env.PI_POCKET_GUARD = "off";
 // And from the real data folder, for code that reads its default rather than the app's own `dataDir`.
 process.env.PI_POCKET_DIR = join(root, "pocket");
 mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+// And from the real GitHub CLI: a `gh` that fails comes first, so no test asks a signed-in `gh` for its token (the
+// extension gallery does). A test that needs `gh` puts its own stand-in before this one.
+const noGh = join(root, "no-gh");
+
+mkdirSync(noGh);
+writeFileSync(join(noGh, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+process.env.PATH = `${noGh}${delimiter}${process.env.PATH ?? ""}`;
 /** The folder test sessions work in. */
 export const work = join(root, "work");
 mkdirSync(work);

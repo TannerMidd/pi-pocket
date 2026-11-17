@@ -6,12 +6,25 @@ The gallery lists drop-ins that other people wrote. This page tells how Pi Pocke
 
 Menu → **Extensions** opens a hub with **Discover**, **Installed**, and **Updates** tabs. **Discover** (also **Find extensions** in the launcher) lists drop-ins that other people wrote. Install from the list; select an entry to read its details beside the list on a wide screen, or in its place on a phone. **Updates** opens each update review directly, with the changes shown before you apply them. The list comes from an index of reviewed entries. By default, the index is the repository [TannerMidd/pi-pocket-extensions](https://github.com/TannerMidd/pi-pocket-extensions), whose `index.json` lists them.
 
-- The owner can read another index instead, at the bottom of that list: a GitHub repository as `owner/name`, or the https address of an `index.json`.
+- The owner can read another index instead, at the bottom of that list: a GitHub repository as `owner/name`, or the https address of an `index.json`. It can be private ([A private index](#a-private-index)).
 - The gallery is the built-in module Extension gallery (`gallery.ts`, the extension `pocket-gallery`). Only the owner can use it. When it is off, it reads nothing.
 
 Each entry gives the files of one drop-in, at one commit of a GitHub repository, with the size and the SHA-256 of each file, and what the module installs.
 
 The index lists themes too, with `"kind": "theme"` ([Themes](themes.md#themes-in-the-gallery)). A theme installs into the data folder's `themes/`, after the same checks as every theme folder, and each person chooses it in Appearance. A Pi Pocket before 0.14.0 counts a theme's entry as one it cannot read, so it never installs one as an extension.
+
+### A private index
+
+A team can keep its own index, and its extensions, in private GitHub repositories. The gallery then needs a GitHub token that can read them.
+
+- **The setting.** Menu → Extensions → Extension gallery → **GitHub token**. A fine-grained token with read access to the contents of those repositories is enough. It is a secret setting ([Secrets](services-settings.md#settings)): it never leaves the server, and the sheet shows only that it is set.
+- **The GitHub CLI.** While the setting is empty, the gallery asks `gh auth token --hostname github.com`, when `gh` is signed in to github.com. It keeps a token for 10 minutes, and no token for 30 seconds, so a new sign-in counts soon. `GH_HOST` does not change the host: a GitHub Enterprise token never goes to github.com.
+- **Where the token goes.** Only to `github.com`, `api.github.com`, and `raw.githubusercontent.com`, over https. Each redirect is checked again: a redirect to another host gets no token. A public index and public repositories on GitHub get it too.
+- **A token that GitHub refuses.** GitHub answers 401 to a token that it does not accept (expired or revoked), and 404 to a request whose token cannot read the repository, also a public one. Then the gallery sends the same request once more, without the token, and the rest of that download goes without it too. So an old `gh` sign-in does not stop the default index, or any public repository.
+- **Errors.** No error shows the token. When GitHub still answers 404, the error says what it means: without a token, give the gallery one; with a token that GitHub refused (401), check the token; with a token that GitHub took, the repository is not there, or the token cannot read it. GitHub answers 404, not 403, for a private repository that a request cannot see. A token with a space, a line break, or another character that a header cannot hold fails with an error that names the setting.
+- **Hidden from Pi.** Pi Pocket hides the token from what Pi and people read: the setting as each secret setting, and the GitHub CLI's token from when the gallery first reads it.
+
+The index's own checks and the review do not change: a private index is a list that the owner trusts.
 
 ## What Pi Pocket checks
 
@@ -20,6 +33,7 @@ Pi Pocket trusts nothing in an entry. So it:
 - **Reads it strictly** (`src/server/gallery/entry.ts`). It checks each field. Each field is one line of plain text, with no control, invisible, or direction characters. Names follow the rules of the drop-in folder. Sizes and lengths stay in the [limits](reference/limits.md#gallery): of the index, of the files, and of each field.
     - It leaves out an entry that it cannot read, and hides an entry for a newer Pi Pocket or extension API. The list says how many.
     - It shows all of an entry as text, and links only to the GitHub addresses that it makes itself.
+- **Sends a GitHub token only to GitHub** ([A private index](#a-private-index)).
 - **Downloads files only over https**, from the entry's repository on `raw.githubusercontent.com`, at the entry's commit. When the size or the SHA-256 of one file is different from the entry's, it installs nothing at all, and the same when a code file (ending in `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs`, `.json`, or `.css`, in any case) is not plain UTF-8 text, or any text file holds characters that change the direction of text.
 - **Installs it off**, as each drop-in starts, also under a name that was on before. Only the owner turns it on.
 - **Keeps where it came from** beside it, in `<name>.gallery.json` in the drop-in folder: the entry as installed. Updates and removal use it. So **Uninstall** removes its files and nothing else, and the gallery says which of them were edited since.
