@@ -358,6 +358,8 @@ export class Runner {
     #streams: StreamLink | undefined;
     /** Network connections opened so far, for tests. */
     opened = 0;
+    /** The same, for each `host:port`: a test counts those to its own site, apart from the browser's own. */
+    readonly openedTo = new Map<string, number>();
     /** Network connections still connecting, by stream id. */
     readonly #connecting = new Map<number, Socket>();
     /** The session of each open or opening browser connection, to close them when its permission ends. */
@@ -1719,6 +1721,10 @@ export class Runner {
             }
 
             this.opened++;
+            this.openedTo.set(
+                `${open.host}:${open.port}`,
+                (this.openedTo.get(`${open.host}:${open.port}`) ?? 0) + 1,
+            );
             ws.send(JSON.stringify({ type: "net-opened", id: open.id } satisfies ControlMessage));
             streams.attach(open.id, socket);
         });

@@ -266,8 +266,13 @@ describe("the browser of a session on another computer", () => {
             const opened = runner.opened;
             const result = await browse(id, { action: "navigate", url: page() });
 
-            assert.match(result, /Through the computer/);
+            // The page's own text: its title can arrive a moment after the navigation's result.
+            assert.match(result, /HTTP 200/);
             assert.ok(!/Could not open/.test(result), result);
+            assert.match(
+                await browse(id, { action: "wait", text: "Hello from the computer" }),
+                /Hello from the computer|Found/i,
+            );
             assert.match(await browse(id, { action: "wait", text: "ws-ok" }), /ws-ok|Found/i);
             // The page and its WebSocket: each a connection the runner opened on its computer.
             assert.ok(runner.opened - opened >= 2, `the runner opened ${runner.opened - opened}`);
@@ -403,16 +408,25 @@ describe("the browser of a session on another computer", () => {
 
     it("leaves a server session's browser as it was: no proxy, no computer", real, async () => {
         const local = await newSession(app);
+        // To the test site, under either name. The other session's Chromium may still open a connection of its own
+        // (to www.google.com) through the computer while this runs: that one is not this session's.
+        const toSite = () =>
+            (runner.openedTo.get(`localhost:${sitePort}`) ?? 0) +
+            (runner.openedTo.get(`127.0.0.1:${sitePort}`) ?? 0);
 
         await loadTools(app, local, "browser");
-        const opened = runner.opened;
+        const opened = toSite();
         const result = await browse(Number(local), {
             action: "navigate",
             url: `127.0.0.1:${sitePort}/`,
         });
 
-        assert.match(result, /Through the computer/);
-        assert.equal(runner.opened, opened, "the runner opened nothing");
+        assert.match(result, /HTTP 200/);
+        assert.match(
+            await browse(Number(local), { action: "wait", text: "Hello from the computer" }),
+            /Hello from the computer|Found/i,
+        );
+        assert.equal(toSite(), opened, "the runner opened nothing");
 
         // Its downloads go to this server's private folder, not to the computer.
         const done = await download(Number(local), {
@@ -425,7 +439,7 @@ describe("the browser of a session on another computer", () => {
         assert.ok(done.includes(`Downloaded ${file} (68 KB).`), done);
         assert.deepEqual(readFileSync(file), REPORT);
         assert.equal(statSync(folder).mode & 0o777, 0o700);
-        assert.equal(runner.opened, opened, "the runner opened nothing");
+        assert.equal(toSite(), opened, "the runner opened nothing");
         assert.deepEqual(incoming(), []);
     });
 
