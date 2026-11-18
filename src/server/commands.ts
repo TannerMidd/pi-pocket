@@ -61,7 +61,7 @@ import {
     NOTE_ENTRY,
     splitAttachments,
 } from "./entry-format.ts";
-import { describe, HttpError, optionalText } from "./errors.ts";
+import { describe, HttpError, optionalFlag, optionalText } from "./errors.ts";
 import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
 import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
@@ -2249,6 +2249,7 @@ export class Commands {
             next?: unknown;
             every?: unknown;
             zone?: unknown;
+            compactBefore?: unknown;
         },
     ): Promise<Schedule> {
         const app = this.#app;
@@ -2256,6 +2257,7 @@ export class Commands {
         app.requireSee(user, id);
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
@@ -2271,6 +2273,7 @@ export class Commands {
             ...(at === undefined ? {} : { at, text: optionalText(request.text, "text") ?? "" }),
             by: user,
             ...(zone === undefined ? {} : { zone }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
         });
         const when =
             schedule.every === undefined
@@ -2296,6 +2299,7 @@ export class Commands {
             every?: unknown;
             zone?: unknown;
             version?: unknown;
+            compactBefore?: unknown;
         },
     ): Promise<Schedule> {
         const app = this.#app;
@@ -2304,6 +2308,7 @@ export class Commands {
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
         const version = optionalText(request.version, "version");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
@@ -2317,6 +2322,7 @@ export class Commands {
             ...at,
             ...(zone === undefined ? {} : { zone }),
             ...(version === undefined ? {} : { version }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
             by: user,
         });
         const when =

@@ -166,6 +166,7 @@ function draftOf(schedule) {
     return {
         kind: every === undefined ? "once" : "minutes" in every ? "interval" : "days",
         text: schedule?.text ?? "",
+        compactBefore: schedule?.compactBefore === true,
         date: dateValue(next),
         time: timeValue(next),
         amount: String(minutes / UNITS[unit]),
@@ -319,6 +320,8 @@ function ScheduleEditor({ schedule, onDone }) {
                 const body = {
                     text: draft.text.trim(),
                     ...send,
+                    // Only a repeat has a run before: one that goes out once has nothing to compact.
+                    compactBefore: draft.kind !== "once" && draft.compactBefore,
                     ...(version === undefined ? {} : { version }),
                 };
 
@@ -503,6 +506,20 @@ function ScheduleEditor({ schedule, onDone }) {
                         ${dayPicker}`
                 }`
         }
+        ${
+            draft.kind !== "once" &&
+            html`<label class="check" data-part="schedule-compact-before">
+                <input
+                    type="checkbox"
+                    checked=${draft.compactBefore}
+                    onChange=${(event) => set({ compactBefore: event.currentTarget.checked })}
+                />
+                Compact before each run
+            </label>
+            <p class="muted small">
+                ${"Pi starts on its last run and what was said since; everything older is summarized."}
+            </p>`
+        }
         <div class=${`sched-preview ${timeWrong ? "wrong" : ""}`} data-part="schedule-preview">
             ${
                 timeWrong ??
@@ -623,6 +640,7 @@ function ScheduleRow({ schedule, now, setBy, archived, steer, onEdit }) {
                     }
                     ${` · set by ${setBy(schedule.by)}`}
                     ${repeat && schedule.runs > 0 ? ` · sent ${schedule.runs}×` : ""}
+                    ${schedule.compactBefore ? " · compacts first" : ""}
                     ${archived ? " · session archived" : ""}
                 </span>
                 ${
