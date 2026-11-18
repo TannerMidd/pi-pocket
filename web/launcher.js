@@ -17,6 +17,7 @@ import { useDragToClose } from "./gestures.js";
 import { togglePeeks } from "./peeks.js";
 import { modelRefreshAvailable, refreshModels } from "./model-refresh.js";
 import { openPip, pipAvailable } from "./pip.js";
+import { restartItems } from "./restart.js";
 import { setArchived, toggleBoard } from "./sessions.js";
 import { branchAvailable, headLabel } from "./sheets/branch.js";
 import { recentLabels } from "./sheets/folder.js";
@@ -506,17 +507,12 @@ function actionItems() {
             icon: "users",
             run: () => openSheet({ type: "name" }),
         },
-        me?.role === "owner" &&
-            server?.supervised && {
-                label: "Restart server",
-                detail: "running work resumes",
-                icon: "reload",
-                run: () =>
-                    attempt(async () => {
-                        await api("restart", {});
-                        notify("info", "Restarting. Running work continues after the restart.");
-                    }),
-            },
+        ...restartItems().map((each) => ({
+            label: each.label,
+            detail: each.hint,
+            icon: "reload",
+            run: each.run,
+        })),
         { label: "Sign out", detail: "this browser", icon: "logout", run: signOut },
         // What extensions' browser modules added (`extension-ui.js`).
         ...extensionLauncherItems(),

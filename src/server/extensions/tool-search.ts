@@ -52,6 +52,10 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string; g
         note: DESIGN_NOTE,
     },
     ask_someone: { use: "draft a question for someone outside this chat" },
+    restart_server: {
+        use: "restart Pi Pocket's server after a change to its code",
+        section: "restart",
+    },
     subagent: {
         use: "hand work to background helpers",
         section: "subagents",

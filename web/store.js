@@ -1974,6 +1974,10 @@ const handlers = {
     peek: (data) =>
         store.set((state) => ({ peeks: { ...state.peeks, [data.conversationId]: data } })),
     users: (users) => setChanged({ users: keptEach(store.state.users, users) }),
+    // A restart that waits began, changed, or ended (null), for the owner's Menu (`restart.ts`).
+    restart: (pending) =>
+        store.state.server &&
+        store.set((state) => ({ server: { ...state.server, restartPending: pending ?? null } })),
     // Pi's lessons changed somewhere: a Memory sheet or menu that shows them fetches them again (`sheets/memory.js`).
     memory: () => store.set((state) => ({ memoryRev: (state.memoryRev ?? 0) + 1 })),
     // Not this person's to see (any more), or gone: nothing of it stays in this tab, kept or shown.

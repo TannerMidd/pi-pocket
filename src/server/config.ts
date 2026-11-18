@@ -118,6 +118,10 @@ interface PocketConfig {
     subagentModels?: string[];
     /** The most hours a run waits for a model's limit to clear (`limit-gate.ts`); 0: it does not wait. Absent: 6. */
     limitWaitHours?: number;
+    /** What Menu → Restart server does (`restart.ts`): "when-safe" waits for calls a restart would cut off. Absent: at once. */
+    restart?: "immediate" | "when-safe";
+    /** The most minutes a restart that waits waits; then it restarts anyway. Absent or 0: until it is safe. */
+    restartDeadlineMinutes?: number;
     /**
      * The owner's values for the settings extension modules declare (`web.settings`), by module and setting name. A
      * setting with no value here has its default. Since 0.22.0; an older Pi Pocket ignores it.
@@ -306,6 +310,40 @@ export class ConfigStore {
             delete this.#config.limitWaitHours;
         } else {
             this.#config.limitWaitHours = Math.min(Math.max(hours, 0), 24);
+        }
+
+        this.save();
+    }
+
+    /** What Menu → Restart server does: at once (the default), or once no call runs that a restart would cut off. */
+    get restart(): "immediate" | "when-safe" {
+        return this.#config.restart === "when-safe" ? "when-safe" : "immediate";
+    }
+
+    set restart(mode: "immediate" | "when-safe") {
+        if (mode === "immediate") {
+            delete this.#config.restart;
+        } else {
+            this.#config.restart = mode;
+        }
+
+        this.save();
+    }
+
+    /** The most minutes a restart that waits waits; 0: until it is safe. */
+    get restartDeadlineMinutes(): number {
+        const minutes = this.#config.restartDeadlineMinutes;
+
+        return typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
+            ? Math.min(minutes, 24 * 60)
+            : 0;
+    }
+
+    set restartDeadlineMinutes(minutes: number) {
+        if (minutes <= 0) {
+            delete this.#config.restartDeadlineMinutes;
+        } else {
+            this.#config.restartDeadlineMinutes = Math.min(minutes, 24 * 60);
         }
 
         this.save();
