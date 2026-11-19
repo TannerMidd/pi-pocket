@@ -365,6 +365,14 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         }
     };
 
+    const remove = async (id: string) => {
+        try {
+            return await relay.remove(id);
+        } catch (error) {
+            throw web.error(409, error instanceof Error ? error.message : String(error));
+        }
+    };
+
     web.route("GET", "connectors", async (request) => {
         await relay.ready;
 
@@ -411,7 +419,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
 
         const before = relay.config(request.params.id ?? "");
 
-        if (before === undefined || !(await relay.remove(before.id))) {
+        if (before === undefined || !(await remove(before.id))) {
             throw web.error(404, "No such connector.");
         }
 

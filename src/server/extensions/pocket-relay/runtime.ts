@@ -1339,6 +1339,12 @@ export class Relay {
         delete this.#states[id];
         await this.persist();
 
+        if (!this.#written) {
+            throw new Error(
+                "The relay could not write its files: the change is lost at a restart.",
+            );
+        }
+
         return true;
     }
 
