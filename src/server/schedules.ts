@@ -229,7 +229,7 @@ export class Schedules {
                             task.state.checkpoint.compacted === true,
                     ),
                 compact: (task, runtime, context) =>
-                    this.#compact(task.state.checkpoint, runtime, context),
+                    this.#compact(task.input.scheduleId, task.state.checkpoint, runtime, context),
             },
             abort: (task, runtime, context) =>
                 runtime.commit(async (tx) => {
@@ -241,6 +241,7 @@ export class Schedules {
                         await configure(tx, runtime.conversationId, {
                             compaction: checkpoint.restore,
                         });
+                        delete doc.items[task.input.scheduleId]?.compacting;
                     }
 
                     // Replaced by an edit: the schedule is the new task's, and stays.
@@ -453,10 +454,22 @@ export class Schedules {
         let moved = false;
 
         await runtime.commit(async (tx) => {
-            if (!ownedBy((await tx.doc(ScheduleDoc, conversationId)).items[id], runtime)) {
+            const items = (await tx.doc(ScheduleDoc, conversationId)).items;
+            const item = items[id];
+
+            if (!ownedBy(item, runtime)) {
                 return finished;
             }
 
+            moved = true;
+
+            // Another schedule of this session compacts now: its settings are not the conversation's own, so this one
+            // sends without compacting, as for a busy session.
+            if (Object.values(items).some((each) => each.compacting === true)) {
+                return { status: "running", checkpoint: { phase: "send", compacted: true } };
+            }
+
+            item.compacting = true;
             const own = (await tx.doc(AgentDoc, conversationId)).compaction;
             const restore =
                 own === undefined ? null : (JSON.parse(JSON.stringify(own)) as CompactionSettings);
@@ -471,7 +484,6 @@ export class Schedules {
                     },
                 },
             });
-            moved = true;
 
             return { status: "running", checkpoint: { phase: "compact", restore } };
         }, context);
@@ -485,6 +497,7 @@ export class Schedules {
      * checkpoint starts another: it finds nothing to compact once the first is placed, or is stale.
      */
     async #compact(
+        id: string,
         state: Extract<ScheduleState, { phase: "compact" }>,
         runtime: Runtime,
         context: Context,
@@ -512,18 +525,30 @@ export class Schedules {
                 );
             }
         } else {
-            const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
-            const submissionId =
-                outcome.status === "completed" ? outcome.result.submissionId : undefined;
+            try {
+                const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
+                const submissionId =
+                    outcome.status === "completed" ? outcome.result.submissionId : undefined;
 
-            // The summary goes in once the conversation is idle: the message goes after it.
-            if (submissionId !== undefined) {
-                await (await app.harness.submission(submissionId, context))?.wait(context);
+                // The summary goes in once the conversation is idle: the message goes after it.
+                if (submissionId !== undefined) {
+                    await (await app.harness.submission(submissionId, context))?.wait(context);
+                }
+            } catch (error) {
+                // Ended by a stop or a restart: the next run of this phase, or the abort, restores the settings.
+                if (runtime.signal.aborted) {
+                    throw error;
+                }
+
+                app.log(
+                    `A schedule in session ${String(conversationId)} did not wait for its compaction: ${describe(error)}`,
+                );
             }
         }
 
         return runtime.commit(async (tx) => {
             await configure(tx, conversationId, { compaction: state.restore });
+            delete (await tx.doc(ScheduleDoc, conversationId)).items[id]?.compacting;
 
             return { status: "running", checkpoint: { phase: "send", compacted: true } };
         }, context);

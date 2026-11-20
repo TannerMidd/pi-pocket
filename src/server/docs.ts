@@ -568,6 +568,10 @@ export type Schedule = {
      * last run and what was said since (`schedules.ts`).
      */
     compactBefore?: true;
+    /**
+     * Set while this schedule compacts with its own cut: another schedule of the session does not compact meanwhile.
+     */
+    compacting?: true;
 };
 
 /** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */
