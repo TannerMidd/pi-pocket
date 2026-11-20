@@ -15,6 +15,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { folderContains, realFolder } from "./folders.ts";
 import type { Approvals, SessionScope } from "./approvals.ts";
 import { FRAME, frame, readFrame, SESSION_FIELD } from "./protocol.ts";
+import { captureSnapshot, READ_SNAPSHOT, snapshotCandidate } from "./read-snapshot.ts";
 
 type Request = {
     scope?: SessionScope;
@@ -52,6 +53,7 @@ const KNOWN_OPS = new Set([
     "pread",
     "fstat",
     "scanLines",
+    READ_SNAPSHOT,
     "opendir",
     "readdir",
     "close",
@@ -193,6 +195,8 @@ export type GateOptions = {
     tmpdir: () => Promise<string>;
     /** The computer's name, for refusals. */
     name: () => string;
+    /** Only the built-in daemon shares its filesystem with the runner. */
+    readSnapshot?: boolean;
     /** A request of a session in `folder` reaches the daemon; the result is called when it ended (`activity.ts`). */
     working?: (folder: string) => () => void;
 };
@@ -355,9 +359,14 @@ export class RequestGate {
                     throw new Error("The request was cancelled");
                 }
 
-                request.sent = true;
                 waiting.requests.delete(request);
-                this.#options.send(frame(type, id, json, payload));
+
+                if (op === READ_SNAPSHOT) {
+                    await this.#snapshot(id, request, json.path);
+                } else {
+                    request.sent = true;
+                    this.#options.send(frame(type, id, json, payload));
+                }
             } catch (error) {
                 waiting.requests.delete(request);
                 this.#refuse(id, request, (error as Error).message);
@@ -374,6 +383,38 @@ export class RequestGate {
                 this.#waiting.delete(key);
             }
         });
+    }
+
+    /** Read only the path the gate authorized. Aliases and failures stay on the normal tool path. */
+    async #snapshot(id: number, request: Request, path: unknown): Promise<void> {
+        const signal = request.stop.signal;
+        const real = request.path;
+        let snapshot;
+
+        if (real !== undefined && real === path) {
+            const before = await snapshotCandidate(real);
+
+            if (before !== undefined) {
+                snapshot = await captureSnapshot(real, before, signal);
+            }
+        }
+
+        if (this.#requests.get(id) !== request || signal.aborted) {
+            return;
+        }
+
+        this.#requests.delete(id);
+        request.finish?.();
+        this.#options.reply(
+            snapshot === undefined
+                ? frame(FRAME.result, id, {})
+                : frame(
+                      FRAME.result,
+                      id,
+                      { name: snapshot.name, mtimeMs: snapshot.mtimeMs },
+                      snapshot.bytes,
+                  ),
+        );
     }
 
     /** Answer a request that does not reach the daemon, once. */
@@ -397,12 +438,18 @@ export class RequestGate {
             );
         }
 
+        const snapshot = request.op === READ_SNAPSHOT;
+
+        if (snapshot && (this.#options.readSnapshot !== true || typeof json.path !== "string")) {
+            throw new Error(`A file snapshot is not available on ${this.#options.name()}`);
+        }
+
         const handle = typeof json.handle === "number" ? this.#handles.get(json.handle) : undefined;
         const listing =
             LISTING.has(request.op) ||
             (["readdir", "close"].includes(request.op) && handle?.directory === true);
 
-        if (typeof json.path === "string" && isAbsolute(json.path)) {
+        if (!snapshot && typeof json.path === "string" && isAbsolute(json.path)) {
             const path = json.path;
 
             // A folder the picker cannot resolve still lists as the daemon decides.
@@ -421,6 +468,11 @@ export class RequestGate {
         }
 
         let permission = await this.#options.approvals.valid(scope);
+
+        if (permission === undefined && snapshot) {
+            // With no approved path to snapshot, let the normal open ask once, at its usual point in the read.
+            return;
+        }
 
         if (permission === undefined && !request.stop.signal.aborted) {
             this.revokeReads(scope.id);
@@ -464,7 +516,9 @@ export class RequestGate {
 
         // Pi's context files and skills: read only, in a file opened to read.
         const reading =
-            request.op === "open" || (handle?.readOnly === true && READING.has(request.op));
+            snapshot ||
+            request.op === "open" ||
+            (handle?.readOnly === true && READING.has(request.op));
         const home = reading ? await realFolder(homedir()) : "";
         const extra = this.#extraReads.get(scope.id);
 
@@ -489,7 +543,12 @@ export class RequestGate {
             );
         }
 
-        if (request.op !== "watch") {
+        if (snapshot && paths[0] !== undefined) {
+            // The path as checked above, not a second resolution of the same name.
+            request.path = paths[0];
+        }
+
+        if (!request.stop.signal.aborted && request.op !== "watch") {
             const used = this.#options.approvals.begin(scope.id);
             const working = this.#options.working?.(permission.folder);
 

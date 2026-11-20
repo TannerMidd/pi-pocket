@@ -159,6 +159,8 @@ export type Hello = {
     /** The runner's Pi Pocket version, for the computers list. */
     version: string;
     tools: RunnerTools;
+    /** The runner can answer a scoped `pocket-read-snapshot` request itself. */
+    readSnapshot?: true;
     /** The folder for its browser downloads, absolute (`settings downloads`). Absent: its temporary folder. */
     downloads?: string;
 };

@@ -50,8 +50,10 @@ import {
     readStreamData,
     STREAM_DATA,
 } from "../runner/protocol.ts";
+import { MAX_SNAPSHOT_BYTES, READ_SNAPSHOT } from "../runner/read-snapshot.ts";
 import { LinkNetwork, NetError, type OpenOptions } from "./runner-network.ts";
-import { BACKGROUND_CONTEXT as BACKGROUND } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT as BACKGROUND, type Context } from "@earendil-works/chord/context";
+import type { FileInfo } from "@earendil-works/pi-durable/env";
 import type { ConfigStore, StoredRunner, User } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { LinkLimits, type LinkLocks, WRONG_CODE } from "./link-limits.ts";
@@ -192,9 +194,11 @@ class LinkSession {
     /** Whether its daemon has said hello: `ready` is settled, so `info` answers without the computer. */
     known = false;
     readonly number: number;
+    readonly readSnapshot: boolean;
 
-    constructor(number: number) {
+    constructor(number: number, readSnapshot: boolean) {
         this.number = number;
+        this.readSnapshot = readSnapshot;
     }
 }
 
@@ -240,6 +244,10 @@ export class RunnerLink {
 
     get name(): string {
         return this.#runners.stored(this.id)?.name ?? "The computer";
+    }
+
+    get supportsReadSnapshot(): boolean {
+        return this.#session?.readSnapshot === true;
     }
 
     /** Its system as it last said (`hello`), kept with the computer. */
@@ -560,7 +568,7 @@ export class RunnerLink {
                 );
             }
 
-            session = new LinkSession(++this.#sessions);
+            session = new LinkSession(++this.#sessions, hello.readSnapshot === true);
             this.#session = session;
             this.#control({
                 type: "welcome",
@@ -1140,6 +1148,7 @@ function toBuffer(data: RawData): Buffer {
 export class RunnerEnv extends RemoteExecutionEnv {
     readonly runner: string;
     readonly link: RunnerLink;
+    readonly #scope?: SessionScope;
 
     constructor(link: RunnerLink, cwd: string, scope?: SessionScope) {
         const connection = {
@@ -1158,6 +1167,52 @@ export class RunnerEnv extends RemoteExecutionEnv {
         });
         this.runner = link.id;
         this.link = link;
+        this.#scope = scope;
+    }
+
+    /** Probe one absolute path. No snapshot means Pi should use the ordinary remote reader. */
+    async readSnapshot(
+        path: string,
+        context: Context,
+    ): Promise<{ info: FileInfo; bytes: Uint8Array } | undefined> {
+        if (this.#scope === undefined || !this.link.supportsReadSnapshot) {
+            return;
+        }
+
+        try {
+            const session = await this.link.session();
+
+            if (!this.link.supportsReadSnapshot) {
+                return;
+            }
+
+            const { json, payload } = await this.link.request(
+                READ_SNAPSHOT,
+                { path },
+                { signal: context.abortSignal, session },
+                this.#scope,
+            );
+
+            if (
+                typeof json.name === "string" &&
+                typeof json.mtimeMs === "number" &&
+                Number.isFinite(json.mtimeMs) &&
+                payload.length <= MAX_SNAPSHOT_BYTES
+            ) {
+                return {
+                    info: {
+                        name: json.name,
+                        path,
+                        kind: "file",
+                        size: payload.length,
+                        mtimeMs: json.mtimeMs,
+                    },
+                    bytes: payload,
+                };
+            }
+        } catch {
+            // Preserve pi-env's errors and alternative path resolution. Never use an incomplete snapshot.
+        }
     }
 
     /** The computer, for the system prompt: its name, and its system as it last said. */

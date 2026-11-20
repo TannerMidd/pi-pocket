@@ -529,6 +529,7 @@ export class Runner {
             shared: async (id) => this.#shared(await temporary, id),
             tmpdir: () => temporary,
             name: () => this.#options.link.name,
+            readSnapshot: this.#options.daemon === undefined,
             working: (folder) => this.#activity.begin(folder),
         });
         void made.daemon.exited.then((code) => {
@@ -769,6 +770,7 @@ export class Runner {
                     received: this.#session.inbox.received,
                     version: this.#options.version,
                     tools,
+                    ...(this.#options.daemon === undefined ? { readSnapshot: true } : {}),
                     ...(this.#settings().downloads === undefined
                         ? {}
                         : { downloads: this.#settings().downloads }),

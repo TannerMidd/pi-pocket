@@ -47,6 +47,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { CodingTools, createCodingTools } from "@earendil-works/pi-durable/tools";
+import { withRunnerRead } from "./runner-read.ts";
 import { Alerts } from "./alerts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
@@ -4897,16 +4898,20 @@ export function installRequestShaping(
  * idle. Without Photon's WebAssembly, `read` sends only images that fit the model's limits as they are.
  */
 async function codingTools(log: (line: string) => void) {
+    let coding = CodingTools;
+
     try {
         const node = import.meta.resolve("@earendil-works/pi-durable/images/node");
 
         // Where Pi Durable loads it from, so a missing package shows now and not on the first image.
         createRequire(node).resolve("@silvia-odwyer/photon/photon_rs_bg.wasm");
-
-        return createCodingTools({ images: await createNodePhotonImages() });
+        coding = createCodingTools({ images: await createNodePhotonImages() });
     } catch (error) {
         log(`read cannot shrink images, Photon is missing: ${describe(error)}`);
-
-        return CodingTools;
     }
+
+    return {
+        ...coding,
+        tools: coding.tools?.map((tool) => (tool.name === "read" ? withRunnerRead(tool) : tool)),
+    };
 }
