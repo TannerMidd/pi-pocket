@@ -2,6 +2,7 @@
 import { type App, cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import { networkInterfaces } from "node:os";
 import { after, before, test } from "node:test";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
@@ -54,5 +55,56 @@ test(
     `);
 
         assert.ok(Number(streams) >= 3, `${streams} streams: a quiet one was kept`);
+    },
+);
+
+// A Cloudflare quick tunnel passes the first batch, then holds small events back: no ping after the first comes.
+const lan = Object.values(networkInterfaces())
+    .flat()
+    .find((address) => address?.family === "IPv4" && !address.internal)?.address;
+
+test(
+    "a stream that hears no ping after its first batch, away from this computer, turns to polling",
+    { skip: real.skip || (lan === undefined ? "no address but loopback" : false) },
+    async () => {
+        const far = createServer(
+            createHandler({ app, listen: { host: lan!, port: 0 }, restart() {} }),
+        );
+
+        await new Promise<void>((resolve) => far.listen(0, lan, resolve));
+        const token = encodeURIComponent(app.config.ownerToken);
+        const page = await browsers.open(2);
+
+        try {
+            await page.navigate(
+                `http://${lan}:${(far.address() as { port: number }).port}/login?token=${token}`,
+            );
+            const transport = await page.evaluate(`
+            const { connect } = await import("/store.js");
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const made = [], Real = EventSource;
+            // The server's own pings are held back, as the tunnel does; one stands in for the first batch's.
+            globalThis.EventSource = class extends Real {
+                constructor(...a) { super(...a); made.push(this); }
+                addEventListener(name, fn, ...rest) {
+                    super.addEventListener(name, name === "ping" ? (e) => e.isTrusted || fn(e) : fn, ...rest);
+                }
+            };
+            localStorage.removeItem("pocket.transport");
+            connect();
+            await wait(1500);
+            made[0].dispatchEvent(new MessageEvent("ping", { data: '{"every":200}' }));
+            await wait(1500);
+            return localStorage.getItem("pocket.transport") ?? "";
+        `);
+
+            assert.match(
+                transport,
+                /^poll:/,
+                `transport "${transport}": the held-back stream was tried again`,
+            );
+        } finally {
+            far.close();
+        }
     },
 );
