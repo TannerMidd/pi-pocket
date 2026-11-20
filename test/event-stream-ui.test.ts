@@ -28,23 +28,31 @@ after(async () => {
     cleanUp();
 });
 
-test("a stream that misses its pings is replaced", real, async () => {
-    const page = await browsers.open(1);
+test(
+    "a stream that misses its pings is replaced, and so is one that dies before its first",
+    real,
+    async () => {
+        const page = await browsers.open(1);
 
-    await page.navigate(url);
-    const streams = await page.evaluate(`
+        await page.navigate(url);
+        const streams = await page.evaluate(`
         const { connect } = await import("/store.js");
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const made = [], Real = EventSource;
-        globalThis.EventSource = class extends Real { constructor(...a) { super(...a); made.push(this); } };
+        // Every stream after the first hears nothing at all, as one a phone dropped before its first ping.
+        globalThis.EventSource = class extends Real {
+            constructor(...a) { super(...a); made.push(this); this.mute = made.length > 1; }
+            addEventListener(...a) { if (!this.mute) super.addEventListener(...a); }
+        };
         await wait(1000);
         connect();
         await wait(1000);
         // A ping says the server pings every 200 ms; then the stream stays quiet, as a half-open one does.
         made[0].dispatchEvent(new MessageEvent("ping", { data: '{"every":200}' }));
-        await wait(1500);
+        await wait(2000);
         return JSON.stringify(made.length);
     `);
 
-    assert.ok(Number(streams) >= 2, `${streams} streams: the quiet one was kept`);
-});
+        assert.ok(Number(streams) >= 3, `${streams} streams: a quiet one was kept`);
+    },
+);

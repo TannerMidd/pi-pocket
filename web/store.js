@@ -2050,6 +2050,8 @@ const pollHere = () => {
 
 /** Event stream reconnects in a row that the browser gave up on, for the pause before the next one. */
 let streamRetries = 0;
+/** The server's ping period, from the last stream that heard a ping: a new stream is watched from its start. */
+let pingPeriod = 0;
 
 const connected = () => store.state.connection !== "open" && store.set({ connection: "open" });
 
@@ -2203,7 +2205,7 @@ function streamEvents(query) {
     const settles = named !== null ? ["view", "missing"] : ["sessions"];
     /** When this stream last said anything, and how often the server pings it: unknown until a first ping. */
     let heardAt = Date.now();
-    let pingMs = 0;
+    let pingMs = pingPeriod;
     let watchdog;
     const connection = {
         close() {
@@ -2228,14 +2230,25 @@ function streamEvents(query) {
               connect();
           }, 6000);
 
+    // A stream that dies before its first ping (a phone locked within one period) is watched too.
+    const watch = () => {
+        watchdog = setInterval(() => {
+            if (source === connection && connection.silent(2.5)) {
+                connect();
+            }
+        }, pingMs);
+    };
+
+    if (pingMs > 0) {
+        watch();
+    }
+
     events.addEventListener("ping", (event) => {
-        if (pingMs === 0) {
-            pingMs = JSON.parse(event.data).every;
-            watchdog = setInterval(() => {
-                if (source === connection && connection.silent(2.5)) {
-                    connect();
-                }
-            }, pingMs);
+        const every = Number(JSON.parse(event.data).every);
+
+        if (watchdog === undefined && every > 0) {
+            pingMs = pingPeriod = every;
+            watch();
         }
 
         heardAt = Date.now();
