@@ -2248,7 +2248,7 @@ function streamEvents(query) {
             streamRetries++;
             connect();
         },
-        FIRST_DATA_MS * (streamRetries + 1),
+        Math.min(60_000, FIRST_DATA_MS * (streamRetries + 1)),
     );
 
     // A stream that dies before its first ping (a phone locked within one period) is watched too.
@@ -2470,7 +2470,11 @@ function pollEvents() {
                 stall = setTimeout(() => asking.abort(), ms);
             };
 
-            quiet(session === null ? FIRST_POLL_MS : pollStallMs(hold));
+            // Until its headers come, the server may build a whole first view (a session it no longer knows), which a
+            // retry would start again: each try in a row waits twice as long.
+            quiet(
+                (session === null ? FIRST_POLL_MS : pollStallMs(hold)) * 2 ** Math.min(failures, 4),
+            );
 
             try {
                 // A poll the server no longer knows (it started again, or this tab fell far behind) attaches afresh: it
@@ -2481,6 +2485,7 @@ function pollEvents() {
                 );
 
                 if (response.status === 401) {
+                    clearTimeout(stall);
                     stopped = true;
                     store.set({ me: null });
 

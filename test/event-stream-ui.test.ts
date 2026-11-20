@@ -123,7 +123,8 @@ test("a first stream that hears nothing at all is made again", real, async () =>
             addEventListener() {}
         };
         connect();
-        await wait(11_500);
+        const until = Date.now() + 20_000;
+        while (made.length < 2 && Date.now() < until) await wait(100);
         return JSON.stringify(made.length);
     `);
 
@@ -172,7 +173,8 @@ test(
             };
             localStorage.setItem("pocket.transport", "poll:" + Date.now());
             connect();
-            await wait(5000);
+            const until = Date.now() + 20_000;
+            while (polls < 3 && Date.now() < until) await wait(100);
             localStorage.removeItem("pocket.transport");
             return JSON.stringify(polls);
         `);

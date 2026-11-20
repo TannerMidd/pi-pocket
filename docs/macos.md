@@ -81,6 +81,7 @@ No `sudo`: the package refuses to install as root. For the sign-in item too, pas
 - Tests that press Ctrl or Alt for a shortcut. On a Mac the app takes ⌘ and Option instead (`APPLE` in `web/ui.js`), so the shortcut does not come. The PiP board tests stop at their first Alt+A, and each later test in that file needs the page that it left.
 - Time limits and animations: the performance limits of the design lint and the RSS parser, the stall limits of helpers, and the glide of new rows. The macOS runner is slower than these limits allow.
 - Some browser tests of the design workspace, drafts, linked sessions, and Markdown extension points, which time out on the runner. Nobody has looked into them yet.
+- 4 tests that passed in one run on the runner and failed in the next (a deck's keys, design versions, the gallery scan's time limit, and the limit wait's Retry now): they are flaky there, not wrong on a Mac.
 
 Tests that need Linux's `/proc` skip by themselves on macOS.
 
