@@ -216,6 +216,8 @@ test("what the loader says about modules goes to the owner alone", async () => {
     loader.watch();
 
     try {
+        // macOS's FSEvents can miss a write made just as the watch starts, more so on a busy runner.
+        await new Promise((resolve) => setTimeout(resolve, 500));
         // An edit that fails to load names what failed: words for the owner, as they can quote a secret.
         writeFileSync(
             join(dropIn, "tell.ts"),
