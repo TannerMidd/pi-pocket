@@ -18,6 +18,7 @@ import {
     origin,
     parseCookies,
     quickTunnelHost,
+    SIGN_IN_LINK_MS,
 } from "../auth.ts";
 import type { User } from "../config.ts";
 import { MAX_AVATAR, readAvatar } from "../avatars.ts";
@@ -991,6 +992,16 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 // Only this device can open a loopback link.
                 local: loopback && lan.length === 0 && tunnel === undefined,
                 ...(app.access === undefined ? {} : { access: app.access }),
+            });
+        }
+
+        // A one-time sign-in link for a window of the desktop app, which asks with the owner's token (docs/desktop-app.md).
+        if (first === "sign-in-link" && second === undefined && method === "POST") {
+            requireOwner(user);
+
+            return json(response, 200, {
+                path: `/login?once=${auth.createSignInLink()}`,
+                expiresInMs: SIGN_IN_LINK_MS,
             });
         }
 

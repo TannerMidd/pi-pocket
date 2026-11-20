@@ -37,7 +37,9 @@ export async function login(
     const form = posted
         ? new URLSearchParams((await readBody(request, 10_000)).toString("utf8"))
         : url.searchParams;
-    const token = form.get("token") ?? "";
+    // A one-time link from the desktop app (`/login?once=…`) is spent here, whatever happens next.
+    const once = form.get("once");
+    const token = (once === null ? form.get("token") : auth.redeemSignInLink(once)) ?? "";
     const next = localPath(form.get("next"));
     const signingIn = auth.tokenUser(token);
 
@@ -47,7 +49,9 @@ export async function login(
             401,
             page(
                 "Pi Pocket",
-                `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`,
+                once === null
+                    ? `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`
+                    : `<h1>Link expired</h1><p>This one-time sign-in link was used already, or it is more than a minute old. Open Pi Pocket again from its icon in the menu bar or the notification area.</p>`,
             ),
             "text/html; charset=utf-8",
         );
@@ -55,7 +59,9 @@ export async function login(
 
     const current = auth.user(request);
 
-    if (!posted && current !== undefined && current.id !== signingIn.id) {
+    // The question below would put the token in the page. A one-time link is the owner's own app window, which signs in
+    // as the owner, so it switches without asking.
+    if (!posted && once === null && current !== undefined && current.id !== signingIn.id) {
         // Signed in as someone else: switching takes a tap, so a link on another site cannot do it unnoticed.
         return send(
             response,
