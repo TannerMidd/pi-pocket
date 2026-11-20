@@ -11,6 +11,9 @@
 # which any branch's workflow can read:
 # - MACOS_INSTALLER_CERTIFICATE: the "Developer ID Installer" certificate with its key, as a base64 .p12 file;
 # - MACOS_INSTALLER_PASSWORD: the password of the .p12 file;
+# - MACOS_APPLICATION_CERTIFICATE, MACOS_APPLICATION_PASSWORD: the "Developer ID Application" certificate with its key,
+#   as a base64 .p12 file, and its password, to sign Pi Pocket.app. Without them the app is signed ad hoc, and the
+#   package is not notarized: notarization refuses code that is signed ad hoc.
 # - MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID, MACOS_NOTARY_PASSWORD (an app-specific password): for notarytool.
 #   Without them the package is signed but not notarized.
 name: macOS installer
@@ -61,10 +64,36 @@ jobs:
                   fi
                   echo "version=$version" >> "$GITHUB_OUTPUT"
 
+            # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Build the package
               env:
                   VERSION: ${{ steps.version.outputs.version }}
-              run: packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/unsigned"
+                  CERTIFICATE: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_CERTIFICATE || '' }}
+                  PASSWORD: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_PASSWORD || '' }}
+              run: |
+                  if [ -n "$CERTIFICATE" ]; then
+                      keychain="$RUNNER_TEMP/app-signing.keychain-db"
+                      p12="$RUNNER_TEMP/app-signing.p12"
+                      keychain_password="$(uuidgen)"
+                      trap 'security delete-keychain "$keychain" 2> /dev/null; rm -f "$p12"' EXIT
+                      security create-keychain -p "$keychain_password" "$keychain"
+                      security set-keychain-settings -lut 3600 "$keychain"
+                      security unlock-keychain -p "$keychain_password" "$keychain"
+                      printf '%s' "$CERTIFICATE" | base64 --decode > "$p12"
+                      security import "$p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/codesign
+                      rm -f "$p12"
+                      security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+                      security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+                      APP_SIGN_IDENTITY="$(security find-identity -v -p codesigning "$keychain" | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+                      if [ -z "$APP_SIGN_IDENTITY" ]; then
+                          echo "The certificate holds no Developer ID Application identity"
+                          exit 1
+                      fi
+                      export APP_SIGN_IDENTITY
+                  else
+                      echo "No application certificate: Pi Pocket.app is signed ad hoc."
+                  fi
+                  packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/unsigned"
 
             # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Sign and notarize the package
@@ -75,6 +104,7 @@ jobs:
                   NOTARY_APPLE_ID: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
                   NOTARY_TEAM_ID: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_TEAM_ID || '' }}
                   NOTARY_PASSWORD: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_PASSWORD || '' }}
+                  APP_SIGNED: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_CERTIFICATE != '' }}
               run: |
                   name="Pi-Pocket-$VERSION.pkg"
                   mkdir -p "$RUNNER_TEMP/package"
@@ -101,7 +131,9 @@ jobs:
                       fi
                       productsign --sign "$identity" --keychain "$keychain" --timestamp "$RUNNER_TEMP/unsigned/$name" "$final"
                       pkgutil --check-signature "$final"
-                      if [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_TEAM_ID" ] && [ -n "$NOTARY_PASSWORD" ]; then
+                      if [ "$APP_SIGNED" != true ]; then
+                          echo "Pi Pocket.app is signed ad hoc: the package is signed, not notarized."
+                      elif [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_TEAM_ID" ] && [ -n "$NOTARY_PASSWORD" ]; then
                           xcrun notarytool submit "$final" --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
                               --password "$NOTARY_PASSWORD" --wait --timeout 20m
                           xcrun stapler staple "$final"

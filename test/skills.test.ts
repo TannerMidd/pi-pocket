@@ -274,7 +274,12 @@ test("a session lists them as /skill: commands and in its system prompt", async 
     await say(app, id, "hello");
     assert.match(prompt, /- everywhere: The everywhere skill\./);
     assert.match(prompt, /- here: The here skill\./);
-    assert.ok(prompt.includes(join(project, ".agents", "skills", "<name>", "SKILL.md")));
+    // The prompt is JSON here, so a Windows path is in it with each backslash doubled.
+    assert.ok(
+        prompt.includes(
+            JSON.stringify(join(project, ".agents", "skills", "<name>", "SKILL.md")).slice(1, -1),
+        ),
+    );
     await say(app, id, "/skill:here do the thing");
     assert.match((await modelTexts(app, id)).join("\n"), /<skill name=\\"here\\" location=/);
 });

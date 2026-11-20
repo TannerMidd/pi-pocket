@@ -1,8 +1,8 @@
 # Stops a running Pi Pocket of this install. The package's preinstall and uninstall.sh source it, with APP set to the
 # install folder. Bash 3.2 (macOS's /bin/bash): no newer syntax.
 #
-# Pi Pocket is each process that runs this install's Node.js (the launcher, the server, and their Node.js children),
-# with every process that they started (the agents' commands), and the launcher's tunnel (cloudflared from the data
+# Pi Pocket is Pi Pocket.app and each process that runs this install's Node.js (the launcher, the server, and their
+# Node.js children), with every process that they started (the agents' commands), and the launcher's tunnel (cloudflared from the data
 # folder), which would run on without it. lsof finds them by the executable file that they run (its txt
 # descriptor), whatever their command line says. A program that only reads the file, such as a backup, has no txt
 # descriptor for it, so it stays.
@@ -15,6 +15,17 @@ pp_running_file() {
 
 pp_node_pids() {
     pp_running_file "$APP/node/bin/node"
+}
+
+# Pi Pocket.app, which starts a launcher of its own, where postinstall put it: by its executable, and by its command
+# line, which LaunchServices starts with the executable's path.
+pp_app_pids() {
+    local each
+
+    for each in "$HOME/Applications/Pi Pocket.app/Contents/MacOS/Pi Pocket" "$APP/Pi Pocket.app/Contents/MacOS/Pi Pocket"; do
+        pp_running_file "$each"
+        /usr/bin/pgrep -f -- "^$each( |\$)" 2>/dev/null
+    done | sort -un
 }
 
 # Each process given, with all of its descendants.
@@ -31,7 +42,7 @@ pp_tree() {
 }
 
 pi_pocket_running() {
-    [ -n "$(pp_node_pids)" ]
+    [ -n "$(pp_node_pids)$(pp_app_pids)" ]
 }
 
 # Each process given, as "<pid> <start time>": the pair stays the same process if its number is used again later.
@@ -57,13 +68,14 @@ pp_ancestors() {
 # left of the processes found before, as the launcher can start a new server. Again until none is left. Not 0 when
 # Pi Pocket still runs at the end, and 2, with nothing stopped, when this shell is one of Pi Pocket's processes.
 stop_pi_pocket() {
-    local _ pid nodes all before roots parent
+    local _ pid nodes apps all before roots parent
 
     for _ in 1 2 3 4 5; do
         nodes="$(pp_node_pids)"
+        apps="$(pp_app_pids)"
         # Found now: a child that outlives its parent goes to launchd, and pgrep -P no longer finds it.
         # shellcheck disable=SC2046,SC2086
-        all="$(pp_tree $nodes $(pp_running_file "$HOME/.pi-pocket/bin/cloudflared") | sort -un)"
+        all="$(pp_tree $apps $nodes $(pp_running_file "$HOME/.pi-pocket/bin/cloudflared") | sort -un)"
 
         if [ -z "$all" ]; then
             return 0
@@ -77,7 +89,8 @@ stop_pi_pocket() {
 
         # shellcheck disable=SC2086
         before="$(pp_started $all)"
-        roots=""
+        # The app quits as its Quit does on SIGTERM: it stops its launcher.
+        roots="$(echo $apps)"
 
         for pid in $nodes; do
             parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
@@ -94,7 +107,7 @@ stop_pi_pocket() {
 
         # The launcher waits up to 10 seconds for its server.
         for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            if [ -z "$(pp_node_pids)" ]; then
+            if [ -z "$(pp_node_pids)$(pp_app_pids)" ]; then
                 break
             fi
 

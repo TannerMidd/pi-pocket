@@ -36,7 +36,7 @@
     <choice
         id="app"
         title="Pi Pocket"
-        description="Node.js, the Pi Pocket launcher, and Pi Pocket.app in the Applications folder of your home folder. The installer gets the pi-pocket package from npm, so it needs the internet."
+        description="Node.js, the Pi Pocket launcher, Pi Pocket.app, and Pi Pocket (console).app in the Applications folder of your home folder. The installer gets the pi-pocket package from npm, so it needs the internet."
         enabled="false"
         selected="true">
         <pkg-ref id="io.github.tannermidd.pi-pocket"/>
@@ -44,7 +44,7 @@
     <choice
         id="login"
         title="Start Pi Pocket when I sign in"
-        description="Opens Pi Pocket in a Terminal window each time you sign in, with the last access mode."
+        description="Starts Pi Pocket in the menu bar each time you sign in, without a window."
         start_selected="loginItemOn()">
         <pkg-ref id="io.github.tannermidd.pi-pocket.login"/>
     </choice>

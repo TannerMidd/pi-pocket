@@ -120,10 +120,9 @@ lipo -info "$node_dir/bin/node"
 root="$work/root"
 mkdir -p "$root"
 mv "$node_dir" "$root/node"
-cp "$here/pi-pocket" "$here/Pi Pocket.command" "$here/Pi Pocket at sign-in.command" "$here/install-app.mjs" \
-    "$here/stop-pi-pocket.sh" "$here/login-item.sh" "$here/uninstall.sh" "$root/"
-chmod 755 "$root/pi-pocket" "$root/Pi Pocket.command" "$root/Pi Pocket at sign-in.command" "$root/login-item.sh" \
-    "$root/uninstall.sh"
+cp "$here/pi-pocket" "$here/Pi Pocket.command" "$here/install-app.mjs" "$here/stop-pi-pocket.sh" \
+    "$here/login-item.sh" "$here/uninstall.sh" "$root/"
+chmod 755 "$root/pi-pocket" "$root/Pi Pocket.command" "$root/login-item.sh" "$root/uninstall.sh"
 spec="pi-pocket@$version"
 
 if [ -n "$package" ]; then
@@ -131,13 +130,7 @@ if [ -n "$package" ]; then
     spec="./$(basename "$package")"
 fi
 
-# Pi Pocket.app: a shell script that opens the launcher in Terminal, with the app's icon made from the web app's.
-bundle="$root/Pi Pocket.app/Contents"
-mkdir -p "$bundle/MacOS" "$bundle/Resources"
-sed -e "s/@VERSION@/$version/g" -e "s/@BUNDLE_VERSION@/${version%%-*}/g" "$here/Info.plist" > "$bundle/Info.plist"
-plutil -lint "$bundle/Info.plist"
-cp "$here/app-executable" "$bundle/MacOS/Pi Pocket"
-chmod 755 "$bundle/MacOS/Pi Pocket"
+# The app's icon, made from the web app's.
 iconset="$work/pi-pocket.iconset"
 mkdir "$iconset"
 
@@ -150,7 +143,50 @@ for size in 16 32 128 256 512; do
     fi
 done
 
-iconutil --convert icns --output "$bundle/Resources/pi-pocket.icns" "$iconset"
+iconutil --convert icns --output "$work/pi-pocket.icns" "$iconset"
+
+# Pi Pocket.app: the desktop app (app/main.swift), for arm64 and x86_64 in one file. Signed ad hoc, as Apple silicon
+# needs, or with APP_SIGN_IDENTITY (a "Developer ID Application" identity in the keychain search list) and the hardened
+# runtime, which notarization needs.
+bundle="$root/Pi Pocket.app/Contents"
+mkdir -p "$bundle/MacOS" "$bundle/Resources"
+sed -e "s/@VERSION@/$version/g" -e "s/@BUNDLE_VERSION@/${version%%-*}/g" "$here/Info.plist" > "$bundle/Info.plist"
+plutil -lint "$bundle/Info.plist"
+sed -e "s/^let appVersion = \"0.0.0-dev\"/let appVersion = \"$version\"/" "$here/app/main.swift" > "$work/main.swift"
+grep -q "^let appVersion = \"$version\"" "$work/main.swift"
+
+for arch in arm64 x86_64; do
+    swiftc -O -swift-version 5 -target "$arch-apple-macos13.5" -framework Cocoa -framework WebKit \
+        -framework UserNotifications -o "$work/app-$arch" "$work/main.swift"
+done
+
+lipo -create "$work/app-arm64" "$work/app-x86_64" -output "$bundle/MacOS/Pi Pocket"
+chmod 755 "$bundle/MacOS/Pi Pocket"
+lipo -info "$bundle/MacOS/Pi Pocket"
+cp "$work/pi-pocket.icns" "$bundle/Resources/pi-pocket.icns"
+if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
+    codesign --force --sign "$APP_SIGN_IDENTITY" --options runtime --timestamp "$root/Pi Pocket.app"
+else
+    codesign --force --sign - --timestamp=none "$root/Pi Pocket.app"
+fi
+
+codesign --verify --strict --all-architectures --verbose=2 "$root/Pi Pocket.app"
+
+# Pi Pocket (console).app: a shell script that opens the launcher in Terminal, for access modes, tunnels, and the
+# sign-in QR code.
+console="$root/Pi Pocket (console).app/Contents"
+mkdir -p "$console/MacOS" "$console/Resources"
+cp "$bundle/Info.plist" "$console/Info.plist"
+plutil -replace CFBundleIdentifier -string io.github.tannermidd.pi-pocket.console "$console/Info.plist"
+plutil -replace CFBundleName -string "Pi Pocket (console)" "$console/Info.plist"
+plutil -replace CFBundleDisplayName -string "Pi Pocket (console)" "$console/Info.plist"
+plutil -replace CFBundleExecutable -string "Pi Pocket (console)" "$console/Info.plist"
+plutil -remove NSAppTransportSecurity "$console/Info.plist"
+plutil -insert LSUIElement -bool true "$console/Info.plist"
+plutil -lint "$console/Info.plist"
+cp "$here/app-executable" "$console/MacOS/Pi Pocket (console)"
+chmod 755 "$console/MacOS/Pi Pocket (console)"
+cp "$work/pi-pocket.icns" "$console/Resources/pi-pocket.icns"
 
 # The package scripts, with the version and the spec in place.
 scripts="$work/scripts"
@@ -159,7 +195,7 @@ cp "$here/stop-pi-pocket.sh" "$scripts/app/"
 sed -i '' -e "s|@VERSION@|$version|g" -e "s|@PACKAGE@|$spec|g" "$scripts/app/postinstall"
 chmod 755 "$scripts/app/preinstall" "$scripts/app/postinstall" "$scripts/login/postinstall"
 
-# Pi Pocket.app must stay where the payload puts it: the installer would otherwise move it onto an older copy that it
+# The two apps must stay where the payload puts them: the installer would otherwise move them onto older copies that it
 # finds elsewhere, such as ~/Applications.
 pkgbuild --analyze --root "$root" "$work/components.plist"
 index=0

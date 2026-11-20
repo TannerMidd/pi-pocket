@@ -1,16 +1,8 @@
 // The walk never follows a symlink, so a project cannot lead it out of the folder.
-import {
-    closeSync,
-    constants,
-    type Dirent,
-    fstatSync,
-    lstatSync,
-    openSync,
-    readdirSync,
-    readSync,
-} from "node:fs";
+import { closeSync, type Dirent, fstatSync, lstatSync, readdirSync, readSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import { quoted } from "../fence.ts";
+import { openNoFollowSync } from "../no-follow.ts";
 import { figHeaderReason } from "./scan-fig-container.ts";
 
 const SKIP = new Set(
@@ -291,7 +283,7 @@ export function readHead(path: string, limit: number = LIMITS.fileBytes): string
 }
 
 function readBytes(path: string, limit: number): Buffer {
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const fd = openNoFollowSync(path);
 
     try {
         // No more than the file has (a regular file), so that a small file does not cost a large buffer.

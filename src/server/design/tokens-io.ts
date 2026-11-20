@@ -3,11 +3,9 @@
 import { randomUUID } from "node:crypto";
 import {
     closeSync,
-    constants,
     fstatSync,
     lstatSync,
     mkdirSync,
-    openSync,
     readdirSync,
     readFileSync,
     readSync,
@@ -16,6 +14,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import { openNoFollowSync } from "../no-follow.ts";
 import type { SystemProblem } from "./system-types.ts";
 import { LIMITS, boundedText, type RawSystem } from "./tokens-base.ts";
 import { forgetSystem } from "./tokens-cache.ts";
@@ -88,7 +87,7 @@ function hasDesignFolder(cwd: string): boolean {
 }
 
 function readHead(path: string, max: number): { bytes: Buffer; more: boolean } {
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const fd = openNoFollowSync(path);
 
     try {
         if (!fstatSync(fd).isFile()) {

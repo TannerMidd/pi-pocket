@@ -20,8 +20,8 @@ fi
 . "$(dirname "$0")/stop-pi-pocket.sh"
 
 if ! stop_pi_pocket; then
-    echo "Pi Pocket still runs: quit it (press q in its window), then install again."
+    echo "Pi Pocket still runs: quit it (Pi Pocket in the menu bar, then Quit), then install again."
     exit 1
 fi
 
-rm -rf "$APP/node" "$APP/Pi Pocket.app"
+rm -rf "$APP/node" "$APP/Pi Pocket.app" "$APP/Pi Pocket (console).app" "$APP/Pi Pocket at sign-in.command"

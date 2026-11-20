@@ -179,21 +179,28 @@ test("npm latest chooses the version; GitHub supplies that tag's notes, or an un
     mocked.mock.restore();
 });
 
-test("an update state folder that the server cannot write stops an npm update before it starts", async (t) => {
-    const dir = mkdtempSync(join(tmpdir(), "pocket-npm-writable-"));
-    const root = join(dir, "lib", "node_modules", "pi-pocket");
-    const state = join(dir, "lib", "node_modules", ".pi-pocket-update");
+// Windows has no mode bits that make a folder read-only for its owner, so `chmod` cannot set the case up there.
+test(
+    "an update state folder that the server cannot write stops an npm update before it starts",
+    {
+        skip: process.platform === "win32",
+    },
+    async (t) => {
+        const dir = mkdtempSync(join(tmpdir(), "pocket-npm-writable-"));
+        const root = join(dir, "lib", "node_modules", "pi-pocket");
+        const state = join(dir, "lib", "node_modules", ".pi-pocket-update");
 
-    t.after(() => {
-        chmodSync(state, 0o755);
-        rmSync(dir, { recursive: true, force: true });
-    });
-    mkdirSync(root, { recursive: true });
-    mkdirSync(state);
-    assert.equal(await npmWritable(root), true);
-    chmodSync(state, 0o555);
-    assert.equal(await npmWritable(root), process.getuid?.() === 0);
-});
+        t.after(() => {
+            chmodSync(state, 0o755);
+            rmSync(dir, { recursive: true, force: true });
+        });
+        mkdirSync(root, { recursive: true });
+        mkdirSync(state);
+        assert.equal(await npmWritable(root), true);
+        chmodSync(state, 0o555);
+        assert.equal(await npmWritable(root), process.getuid?.() === 0);
+    },
+);
 
 test("warnings after the displayed notes limit still require care", async (t) => {
     let alert = "WARNING";

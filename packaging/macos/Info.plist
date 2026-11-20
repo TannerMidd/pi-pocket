@@ -24,8 +24,22 @@
     <string>@BUNDLE_VERSION@</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.5</string>
-    <key>LSUIElement</key>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+    <!-- The window shows the server on this Mac, over http://127.0.0.1. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright (c) 2026 Tanner Middleton. MIT License.</string>
 </dict>

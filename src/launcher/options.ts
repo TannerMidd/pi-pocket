@@ -27,6 +27,9 @@ Usage: pi-pocket [options]
                       address and an access mode. Its folder must be owned by you or root and writable
                       by no one else (see Remote access in the README)
       --rotate-token  Replace the owner sign-in link, signing out the devices that used it
+      --desktop       For the desktop app: this device only (unless --access says otherwise), no menu,
+                      no keys, no sign-in link or QR code, and it stops when its input closes. The
+                      access choice is not saved
   -h, --help          Show this help
 
 Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_DIR, PI_POCKET_HOST, PI_POCKET_SOCKET,
@@ -41,6 +44,7 @@ export interface Options {
     cwd: string;
     data: string;
     rotateToken: boolean;
+    desktop: boolean;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -54,7 +58,11 @@ export function parseArgs(argv: string[]): Options {
         cwd: process.cwd(),
         data: resolve(process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket")),
         rotateToken: false,
+        desktop: false,
     };
+    let accessGiven = false;
+    let hostGiven = false;
+    let socketGiven = false;
     const tcpFlags: string[] = [];
 
     for (let index = 0; index < argv.length; index++) {
@@ -78,16 +86,20 @@ export function parseArgs(argv: string[]): Options {
             }
 
             options.access = mode as AccessMode;
+            accessGiven = true;
             tcpFlags.push(arg);
         } else if (arg === "--yes" || arg === "-y") {
             options.yes = true;
         } else if (arg === "--host") {
             options.host = value();
+            hostGiven = true;
             tcpFlags.push(arg);
         } else if (arg === "--port" || arg === "-p") {
             options.port = Number(value());
             tcpFlags.push(arg);
         } else if (arg === "--socket") {
+            socketGiven = true;
+
             try {
                 options.socket = socketArgument(value());
             } catch (error) {
@@ -99,12 +111,27 @@ export function parseArgs(argv: string[]): Options {
             options.data = resolve(value());
         } else if (arg === "--rotate-token") {
             options.rotateToken = true;
+        } else if (arg === "--desktop") {
+            options.desktop = true;
         } else if (arg === "--help" || arg === "-h") {
             console.log(HELP);
             process.exit(0);
         } else {
             fail(`Unknown argument: ${arg}\n\n${HELP}`);
         }
+    }
+
+    if (options.desktop) {
+        if (socketGiven) {
+            fail("--desktop cannot be combined with --socket: the app window needs an address");
+        }
+
+        // The app window is on this machine: it shares nothing with other devices unless its own arguments say so. The
+        // environment of a login shell (PI_POCKET_ACCESS, PI_POCKET_HOST, PI_POCKET_SOCKET) does not count.
+        options.yes = true;
+        options.access = accessGiven ? options.access : "local";
+        options.host = hostGiven ? options.host : undefined;
+        options.socket = undefined;
     }
 
     try {
