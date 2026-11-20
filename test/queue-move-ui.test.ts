@@ -32,7 +32,7 @@ let server: Server;
 let browsers: Browsers;
 let page: BrowserPage;
 let base: string;
-const moves = new Map<string, number>();
+const moves = new Map<string, number[]>();
 
 before(async () => {
     if (chromium === undefined) {
@@ -64,7 +64,9 @@ before(async () => {
         const path = request.url;
 
         if (request.method === "POST" && path?.endsWith("/move")) {
-            response.once("finish", () => moves.set(path, response.statusCode));
+            response.once("finish", () => {
+                moves.set(path, [...(moves.get(path) ?? []), response.statusCode]);
+            });
         }
 
         void handler(request, response);
@@ -179,7 +181,7 @@ test(
         const releaseViews = delayViews(t, id);
 
         assert.equal((await page.click({ selector: move })).covered, undefined);
-        assert.equal(moves.get(path), 200);
+        assert.deepEqual(moves.get(path), [200]);
         assert.equal((await inbox(id))[0]?.mode, "followUp");
         assert.equal(app.isBusy(id), true);
         await until(
@@ -199,6 +201,30 @@ test(
     },
 );
 
+test("two quick clicks on Move to queue leave one Queue card without an error", real, async (t) => {
+    const { id, releaseBash, path } = await startSteer(t);
+    const releaseViews = delayViews(t, id);
+
+    // Both clicks are on Move to queue, before either reply can change it to Steer now.
+    await page.evaluate(`
+        const button = document.querySelector(${JSON.stringify(move)});
+        button.click();
+        button.click();
+    `);
+    await until(() => moves.get(path)?.length === 2, "both move replies");
+    assert.deepEqual(moves.get(path), [200, 200]);
+    assert.deepEqual(
+        (await inbox(id)).map((item) => item.mode),
+        ["followUp"],
+    );
+    await until(async () => (await textOf(move)) === "Steer now", "the Queue card");
+    assert.equal((await textOf(`${card} .queued-mode`)).startsWith("Queue"), true);
+    assert.equal(await textOf(".notice.error .notice-text"), "");
+    releaseViews();
+    releaseBash();
+    await until(() => !app.isBusy(id), "Pi to finish both messages");
+});
+
 test("a move from a stale card says when the Steer has already gone to Pi", real, async (t) => {
     const { id, releaseBash, path } = await startSteer(t);
     const releaseViews = delayViews(t, id);
@@ -209,7 +235,7 @@ test("a move from a stale card says when the Steer has already gone to Pi", real
         "Pi to take the Steer at the tool boundary",
     );
     assert.equal((await page.click({ selector: move })).covered, undefined);
-    assert.equal(moves.get(path), 409);
+    assert.deepEqual(moves.get(path), [409]);
     await until(
         async () =>
             (await textOf(".notice.error .notice-text")) === "That message has already gone to Pi.",
