@@ -50,7 +50,7 @@ ask() {
     [ "$answer" = y ] || [ "$answer" = Y ] || [ "$answer" = yes ]
 }
 
-if [ ! -f "$APP/pi-pocket" ] || [ ! -f "$APP/install-app.mjs" ]; then
+if [ ! -f "$APP/pi-pocket" ] || [ ! -f "$APP/place-app.mjs" ]; then
     echo "No Pi Pocket package install in $APP." >&2
     exit 1
 fi

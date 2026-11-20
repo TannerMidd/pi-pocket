@@ -163,6 +163,82 @@ namespace PiPocket
             }
         }
 
+        /// -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release (the same order as
+        /// CompareVersions in pi-pocket.iss).
+        public static int CompareVersions(string a, string b)
+        {
+            string[] left = a.Split('+')[0].Split(new char[] { '-' }, 2);
+            string[] right = b.Split('+')[0].Split(new char[] { '-' }, 2);
+            string[] leftCore = left[0].Split('.');
+            string[] rightCore = right[0].Split('.');
+
+            for (int index = 0; index < 3; index++)
+            {
+                long x = index < leftCore.Length ? Number(leftCore[index]) : 0;
+                long y = index < rightCore.Length ? Number(rightCore[index]) : 0;
+
+                if (x != y)
+                {
+                    return x < y ? -1 : 1;
+                }
+            }
+
+            if (left.Length == 1 || right.Length == 1)
+            {
+                return left.Length == right.Length ? 0 : (left.Length == 1 ? 1 : -1);
+            }
+
+            string[] leftPre = left[1].Split('.');
+            string[] rightPre = right[1].Split('.');
+
+            for (int index = 0; index < Math.Max(leftPre.Length, rightPre.Length); index++)
+            {
+                if (index >= leftPre.Length || index >= rightPre.Length)
+                {
+                    return index >= leftPre.Length ? -1 : 1;
+                }
+
+                string x = leftPre[index];
+                string y = rightPre[index];
+                int order = Digits(x) && Digits(y)
+                    ? Number(x).CompareTo(Number(y))
+                    : string.CompareOrdinal(x, y);
+
+                if (order != 0)
+                {
+                    return order < 0 ? -1 : 1;
+                }
+            }
+
+            return 0;
+        }
+
+        static bool Digits(string text)
+        {
+            if (text.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (char each in text)
+            {
+                if (each < '0' || each > '9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        static long Number(string text)
+        {
+            long value;
+
+            return long.TryParse(text, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out value) ? value : 0;
+        }
+
         static int Signal(string name)
         {
             try
@@ -307,6 +383,15 @@ namespace PiPocket
                     return;
                 }
 
+                string[] problem = PackageProblem();
+
+                if (problem != null)
+                {
+                    OnUi(delegate { Fail(problem[0], problem[1]); });
+
+                    return;
+                }
+
                 StartLauncher();
                 Stopwatch waited = Stopwatch.StartNew();
 
@@ -424,6 +509,48 @@ namespace PiPocket
             Log("Pi Pocket desktop app " + Program.Version + ", " + DateTime.Now.ToString("u"));
         }
 
+        /// What is wrong with the pi-pocket package that Setup put in app\, as a title and what to do; null when nothing is.
+        /// A package older than this app is one that Setup did not replace: an older launcher refuses --desktop, so it
+        /// must not start. A newer one is an in-app update, and stays.
+        string[] PackageProblem()
+        {
+            string folder = Path.Combine(appDir, @"app\node_modules\pi-pocket");
+            string again = "Run Pi Pocket Setup " + Program.Version + " again. Your sessions and settings stay.";
+            string version = null;
+
+            try
+            {
+                if (File.Exists(Path.Combine(folder, @"bin\pi-pocket.js")))
+                {
+                    Dictionary<string, object> manifest = new JavaScriptSerializer()
+                        .Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(folder, "package.json")));
+                    object value;
+                    version = manifest.TryGetValue("version", out value) ? value as string : null;
+                }
+            }
+            catch (Exception)
+            {
+                version = null;
+            }
+
+            if (version == null)
+            {
+                return new string[] { "Pi Pocket is not fully installed: " + folder + " holds no pi-pocket package.", again };
+            }
+
+            if (!string.Equals(Program.Version, "0.0.0-dev") && Program.CompareVersions(version, Program.Version) < 0)
+            {
+                return new string[]
+                {
+                    "The pi-pocket package of Pi Pocket is version " + version + ", older than this app (" +
+                        Program.Version + ").",
+                    "Setup did not finish putting the package in place, so Pi Pocket cannot start. " + again
+                };
+            }
+
+            return null;
+        }
+
         void StartLauncher()
         {
             string node = Path.Combine(appDir, @"node\node.exe");
@@ -539,6 +666,11 @@ namespace PiPocket
 
         void Fail(string message)
         {
+            Fail(message, launcher == null ? null : "The details are in " + logFile);
+        }
+
+        void Fail(string message, string advice)
+        {
             if (quitting)
             {
                 return;
@@ -546,8 +678,9 @@ namespace PiPocket
 
             quitting = true;
             tray.Visible = false;
-            string details = launcher == null ? "" : "\r\n\r\nThe details are in " + logFile;
-            MessageBox.Show(message + details, "Pi Pocket", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Log("Error: " + message + (advice == null ? "" : " " + advice));
+            MessageBox.Show(message + (advice == null ? "" : "\r\n\r\n" + advice), "Pi Pocket", MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
             Stop();
         }
 

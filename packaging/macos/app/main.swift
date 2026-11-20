@@ -74,6 +74,86 @@ func jsString(_ text: String) -> String {
     return String(array.dropFirst().dropLast())
 }
 
+/// -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release (place-app.mjs's
+/// compareVersions).
+func compareVersions(_ a: String, _ b: String) -> Int {
+    func parse(_ text: String) -> (core: [Int], pre: [String]) {
+        let plain = String(text.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let parts = plain.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let core = parts[0].split(separator: ".", omittingEmptySubsequences: false).map { Int($0) ?? 0 }
+        let pre = parts.count > 1 ? parts[1].split(separator: ".", omittingEmptySubsequences: false).map(String.init) : []
+
+        return (core, pre)
+    }
+
+    func digits(_ text: String) -> Bool {
+        return !text.isEmpty && text.allSatisfy { $0 >= "0" && $0 <= "9" }
+    }
+
+    let left = parse(a)
+    let right = parse(b)
+
+    for index in 0..<3 {
+        let x = index < left.core.count ? left.core[index] : 0
+        let y = index < right.core.count ? right.core[index] : 0
+
+        if x != y {
+            return x < y ? -1 : 1
+        }
+    }
+
+    if left.pre.isEmpty || right.pre.isEmpty {
+        return left.pre.isEmpty == right.pre.isEmpty ? 0 : (left.pre.isEmpty ? 1 : -1)
+    }
+
+    for index in 0..<max(left.pre.count, right.pre.count) {
+        if index >= left.pre.count || index >= right.pre.count {
+            return index >= left.pre.count ? -1 : 1
+        }
+
+        let x = left.pre[index]
+        let y = right.pre[index]
+        let order: Int
+
+        if digits(x), digits(y), let m = Int(x), let n = Int(y) {
+            order = m < n ? -1 : m > n ? 1 : 0
+        } else {
+            order = x < y ? -1 : x > y ? 1 : 0
+        }
+
+        if order != 0 {
+            return order
+        }
+    }
+
+    return 0
+}
+
+/// What is wrong with the pi-pocket package that the installer put in app/, as a title and what to do; nil when
+/// nothing is. A package older than this app is one that the install did not replace: an older launcher refuses
+/// --desktop, so it must not start. A newer one is an in-app update, and stays.
+func packageProblem() -> (title: String, advice: String)? {
+    let folder = appFolder.appendingPathComponent("app/lib/node_modules/pi-pocket")
+    let again = "Install Pi Pocket \(appVersion) again: open its .pkg file. Your sessions and settings stay."
+
+    guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("bin/pi-pocket.js").path),
+        let data = try? Data(contentsOf: folder.appendingPathComponent("package.json")),
+        let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let version = manifest["version"] as? String
+    else {
+        return ("Pi Pocket is not fully installed: \(folder.path) holds no pi-pocket package.", again)
+    }
+
+    if appVersion != "0.0.0-dev" && compareVersions(version, appVersion) < 0 {
+        return (
+            "The pi-pocket package of Pi Pocket is version \(version), older than this app (\(appVersion)).",
+            "The install did not finish putting the package in place, so Pi Pocket cannot start. \(again)"
+        )
+    }
+
+    return nil
+}
+
 /// The launcher that runs, from launcher-running.json, if its server answers; for pid nil, any launcher's.
 func runningServer(pid: Int32?) -> URL? {
     guard let data = try? Data(contentsOf: dataFolder.appendingPathComponent("launcher-running.json")),
@@ -258,6 +338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             return
         }
 
+        if let problem = packageProblem() {
+            DispatchQueue.main.async { self.fail(problem.title, advice: problem.advice) }
+
+            return
+        }
+
         do {
             try startLauncher()
         } catch {
@@ -376,16 +462,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         fail("\(ready ? "Pi Pocket stopped" : "Pi Pocket could not start") (exit code \(process.terminationStatus)).")
     }
 
-    func fail(_ message: String) {
+    func fail(_ message: String, advice: String? = nil) {
         if quitting {
             return
         }
 
+        log("Error: \(message) \(advice ?? "")")
         let alert = NSAlert()
 
         alert.alertStyle = .critical
         alert.messageText = message
-        alert.informativeText = launcher == nil ? "" : "The details are in \(logFile.path)."
+        alert.informativeText = advice ?? (launcher == nil ? "" : "The details are in \(logFile.path).")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
         NSApp.terminate(nil)

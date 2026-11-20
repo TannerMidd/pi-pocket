@@ -1,13 +1,12 @@
 #!/bin/bash
-# Runs after the payload is in place, as the user: it installs the pi-pocket npm package into the private prefix
-# (install-app.mjs), moves Pi Pocket.app and Pi Pocket (console).app into ~/Applications, and turns the sign-in item
-# off (the "Start Pi Pocket when I sign in" choice, which runs after this, turns it on again; it starts on when the item
+# Runs after the payload is in place, as the user: it puts the pi-pocket package that the payload holds in app.new/ in
+# place of the private prefix app/ (place-app.mjs, with no network), moves Pi Pocket.app and Pi Pocket (console).app
+# into ~/Applications, and turns the sign-in item off (the "Start Pi Pocket when I sign in" choice, which runs after this, turns it on again; it starts on when the item
 # was on before). A GUI install then opens Pi Pocket.app.
-# build.sh puts the version and the package spec in place of the two markers below.
+# build.sh puts the version in place of the marker below.
 set -u
 APP="$2"
 VERSION="@VERSION@"
-PACKAGE="@PACKAGE@"
 
 if [ "$(id -u)" = 0 ] || [ "$APP" != "$HOME/Library/Application Support/Pi Pocket" ]; then
     echo "Pi Pocket installs for the current user only: install it for yourself, without sudo, not in $APP."
@@ -16,8 +15,8 @@ fi
 
 "$APP/login-item.sh" off
 
-if ! "$APP/node/bin/node" "$APP/install-app.mjs" "$PACKAGE" "$VERSION"; then
-    echo "Could not install the pi-pocket package from npm. Check the internet connection, then install again."
+if ! "$APP/node/bin/node" "$APP/place-app.mjs" "$VERSION"; then
+    echo "Could not put the pi-pocket package in place. Install Pi Pocket $VERSION again."
     echo "The details are in $APP/install.log:"
     cat "$APP/install.log"
     exit 1

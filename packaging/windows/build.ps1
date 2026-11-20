@@ -1,14 +1,18 @@
 # Builds Pi-Pocket-Setup-<version>.exe on Windows: it downloads the pinned Node.js zip and Inno Setup, checks each
 # against the SHA256 below, compiles the desktop app (PiPocket.cs) with the C# compiler of the .NET Framework that
-# Windows has, and compiles pi-pocket.iss. The workflows run it (.github/workflows/windows*.yml).
+# Windows has, and compiles pi-pocket.iss. It puts the pi-pocket package of a checkout in it, with its dependencies
+# (packaging/bundle-app.mjs), so Setup needs no npm and no network. The workflows run it (.github/workflows/windows*.yml).
 #
-#   pwsh packaging/windows/build.ps1 -Version 0.29.0 [-OutDir out] [-SignThumbprint <certificate SHA1>]
+#   pwsh packaging/windows/build.ps1 -Version 0.29.0 [-OutDir out] [-Source <checkout>] [-SignThumbprint <SHA1>]
 #
+# -Source is the checkout to pack, with -Version in its package.json: by default the one this script is in (the release
+# workflow gives the release tag's).
 # -SignThumbprint signs Pi Pocket.exe, Setup, and its uninstaller with that certificate from the user's certificate
 # store.
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$OutDir = (Join-Path $PSScriptRoot "out"),
+    [string]$Source = (Join-Path $PSScriptRoot "..\.."),
     [string]$SignThumbprint = ""
 )
 
@@ -50,6 +54,14 @@ $nodeDir = Join-Path $work $nodeName
 
 if (-not (Test-Path (Join-Path $nodeDir "node.exe"))) {
     throw "The Node.js zip has no $nodeName\node.exe"
+}
+
+# The app folder: this Node.js and its npm make it, as they make an in-app update later.
+$appDir = Join-Path $work "app"
+& (Join-Path $nodeDir "node.exe") (Join-Path $PSScriptRoot "..\bundle-app.mjs") $Source $appDir $Version
+
+if ($LASTEXITCODE -ne 0) {
+    throw "bundle-app.mjs exited with $LASTEXITCODE"
 }
 
 # Pi Pocket.exe: C# 5, for the compiler that every Windows 10 and 11 has in its .NET Framework 4.x. Nothing to download.
@@ -95,7 +107,7 @@ if (-not (Test-Path $iscc)) {
     throw "No ISCC.exe in $innoDir"
 }
 
-$arguments = @("/Qp", "/DAppVersion=$Version", "/DNodeDir=$nodeDir", "/DOutputDir=$OutDir", "/DDesktopDir=$desktop")
+$arguments = @("/Qp", "/DAppVersion=$Version", "/DNodeDir=$nodeDir", "/DOutputDir=$OutDir", "/DDesktopDir=$desktop", "/DAppDir=$appDir")
 
 if ($SignThumbprint -ne "") {
     $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"

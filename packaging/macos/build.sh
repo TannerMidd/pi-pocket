@@ -2,12 +2,13 @@
 # Builds Pi-Pocket-<version>.pkg on macOS (pkgbuild and productbuild, from Xcode's command line tools). It downloads
 # the pinned Node.js tarballs for arm64 and x64, checks each against the SHA256 below, and joins their two node
 # executables into one universal file with lipo: one package for both kinds of Mac, with the official code in each half.
-# The workflows run it (.github/workflows/macos*.yml).
+# It puts the pi-pocket package of a checkout in it, with its dependencies (packaging/bundle-app.mjs), so the install
+# needs no npm and no network. The workflows run it (.github/workflows/macos*.yml).
 #
-#   packaging/macos/build.sh <version> [out folder] [--package <pi-pocket .tgz>]
+#   packaging/macos/build.sh <version> [out folder] [--source <checkout>]
 #
-# --package puts that tarball in the package, to install instead of pi-pocket@<version> from npm (the macOS CI job
-# packs one from its checkout). The package is unsigned: the workflow signs it when it has the secrets.
+# --source is the checkout to pack, with <version> in its package.json: by default the one this script is in (the release
+# workflow gives the release tag's). The package is unsigned: the workflow signs it when it has the secrets.
 set -euo pipefail
 
 # To move to another Node.js, take the darwin-arm64.tar.xz and darwin-x64.tar.xz lines of
@@ -20,12 +21,12 @@ here="$(cd "$(dirname "$0")" && pwd -P)"
 repo="$(cd "$here/../.." && pwd -P)"
 version=""
 out="$here/out"
-package=""
+checkout="$repo"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --package)
-            package="$2"
+        --source)
+            checkout="$2"
             shift 2
             ;;
         *)
@@ -45,8 +46,8 @@ if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
     exit 1
 fi
 
-if [ -n "$package" ] && [[ ! "$package" =~ \.tgz$ || ! -f "$package" ]]; then
-    echo "--package $package is not a .tgz file" >&2
+if [ ! -f "$checkout/package.json" ]; then
+    echo "--source $checkout is not a checkout of pi-pocket" >&2
     exit 1
 fi
 
@@ -120,14 +121,23 @@ lipo -info "$node_dir/bin/node"
 root="$work/root"
 mkdir -p "$root"
 mv "$node_dir" "$root/node"
-cp "$here/pi-pocket" "$here/Pi Pocket.command" "$here/install-app.mjs" "$here/stop-pi-pocket.sh" \
+cp "$here/pi-pocket" "$here/Pi Pocket.command" "$here/place-app.mjs" "$here/stop-pi-pocket.sh" \
     "$here/login-item.sh" "$here/uninstall.sh" "$root/"
 chmod 755 "$root/pi-pocket" "$root/Pi Pocket.command" "$root/login-item.sh" "$root/uninstall.sh"
-spec="pi-pocket@$version"
 
-if [ -n "$package" ]; then
-    cp "$package" "$root/"
-    spec="./$(basename "$package")"
+# The app folder, as app.new: postinstall (place-app.mjs) puts it in place of app/, unless app/ holds a newer pi-pocket
+# that the app already updated to. This Node.js and its npm make it, as they make an in-app update later.
+"$root/node/bin/node" "$repo/packaging/bundle-app.mjs" "$checkout" "$root/app.new" "$version"
+
+# Notarization needs each Mach-O file signed with the Developer ID and the hardened runtime: the prebuilt native modules
+# of the packages. Without the identity they stay as npm delivers them.
+if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
+    while IFS= read -r -d '' file; do
+        if file -b "$file" | grep -q Mach-O; then
+            codesign --force --sign "$APP_SIGN_IDENTITY" --options runtime --timestamp "$file"
+            echo "Signed ${file#"$root/"}"
+        fi
+    done < <(find "$root/app.new" -type f \( -name '*.node' -o -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print0)
 fi
 
 # The app's icon, made from the web app's.
@@ -188,11 +198,11 @@ cp "$here/app-executable" "$console/MacOS/Pi Pocket (console)"
 chmod 755 "$console/MacOS/Pi Pocket (console)"
 cp "$work/pi-pocket.icns" "$console/Resources/pi-pocket.icns"
 
-# The package scripts, with the version and the spec in place.
+# The package scripts, with the version in place.
 scripts="$work/scripts"
 cp -R "$here/scripts" "$scripts"
 cp "$here/stop-pi-pocket.sh" "$scripts/app/"
-sed -i '' -e "s|@VERSION@|$version|g" -e "s|@PACKAGE@|$spec|g" "$scripts/app/postinstall"
+sed -i '' -e "s|@VERSION@|$version|g" "$scripts/app/postinstall"
 chmod 755 "$scripts/app/preinstall" "$scripts/app/postinstall" "$scripts/login/postinstall"
 
 # The two apps must stay where the payload puts them: the installer would otherwise move them onto older copies that it

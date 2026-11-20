@@ -1,6 +1,7 @@
 # Builds the macOS package (packaging/macos) for each published release, and attaches Pi-Pocket-<version>.pkg and its
 # SHA256 to the release. It runs beside publish.yml and does not wait for it: a failure here does not stop or change
-# the npm publish. The package gets pi-pocket@<version> from npm when it installs.
+# the npm publish. The package holds the package of the release tag with its dependencies (packaging/bundle-app.mjs
+# packs the tag here), so it needs neither npm nor the npm release when it installs.
 #
 # A run by hand builds the package for an existing tag (gh workflow run macos-installer.yml -f tag=v0.29.0) from the
 # branch it runs on, as a workflow artifact only: it attaches nothing to the release.
@@ -63,6 +64,8 @@ jobs:
                       exit 1
                   fi
                   echo "version=$version" >> "$GITHUB_OUTPUT"
+                  # The package to bundle is the tag's, also for a run by hand on another branch.
+                  git worktree add --detach "$RUNNER_TEMP/source" "refs/tags/$TAG"
 
             # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Build the package
@@ -93,7 +96,7 @@ jobs:
                   else
                       echo "No application certificate: Pi Pocket.app is signed ad hoc."
                   fi
-                  packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/unsigned"
+                  packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/unsigned" --source "$RUNNER_TEMP/source"
 
             # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Sign and notarize the package
