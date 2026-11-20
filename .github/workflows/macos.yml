@@ -136,10 +136,18 @@ jobs:
                       echo "The launcher printed no sign-in link"
                       exit 1
                   fi
-                  # It signs in, then sends the browser on to the app.
+                  # It signs in with a cookie, then sends the browser on to the app, which then answers for that cookie.
                   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -c "$RUNNER_TEMP/cookies" "$login")"
-                  echo "The sign-in link answered $code, with $(grep -vc '^#' "$RUNNER_TEMP/cookies" || true) cookies"
-                  if [ "$code" -ge 400 ]; then
+                  echo "The sign-in link answered $code"
+                  if [ "$code" != 303 ] || ! grep -q $'\tpocket_auth\t' "$RUNNER_TEMP/cookies"; then
+                      echo "The sign-in link did not answer 303 with the pocket_auth cookie"
+                      cat "$RUNNER_TEMP/cookies"
+                      exit 1
+                  fi
+                  me="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$RUNNER_TEMP/cookies" http://127.0.0.1:8787/api/me)"
+                  anonymous="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8787/api/me)"
+                  echo "/api/me answered $me with the cookie, and $anonymous without it"
+                  if [ "$me" != 200 ] || [ "$anonymous" -lt 400 ]; then
                       exit 1
                   fi
 

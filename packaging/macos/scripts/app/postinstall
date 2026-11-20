@@ -27,17 +27,20 @@ fi
 cat "$APP/install.log"
 
 # Only an earlier Pi Pocket.app is replaced, not another app of the same name.
+launcher="$BUNDLE"
+
 if [ -e "$BUNDLE" ] && [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUNDLE/Contents/Info.plist" \
     2>/dev/null)" != "io.github.tannermidd.pi-pocket.launcher" ]; then
     echo "$BUNDLE is another app: Pi Pocket.app stays in $APP."
+    launcher="$APP/Pi Pocket.app"
 else
     mkdir -p "$HOME/Applications" && rm -rf "$BUNDLE" && mv "$APP/Pi Pocket.app" "$BUNDLE" || exit 1
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
         -f "$BUNDLE" 2> /dev/null || true
 fi
 
-if [ "${COMMAND_LINE_INSTALL:-}" != 1 ] && [ -d "$BUNDLE" ]; then
-    /usr/bin/open "$BUNDLE" || true
+if [ "${COMMAND_LINE_INSTALL:-}" != 1 ]; then
+    /usr/bin/open "$launcher" || true
 fi
 
 exit 0
