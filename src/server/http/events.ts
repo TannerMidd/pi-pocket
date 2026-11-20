@@ -204,6 +204,7 @@ export function createEventStreams(app: PocketApp) {
         if (response !== undefined && !response.writableEnded) {
             json(response, 200, {
                 session: poller.id,
+                hold: POLL_HOLD_MS,
                 events: poller.queue.map(({ seq, event, data }) => ({ seq, event, data })),
             });
 
@@ -383,7 +384,7 @@ export function createEventStreams(app: PocketApp) {
             if (!pollers.has(created.id)) {
                 app.detach(created.client);
 
-                return json(response, 200, { session: created.id, events: [] });
+                return json(response, 200, { session: created.id, hold: POLL_HOLD_MS, events: [] });
             }
 
             // The tab went while its first view was built: nothing waits for it now, so it goes at once.

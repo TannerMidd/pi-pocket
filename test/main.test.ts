@@ -159,8 +159,11 @@ test(
     "a restart asked for while starting waits for the start, then restarts",
     { skip: posix },
     async () => {
-        const { proc, data } = server("early", await freePort());
-        // As soon as the server listens for it, which is before it starts loading the app; elsewhere, a moment in.
+        const port = await freePort();
+        const { proc, data } = server("early", port);
+        // As soon as the server listens for it, which is before it starts loading the app. Without /proc (macOS), once
+        // it answers HTTP: it listens for the signal before it opens its port, and a slow start can take longer than
+        // any fixed wait.
         const until = Date.now() + 5000;
 
         while (catchesRestart(proc.pid!) === false && Date.now() < until) {
@@ -168,7 +171,20 @@ test(
         }
 
         if (catchesRestart(proc.pid!) === undefined) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            const answers = Date.now() + 30_000;
+
+            while (Date.now() < answers) {
+                const answered = await fetch(`http://127.0.0.1:${port}/`).then(
+                    () => true,
+                    () => false,
+                );
+
+                if (answered) {
+                    break;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
         }
 
         proc.kill("SIGUSR2");

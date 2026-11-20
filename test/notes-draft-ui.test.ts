@@ -2,6 +2,7 @@
 import {
     type App,
     cleanUp,
+    loopback,
     newSession,
     openApp,
     owner,
@@ -74,10 +75,14 @@ before(async () => {
 
     app = await openApp(scriptedModel());
     server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.2", port: 0 }, restart: () => {} }),
+        createHandler({ app, listen: { host: loopback, port: 0 }, restart: () => {} }),
     );
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.2", resolve));
-    base = `http://127.0.0.2:${(server.address() as { port: number }).port}`;
+    // A listen that fails ends the hook, rather than leave it waiting.
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, loopback, resolve);
+    });
+    base = `http://${loopback}:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
         dataDir: mkdtempSync(join(root, "notes-draft-browser-")),
         load: async () => undefined,

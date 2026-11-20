@@ -163,6 +163,8 @@ test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, an
 
     await app.attach(tab.client);
     app.loader.watch();
+    // On macOS a watch starts a moment after the call: a write before that is not seen.
+    await new Promise((resolve) => setTimeout(resolve, process.platform === "darwin" ? 1000 : 0));
 
     try {
         writeFileSync(join(dropIns, "shout.ts"), shout("!!"));
