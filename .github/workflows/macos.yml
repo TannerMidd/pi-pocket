@@ -412,6 +412,10 @@ jobs:
             # one run and failed in the next: they are flaky on the runner.
             - name: Tests
               timeout-minutes: 30
+              # The browser tests time out at random on the macOS runner (a different 4 in each run), so they are left
+              # out here, as on Windows: a browser path that does not exist makes each one skip itself.
+              env:
+                  PI_POCKET_BROWSER: /nonexistent/no-browser-on-macos-ci
               run: >
                   node --test --test-concurrency=4 --test-timeout=300000
                   --test-skip-pattern="a taken app key opens neither a sheet nor the launcher"
