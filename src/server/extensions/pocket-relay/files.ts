@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { basename, extname, relative, resolve, sep } from "node:path";
 import { workspaceScheme } from "../../paths.ts";
+import { isEnvFile } from "../../secrets.ts";
 import type { RelayOutFile } from "./types.ts";
 
 /** What one reply sends in all, whatever the connector's caps: the relay holds it in memory while it sends. */
@@ -100,6 +101,12 @@ export async function readFiles(
         ) {
             throw new Error(
                 `${shown} is in a hidden file or folder, which can hold secrets: the relay does not send it. Nothing was sent.`,
+            );
+        }
+
+        if (isEnvFile(basename(real))) {
+            throw new Error(
+                `${shown} is a file of variables, which can hold secrets: the relay does not send it. Nothing was sent.`,
             );
         }
 
