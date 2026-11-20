@@ -68,6 +68,7 @@ Source: "{#DesktopDir}\Pi Pocket.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "pi-pocket.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install-app.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "pi-pocket.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "stop-pi-pocket.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; The app, and the console launcher for access modes, tunnels, and the sign-in QR code. The sign-in shortcut starts the
@@ -100,81 +101,45 @@ begin
   Result := not InstallFailed;
 end;
 
-{ PowerShell with a script that has no outside input but the install folder, quoted for a single-quoted string. }
-function RunPowerShell(const Script: String): Integer;
+{ stop-pi-pocket.ps1 with Windows PowerShell, for this install: what it prints goes to Setup's or the uninstaller's
+  log. Setup runs its own copy from {tmp}; the uninstaller the one in the install folder, which it deletes after. }
+function RunStopScript(const Arguments: String): Integer;
 var
-  Code: Integer;
+  Script: String;
+  Code, Index: Integer;
+  Output: TExecOutput;
 begin
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
-    '', SW_HIDE, ewWaitUntilTerminated, Code) then
+  if IsUninstaller then
+    Script := ExpandConstant('{app}\stop-pi-pocket.ps1')
+  else
+  begin
+    ExtractTemporaryFile('stop-pi-pocket.ps1');
+    Script := ExpandConstant('{tmp}\stop-pi-pocket.ps1');
+  end;
+
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' + AddQuotes(Script) + ' -App ' +
+    AddQuotes(ExpandConstant('{app}')) + Arguments, '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
     Code := -1;
-  Log('PowerShell exited with ' + IntToStr(Code) + ': ' + Copy(Script, 1, 120));
+
+  for Index := 0 to GetArrayLength(Output.StdOut) - 1 do
+    Log(Output.StdOut[Index]);
+
+  for Index := 0 to GetArrayLength(Output.StdErr) - 1 do
+    Log(Output.StdErr[Index]);
+
+  Log('stop-pi-pocket.ps1' + Arguments + ' exited with ' + IntToStr(Code));
   Result := Code;
-end;
-
-{ A path as a PowerShell single-quoted string. PowerShell takes 4 other characters for a single quote too. }
-function PsQuote(const Path: String): String;
-begin
-  Result := Path;
-  StringChangeEx(Result, '''', '''''', True);
-  StringChangeEx(Result, #$2018, #$2018#$2018, True);
-  StringChangeEx(Result, #$2019, #$2019#$2019, True);
-  StringChangeEx(Result, #$201A, #$201A#$201A, True);
-  StringChangeEx(Result, #$201B, #$201B#$201B, True);
-  Result := '''' + Result + '''';
-end;
-
-function StartsWith(const Folder: String): String;
-begin
-  Result := '$_.Path.StartsWith(' + PsQuote(Folder) + ', [StringComparison]::OrdinalIgnoreCase)';
-end;
-
-{ The desktop app (Pi Pocket.exe) of this install. }
-function DesktopProcesses: String;
-begin
-  Result := '@(Get-Process -Name ''Pi Pocket'' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ' +
-    '$_.Path.Equals(' + PsQuote(ExpandConstant('{app}\Pi Pocket.exe')) + ', [StringComparison]::OrdinalIgnoreCase) })';
-end;
-
-{ The processes that run from this install: the desktop app first, then the node.exe processes (the launcher, the
-  server, and their Node.js children), then Edge's processes for the app's window, by its profile folder (the job of the
-  app ends them, but Edge's crash reporter can start outside it). }
-function NodeProcesses: String;
-begin
-  Result := '(' + DesktopProcesses + ' + @(Get-Process -Name node -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{app}\node\')) + ' }) + ' +
-    '@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq ''msedge.exe'' -and ' +
-    '$_.CommandLine -and $_.CommandLine.Contains(' + PsQuote(ExpandConstant('{app}\Edge profile')) + ') } | ' +
-    'ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }))';
 end;
 
 function PiPocketRunning: Boolean;
 begin
-  Result := RunPowerShell('if (' + NodeProcesses + '.Count -gt 0) { exit 1 } else { exit 0 }') = 1;
+  Result := RunStopScript(' -Check') = 1;
 end;
 
-{ Each one with its whole process tree (the agents' commands too), and the launcher's cloudflared (the tunnel) from the
-  data folder, which would run on without it. Again until none is left, as the launcher can start a new server. The
-  desktop app alone, without its tree: its job ends what it started, and a default browser that it opened stays. }
 procedure StopPiPocket;
-var
-  Code: Integer;
 begin
-  { The desktop app first, as its Quit does: it closes its launcher's input, and the launcher stops the server and the
-    tunnel. What is left after 25 seconds is stopped below. }
-  if FileExists(ExpandConstant('{app}\Pi Pocket.exe')) then
-  begin
-    Exec(ExpandConstant('{app}\Pi Pocket.exe'), '--quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
-    RunPowerShell('for ($wait = 0; $wait -lt 25 -and ' + DesktopProcesses + '.Count -gt 0; $wait++) { Start-Sleep -Seconds 1 }');
-  end;
-
-  RunPowerShell('for ($round = 0; $round -lt 5; $round++) { ' +
-    '$all = ' + NodeProcesses + ' + @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{%USERPROFILE}\.pi-pocket\bin\')) + ' }); ' +
-    'if ($all.Count -eq 0) { exit 0 }; ' +
-    'foreach ($each in $all) { if ($each.Name -eq ''Pi Pocket'') { & taskkill.exe /F /PID $each.Id 2>&1 | Out-Null } ' +
-    'else { & taskkill.exe /F /T /PID $each.Id 2>&1 | Out-Null } }; Start-Sleep -Seconds 1 }; exit 1');
+  RunStopScript('');
 end;
 
 { A folder that Setup may install into: none yet, an empty one, or an earlier install. With /DIR= pointed at another

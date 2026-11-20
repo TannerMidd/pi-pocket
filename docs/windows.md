@@ -22,6 +22,7 @@ Everything goes in `%LOCALAPPDATA%\Pi Pocket` (`C:\Users\<you>\AppData\Local\Pi 
 | `app\`                      | A private npm prefix that holds the `pi-pocket` package. It is yours, so updates from the app work.                                                                          |
 | `Pi Pocket.exe`             | The desktop app ([desktop-app.md](desktop-app.md)): the icon in the notification area and the window. Setup's build compiles it from `PiPocket.cs`.                          |
 | `pi-pocket.cmd`             | Starts the launcher with that Node.js and prefix, in a console. Arguments go to `pi-pocket` (`pi-pocket.cmd --help`).                                                        |
+| `stop-pi-pocket.ps1`        | What stops a running Pi Pocket for Setup and the uninstaller: the app, its launcher and server with the agents' commands, the window's Edge, and the tunnel.                 |
 | `Edge profile\`             | The Edge profile of the app's window, with its sign-in cookie.                                                                                                               |
 | `launcher.log`              | What the app's launcher and server print, and `launcher.old.log` from the run before. It has no sign-in link.                                                                |
 | `npm-cache\`, `install.log` | npm's cache, and what npm printed during Setup.                                                                                                                              |
