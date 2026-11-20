@@ -1,7 +1,3 @@
-// A repeat set to compact first: before each sending, everything before its last message is summarized, so a run
-// starts on the last run and what was said since. Its first sending has nothing before to keep; one without the
-// setting compacts nothing; a session at work sends without compacting; a restart while it compacts sends once; and
-// the conversation's own compaction settings are as they were after, also when the schedule is stopped meanwhile.
 import {
     type App,
     cleanUp,
@@ -23,10 +19,8 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/
 import { AgentDoc, type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { ScheduleDoc } from "../src/server/docs.ts";
 
-/** The requests Pi Durable's summaries were written from. */
 const summaries: string[] = [];
 
-/** What holds answers until a test lets them go: summaries while `summaries` is on, and messages that say "hold". */
 const holding = { summaries: false, release: () => {}, gate: Promise.resolve() };
 
 function hold(): void {
@@ -80,7 +74,6 @@ after(async () => {
     cleanUp();
 });
 
-/** Restart the server with its clock `minutes` further ahead. */
 async function restartLater(minutes: number): Promise<void> {
     await app.close();
     ahead += minutes * 60_000;
@@ -92,7 +85,6 @@ async function restartLater(minutes: number): Promise<void> {
 const runs = async (id: ConversationId, scheduleId: string) =>
     (await app.harness.snapshot(ScheduleDoc, id, context))?.items[scheduleId]?.runs ?? 0;
 
-/** The model context as entries: their kind and the text of their first message. */
 async function contextOf(id: ConversationId): Promise<{ kind: string; text: string }[]> {
     const view = await (await app.harness.conversation(id, context))!.context(context);
 
@@ -121,7 +113,6 @@ async function briefings(id: ConversationId): Promise<number> {
 const ownCompaction = async (id: ConversationId) =>
     (await app.harness.snapshot(AgentDoc, id, context))?.compaction;
 
-/** A session with some old work and a repeat set to compact first, after its first sending. */
 async function afterFirstBriefing(): Promise<{ id: ConversationId; scheduleId: string }> {
     const id = await newSession(app);
 
@@ -139,7 +130,6 @@ async function afterFirstBriefing(): Promise<{ id: ConversationId; scheduleId: s
     return { id, scheduleId: schedule.id };
 }
 
-/** Wait until the scheduled message number `count` was answered. */
 async function answered(id: ConversationId, count: number): Promise<void> {
     await until(async () => {
         const entries = await contextOf(id);
@@ -180,16 +170,13 @@ test("a repeat set to compact first keeps its last run and what came since, and 
 
     assert.equal(schedule.compactBefore, true);
 
-    // The first sending: no run before it, nothing compacted.
     await restartLater(21);
     await until(async () => (await runs(id, schedule.id)) === 1, "the first sending");
     await answered(id, 1);
     assert.equal(summaries.length, 0, "the first sending compacts nothing");
 
-    // Asked after the run, to debug it: this stays too.
     await say(app, id, "why did the briefing say that?");
 
-    // The second sending: everything before the first briefing is summarized.
     await restartLater(20);
     await until(async () => (await runs(id, schedule.id)) === 2, "the second sending");
     await answered(id, 2);
@@ -215,10 +202,8 @@ test("a repeat set to compact first keeps its last run and what came since, and 
         "the last briefing and the new one",
     );
 
-    // The conversation's own compaction settings are as they were: none.
     assert.equal((await app.harness.snapshot(AgentDoc, id, context))?.compaction, undefined);
 
-    // Without the setting, the next sending compacts nothing.
     await app.commands.updateSchedule(id, owner(app), schedule.id, {
         text: "briefing",
         every: { minutes: 20 },
@@ -279,7 +264,6 @@ test("a restart while it compacts sends once, after the summary; a stop while it
         "the compaction to run",
     );
 
-    // A restart in the middle: the schedule waits for the same compaction, and nothing goes out before it is done.
     await restartLater(0);
     assert.equal(await runs(id, scheduleId), 1);
     assert.equal(await briefings(id), 1);
@@ -291,7 +275,6 @@ test("a restart while it compacts sends once, after the summary; a stop while it
     assert.equal((await contextOf(id))[0]?.kind, "pi.compaction");
     assert.equal(await ownCompaction(id), undefined);
 
-    // Stopped while it compacts: the conversation gets its own settings back, and nothing more goes out.
     holding.summaries = true;
     hold();
     await restartLater(20);

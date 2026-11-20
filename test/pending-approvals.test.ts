@@ -1,4 +1,3 @@
-// Read-only approval observations, with real session audiences and a resumed durable guard hook.
 import {
     type App,
     cleanUp,

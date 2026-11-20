@@ -42,7 +42,6 @@ async function freePort(): Promise<number> {
     return port;
 }
 
-/** The server on `listen`: a port, or other options such as `--socket PATH`. */
 function server(
     name: string,
     listen: number | string[],
@@ -200,8 +199,6 @@ test(
     },
 );
 
-// ─── --socket: a Unix socket for a reverse proxy ─────────────────────────
-
 /** A socket's folder as an administrator makes it: this user's, and writable by no one else. */
 function socketFolder(path: string, mode = 0o750): string {
     mkdirSync(path, { recursive: true });
@@ -210,7 +207,6 @@ function socketFolder(path: string, mode = 0o750): string {
     return path;
 }
 
-/** The status of a GET over the socket, as a reverse proxy sends it. */
 function statusOverSocket(socketPath: string, path: string): Promise<number> {
     return new Promise((resolve, reject) => {
         const sent = request({ socketPath, path }, (response) => {
@@ -285,7 +281,6 @@ test(
     { skip: unix, timeout: 60_000 },
     async () => {
         const port = await freePort();
-        // An empty --socket (an unset shell variable) is an error, not a fall back to the port.
         const empty = server("empty", ["--socket", ""], { PI_POCKET_PORT: String(port) });
 
         assert.deepEqual(await exit(empty.proc, 15_000), { code: 1, signal: null });

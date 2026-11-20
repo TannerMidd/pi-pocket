@@ -2203,7 +2203,6 @@ function streamEvents(query) {
     /** The first batch arrived whole: the session's view, or the session list when no session is open. */
     let settled = false;
     const settles = named !== null ? ["view", "missing"] : ["sessions"];
-    /** When this stream last said anything, and how often the server pings it: unknown until a first ping. */
     let heardAt = Date.now();
     let pingMs = pingPeriod;
     let watchdog;
