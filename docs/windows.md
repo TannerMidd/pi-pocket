@@ -40,7 +40,7 @@ Background tasks (Pi's `background` tool) work on Windows since 0.30.0, with Git
 
 - A stop ends the processes by force at once, with no polite stop first.
 - A process that leaves a task's job and its tree (a program started through a service, or one that asks to leave its job) is not followed, and a task does not say what it left running.
-- After a restart of the server the jobs are gone: a task's processes are the ones found before the restart and what they start after it.
+- The task's first process holds a handle to its job, so a restarted server finds the job again while that process runs. Once it ended, a restarted server knows the processes found before the restart, and what they start directly; a process started through Git Bash (which starts a program as a new process) is then not followed.
 - A PowerShell in Constrained Language mode (a locked-down machine) cannot load the helper: then background tasks do not start, and say why.
 
 ## Updates
