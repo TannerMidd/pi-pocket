@@ -1300,12 +1300,12 @@ export class BackgroundTasks {
             await this.beforeSpawn?.();
             this.#needsSplit();
 
-            const spawned = await this.#spawn(conversationId, item, added);
+            const { pid: spawned, start } = await this.#spawn(conversationId, item, added);
 
             pid = spawned;
             await this.beforeRecord?.();
 
-            const startTicks = await this.#procs.startOf(spawned);
+            const startTicks = start ?? (await this.#procs.startOf(spawned));
             const recorded = await app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
 
@@ -1360,7 +1360,7 @@ export class BackgroundTasks {
         conversationId: ConversationId,
         item: BackgroundTask,
         added: Record<string, string>,
-    ): Promise<number> {
+    ): Promise<{ pid: number; start?: number }> {
         mkdirSync(this.#dir(conversationId), { recursive: true });
 
         try {

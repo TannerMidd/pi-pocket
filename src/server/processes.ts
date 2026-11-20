@@ -47,8 +47,13 @@ export interface TaskProcesses {
     unsupported(): Promise<string | undefined>;
     /** The bash that runs the wrapper; undefined when there is none. */
     shell(): string | undefined;
-    /** Start the wrapper detached, as its own group or job; its pid. */
-    spawn(script: string, cwd: string, env: NodeJS.ProcessEnv, task: TaskRef): Promise<number>;
+    /** Start the wrapper detached, as its own group or job: its pid, and its start where it is read at once (Windows). */
+    spawn(
+        script: string,
+        cwd: string,
+        env: NodeJS.ProcessEnv,
+        task: TaskRef,
+    ): Promise<{ pid: number; start?: number }>;
     /** The start time of a process, for a task's record. */
     startOf(pid: number): Promise<number | undefined>;
     /** The live processes of a task's group (Linux, macOS) or tree (Windows). */
@@ -123,7 +128,8 @@ interface ProcTable {
     unsupported(): string | undefined;
     /** A new look starts: what is fresh is from after this moment. */
     begin(): void;
-    stat(pid: number): Proc | undefined;
+    /** A process; `fresh`: from a table newer than the look's start. */
+    stat(pid: number, fresh?: boolean): Proc | undefined;
     list(fresh: boolean): Proc[];
     marked(pid: number, marker: string): boolean;
     /** Fetch what the reads since `begin` missed; false when they missed nothing. */
@@ -258,15 +264,16 @@ function run(file: string, args: string[]): Promise<string> {
     });
 }
 
-/** The parts of `ps -o pid=,command=` output by pid. */
-function byPid(text: string): Map<number, string> {
-    const lines = new Map<number, string>();
+/** The lines of `ps -o pid=,lstart=,command=` output by `pid:start`. */
+function byProcess(text: string): Map<string, string> {
+    const lines = new Map<string, string>();
 
     for (const line of text.split("\n")) {
-        const parts = /^\s*(\d+) (.*)$/.exec(line);
+        const parts = /^\s*(\d+) (\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d+) (.*)$/.exec(line);
+        const start = parts === null ? undefined : parseLstart(parts[2]!);
 
-        if (parts !== null) {
-            lines.set(Number(parts[1]), parts[2]!);
+        if (parts !== null && start !== undefined) {
+            lines.set(`${parts[1]}:${start}`, parts[3]!);
         }
     }
 
@@ -315,8 +322,8 @@ class DarwinTable implements ProcTable {
         return scan?.byPid ?? new Map();
     }
 
-    stat(pid: number): Proc | undefined {
-        const found = this.#table(false).get(pid);
+    stat(pid: number, fresh = false): Proc | undefined {
+        const found = this.#table(fresh).get(pid);
 
         // Not in a table from before this look: it may have started since.
         if (found === undefined && (this.#scan?.at ?? 0) < this.#epoch) {
@@ -437,12 +444,13 @@ class DarwinTable implements ProcTable {
     async #readEnv(pids: number[]): Promise<void> {
         const list = pids.join(",");
         const [withEnv, plain] = await Promise.all([
-            run("/bin/ps", ["-E", "-ww", "-o", "pid=,command=", "-p", list]),
-            run("/bin/ps", ["-ww", "-o", "pid=,command=", "-p", list]),
+            run("/bin/ps", ["-E", "-ww", "-o", "pid=,lstart=,command=", "-p", list]),
+            run("/bin/ps", ["-ww", "-o", "pid=,lstart=,command=", "-p", list]),
         ]);
-        const envs = byPid(withEnv);
-        const commands = byPid(plain);
+        const envs = byProcess(withEnv);
+        const commands = byProcess(plain);
 
+        // Kept by the start each line says, so an environment is never taken for that of a process that had the pid.
         for (const pid of pids) {
             const info = this.#scan?.byPid.get(pid);
 
@@ -450,12 +458,16 @@ class DarwinTable implements ProcTable {
                 continue;
             }
 
-            const full = envs.get(pid) ?? "";
-            const command = commands.get(pid);
-            const env =
-                command !== undefined && full.startsWith(command) ? full.slice(command.length) : "";
+            const key = `${pid}:${info.start}`;
+            const full = envs.get(key);
+            const command = commands.get(key);
 
-            this.#env.set(`${pid}:${info.start}`, env);
+            this.#env.set(
+                key,
+                full !== undefined && command !== undefined && full.startsWith(command)
+                    ? full.slice(command.length)
+                    : "",
+            );
         }
     }
 
@@ -483,7 +495,7 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[]
         return [];
     }
 
-    const first = table.stat(item.pid);
+    const first = table.stat(item.pid, fresh);
 
     // The task's own leader: its start, and on macOS its marker too.
     const own = (leader: Proc) =>
@@ -535,19 +547,28 @@ class PosixProcesses implements TaskProcesses {
         return this.#table.boot;
     }
 
+    /** The look under way: looks take turns, as each one's view is the table's. */
+    #turn: Promise<unknown> = Promise.resolve();
+
     /** Run a look until the view had all it read. */
-    async #look<T>(read: () => T): Promise<T> {
-        this.#table.begin();
+    #look<T>(read: () => T): Promise<T> {
+        const look = this.#turn.then(async () => {
+            this.#table.begin();
 
-        for (let round = 0; round < 4; round++) {
-            const result = read();
+            for (let round = 0; round < 4; round++) {
+                const result = read();
 
-            if (!(await this.#table.fill())) {
-                return result;
+                if (!(await this.#table.fill())) {
+                    return result;
+                }
             }
-        }
 
-        return read();
+            return read();
+        });
+
+        this.#turn = look.catch(() => undefined);
+
+        return look;
     }
 
     async unsupported(): Promise<string | undefined> {
@@ -562,8 +583,8 @@ class PosixProcesses implements TaskProcesses {
         return "bash";
     }
 
-    async spawn(script: string, cwd: string, env: NodeJS.ProcessEnv): Promise<number> {
-        return spawnDetached("bash", script, cwd, env).pid!;
+    async spawn(script: string, cwd: string, env: NodeJS.ProcessEnv): Promise<{ pid: number }> {
+        return { pid: spawnDetached("bash", script, cwd, env).pid! };
     }
 
     startOf(pid: number): Promise<number | undefined> {
@@ -600,16 +621,11 @@ class PosixProcesses implements TaskProcesses {
     }
 
     async signal(task: TaskRef, name: Signal): Promise<void> {
-        const { group, marked } = await this.#look(() => ({
-            group: groupMembers(this.#table, task, true).length > 0,
-            marked: markedProcesses(this.#table, task.marker),
-        }));
-
-        if (group) {
+        if ((await this.#look(() => groupMembers(this.#table, task, true))).length > 0) {
             kill(-task.pid, name);
         }
 
-        for (const each of marked) {
+        for (const each of await this.#look(() => markedProcesses(this.#table, task.marker))) {
             kill(each.pid === each.pgid ? -each.pid : each.pid, name);
         }
 
@@ -651,9 +667,9 @@ const WINDOWS_EPOCH_MS = 11_644_473_600_000;
 
 /**
  * The helper's code: the process table (pid, parent, start time in ms since 1601) from one Toolhelp snapshot, jobs that
- * hold each task's processes, and ends of processes through a handle whose start time it checked first. A job lets its
- * processes leave it (`BREAKAWAY_OK`), so a program that asks to leave still starts, and does not end them when its
- * handle closes, so a task runs on after a restart of the server.
+ * hold each task's processes, and ends of processes through a handle whose start time it checked first. A job has no
+ * limits: it does not let its processes leave (Git Bash's runtime leaves a job that allows it), and it does not end
+ * them when its handle closes, so a task runs on after a restart of the server.
  */
 const HELPER_CS = String.raw`
 using System;
@@ -668,19 +684,6 @@ public static class PiPocketProcesses {
         public uint th32ModuleID; public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase;
         public uint dwFlags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
     }
-    [StructLayout(LayoutKind.Sequential)]
-    struct BasicLimits {
-        public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags;
-        public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit;
-        public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct IoCounters { public ulong A; public ulong B; public ulong C; public ulong D; public ulong E; public ulong F; }
-    [StructLayout(LayoutKind.Sequential)]
-    struct ExtendedLimits {
-        public BasicLimits Basic; public IoCounters Io; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit;
-        public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed;
-    }
 
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool Process32FirstW(IntPtr snapshot, ref Entry entry);
@@ -691,9 +694,9 @@ public static class PiPocketProcesses {
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint ms);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObjectW(IntPtr attributes, string name);
-    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits info, int length);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint code);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, IntPtr info, int length, out int returned);
 
     const uint QUERY = 0x1000, SYNCHRONIZE = 0x100000, TERMINATE = 0x1, SET_QUOTA = 0x100;
@@ -706,23 +709,53 @@ public static class PiPocketProcesses {
         return GetProcessTimes(process, out creation, out exit, out kernel, out user) ? creation / 10000 : 0;
     }
 
-    static string List() {
-        StringBuilder text = new StringBuilder("list");
+    // Each process's pid and parent from one snapshot. A handle opened on each pid of a first snapshot holds that
+    // pid, so the second snapshot's parent of it is its own, not one of a process that ended and gave up the pid.
+    static readonly Dictionary<uint, string> names = new Dictionary<uint, string>();
+    static Dictionary<uint, uint> Parents(out string error) {
+        error = null;
+        names.Clear();
+        Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
         IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
-        if (snapshot == new IntPtr(-1)) { return "error snapshot " + Marshal.GetLastWin32Error(); }
+        if (snapshot == new IntPtr(-1)) { error = "error snapshot " + Marshal.GetLastWin32Error(); return parents; }
         try {
             Entry entry = new Entry();
             entry.dwSize = (uint)Marshal.SizeOf(typeof(Entry));
             for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry)) {
-                if (entry.th32ProcessID == 0) { continue; }
-                long start = 0;
-                IntPtr process = OpenProcess(QUERY | SYNCHRONIZE, false, entry.th32ProcessID);
-                if (process != IntPtr.Zero) { start = Start(process); CloseHandle(process); }
-                if (start < 0) { continue; }
-                text.Append(' ').Append(entry.th32ProcessID).Append(',').Append(entry.th32ParentProcessID).Append(',').Append(start);
+                if (entry.th32ProcessID != 0) {
+                    parents[entry.th32ProcessID] = entry.th32ParentProcessID;
+                    names[entry.th32ProcessID] = entry.szExeFile.Replace(' ', '_').Replace(',', '_');
+                }
             }
         } finally { CloseHandle(snapshot); }
-        return text.ToString();
+        return parents;
+    }
+
+    static string List() {
+        string error;
+        Dictionary<uint, uint> first = Parents(out error);
+        if (error != null) { return error; }
+        Dictionary<uint, IntPtr> held = new Dictionary<uint, IntPtr>();
+        try {
+            foreach (uint pid in first.Keys) {
+                IntPtr process = OpenProcess(QUERY | SYNCHRONIZE, false, pid);
+                if (process != IntPtr.Zero) { held[pid] = process; }
+            }
+            Dictionary<uint, uint> second = Parents(out error);
+            if (error != null) { return error; }
+            StringBuilder text = new StringBuilder("list");
+            foreach (KeyValuePair<uint, uint> each in second) {
+                if (!first.ContainsKey(each.Key)) { continue; }
+                long start = 0;
+                IntPtr process;
+                if (held.TryGetValue(each.Key, out process)) { start = Start(process); }
+                if (start < 0) { continue; }
+                text.Append(' ').Append(each.Key).Append(',').Append(each.Value).Append(',').Append(start).Append(',').Append(names[each.Key]);
+            }
+            return text.ToString();
+        } finally {
+            foreach (IntPtr process in held.Values) { CloseHandle(process); }
+        }
     }
 
     // Opens a process only when it still has the start it is known by: the handle holds its pid while it is open.
@@ -744,9 +777,6 @@ public static class PiPocketProcesses {
         if (!jobs.TryGetValue(key, out job)) {
             job = CreateJobObjectW(IntPtr.Zero, null);
             if (job == IntPtr.Zero) { return "error job " + Marshal.GetLastWin32Error(); }
-            ExtendedLimits limits = new ExtendedLimits();
-            limits.Basic.LimitFlags = 0x800;
-            SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(ExtendedLimits)));
             jobs[key] = job;
         }
         IntPtr process = Open(pid, start, SET_QUOTA | TERMINATE);
@@ -766,8 +796,21 @@ public static class PiPocketProcesses {
                 int assigned = Marshal.ReadInt32(buffer), listed = Marshal.ReadInt32(buffer, 4);
                 if (!ok && Marshal.GetLastWin32Error() != 234) { return "error members " + Marshal.GetLastWin32Error(); }
                 if (listed < assigned && size < 1 << 20) { continue; }
+                // Each with its start, read through a handle that is still in the job: a pid that a process outside it
+                // took since the job's list is left out.
                 StringBuilder text = new StringBuilder("members");
-                for (int at = 0; at < listed; at++) { text.Append(' ').Append(Marshal.ReadIntPtr(buffer, 8 + at * IntPtr.Size).ToInt64()); }
+                for (int at = 0; at < listed; at++) {
+                    uint pid = (uint)Marshal.ReadIntPtr(buffer, 8 + at * IntPtr.Size).ToInt64();
+                    IntPtr process = OpenProcess(QUERY | SYNCHRONIZE, false, pid);
+                    if (process == IntPtr.Zero) { continue; }
+                    try {
+                        bool inJob;
+                        long start = Start(process);
+                        if (start > 0 && IsProcessInJob(process, job, out inJob) && inJob) {
+                            text.Append(' ').Append(pid).Append(',').Append(start);
+                        }
+                    } finally { CloseHandle(process); }
+                }
                 return text.ToString();
             } finally { Marshal.FreeHGlobal(buffer); }
         }
@@ -920,7 +963,7 @@ class Helper {
         current.child.stdin!.write(`${line}\n`);
 
         try {
-            const text = await withTimeout(answer, 15_000, "The process helper did not answer");
+            const text = await withTimeout(answer, 30_000, "The process helper did not answer");
 
             if (process.env.PI_POCKET_PROCESS_DEBUG === "1" && !line.startsWith("list")) {
                 console.error(`[processes] ${line} -> ${text.slice(0, 300)}`);
@@ -936,15 +979,13 @@ class Helper {
                 console.error(`[processes] ${line} failed: ${(error as Error).message}`);
             }
 
-            // A helper that does not answer in time is out of step with its answers: a new one starts next time.
-            if ((error as Error).message === "The process helper did not answer") {
-                this.close();
-            }
-
+            // A late answer still goes to its own ask, which stays in the queue: the answers after it keep their order,
+            // and the helper keeps its jobs.
             throw error;
         } finally {
+            clearTimeout(this.#idle);
             this.#idle = setTimeout(() => {
-                if (!this.holds()) {
+                if (!this.holds() && this.#current?.waiting.length === 0) {
                     this.close();
                 }
             }, 60_000);
@@ -974,7 +1015,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
     ]).finally(() => clearTimeout(timer));
 }
 
-type WinProc = { pid: number; ppid: number; start: number };
+type WinProc = { pid: number; ppid: number; start: number; name: string };
 
 /** Git Bash: Git for Windows' launcher first, as Pi's own bash tool looks for it, then a `bash.exe` on PATH. */
 function findGitBash(): string | undefined {
@@ -1008,7 +1049,7 @@ function findGitBash(): string | undefined {
  * runs, for a start a crash cut off, and waits for a line on its input: the job holds it before it starts anything.
  */
 const WINDOWS_GATE =
-    'pidf=$PI_POCKET_BACKGROUND_PIDFILE; unset PI_POCKET_BACKGROUND_PIDFILE; read -r winpid < /proc/$$/winpid; printf "%s" "$winpid" > "$pidf"; IFS= read -r _gate; exec 0< /dev/null; ';
+    'pidf=$PI_POCKET_BACKGROUND_PIDFILE; unset PI_POCKET_BACKGROUND_PIDFILE; read -r winpid < /proc/$$/winpid; printf "%s" "$winpid" > "$pidf"; IFS= read -r _gate; [ "$_gate" = go ] || exit 1; exec 0< /dev/null; ';
 
 class WindowsProcesses implements TaskProcesses {
     readonly boot = undefined;
@@ -1062,9 +1103,14 @@ class WindowsProcesses implements TaskProcesses {
         const all = new Map<number, WinProc>();
 
         for (const word of answer.split(" ").slice(1)) {
-            const [pid, ppid, start] = word.split(",").map(Number);
+            const [pid, ppid, start, name] = word.split(",");
 
-            all.set(pid!, { pid: pid!, ppid: ppid!, start: start! });
+            all.set(Number(pid), {
+                pid: Number(pid),
+                ppid: Number(ppid),
+                start: Number(start),
+                name: name ?? "",
+            });
         }
 
         this.#scan = { at, all };
@@ -1106,7 +1152,11 @@ class WindowsProcesses implements TaskProcesses {
      * them, still running with its start time, and that started after it (a parent's pid that a later process took
      * is not that process's parent).
      */
-    #members(task: TaskRef, all: Map<number, WinProc>, job: number[]): number[] {
+    #members(
+        task: TaskRef,
+        all: Map<number, WinProc>,
+        job: { pid: number; start: number }[],
+    ): number[] {
         if (task.pid <= 0 || task.startTicks === undefined) {
             return [];
         }
@@ -1119,11 +1169,9 @@ class WindowsProcesses implements TaskProcesses {
             found.push(`${pid} ${start}\n`);
         };
 
-        for (const pid of job) {
-            const info = all.get(pid);
-
-            if (info !== undefined && info.start > 0 && !known.has(pid)) {
-                add(pid, info.start);
+        for (const each of job) {
+            if (each.start > 0 && !known.has(each.pid) && all.get(each.pid)?.start === each.start) {
+                add(each.pid, each.start);
             }
         }
 
@@ -1154,7 +1202,8 @@ class WindowsProcesses implements TaskProcesses {
             .map(([pid]) => pid);
     }
 
-    async #job(task: TaskRef): Promise<number[]> {
+    /** The processes in a task's job, each with its start, as the helper read it through a handle in the job. */
+    async #job(task: TaskRef): Promise<{ pid: number; start: number }[]> {
         const key = this.#key(task);
 
         if (!this.#jobs.has(key)) {
@@ -1163,7 +1212,13 @@ class WindowsProcesses implements TaskProcesses {
 
         const answer = await this.#helper.ask(`members ${key}`);
 
-        return answer === "none" ? [] : answer.split(" ").slice(1).map(Number);
+        return answer === "none"
+            ? []
+            : answer
+                  .split(" ")
+                  .slice(1)
+                  .map((word) => word.split(",").map(Number))
+                  .map(([pid, start]) => ({ pid: pid!, start: start! }));
     }
 
     async spawn(
@@ -1171,7 +1226,7 @@ class WindowsProcesses implements TaskProcesses {
         cwd: string,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
-    ): Promise<number> {
+    ): Promise<{ pid: number; start: number }> {
         const shell = this.shell();
 
         if (shell === undefined) {
@@ -1200,9 +1255,12 @@ class WindowsProcesses implements TaskProcesses {
         child.unref();
         (child.stdin as unknown as { unref?: () => void }).unref?.();
 
+        let start: number | undefined;
+
         try {
             // Its bash runs under Git's launcher: once the bash wrote its pid, both wait at the gate, started before the
-            // job was there, so each goes into it before the command starts.
+            // job was there, so each goes into it before the command starts. While it waits, Node's handle on the
+            // launcher holds its pid: the start read now is its own.
             for (let tries = 0; tries < 400 && !existsSync(`${task.files}.pid`); tries++) {
                 if (child.exitCode !== null) {
                     break;
@@ -1212,16 +1270,18 @@ class WindowsProcesses implements TaskProcesses {
             }
 
             const all = await this.#list(true);
-            const start = all.get(pid)?.start;
+
+            start = all.get(pid)?.start;
 
             if (start === undefined || start <= 0) {
                 throw new Error("The command's start time could not be read.");
             }
 
             const key = this.#key(task);
-            const known = this.#knownOf({ ...task, pid, startTicks: start });
+            const ref = { ...task, pid, startTicks: start };
+            const known = this.#knownOf(ref);
 
-            for (const each of this.#members({ ...task, pid, startTicks: start }, all, [])) {
+            for (const each of this.#members(ref, all, [])) {
                 const answer = await this.#helper
                     .ask(`job ${key} ${each} ${known.get(each)}`)
                     .catch(() => "no");
@@ -1233,14 +1293,16 @@ class WindowsProcesses implements TaskProcesses {
                 }
             }
         } catch (error) {
+            // No word at the gate: the wrapper exits without running the command.
+            child.stdin!.end();
             child.kill();
 
             throw error;
-        } finally {
-            child.stdin!.end();
         }
 
-        return pid;
+        child.stdin!.end("go\n");
+
+        return { pid, start };
     }
 
     async startOf(pid: number): Promise<number | undefined> {
@@ -1253,7 +1315,7 @@ class WindowsProcesses implements TaskProcesses {
         }
 
         let all: Map<number, WinProc>;
-        let job: number[];
+        let job: { pid: number; start: number }[];
 
         try {
             [job, all] = await Promise.all([this.#job(task), this.#list(fresh)]);
@@ -1263,6 +1325,17 @@ class WindowsProcesses implements TaskProcesses {
         }
 
         const members = this.#members(task, all, job);
+
+        if (process.env.PI_POCKET_PROCESS_DEBUG === "1") {
+            const known = this.#knownOf(task);
+            const near = [...all.values()]
+                .filter((each) => known.has(each.pid) || known.has(each.ppid))
+                .map((each) => `${each.pid}<${each.ppid}@${each.start}:${each.name}`);
+
+            console.error(
+                `[processes] members ${[...known].join(";")} -> ${members.join(",")} near ${near.join(" ")}`,
+            );
+        }
 
         if (members.length === 0 && fresh) {
             this.#done(task);
@@ -1359,8 +1432,8 @@ class WindowsProcesses implements TaskProcesses {
         if (
             info === undefined ||
             info.start <= 0 ||
-            info.start > written + 2000 ||
-            info.start < task.startedAt + WINDOWS_EPOCH_MS - 2000
+            info.start > written + 20 ||
+            info.start < task.startedAt + WINDOWS_EPOCH_MS - 20
         ) {
             return undefined;
         }
