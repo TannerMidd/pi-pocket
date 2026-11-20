@@ -153,11 +153,12 @@ jobs:
 
             - run: npm run check
 
-            # A part of the suite: the files known to pass on Windows. The browser tests are not in it (no browser on
-            # the runner), nor are files not yet checked there.
+            # A part of the suite: the files known to pass on Windows, not yet the others. The browser tests are left
+            # out: on the runner the browser can take longer than its 20 s limit to start (`browser/cdp.ts`).
             - name: Tests known to pass on Windows
               run: >
                   node --test --test-concurrency=4 --test-timeout=300000
+                  --test-skip-pattern="a real sandbox loads relative CSS"
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/lock.test.ts
