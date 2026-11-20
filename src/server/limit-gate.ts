@@ -262,7 +262,8 @@ const when = (at: number) =>
         ? ` (${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC)`
         : "";
 
-function failure(
+/** A request that ends with no content: an abort, or an error before the provider answered. */
+export function failure(
     model: Model<Api>,
     started: number,
     stopReason: "error" | "aborted",

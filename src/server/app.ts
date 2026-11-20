@@ -118,6 +118,14 @@ import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./p
 import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
+import {
+    RESTART_DEADLINE_CHOICES,
+    RESTART_MODES,
+    type RestartAsk,
+    type RestartBlocker,
+    type RestartPending,
+    Restarts,
+} from "./restart.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
@@ -405,6 +413,8 @@ export class PocketApp {
     readonly customProviders = new CustomProviders(this);
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
+    /** A restart that waits until no call runs that it would cut off, holding new model requests (`restart.ts`). */
+    readonly restarts: Restarts;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
     readonly schedules = new Schedules(this);
@@ -579,6 +589,14 @@ export class PocketApp {
             log: (line) => this.#log(line),
             file: join(options.dataDir, "provider-limits.json"),
             ...(options.limits === undefined ? {} : { tuning: options.limits }),
+        });
+        this.restarts = new Restarts({
+            restart: () => options.restart?.(),
+            blockers: () => this.#restartBlockers(),
+            conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
+            changed: (pending) => this.#restartChanged(pending),
+            heldChanged: (ids) => this.#restartHeldChanged(ids),
+            log: (line) => this.#log(line),
         });
         this.browsers = new Browsers({
             dataDir: options.dataDir,
@@ -851,6 +869,9 @@ export class PocketApp {
         measureModelStreams(this.models);
         // Outside the timing wrapper: each attempt is timed on its own, not the wait before it.
         this.limits.install(this.models);
+        // Outside the limit gate: a request held for a restart has not met a limit yet. Inside the cache keeper, so
+        // its keep-alive requests are held too.
+        this.restarts.install(this.models);
         // Outermost: it sees each real request finish, and replays it through the wrappers below.
         this.cacheKeeper.install(this.models);
         await this.models.getAvailable().catch(() => []);
@@ -963,6 +984,32 @@ export class PocketApp {
                     .snapshot()
                     .tools()
                     .map(({ tool }) => tool.name),
+            restartWhenSafe: async (conversationId, callId, reason) => {
+                const requester = this.attribution.requesterOf(conversationId);
+                const person =
+                    requester === undefined ? undefined : this.config.userById(requester);
+
+                // Only when Pi works for the owner: a guest's Pi must not restart a server that is not theirs.
+                if (person?.role !== "owner") {
+                    throw new Error(
+                        "Only the owner can restart the server, and Pi works for someone else here.",
+                    );
+                }
+
+                // A subagent's restart would wait for its own session's subagent call, which waits for it.
+                if (this.sessionMeta(conversationId) === undefined) {
+                    throw new Error(
+                        "Only a session can restart the server: say so in your report, and its Pi can.",
+                    );
+                }
+
+                return this.askRestart(
+                    person,
+                    "when-safe",
+                    { conversationId: Number(conversationId), callId },
+                    reason,
+                );
+            },
         };
 
         this.#registry = registry;
@@ -1762,6 +1809,146 @@ export class PocketApp {
 
         if (changed.size > 0) {
             this.#scheduleSessions();
+        }
+    }
+
+    // ─── Restart when safe ──────────────────────────────────────────────────
+
+    /**
+     * Ask for a restart: as the owner's setting says, or `mode`. One Pi asks for (`agent`) always waits for what runs,
+     * its own call aside. 409 when Pi Pocket runs without its launcher, which is what restarts it.
+     */
+    async askRestart(
+        user: User,
+        mode: unknown,
+        agent?: { conversationId: number; callId: string },
+        reason?: string,
+    ): Promise<{ restarting: boolean; pending?: RestartPending }> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can restart the server");
+        }
+
+        if (!this.supervised) {
+            throw new HttpError(
+                409,
+                "Start Pi Pocket with bin/pi-pocket.js to restart from the app.",
+            );
+        }
+
+        if (mode !== undefined && mode !== "now" && mode !== "when-safe") {
+            throw new HttpError(400, 'mode must be "now" or "when-safe"');
+        }
+
+        const chosen: RestartAsk["mode"] =
+            agent !== undefined ? "when-safe" : (mode ?? this.config.restart);
+        const deadline = this.config.restartDeadlineMinutes;
+
+        return this.restarts.ask({
+            mode: chosen,
+            by: user.id,
+            ...(deadline > 0 ? { deadlineMinutes: deadline } : {}),
+            ...(agent === undefined ? {} : { agent: true }),
+            ...(reason === undefined ? {} : { reason }),
+        });
+    }
+
+    /** The owner ends a restart that waits: held requests go on. */
+    cancelRestart(user: User): boolean {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        return this.restarts.cancel();
+    }
+
+    /** The owner chooses what Menu → Restart server does, and how long a restart that waits waits at most. */
+    async setRestartSettings(user: User, mode: unknown, deadlineMinutes: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (mode !== undefined && !RESTART_MODES.includes(mode as never)) {
+            throw new HttpError(400, `restart must be one of ${RESTART_MODES.join(", ")}`);
+        }
+
+        if (
+            deadlineMinutes !== undefined &&
+            (typeof deadlineMinutes !== "number" ||
+                !RESTART_DEADLINE_CHOICES.includes(deadlineMinutes))
+        ) {
+            throw new HttpError(
+                400,
+                `restartDeadlineMinutes must be one of ${RESTART_DEADLINE_CHOICES.join(", ")}`,
+            );
+        }
+
+        if (mode !== undefined) {
+            this.config.restart = mode as "immediate" | "when-safe";
+        }
+
+        if (deadlineMinutes !== undefined) {
+            this.config.restartDeadlineMinutes = deadlineMinutes as number;
+        }
+
+        await this.#refreshClients((each) => each.role === "owner");
+    }
+
+    /**
+     * The calls a restart now would cut off: in each conversation with a run going (subagents and linked sessions are
+     * conversations of their own), each running call, nested ones too, of a tool that is not replay-safe. A tool that is
+     * gone from the registry counts as not safe, as Pi Durable treats it.
+     */
+    async #restartBlockers(): Promise<RestartBlocker[]> {
+        const out: RestartBlocker[] = [];
+
+        for (const id of [...this.#busy]) {
+            const live = await this.harness.snapshot(LiveDoc, id, context);
+            const running = [...(live?.tools ?? []), ...(live?.nestedTools ?? [])].filter(
+                (slot) => slot.status === "running",
+            );
+
+            if (running.length === 0) {
+                continue;
+            }
+
+            const conversation = await this.harness.conversation(id, context);
+            const agent = await conversation?.agent(context);
+            const safe = new Set(
+                [...(agent?.tools ?? []), ...(agent?.callable ?? []), ...(agent?.deferred ?? [])]
+                    .filter((tool) => tool.replay === "safe")
+                    .map((tool) => tool.name),
+            );
+
+            for (const slot of running) {
+                if (!safe.has(slot.name)) {
+                    out.push({ conversationId: Number(id), callId: slot.callId, tool: slot.name });
+                }
+            }
+        }
+
+        return out;
+    }
+
+    /** What the owner's tabs show of a restart that waits (Menu), or nothing. */
+    #restartChanged(pending: RestartPending | undefined): void {
+        for (const client of this.#clients) {
+            if (client.user.role === "owner") {
+                client.send("restart", pending ?? null);
+            }
+        }
+    }
+
+    /** A conversation's model request began or ended its wait for a restart: its live line says so. */
+    #restartHeldChanged(ids: number[]): void {
+        for (const id of ids) {
+            const conversation = id as unknown as ConversationId;
+
+            for (const room of new Set([conversation, this.rootOf(conversation)])) {
+                void this.#rooms.get(room)?.then(
+                    (open) => open.schedule(),
+                    () => {},
+                );
+            }
         }
     }
 
@@ -2704,6 +2891,14 @@ export class PocketApp {
                 pipCompactAt: this.pipCompaction.compactAt,
                 // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
                 limitWaitHours: this.config.limitWaitHours,
+                // What Menu → Restart server does, and a restart that waits now: the owner's (`restart.ts`).
+                ...(user.role === "owner"
+                    ? {
+                          restart: this.config.restart,
+                          restartDeadlineMinutes: this.config.restartDeadlineMinutes,
+                          restartPending: this.restarts.pending() ?? null,
+                      }
+                    : {}),
             },
             // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
             folderFavorites: await this.folderFavorites.list(user),
@@ -4232,6 +4427,7 @@ export class PocketApp {
             await this.cacheKeeper.close();
             this.spend.close();
             this.limits.close();
+            this.restarts.close();
             this.background.close();
             this.#unsubscribeCommits?.();
             this.#unsubscribeRunEnds?.();
