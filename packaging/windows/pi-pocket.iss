@@ -109,6 +109,7 @@ begin
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
     '', SW_HIDE, ewWaitUntilTerminated, Code) then
     Code := -1;
+  Log('PowerShell exited with ' + IntToStr(Code) + ': ' + Copy(Script, 1, 120));
   Result := Code;
 end;
 
