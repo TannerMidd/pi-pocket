@@ -329,6 +329,7 @@ jobs:
                   test/prompts.test.ts
                   test/themes.test.ts
                   test/extension-loader.test.ts
+                  test/dropin-no-link.test.ts
                   test/docs.test.ts
                   test/watch-tree.test.ts
                   test/folder-favorites.test.ts

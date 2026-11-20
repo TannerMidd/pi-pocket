@@ -124,6 +124,7 @@ import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
 import { CustomProviders } from "./custom-providers.ts";
 import { type EmbedderMessage, PushStore } from "./push.ts";
+import { writeDropInConfig } from "./dropin-config.ts";
 import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import {
@@ -969,20 +970,29 @@ export class PocketApp {
 
         this.#registry = registry;
         const dropIn = join(this.dataDir, "extensions");
+        const packageModules = Object.fromEntries(
+            Object.keys(pocketPackage.dependencies ?? {}).map((name) => [name, modulesWith(name)]),
+        );
 
         try {
-            prepareDropInFolder(
+            const refused = prepareDropInFolder(
                 dropIn,
                 modulesWith("@earendil-works/pi-durable"),
-                Object.fromEntries(
-                    Object.keys(pocketPackage.dependencies ?? {}).map((name) => [
-                        name,
-                        modulesWith(name),
-                    ]),
-                ),
+                packageModules,
             );
+
+            // Drop-ins import Pi Pocket's packages without the link: only tools that read the folder miss it.
+            if (refused !== undefined) {
+                this.#log(`The drop-in folder has no node_modules link: ${describe(refused)}`);
+            }
         } catch (error) {
-            this.#log(`Drop-in extensions cannot import Pi Pocket's packages: ${describe(error)}`);
+            this.#log(`The drop-in folder cannot be made: ${describe(error)}`);
+        }
+
+        try {
+            writeDropInConfig(dropIn, packageModules);
+        } catch (error) {
+            this.#log(`The drop-in folder has no tsconfig.json: ${describe(error)}`);
         }
 
         try {

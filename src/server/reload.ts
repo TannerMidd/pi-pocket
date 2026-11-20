@@ -212,21 +212,31 @@ function moduleFiles(directory: string): string[] {
 }
 
 /**
- * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages. Drop-ins then import
- * `@earendil-works/pi-durable` and the rest as built-in modules do, and get the very modules the server runs. A
- * `node_modules` folder the owner made there stays as it is; a link to another place is replaced. Where npm split Pi
- * Pocket's packages between folders (a local install beside other versions of them), `packageModules` says where each
- * is, and the link leads to a hidden folder with a link to each one instead.
+ * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages for editors and other tools. Drop-ins
+ * import Pi Pocket's packages without it too (`documentImports` resolves them), and get the very modules the server
+ * runs. A `node_modules` folder the owner made there stays as it is; a link to another place is replaced. Where npm
+ * split Pi Pocket's packages between folders (a local install beside other versions of them), `packageModules` says
+ * where each is, and the link leads to a hidden folder with a link to each one instead. A link the system refuses (an
+ * enterprise policy, say) is left out: the first such error comes back, for one line in the log.
  */
 export function prepareDropInFolder(
     directory: string,
     appModules: string,
     packageModules: Readonly<Record<string, string>> = {},
-): void {
+): unknown {
     mkdirSync(directory, { recursive: true });
     // A junction on Windows: no administrator rights needed.
     const type = process.platform === "win32" ? "junction" : "dir";
     let target = appModules;
+    let failure: unknown;
+
+    const link = (path: string, to: string) => {
+        try {
+            keepLink(path, to, type);
+        } catch (error) {
+            failure ??= error;
+        }
+    };
 
     // All in one folder, as in a checkout and most installs: one link to it, as before.
     if (Object.values(packageModules).some((modules) => modules !== appModules)) {
@@ -234,16 +244,16 @@ export function prepareDropInFolder(
         mkdirSync(target, { recursive: true });
 
         for (const [name, modules] of Object.entries(packageModules)) {
-            const link = join(target, name);
-
             if (existsSync(join(modules, name))) {
-                mkdirSync(dirname(link), { recursive: true });
-                keepLink(link, join(modules, name), type);
+                mkdirSync(dirname(join(target, name)), { recursive: true });
+                link(join(target, name), join(modules, name));
             }
         }
     }
 
-    keepLink(join(directory, "node_modules"), target, type);
+    link(join(directory, "node_modules"), target);
+
+    return failure;
 }
 
 /** The first line of a copy of the types that Pi Pocket made where it cannot link: it refreshes only such a copy. */
@@ -254,8 +264,8 @@ const TYPES_COPY =
  * Link `_pocket.d.ts` in the drop-in folder to Pi Pocket's public types (`types/pocket.d.ts`), so a drop-in imports them
  * from beside it on any machine. Its leading `_` keeps it from loading as a module. A link that leads to a file that can
  * be read stays as it is, wherever it leads (the owner's own checkout, say); a link to nowhere is made again. A file the
- * owner made stays as it is. Where links cannot be made (Windows, or a file system that refuses them with `EPERM`), it
- * is a copy instead, refreshed when the types change.
+ * owner made stays as it is. Where links cannot be made (Windows, or a system that refuses them), it is a copy
+ * instead, refreshed when the types change.
  */
 export function linkTypes(directory: string, types: string): void {
     const link = join(directory, "_pocket.d.ts");
@@ -292,10 +302,8 @@ export function linkTypes(directory: string, types: string): void {
             symlinkSync(types, link, "file");
 
             return;
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "EPERM") {
-                throw error;
-            }
+        } catch {
+            // Refused (`EPERM`, `EACCES`, a policy): a copy instead, below.
         }
     }
 
