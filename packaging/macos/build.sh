@@ -146,7 +146,8 @@ done
 iconutil --convert icns --output "$work/pi-pocket.icns" "$iconset"
 
 # Pi Pocket.app: the desktop app (app/main.swift), for arm64 and x86_64 in one file. Signed ad hoc, as Apple silicon
-# needs; a release that is notarized must sign it with a Developer ID Application certificate instead.
+# needs, or with APP_SIGN_IDENTITY (a "Developer ID Application" identity in the keychain search list) and the hardened
+# runtime, which notarization needs.
 bundle="$root/Pi Pocket.app/Contents"
 mkdir -p "$bundle/MacOS" "$bundle/Resources"
 sed -e "s/@VERSION@/$version/g" -e "s/@BUNDLE_VERSION@/${version%%-*}/g" "$here/Info.plist" > "$bundle/Info.plist"
@@ -163,7 +164,12 @@ lipo -create "$work/app-arm64" "$work/app-x86_64" -output "$bundle/MacOS/Pi Pock
 chmod 755 "$bundle/MacOS/Pi Pocket"
 lipo -info "$bundle/MacOS/Pi Pocket"
 cp "$work/pi-pocket.icns" "$bundle/Resources/pi-pocket.icns"
-codesign --force --sign - --timestamp=none "$root/Pi Pocket.app"
+if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
+    codesign --force --sign "$APP_SIGN_IDENTITY" --options runtime --timestamp "$root/Pi Pocket.app"
+else
+    codesign --force --sign - --timestamp=none "$root/Pi Pocket.app"
+fi
+
 codesign --verify --strict --all-architectures --verbose=2 "$root/Pi Pocket.app"
 
 # Pi Pocket (console).app: a shell script that opens the launcher in Terminal, for access modes, tunnels, and the
