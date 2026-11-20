@@ -380,8 +380,9 @@ namespace PiPocket
                     }
                 }
             }
-            catch (ArgumentException)
+            catch (Exception)
             {
+                // Gone, or the number is another user's process now: the check below decides either way.
                 return null;
             }
 
@@ -434,7 +435,7 @@ namespace PiPocket
             }
 
             // What pi-pocket.cmd sets, for the console entry.
-            ProcessStartInfo start = new ProcessStartInfo(node, Quote(script) + " --desktop");
+            ProcessStartInfo start = new ProcessStartInfo(node, Quote(script) + " --desktop --data " + Quote(dataDir));
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
             start.RedirectStandardInput = true;

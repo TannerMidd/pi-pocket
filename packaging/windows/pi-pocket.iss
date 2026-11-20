@@ -150,7 +150,8 @@ begin
 end;
 
 { Each one with its whole process tree (the agents' commands too), and the launcher's cloudflared (the tunnel) from the
-  data folder, which would run on without it. Again until none is left, as the launcher can start a new server. }
+  data folder, which would run on without it. Again until none is left, as the launcher can start a new server. The
+  desktop app alone, without its tree: its job ends what it started, and a default browser that it opened stays. }
 procedure StopPiPocket;
 var
   Code: Integer;
@@ -167,7 +168,8 @@ begin
     '$all = ' + NodeProcesses + ' + @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue | ' +
     'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{%USERPROFILE}\.pi-pocket\bin\')) + ' }); ' +
     'if ($all.Count -eq 0) { exit 0 }; ' +
-    'foreach ($each in $all) { & taskkill.exe /F /T /PID $each.Id 2>&1 | Out-Null }; Start-Sleep -Seconds 1 }; exit 1');
+    'foreach ($each in $all) { if ($each.Name -eq ''Pi Pocket'') { & taskkill.exe /F /PID $each.Id 2>&1 | Out-Null } ' +
+    'else { & taskkill.exe /F /T /PID $each.Id 2>&1 | Out-Null } }; Start-Sleep -Seconds 1 }; exit 1');
 end;
 
 { A folder that Setup may install into: none yet, an empty one, or an earlier install. With /DIR= pointed at another

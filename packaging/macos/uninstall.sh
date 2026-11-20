@@ -90,6 +90,12 @@ for pair in "Pi Pocket.app:io.github.tannermidd.pi-pocket.launcher" \
     fi
 done
 
+# What macOS keeps for Pi Pocket.app: the window's website data (with its sign-in cookie), its settings, and the logs.
+ID=io.github.tannermidd.pi-pocket.launcher
+rm -rf "$HOME/Library/WebKit/$ID" "$HOME/Library/HTTPStorages/$ID" "$HOME/Library/HTTPStorages/$ID.binarycookies" \
+    "$HOME/Library/Caches/$ID" "$HOME/Library/Saved Application State/$ID.savedState" \
+    "$HOME/Library/Preferences/$ID.plist" "$HOME/Library/Logs/Pi Pocket"
+
 for package in $PACKAGES; do
     /usr/sbin/pkgutil --volume "$HOME" --forget "$package" > /dev/null 2>&1
 done

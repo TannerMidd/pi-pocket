@@ -39,7 +39,7 @@ case "${1:-}" in
             exit 1
         fi
 
-        mkdir -p "$HOME/Library/LaunchAgents" || exit 1
+        mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/Pi Pocket" || exit 1
         cat > "$PLIST.tmp" <<EOF || exit 1
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -58,6 +58,8 @@ case "${1:-}" in
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <key>StandardErrorPath</key>
+    <string>$(xml "$HOME/Library/Logs/Pi Pocket/sign-in-item.log")</string>
     <key>LimitLoadToSessionType</key>
     <string>Aqua</string>
 </dict>

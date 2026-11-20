@@ -22,23 +22,31 @@ const LAUNCHER = fileURLToPath(new URL("../src/launcher/main.ts", import.meta.ur
 const OPTIONS = fileURLToPath(new URL("../src/launcher/options.ts", import.meta.url));
 
 test("--desktop means this device only and no questions, unless --access says otherwise", () => {
-    const saved = process.env.PI_POCKET_ACCESS;
+    const saved = { ...process.env };
 
     process.env.PI_POCKET_ACCESS = "lan";
+    process.env.PI_POCKET_HOST = "0.0.0.0";
+    process.env.PI_POCKET_SOCKET = join(root, "env.sock");
 
     try {
         const plain = parseArgs(["--desktop"]);
 
         assert.equal(plain.desktop, true);
         assert.equal(plain.access, "local", "the environment's access mode does not reach the app");
+        assert.equal(plain.host, undefined, "nor its address");
+        assert.equal(plain.socket, undefined, "nor its socket");
+        assert.equal(parseArgs(["--desktop", "--host", "127.0.0.2"]).host, "127.0.0.2");
         assert.equal(plain.yes, true);
         assert.equal(parseArgs(["--desktop", "--access", "tailscale"]).access, "tailscale");
+        delete process.env.PI_POCKET_SOCKET;
         assert.equal(parseArgs([]).desktop, false);
     } finally {
-        if (saved === undefined) {
-            delete process.env.PI_POCKET_ACCESS;
-        } else {
-            process.env.PI_POCKET_ACCESS = saved;
+        for (const name of ["PI_POCKET_ACCESS", "PI_POCKET_HOST", "PI_POCKET_SOCKET"]) {
+            if (saved[name] === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = saved[name];
+            }
         }
     }
 

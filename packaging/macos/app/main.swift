@@ -194,7 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-            .filter { $0.processIdentifier != getpid() }
+            // LaunchServices can list one that just quit for a moment: only a live process counts.
+            .filter { $0.processIdentifier != getpid() && !$0.isTerminated && kill($0.processIdentifier, 0) == 0 }
         let center = DistributedNotificationCenter.default()
 
         if CommandLine.arguments.contains("--quit") {
@@ -203,6 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
 
         if let other = others.first {
+            log("Pi Pocket.app runs already (process \(other.processIdentifier)): this one exits.")
+
             if openWhenReady {
                 center.postNotificationName(openNotice, object: nil, userInfo: nil, deliverImmediately: true)
                 other.activate(options: [])
@@ -317,7 +320,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let input = Pipe()
 
         process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-c", "exec \"$0\" --desktop", script.path]
+        // The data folder by name: the login shell may set PI_POCKET_DIR to another one than this app reads.
+        process.arguments = ["-l", "-c", "exec \"$0\" --desktop --data \"$1\"", script.path, dataFolder.path]
         process.currentDirectoryURL = home
         process.standardInput = input
         process.standardOutput = output
@@ -576,8 +580,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         view.allowsBackForwardNavigationGestures = true
         view.allowsMagnification = true
 
+        // For debugging only: defaults write io.github.tannermidd.pi-pocket.launcher WebInspector -bool true
         if #available(macOS 13.3, *) {
-            view.isInspectable = true
+            view.isInspectable = UserDefaults.standard.bool(forKey: "WebInspector")
         }
 
         let made = NSWindow(

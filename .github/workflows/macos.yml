@@ -347,7 +347,12 @@ jobs:
                       fi
                   done
                   echo "GET / answered $code after about $try seconds"
-                  [ "$code" = 200 ]
+                  if [ "$code" != 200 ]; then
+                      launchctl print "gui/$(id -u)/io.github.tannermidd.pi-pocket" || true
+                      cat "$HOME/Library/Logs/Pi Pocket/sign-in-item.log" "$LOG" || true
+                      ps -axo pid,ppid,command | grep -F "Pi Pocket" | grep -v grep || true
+                      exit 1
+                  fi
                   lsof -t "$BUNDLE/Contents/MacOS/Pi Pocket"
                   if pgrep -x Terminal; then
                       echo "Terminal runs: the sign-in item must not open it"

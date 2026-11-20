@@ -61,6 +61,8 @@ export function parseArgs(argv: string[]): Options {
         desktop: false,
     };
     let accessGiven = false;
+    let hostGiven = false;
+    let socketGiven = false;
     const tcpFlags: string[] = [];
 
     for (let index = 0; index < argv.length; index++) {
@@ -90,11 +92,14 @@ export function parseArgs(argv: string[]): Options {
             options.yes = true;
         } else if (arg === "--host") {
             options.host = value();
+            hostGiven = true;
             tcpFlags.push(arg);
         } else if (arg === "--port" || arg === "-p") {
             options.port = Number(value());
             tcpFlags.push(arg);
         } else if (arg === "--socket") {
+            socketGiven = true;
+
             try {
                 options.socket = socketArgument(value());
             } catch (error) {
@@ -116,20 +121,23 @@ export function parseArgs(argv: string[]): Options {
         }
     }
 
+    if (options.desktop) {
+        if (socketGiven) {
+            fail("--desktop cannot be combined with --socket: the app window needs an address");
+        }
+
+        // The app window is on this machine: it shares nothing with other devices unless its own arguments say so. The
+        // environment of a login shell (PI_POCKET_ACCESS, PI_POCKET_HOST, PI_POCKET_SOCKET) does not count.
+        options.yes = true;
+        options.access = accessGiven ? options.access : "local";
+        options.host = hostGiven ? options.host : undefined;
+        options.socket = undefined;
+    }
+
     try {
         options.socket = parseSocketPath(options.socket);
     } catch (error) {
         fail((error as Error).message);
-    }
-
-    if (options.desktop) {
-        if (options.socket !== undefined) {
-            fail("--desktop cannot be combined with --socket: the app window needs an address");
-        }
-
-        // The app window is on this machine: it shares nothing with other devices unless asked to.
-        options.yes = true;
-        options.access = accessGiven ? options.access : "local";
     }
 
     if (options.socket !== undefined && tcpFlags.length > 0) {

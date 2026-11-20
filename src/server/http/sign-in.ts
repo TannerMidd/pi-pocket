@@ -49,7 +49,9 @@ export async function login(
             401,
             page(
                 "Pi Pocket",
-                `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`,
+                once === null
+                    ? `<h1>Link expired</h1><p>That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.</p>`
+                    : `<h1>Link expired</h1><p>This one-time sign-in link was used already, or it is more than a minute old. Open Pi Pocket again from its icon in the menu bar or the notification area.</p>`,
             ),
             "text/html; charset=utf-8",
         );
