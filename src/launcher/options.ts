@@ -109,10 +109,6 @@ export function parseArgs(argv: string[]): Options {
         }
     }
 
-    if (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535) {
-        fail("--port must be a port number");
-    }
-
     try {
         options.socket = parseSocketPath(options.socket);
     } catch (error) {
@@ -121,6 +117,13 @@ export function parseArgs(argv: string[]): Options {
 
     if (options.socket !== undefined && tcpFlags.length > 0) {
         fail(`--socket cannot be combined with ${tcpFlags[0]}`);
+    }
+
+    if (
+        options.socket === undefined &&
+        (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535)
+    ) {
+        fail("--port must be a port number");
     }
 
     return options;
