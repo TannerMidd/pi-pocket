@@ -1,4 +1,3 @@
-// A run waiting to retry, in a real browser: the live line gives the reason and has Retry now.
 import {
     type App,
     cleanUp,

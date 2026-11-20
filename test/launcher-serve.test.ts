@@ -584,11 +584,7 @@ withFake("a probe that hangs is abandoned and says so", { hang: true }, (run) =>
 
 // ─── The launcher itself ─────────────────────────────────────────────────
 
-/**
- * The launcher itself, copied beside a stub server that only says it is ready, started in `local` mode on `port` with
- * the fake tailscale on its PATH. It runs until the stub starts, which is after the stale mount cleanup, then quits.
- * The stub writes the options it got to `server-args.json` in the data folder.
- */
+/** The launcher beside a stub server. It quits once the stub starts, which is after the stale mount cleanup. */
 async function launchLocal(
     data: string,
     port: number,
@@ -782,7 +778,7 @@ withFake(
 
         assert.deepEqual(args.slice(0, 2), ["--socket", socket]);
         assert.ok(!args.includes("--port") && !args.includes("--host"));
-        // An empty --socket (an unset shell variable) stops the launcher, not falls back to a port.
+        // An unset shell variable gives an empty path.
         assert.equal(await launchLocal(run.data, LOCAL_PORT, "local", ["--socket", ""]), false);
     },
 );
