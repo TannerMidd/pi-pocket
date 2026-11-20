@@ -165,6 +165,7 @@ jobs:
                   --test-skip-pattern="a session lists them as /skill: commands"
                   --test-skip-pattern="a session in its own worktree starts with the folder"
                   --test-skip-pattern="a worktree another session works in stays"
+                  --test-skip-pattern="a bash call that prints nothing for the quiet limit"
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/lock.test.ts
