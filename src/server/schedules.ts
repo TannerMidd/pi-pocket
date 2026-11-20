@@ -6,17 +6,26 @@
  * spend limit is reached; otherwise it is cancelled, with a line in the chat saying why. A repeat whose last message
  * still waits in the session's queue sends no other: that time is skipped, counted on the schedule, and said in the
  * chat, so messages do not pile up behind a session that cannot answer. One in PiP's conversation
- * waits while PiP is turned off, and goes out once it is back. The schedules extension
+ * waits while PiP is turned off, and goes out once it is back. A schedule set to compact first (`compactBefore`)
+ * summarizes everything before its last message, then sends: each run starts on its last run and what was said since,
+ * not on months of runs (a weekly briefing would otherwise pay for all of them again each time). The schedules extension
  * (`extensions/schedules.ts`) installs the task and gives Pi a tool to schedule its own follow-ups; while it is off,
  * nothing goes out.
  */
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
+    AgentDoc,
+    type CompactionResult,
+    type CompactionSettings,
     type ConversationId,
+    configure,
     defineTask,
+    LiveDoc,
     type Task,
+    type TaskId,
     type TaskRuntime,
     type Tx,
 } from "@earendil-works/pi-durable";
@@ -60,7 +69,19 @@ export const DEFAULT_SCHEDULE_LIMITS: Readonly<ScheduleLimits> = {
  * (while it has sent `runs` in all), so the check for a message that still waits finds that one too.
  */
 type ScheduleInput = { scheduleId: string; last?: { runs: number; request: string } };
-type ScheduleState = { phase: "wait" } | { phase: "send" };
+/**
+ * `compact`: compacting before a sending, with the conversation's own compaction settings as they were before
+ * (`restore`, null for none) and, once started, the compaction's task. `send` after it: `compacted`, so it is not
+ * compacted again.
+ */
+type ScheduleState =
+    | { phase: "wait" }
+    | { phase: "send"; compacted?: true }
+    | {
+          phase: "compact";
+          restore: CompactionSettings | null;
+          compaction?: TaskId<CompactionResult>;
+      };
 type Runtime = TaskRuntime<ScheduleInput, ScheduleState, null, object>;
 
 /** The schedule as stored now; undefined once it was cancelled. */
@@ -161,6 +182,8 @@ export type ScheduleRequest = {
     requestedBy?: string;
     /** The same key sets up the same schedule once: a tool call replayed after a restart finds the one it made. */
     key?: string;
+    /** Compact before each sending (`Schedule.compactBefore`). */
+    compactBefore?: boolean;
 };
 
 export class Schedules {
@@ -197,11 +220,28 @@ export class Schedules {
 
                     return runtime.sleepUntil(schedule.next, { phase: "send" }, context);
                 },
-                send: (task, runtime, context) => this.#send(task.input, runtime, context),
+                send: (task, runtime, context) =>
+                    this.#send(
+                        task.input,
+                        runtime,
+                        context,
+                        task.state.checkpoint.phase === "send" &&
+                            task.state.checkpoint.compacted === true,
+                    ),
+                compact: (task, runtime, context) =>
+                    this.#compact(task.state.checkpoint, runtime, context),
             },
             abort: (task, runtime, context) =>
                 runtime.commit(async (tx) => {
                     const doc = await tx.doc(ScheduleDoc, runtime.conversationId);
+                    const checkpoint = (task.state as { checkpoint?: ScheduleState }).checkpoint;
+
+                    // Stopped while it compacted: the conversation gets its own settings back.
+                    if (checkpoint?.phase === "compact") {
+                        await configure(tx, runtime.conversationId, {
+                            compaction: checkpoint.restore,
+                        });
+                    }
 
                     // Replaced by an edit: the schedule is the new task's, and stays.
                     if (ownedBy(doc.items[task.input.scheduleId], runtime)) {
@@ -213,8 +253,16 @@ export class Schedules {
         });
     }
 
-    /** Send a schedule's message, unless it may not go out anymore; then wait for the next time, or finish. */
-    async #send(input: ScheduleInput, runtime: Runtime, context: Context): Promise<void> {
+    /**
+     * Send a schedule's message, unless it may not go out anymore; then wait for the next time, or finish. One set to
+     * compact first compacts before it sends (`compacted`: it did).
+     */
+    async #send(
+        input: ScheduleInput,
+        runtime: Runtime,
+        context: Context,
+        compacted = false,
+    ): Promise<void> {
         const id = input.scheduleId;
         const conversationId = runtime.conversationId;
         const schedule = await stored(runtime, id, context);
@@ -277,6 +325,16 @@ export class Schedules {
             return this.#skip(id, runtime, context);
         }
 
+        if (
+            !compacted &&
+            schedule.compactBefore === true &&
+            stopped === undefined &&
+            last !== undefined &&
+            (await this.#startCompaction(id, last, runtime, context))
+        ) {
+            return;
+        }
+
         // Sent in the commit that reads the schedule again, so an edit or cancel either comes first, and nothing goes
         // out, or after, and the message went out as it was. The request id makes a run again after a crash send once.
         await runtime.commit(async (tx) => {
@@ -330,6 +388,144 @@ export class Schedules {
             item.next = nextRepeat(item.every, runtime.now(), item.zone);
 
             return { status: "running", checkpoint: { phase: "wait" } };
+        }, context);
+    }
+
+    /**
+     * Before a sending, compact everything that came before the message the schedule sent last (`last`, its request
+     * id), keeping that message and all after it. Pi Durable keeps the newest `keepRecentTokens` of the context, and
+     * cuts at the first entry it may cut at from there on: kept as many tokens as that message and all after it count
+     * (its own estimate), it cuts at that message. So the conversation's own setting is that, for its model too (a
+     * model's setting beats a conversation's), until the compaction is done. Whether it moved on to compact: not when
+     * the conversation is busy or compacting already (the cut would move with what it adds meanwhile), or when nothing
+     * comes before.
+     */
+    async #startCompaction(
+        id: string,
+        last: string,
+        runtime: Runtime,
+        context: Context,
+    ): Promise<boolean> {
+        const app = this.#app;
+        const conversationId = runtime.conversationId;
+
+        const live = await runtime.snapshot(LiveDoc, conversationId, context);
+
+        // A run resumed after a restart is in the live document before the app counts it busy.
+        if (
+            app.isBusy(conversationId) ||
+            live?.run !== undefined ||
+            (live?.compactions?.length ?? 0) > 0
+        ) {
+            app.log(
+                `Schedule ${id} in session ${String(conversationId)} sends without compacting first: the session is busy.`,
+            );
+
+            return false;
+        }
+
+        const record = await app.harness.commit(
+            (tx) => tx.submissionByRequest(conversationId, last),
+            context,
+        );
+        const view = await runtime.context(conversationId, context);
+        const from = view.entries.findIndex((entry) => entry.id === record?.entry);
+        const ref = (await runtime.agent(context)).model;
+
+        // Not in the context anymore, or nothing before it to compact.
+        if (from <= (view.head === undefined ? 0 : 1) || ref === undefined) {
+            return false;
+        }
+
+        let keep = 0;
+
+        for (const messages of view.contributions.slice(from)) {
+            for (const message of messages) {
+                keep += estimateMessageTokens(message);
+            }
+        }
+
+        if (keep === 0) {
+            return false;
+        }
+
+        const model = `${ref.provider}/${ref.modelId}`;
+        let moved = false;
+
+        await runtime.commit(async (tx) => {
+            if (!ownedBy((await tx.doc(ScheduleDoc, conversationId)).items[id], runtime)) {
+                return finished;
+            }
+
+            const own = (await tx.doc(AgentDoc, conversationId)).compaction;
+            const restore =
+                own === undefined ? null : (JSON.parse(JSON.stringify(own)) as CompactionSettings);
+
+            await configure(tx, conversationId, {
+                compaction: {
+                    ...restore,
+                    keepRecentTokens: keep,
+                    modelOverrides: {
+                        ...restore?.modelOverrides,
+                        [model]: { ...restore?.modelOverrides?.[model], keepRecentTokens: keep },
+                    },
+                },
+            });
+            moved = true;
+
+            return { status: "running", checkpoint: { phase: "compact", restore } };
+        }, context);
+
+        return moved;
+    }
+
+    /**
+     * Compact, wait until the summary is in place, give the conversation its own compaction settings back, and send. A
+     * compaction that fails or finds nothing to compact sends all the same. A restart before its task is in the
+     * checkpoint starts another: it finds nothing to compact once the first is placed, or is stale.
+     */
+    async #compact(
+        state: Extract<ScheduleState, { phase: "compact" }>,
+        runtime: Runtime,
+        context: Context,
+    ): Promise<void> {
+        const app = this.#app;
+        const conversationId = runtime.conversationId;
+
+        if (state.compaction === undefined) {
+            let compaction: TaskId<CompactionResult> | undefined;
+
+            try {
+                compaction = await (
+                    await app.conversation(conversationId)
+                ).compact(undefined, context);
+            } catch (error) {
+                app.log(
+                    `A schedule in session ${String(conversationId)} did not compact before sending: ${describe(error)}`,
+                );
+            }
+
+            if (compaction !== undefined) {
+                return runtime.commit(
+                    () => ({ status: "running", checkpoint: { ...state, compaction } }),
+                    context,
+                );
+            }
+        } else {
+            const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
+            const submissionId =
+                outcome.status === "completed" ? outcome.result.submissionId : undefined;
+
+            // The summary goes in once the conversation is idle: the message goes after it.
+            if (submissionId !== undefined) {
+                await (await app.harness.submission(submissionId, context))?.wait(context);
+            }
+        }
+
+        return runtime.commit(async (tx) => {
+            await configure(tx, conversationId, { compaction: state.restore });
+
+            return { status: "running", checkpoint: { phase: "send", compacted: true } };
         }, context);
     }
 
@@ -548,6 +744,7 @@ export class Schedules {
                 runs: 0,
                 taskId,
                 ...(request.key === undefined ? {} : { key: request.key }),
+                ...(request.compactBefore === true ? { compactBefore: true } : {}),
             };
 
             doc.items[id] = schedule;
@@ -572,6 +769,8 @@ export class Schedules {
             /** The version the change was made from (its `revision`): one edited since is refused. */
             version?: string;
             by: { id: string; name: string };
+            /** Compact before each sending; absent: as it was. */
+            compactBefore?: boolean;
         },
     ): Promise<Schedule> {
         const app = this.#app;
@@ -632,6 +831,12 @@ export class Schedules {
                 delete item.every;
             } else {
                 item.every = change.every;
+            }
+
+            if (change.compactBefore === true) {
+                item.compactBefore = true;
+            } else if (change.compactBefore === false) {
+                delete item.compactBefore;
             }
 
             return JSON.parse(JSON.stringify(item)) as Schedule;

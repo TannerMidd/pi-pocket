@@ -872,6 +872,7 @@ export class Room {
                         paused,
                         skipped,
                         skippedAt,
+                        compactBefore,
                     }) => ({
                         id,
                         version: String(revision ?? 0),
@@ -884,6 +885,7 @@ export class Room {
                         ...(skipped === undefined ? {} : { skipped, skippedAt }),
                         createdAt,
                         ...(paused === undefined ? {} : { paused: paused.at, pausedBy: paused.by }),
+                        ...(compactBefore === true ? { compactBefore } : {}),
                     }),
                 ),
             // What a Stop held: each message's start and who wrote it, as the queue shows them.

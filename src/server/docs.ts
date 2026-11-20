@@ -563,6 +563,11 @@ export type Schedule = {
     revision?: number;
     /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
     paused?: { at: number; by: string };
+    /**
+     * Compact before each sending: everything before the message it sent last is summarized, so a run starts on the
+     * last run and what was said since (`schedules.ts`).
+     */
+    compactBefore?: true;
 };
 
 /** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */
