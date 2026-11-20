@@ -2,7 +2,8 @@
 # - installer: builds the installer (packaging/windows) with a package packed from this checkout, installs it
 #   silently, starts Pi Pocket without the interactive launcher, checks that it answers HTTP, and uninstalls it
 #   while it runs, which must stop it and keep the data folder.
-# - checks: the type check and the part of the test suite that is known to pass on Windows.
+# - checks: the type check and the part of the test suite that is known to pass on Windows, with the background task
+#   and quiet-limit tests.
 name: Windows
 
 on:
@@ -165,7 +166,6 @@ jobs:
                   --test-skip-pattern="a session lists them as /skill: commands"
                   --test-skip-pattern="a session in its own worktree starts with the folder"
                   --test-skip-pattern="a worktree another session works in stays"
-                  --test-skip-pattern="a bash call that prints nothing for the quiet limit"
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/lock.test.ts
@@ -178,6 +178,7 @@ jobs:
                   test/quote-text.test.ts
                   test/timing.test.ts
                   test/deadlines.test.ts
+                  test/background-platforms.test.ts
                   test/history.test.ts
                   test/signins.test.ts
                   test/shares.test.ts

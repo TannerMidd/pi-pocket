@@ -4,7 +4,8 @@
 #   that it answers HTTP and that the sign-in link works, and uninstalls it while it runs, which must stop it and keep
 #   the data folder. Then it installs it again with the sign-in item, opens Pi Pocket.app, starts the sign-in item,
 #   installs over the running Pi Pocket (which keeps the sign-in item), and uninstalls it with the data.
-# - checks: the type check. The test suite does not pass on macOS yet (docs/macos.md says why).
+# - checks: the type check, and the background task and quiet-limit tests. The rest of the test suite does not pass on
+#   macOS yet (docs/macos.md says why).
 name: macOS
 
 on:
@@ -267,7 +268,7 @@ jobs:
                   grep -E "installd|package_script_service|installer\[" /var/log/install.log | tail -150 || true
 
     checks:
-        name: Type check
+        name: Type check and tests
         runs-on: macos-latest
         timeout-minutes: 40
         steps:
@@ -283,3 +284,6 @@ jobs:
             - run: npm ci
 
             - run: npm run check
+
+            - name: Background task and quiet-limit tests
+              run: node --test --test-concurrency=1 --test-timeout=180000 test/background-platforms.test.ts test/deadlines.test.ts
