@@ -170,6 +170,13 @@ const server = createServer((request, response) => {
     response.end("Pi Pocket is starting…");
 });
 
+// WebSockets: runners on other computers (`runners.ts`), once the app is open. Nothing else upgrades.
+server.on("upgrade", (request, socket, head) => {
+    if (app === undefined || !app.runners.upgrade(request, socket, head)) {
+        socket.destroy();
+    }
+});
+
 // The whole request must arrive within this: long enough for a 50 MB upload on a slow phone connection. Event streams
 // and long polls are GET requests without a body, so their time on the connection does not count.
 server.requestTimeout = 15 * 60_000;

@@ -13,7 +13,7 @@ import { extname, join, relative, sep } from "node:path";
 import { quoted } from "../fence.ts";
 import { figHeaderReason } from "./scan-fig-container.ts";
 
-const SKIP = new Set(
+export const SCAN_SKIP = new Set(
     `node_modules .git dist build out coverage .next .nuxt .svelte-kit .cache .turbo
     .parcel-cache .output .vercel .netlify .yarn .pnpm-store .venv venv __pycache__ target
     vendor vendors third_party third-party thirdparty bower_components exports
@@ -30,7 +30,7 @@ export interface Skipped {
     why: string;
 }
 
-const DOT_STYLE_FOLDERS = new Set([".storybook", ".vitepress", ".vuepress", ".docusaurus"]);
+export const DOT_STYLE_FOLDERS = new Set([".storybook", ".vitepress", ".vuepress", ".docusaurus"]);
 
 const HEADER_BYTES = 8;
 
@@ -100,7 +100,7 @@ export function priority(rel: string): number {
     return score - rel.split("/").length * 2;
 }
 
-const wanted = (rel: string, name: string) =>
+export const scanSource = (rel: string, name: string) =>
     /\.fig$/i.test(name) ||
     (STYLE.test(name) ? !name.endsWith(".d.ts") : TOKEN_JSON.test(rel) && name.endsWith(".json"));
 
@@ -154,7 +154,7 @@ function studioSets(root: string, dir: string, depth: number, found: string[]): 
         if (
             entry.isDirectory() &&
             depth < 3 &&
-            !SKIP.has(entry.name) &&
+            !SCAN_SKIP.has(entry.name) &&
             !entry.name.startsWith(".")
         ) {
             studioSets(root, rel, depth + 1, found);
@@ -216,7 +216,8 @@ export function collectFiles(root: string): {
 
             // Dirent reports a symlink as a symlink, not as its target: neither branch below takes one.
             if (entry.isDirectory()) {
-                const skip = SKIP.has(entry.name) || (hidden && !DOT_STYLE_FOLDERS.has(entry.name));
+                const skip =
+                    SCAN_SKIP.has(entry.name) || (hidden && !DOT_STYLE_FOLDERS.has(entry.name));
 
                 if (!skip && depth < LIMITS.depth) {
                     walk(path, depth + 1);
@@ -230,7 +231,7 @@ export function collectFiles(root: string): {
                 }
             } else if (entry.isSymbolicLink() && !hidden) {
                 note(rel, "a link, not followed");
-            } else if (entry.isFile() && wanted(rel, entry.name)) {
+            } else if (entry.isFile() && scanSource(rel, entry.name)) {
                 if (FIG.test(entry.name) && !isFigma(path, rel)) {
                     continue;
                 }

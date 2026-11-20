@@ -36,15 +36,25 @@ export function callHost(name, ...args) {
 
 const listeners = new Map();
 
-callHost("subscribe", (event) => {
-    for (const listener of listeners.get(event?.type) ?? []) {
-        try {
-            listener(event);
-        } catch (error) {
-            console.error(error);
+/**
+ * The host's events this page's code handles, told to the host as it subscribes: an app sends an event that came after
+ * version 1 began (such as "newSession") only to a page that names it, and does something else for an older page.
+ */
+const EVENTS = ["visibility", "open", "approve", "newSession"];
+
+callHost(
+    "subscribe",
+    (event) => {
+        for (const listener of listeners.get(event?.type) ?? []) {
+            try {
+                listener(event);
+            } catch (error) {
+                console.error(error);
+            }
         }
-    }
-});
+    },
+    EVENTS,
+);
 
 export function onHost(type, listener) {
     const set = listeners.get(type) ?? new Set();

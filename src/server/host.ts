@@ -528,6 +528,10 @@ export interface PocketHost {
     readonly fetchPublic: FetchPublic;
     /** Who Pi works for in a conversation now: whose message led to its current work. */
     requesterOf(conversationId: ConversationId): string | undefined;
+    /** The computer this conversation and its subagents run on; undefined for this server. Built-in modules only. */
+    runnerOf(conversationId: ConversationId): string | undefined;
+    /** The session-bound environment, with its existing runner permission. Built-in modules only. */
+    envFor(conversationId: ConversationId): ExecutionEnv;
     /**
      * The role of a person by id, as core decides it; undefined for an id that is not a person here.
      *
@@ -583,7 +587,10 @@ export interface PocketHost {
      * printed, and the run goes on. False when no such call runs.
      */
     stopToolCall(conversationId: ConversationId, callId: string): Promise<boolean>;
-    /** Whether a run of the conversation waits for a provider's limit to clear (`limit-gate.ts`): no stall. */
+    /**
+     * Whether a run of the conversation waits for a provider's limit to clear (`limit-gate.ts`), or for its linked
+     * computer to be online again (`runners.ts`): no stall.
+     */
     waitsForLimit(conversationId: ConversationId): boolean;
     /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
     alertOwner(conversationId: ConversationId, title: string, body: string): void;
@@ -628,7 +635,7 @@ export interface PocketHost {
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
     /** The built-in browser: a page per conversation, which the people in it watch and use too. */
-    readonly browsers: Pick<Browsers, "open">;
+    readonly browsers: Pick<Browsers, "open" | "downloads" | "computerOf" | "networkProblem">;
     /** PiP, the owner's assistant: what its tools do, each as PiP's person (`pip.ts`). */
     readonly pip: Pick<
         Pip,
@@ -936,4 +943,9 @@ export type ExtensionModule = {
     ) => Extension | readonly Extension[] | void | Promise<Extension | readonly Extension[] | void>;
     /** The version of the extension API the module needs, when it says: a newer one than the app's is not loaded. */
     pocketApi?: unknown;
+    /**
+     * True: its extensions also load in sessions on another computer (`docs/runners.md`). The module reaches the
+     * session's files and commands only through the session (`api.env`), so they are that computer's.
+     */
+    remoteSessions?: unknown;
 };

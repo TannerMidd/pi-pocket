@@ -23,8 +23,16 @@ export function quietMessage(ms: number): string {
     return `Command timed out: it printed nothing for ${span}, so Pi Pocket stopped it and the processes it started. The output above is all it printed. For a long job that prints little, pass timeout (seconds); in a session, not a subagent, the background tool can also run it.`;
 }
 
-/** `base`, with the quiet limit `quietMs()` (read at each command; 0 or less: none) on every command it runs. */
-export function withQuietLimit(base: ExecutionEnv, quietMs: () => number): ExecutionEnv {
+/**
+ * `base`, with the quiet limit `quietMs()` (read at each command; 0 or less: none) on every command it runs. While
+ * `waiting()` says so, no quiet time counts: a command on a linked computer that is offline waits for it, and what it
+ * printed meanwhile comes when the computer is back.
+ */
+export function withQuietLimit(
+    base: ExecutionEnv,
+    quietMs: () => number,
+    waiting?: () => boolean,
+): ExecutionEnv {
     const exec: ExecutionEnv["exec"] = async (command, options, context) => {
         const limit = quietMs();
 
@@ -38,6 +46,12 @@ export function withQuietLimit(base: ExecutionEnv, quietMs: () => number): Execu
         let quiet = false;
         const look = setInterval(
             () => {
+                if (waiting?.() === true) {
+                    last = performance.now();
+
+                    return;
+                }
+
                 if (performance.now() - last >= limit) {
                     quiet = true;
                     cancel(new Error("quiet"));

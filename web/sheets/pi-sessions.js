@@ -4,8 +4,19 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { actions, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Icon, Loader, Sheet, shortPath, timeAgo } from "../ui.js";
 
-/** Only the owner: Pi's sessions are the owner's files. */
-export const piSessionsAvailable = () => store.state.me?.role === "owner";
+import { waitOnComputer } from "../runner-wait.js";
+
+/** Local sessions are the owner's files; a computer's list is for whoever may use it. */
+export const piSessionsAvailable = (runner) =>
+    runner
+        ? store.state.runners.some(
+              (each) =>
+                  each.id === runner &&
+                  (store.state.me?.role !== "owner" ||
+                      each.createdBy === store.state.me.id ||
+                      each.users?.some((person) => person.id === store.state.me.id)),
+          )
+        : store.state.me?.role === "owner";
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -30,12 +41,12 @@ function byFolder(sessions) {
     return [...folders];
 }
 
-function SessionRow({ session }) {
+function SessionRow({ session, runner }) {
     const pocket = session.pocket;
 
     return html`<button
         class="pi-session"
-        onClick=${() => openSheet({ type: "pi-session", id: session.path })}
+        onClick=${() => openSheet({ type: "pi-session", id: session.path, runner })}
     >
         <span class="pi-session-text">
             <span class="pi-session-title">${session.title}</span>
@@ -54,8 +65,9 @@ function SessionRow({ session }) {
 }
 
 /** Pi's sessions on this computer, by folder, with a search the server runs through all of them, words included. */
-export function PiSessionsSheet() {
-    const home = store.state.server?.home;
+export function PiSessionsSheet({ runner }) {
+    const computer = store.state.runners.find((each) => each.id === runner);
+    const home = runner ? computer?.home : store.state.server?.home;
     const [sessions, setSessions] = useState(null);
     // Whether Pi has any at all, from the first list: a search that finds none is not "no sessions".
     const [any, setAny] = useState(null);
@@ -72,7 +84,7 @@ export function PiSessionsSheet() {
         // A pause in typing, then the search: the first list at once.
         const timer = setTimeout(
             () =>
-                actions.piSessions(needle).then(
+                actions.piSessions(needle, runner).then(
                     (result) => {
                         if (current) {
                             setSessions(result.sessions);
@@ -88,7 +100,7 @@ export function PiSessionsSheet() {
             current = false;
             clearTimeout(timer);
         };
-    }, [needle]);
+    }, [needle, runner]);
     const folders = byFolder(sessions ?? []);
 
     useLayoutEffect(() => {
@@ -105,7 +117,7 @@ export function PiSessionsSheet() {
 
     return html`<${Sheet} title="Continue a Pi session" onClose=${closeSheet}>
         <p class="muted small">
-            Sessions of Pi in the terminal on this computer. One continues here as a new session; its file stays as it is.
+            ${`Sessions of Pi in the terminal on ${runner ? (computer?.name ?? "another computer") : "this computer"}. One continues here as a new session; its file stays as it is.`}
         </p>
         ${problem && html`<div class="error-box small">${problem}</div>`}
         ${sessions === null && problem === null && html`<${Loader} label="Finding Pi's sessions" />`}
@@ -117,7 +129,7 @@ export function PiSessionsSheet() {
                 type="search"
                 ref=${box}
                 placeholder="Search sessions"
-                aria-label="Search Pi's sessions: titles, folders, and messages"
+                aria-label=${runner ? "Search Pi's sessions: titles and folders" : "Search Pi's sessions: titles, folders, and messages"}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />`
@@ -137,7 +149,7 @@ export function PiSessionsSheet() {
                         ${parent && html`<span class="pi-folder-parent">${parent}</span>`}
                     </div>
                     <div class="pi-folder-list">
-                        ${list.map((session) => html`<${SessionRow} key=${session.path} session=${session} />`)}
+                        ${list.map((session) => html`<${SessionRow} key=${session.path} session=${session} runner=${runner} />`)}
                     </div>
                 </section>`;
             })}
@@ -152,8 +164,9 @@ export function PiSessionsSheet() {
 }
 
 /** One of Pi's sessions: where it worked and with what, its last messages, and continuing it here. */
-export function PiSessionSheet({ path }) {
-    const home = store.state.server?.home;
+export function PiSessionSheet({ path, runner }) {
+    const computer = store.state.runners.find((each) => each.id === runner);
+    const home = runner ? computer?.home : store.state.server?.home;
     const [info, setInfo] = useState(null);
     const [problem, setProblem] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -161,8 +174,34 @@ export function PiSessionSheet({ path }) {
     const going = useRef(false);
 
     useEffect(() => {
-        actions.piSession(path).then(setInfo, (error) => setProblem(error.message));
-    }, [path]);
+        const controller = new AbortController();
+        const reading = runner
+            ? waitOnComputer(
+                  runner,
+                  "",
+                  "pi-preview",
+                  (signal) => actions.piSession(path, runner, signal),
+                  controller.signal,
+              )
+            : actions.piSession(path, undefined, controller.signal);
+
+        reading.then(
+            (result) => {
+                if (result && !controller.signal.aborted) {
+                    setInfo(result);
+                } else if (!controller.signal.aborted) {
+                    closeSheet();
+                }
+            },
+            (error) => {
+                if (!controller.signal.aborted) {
+                    setProblem(error.message);
+                }
+            },
+        );
+
+        return () => controller.abort();
+    }, [path, runner]);
 
     const open = (id) => {
         closeSheet();
@@ -179,9 +218,17 @@ export function PiSessionSheet({ path }) {
             setBusy(true);
 
             try {
-                const { id } = await actions.continuePiSession(path);
+                const result = runner
+                    ? await waitOnComputer(runner, info.cwd, "new", (signal) =>
+                          actions.continuePiSession(path, runner, signal),
+                      )
+                    : await actions.continuePiSession(path);
 
-                open(id);
+                if (!result) {
+                    return;
+                }
+
+                open(result.id);
                 notify(
                     "info",
                     "Continued from Pi. Pi has the conversation as Pi left it; nothing it did runs again.",

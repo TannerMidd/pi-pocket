@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { defineExtension } from "@earendil-works/pi-durable";
 import { designGuide, designRoutes, designTools } from "../design/index.ts";
+import { remoteDesignWeb } from "../design/mirror.ts";
 import {
     type ArtifactMeta,
     ArtifactBodyDoc,
@@ -151,6 +152,8 @@ export default async function createDesign(host: PocketHost, web?: ExtensionWeb)
     if (web === undefined) {
         return extension;
     }
+
+    web = remoteDesignWeb(host, web);
 
     // Everyone who sees every session sees the canvas, the versions, and the comments; steering is checked per route.
     web.client("design", { access: "view" });

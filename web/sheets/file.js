@@ -20,6 +20,7 @@ import {
     Markdown,
     openFile,
     revealFile,
+    revealOffered,
     Sheet,
 } from "../ui.js";
 
@@ -303,7 +304,7 @@ function FileActions({ file, shown, previewable, preview, onPreview, running, on
         // For the owner at the server's machine, with a mouse: show it in that machine's file manager.
         // Ctrl+click (⌘+click) on a path does the same.
         file &&
-        store.state.me?.role === "owner" &&
+        revealOffered() &&
         matchMedia("(pointer: fine)").matches &&
         html`<button
             class="icon-button"

@@ -35,6 +35,7 @@ import { localFolder } from "../design/files.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
 import { assetName, assetType } from "../http/artifact-assets.ts";
 import { expandHome, workspaceScheme } from "../paths.ts";
+import { getOrThrow } from "@earendil-works/pi-durable/env";
 
 export const MAX_BYTES = 2_000_000;
 export const MAX_ASSET_BYTES = 5_000_000;
@@ -93,9 +94,53 @@ async function readFileBytes(path: string, limit: number): Promise<Buffer> {
     }
 }
 
-async function readArtifact(path: string): Promise<string> {
-    const bytes = await readFileBytes(path, MAX_BYTES);
+/** Read a session's file where its tools run, with the same bound and final-link rule on either computer. */
+async function readSessionFile(
+    path: string,
+    limit: number,
+    api: Parameters<Exec>[1],
+    context: Parameters<Exec>[2],
+    remote: boolean,
+): Promise<Buffer> {
+    if (!remote) {
+        const agent = await api.agent(context);
 
+        if (workspaceScheme(agent.cwd ?? "") !== undefined) {
+            throw new Error("A remote session's files are not on this machine: give content.");
+        }
+
+        return readFileBytes(resolve(agent.cwd ?? process.cwd(), expandHome(path)), limit);
+    }
+
+    const env = api.env;
+
+    if (env === undefined) {
+        throw new Error("The session's computer is not available: give content.");
+    }
+
+    const absolute = getOrThrow(await env.absolutePath(path, context));
+    const reader = getOrThrow(await env.openBinaryReader(absolute, { noFollow: true }, context));
+
+    try {
+        const info = getOrThrow(await reader.info(context));
+
+        if (info.size > limit) {
+            throw new Error(`Files are limited to ${limit} bytes.`);
+        }
+
+        const bytes = getOrThrow(await reader.read(0, limit + 1, context));
+
+        if (bytes.length > limit) {
+            throw new Error(`Files are limited to ${limit} bytes.`);
+        }
+
+        return Buffer.from(bytes);
+    } finally {
+        await reader.close(context);
+    }
+}
+
+function readArtifact(bytes: Buffer): string {
     try {
         if (bytes.includes(0)) {
             throw new Error("Binary data");
@@ -122,6 +167,7 @@ async function attachDesignSystem(
     prepared: Map<string, { asset: ArtifactAsset; bytes: Buffer }>,
     removed: readonly string[],
     cwd: string | undefined,
+    remote: boolean,
 ): Promise<string[]> {
     const wanted = (Object.keys(DESIGN_FILES) as (keyof typeof DESIGN_FILES)[]).filter(
         (name) => content.includes(name) && !prepared.has(name) && !removed.includes(name),
@@ -129,6 +175,12 @@ async function attachDesignSystem(
 
     if (wanted.length === 0) {
         return [];
+    }
+
+    if (remote) {
+        return [
+            `The page links ${wanted.join(", ")}. Automatic design-system loading is not available in sessions on another computer: include these files with assets[].path.`,
+        ];
     }
 
     let system;
@@ -216,11 +268,11 @@ const INLINE_GUIDE = `- inline: true shows the page as a card in your reply, for
 
 export const BRIDGE_GUIDE = join(APP_ROOT, "src", "server", "guides", "artifact-bridge.md");
 
-const guide = (inline: boolean) =>
+const guide = (inline: boolean, remote = false) =>
     `Use the artifact tool for results to see rendered, not read: demos, games, charts, diagrams, reports; not for plain answers or project files.
 - HTML runs in a sandboxed frame on the user's device (often a phone), with no access to this app, its cookies, or the parent page. Make it self-contained, responsive (a viewport meta tag), and touch-friendly, with loading and error states (window.onerror).
 - Load libraries from a CDN by full URL (https://esm.sh, https://cdn.jsdelivr.net); bare specifiers need an import map.
-- For a page that puts a message in the person's message box or keeps its state across reloads and devices, read ${BRIDGE_GUIDE} first.
+${remote ? "- The artifact bridge guide lives on the server and cannot be read from this computer. Use self-contained pages here." : `- For a page that puts a message in the person's message box or keeps its state across reloads and devices, read ${BRIDGE_GUIDE} first.`}
 - Send edits for small fixes. Give path to publish a local file without repeating it; everyone in the conversation can open the copy.
 ${inline ? INLINE_GUIDE : ""}`.trimEnd();
 
@@ -247,7 +299,9 @@ async function publish(
     api: Parameters<Exec>[1],
     context: Parameters<Exec>[2],
     inline: boolean,
+    host: PocketHost,
 ): ReturnType<Exec> {
+    const remote = host.runnerOf?.(api.conversationId) !== undefined;
     const id = slugify(args.id);
 
     if (id === "") {
@@ -314,15 +368,9 @@ async function publish(
             }
 
             type = inferred;
-            const agent = await api.agent(context);
-
-            if (workspaceScheme(agent.cwd ?? "") !== undefined) {
-                throw new Error("A remote session's files are not on this machine: give content.");
-            }
-
-            const path = resolve(agent.cwd ?? process.cwd(), expandHome(args.path));
-
-            content = await readArtifact(path);
+            content = readArtifact(
+                await readSessionFile(args.path, MAX_BYTES, api, context, remote),
+            );
         } else if (args.content !== undefined) {
             content = args.content;
         } else if (args.edits !== undefined && args.edits.length > 0) {
@@ -388,17 +436,7 @@ async function publish(
                     throw new Error("Give a local file path.");
                 }
 
-                const agent = await api.agent(context);
-
-                if (workspaceScheme(agent.cwd ?? "") !== undefined) {
-                    throw new Error(
-                        "A remote session's files are not on this machine: give content.",
-                    );
-                }
-
-                const path = resolve(agent.cwd ?? process.cwd(), expandHome(entry.path));
-
-                bytes = await readFileBytes(path, MAX_ASSET_BYTES);
+                bytes = await readSessionFile(entry.path, MAX_ASSET_BYTES, api, context, remote);
             } else {
                 if (Buffer.byteLength(entry.content!, "utf8") > MAX_ASSET_BYTES) {
                     throw new Error(`Assets are limited to ${MAX_ASSET_BYTES} bytes each.`);
@@ -431,12 +469,20 @@ async function publish(
             let cwd: string | undefined;
 
             try {
-                cwd = localFolder((await api.agent(context)).cwd);
+                if (!remote) {
+                    cwd = localFolder((await api.agent(context)).cwd);
+                }
             } catch {
                 // No session folder to look in: the page keeps its link.
             }
 
-            notes = await attachDesignSystem(content, prepared, args.removeAssets ?? [], cwd);
+            notes = await attachDesignSystem(
+                content,
+                prepared,
+                args.removeAssets ?? [],
+                cwd,
+                remote,
+            );
             preparedSize = [...prepared.values()].reduce(
                 (total, each) => total + each.bytes.length,
                 0,
@@ -670,7 +716,7 @@ export function withoutInline(tool: ToolRegistration): ToolRegistration {
     } as ToolRegistration;
 }
 
-export default function createArtifacts(_host: PocketHost) {
+export default function createArtifacts(host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
         description:
@@ -697,7 +743,7 @@ export default function createArtifacts(_host: PocketHost) {
         ),
         // The commit in publish() is idempotent per call, so a rerun after a crash is harmless.
         replay: "safe",
-        execute: (args, api, context) => publish(args, api, context, args.inline === true),
+        execute: (args, api, context) => publish(args, api, context, args.inline === true, host),
     });
 
     return defineExtension({
@@ -710,6 +756,7 @@ export default function createArtifacts(_host: PocketHost) {
                         input.agent.tools.find((tool) => tool.name === "artifact")?.parameters as
                             { properties?: Record<string, unknown> } | undefined
                     )?.properties?.inline !== undefined,
+                    host.runnerOf?.(input.conversationId) !== undefined,
                 ),
             ),
         ],

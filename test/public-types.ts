@@ -74,6 +74,8 @@ type Internal =
     | "watches"
     | "repoWatches"
     | "approvals"
+    | "runnerOf"
+    | "envFor"
     | "guard"
     | "schedules"
     | "background"

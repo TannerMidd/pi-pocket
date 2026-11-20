@@ -362,6 +362,36 @@ function Group({ title, lessons, data, empty, conversationId, pendingOnly = fals
     </div>`;
 }
 
+/** A lesson from another copy is added here as a new lesson, with the usual approval rules. */
+function OtherLesson({ lesson, conversationId, canWrite }) {
+    const [busy, setBusy] = useState(false);
+
+    const add = () => {
+        if (busy) {
+            return;
+        }
+
+        setBusy(true);
+        attempt(async () => {
+            try {
+                await api(path(conversationId), { copy: lesson.id });
+            } finally {
+                refresh();
+            }
+        }).finally(() => setBusy(false));
+    };
+
+    return html`<div class="lesson">
+        <div class="lesson-text">${lesson.text}</div>
+        ${
+            canWrite &&
+            html`<div class="row lesson-actions">
+                <button class="button small" disabled=${busy} onClick=${add}>Add</button>
+            </div>`
+        }
+    </div>`;
+}
+
 /**
  * The sheet's scope: which lessons it lists, and where one added by hand goes. Each shows how many it holds, and for the
  * owner how many of them wait for approval, so none hides behind the other.
@@ -560,6 +590,24 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                 conversationId=${id}
                 empty="Nothing yet."
             />`
+        }
+        ${
+            chosen === "project" &&
+            data.others?.map(
+                (other) => html`<details class="group lesson-copies" key=${other.project}>
+                    <summary class="group-title">${`From ${other.name} on ${other.computer} (${other.lessons.length})`}</summary>
+                    <div class="sheet-list">
+                        ${other.lessons.map(
+                            (lesson) => html`<${OtherLesson}
+                            key=${lesson.id}
+                            lesson=${lesson}
+                            conversationId=${id}
+                            canWrite=${data.canWrite}
+                        />`,
+                        )}
+                    </div>
+                </details>`,
+            )
         }
         ${
             chosen === "everywhere" &&

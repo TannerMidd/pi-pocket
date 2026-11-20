@@ -17,6 +17,8 @@ import { after, before, test } from "node:test";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { withQuietLimit } from "../src/server/deadline.ts";
 
 const route: FauxResponseStep = (request) => {
     const { role, text } = lastText(request as never);
@@ -83,4 +85,44 @@ test("a call that keeps printing, or gives its own timeout, runs past the quiet 
     const own = await run({ command: "sleep 0.8; echo late", timeout: 5 });
 
     assert.match(own.text, /late/);
+});
+
+test("a command on a linked computer that is offline waits: the wait is no quiet time", async () => {
+    let offline = true;
+    let cancelled = false;
+    // A command that prints nothing for 500 ms, and ends early when it is cancelled.
+    const base = {
+        exec: (_command: unknown, _options: unknown, inner: typeof context) =>
+            new Promise((resolve) => {
+                const timer = setTimeout(() => resolve({ ok: true, value: { exitCode: 0 } }), 500);
+
+                inner.abortSignal?.addEventListener("abort", () => {
+                    cancelled = true;
+                    clearTimeout(timer);
+                    resolve({ ok: false, error: new Error("cancelled") });
+                });
+            }),
+    } as unknown as ExecutionEnv;
+
+    const waited = await withQuietLimit(
+        base,
+        () => 100,
+        () => offline,
+    ).exec("true", undefined, context);
+
+    assert.equal(waited.ok, true, "not stopped while the computer was offline");
+    assert.equal(cancelled, false);
+
+    // The same command with the computer online is stopped at the limit.
+    offline = false;
+
+    const stopped = await withQuietLimit(
+        base,
+        () => 100,
+        () => offline,
+    ).exec("true", undefined, context);
+
+    assert.equal(stopped.ok, false);
+    assert.equal(cancelled, true);
+    assert.match(String(!stopped.ok && stopped.error.message), /printed nothing/);
 });

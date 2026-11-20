@@ -1,6 +1,7 @@
 /**
- * Show a file in the file manager of the machine Pi Pocket runs on (Files, Dolphin, Finder, Explorer), selected in its
- * folder; a folder opens itself. For the owner at that machine: a Ctrl+click on a path (`web/ui.js`).
+ * Show a file in a file manager (Files, Dolphin, Finder, Explorer), selected in its folder; a folder opens itself. For
+ * the owner: a Ctrl+click on a path (`web/ui.js`). A session's own machine shows it: this one, or for a session on
+ * another computer, that computer (`revealOn`), where its runner runs the same commands.
  */
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -101,4 +102,32 @@ export async function reveal(
     }
 
     throw new HttpError(409, "No file manager could show it");
+}
+
+/** The Node platform name of a runner's system, as pi-env's `hello` names it. */
+export function platformOf(os: string): NodeJS.Platform {
+    return os === "macos" ? "darwin" : os === "windows" ? "win32" : "linux";
+}
+
+/**
+ * Show a path on another computer, in its file manager: `run` runs each command there (its runner), and says whether
+ * it worked. A computer without a desktop (a headless server) has nothing that works: a 409 that names it.
+ */
+export async function revealOn(
+    computer: string,
+    path: string,
+    folder: boolean,
+    os: string,
+    run: (command: Command) => Promise<boolean>,
+): Promise<void> {
+    for (const command of revealCommands(path, folder, platformOf(os))) {
+        if (await run(command)) {
+            return;
+        }
+    }
+
+    throw new HttpError(
+        409,
+        `No file manager on ${computer} could show it. Its runner may have no desktop session there.`,
+    );
 }

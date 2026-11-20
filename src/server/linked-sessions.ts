@@ -557,11 +557,9 @@ export class LinkedSessions implements LinkedSessionsApi {
                 continue;
             }
 
-            // Waiting for a person to allow a call, or for a provider's limit to clear, is no stall; it is still at work.
-            if (
-                app.approvals.forConversation(id).length > 0 ||
-                app.limits.waits().some((wait) => wait.conversationId === Number(id))
-            ) {
+            // Waiting for a person to allow a call, for a provider's limit to clear, or for its linked computer to be
+            // online again, is no stall; it is still at work.
+            if (app.approvals.forConversation(id).length > 0 || app.waitsOutside(id)) {
                 found.push({
                     address: addresses.get(each.id)!,
                     progress: "",
@@ -775,7 +773,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         return { session, address, answers: this.#leads(source, session) };
     }
 
-    /** Use the normal folder-picker validation for an explicit working directory. */
+    /** Use the source computer's folder-picker validation for an explicit working directory. */
     async #directory(
         source: ConversationId,
         user: User,
@@ -793,6 +791,12 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         if (typeof cwd !== "string") {
             throw new HttpError(400, "The working directory must be a folder path.");
+        }
+
+        const runner = this.#app.runnerOf(source);
+
+        if (runner !== undefined) {
+            return this.#app.runners.checkFolder(runner, cwd);
         }
 
         this.#app.requireWorkspaceOwner(user, cwd);
@@ -886,6 +890,14 @@ export class LinkedSessions implements LinkedSessionsApi {
     ): Promise<ConversationId> {
         const app = this.#app;
         const title = request.title;
+        const runner = app.runnerOf(source);
+
+        if (runner !== undefined && !app.runners.mayUse(runner, user)) {
+            throw new HttpError(
+                403,
+                "Only the person who linked this computer or the people they chose can start sessions on it.",
+            );
+        }
 
         if (user.sessions !== undefined) {
             throw new HttpError(403, "You were invited to one session and cannot start new ones.");
@@ -910,6 +922,29 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const cwd = approved?.cwd ?? (await this.#directory(source, user, agent, request.cwd));
+
+        const sameFolder = cwd === (agent.cwd ?? app.cwdOf(source));
+        // A linked session in the same folder shares its source's permission and starts without a question.
+        const runnerPermission =
+            runner === undefined
+                ? undefined
+                : sameFolder
+                  ? app.runnerScope(source).id
+                  : randomUUID();
+
+        if (runner !== undefined && !sameFolder) {
+            await app.runners.link(runner).confirm(
+                {
+                    kind: "new",
+                    person: user.name,
+                    folder: cwd,
+                    session: runnerPermission!,
+                },
+                undefined,
+                user.id,
+            );
+        }
+
         const now = Date.now();
 
         return app.harness.commit(async (tx) => {
@@ -954,14 +989,22 @@ export class LinkedSessions implements LinkedSessionsApi {
             const sessions = await tx.doc(SessionsDoc);
             const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
 
-            Object.assign(await tx.doc(AgentDoc, child.id), inherited, {
+            const childAgent = await tx.doc(AgentDoc, child.id);
+
+            Object.assign(childAgent, inherited, {
                 cwd,
                 model,
                 thinkingLevel: thinking,
             });
+
+            if (runner !== undefined) {
+                childAgent.extensions = app.remoteExtensions();
+            }
+
             sessions.items[String(child.id)] = {
                 cwd,
                 title,
+                ...(runner === undefined ? {} : { runner, runnerPermission }),
                 createdAt: now,
                 updatedAt: now,
                 createdBy: user.id,
