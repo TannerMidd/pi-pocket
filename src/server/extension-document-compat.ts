@@ -4,6 +4,10 @@ import { reportCheckpointDefault } from "./extension-document-imports.ts";
 
 export * from "@earendil-works/pi-durable";
 
+/** Pi Durable 1.6 renamed `runEndTask` to `hookTask`: a drop-in written before still imports the old name. */
+export const runEndTask = durable.hookTask;
+export type RunEndTask = durable.HookTask;
+
 /** Copy a missing policy, including frozen definitions, without changing any stored document semantics. */
 function checkpointDefault<T extends { readonly kind: string; readonly checkpointWhen?: unknown }>(
     definition: T,
