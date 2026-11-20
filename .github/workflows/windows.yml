@@ -184,8 +184,11 @@ jobs:
                   # The same sign-in flow over HTTP, as the app does it.
                   $headers = @{ Authorization = "Bearer $token"; "X-Pocket" = "1" }
                   $path = (Invoke-RestMethod -Method Post -Uri "$($info.url)/api/sign-in-link" -Headers $headers -Body "{}" -ContentType "application/json").path
-                  $signed = Invoke-WebRequest -Uri "$($info.url)$path" -UseBasicParsing -SkipHttpErrorCheck -MaximumRedirection 0 -SessionVariable cookies
-                  if ($signed.StatusCode -ne 303) { throw "The one-time link answered $($signed.StatusCode)" }
+                  # It answers 303 with the cookie, on to the app.
+                  $signed = Invoke-WebRequest -Uri "$($info.url)$path" -UseBasicParsing -SkipHttpErrorCheck -SessionVariable cookies
+                  if ($signed.StatusCode -ne 200 -or $cookies.Cookies.GetCookies($info.url)["pocket_auth"] -eq $null) {
+                      throw "The one-time link answered $($signed.StatusCode), without the pocket_auth cookie"
+                  }
                   $me = Invoke-WebRequest -Uri "$($info.url)/api/me" -UseBasicParsing -SkipHttpErrorCheck -WebSession $cookies
                   if ($me.StatusCode -ne 200) { throw "/api/me answered $($me.StatusCode) after the one-time sign-in" }
                   $log = Get-Content -Raw (Join-Path $env:APP "launcher.log")

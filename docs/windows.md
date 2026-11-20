@@ -20,7 +20,10 @@ Everything goes in `%LOCALAPPDATA%\Pi Pocket` (`C:\Users\<you>\AppData\Local\Pi 
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node\`                     | A portable Node.js LTS, the official `win-x64` zip. The build checks its SHA256 against the value pinned in [`packaging/windows/build.ps1`](../packaging/windows/build.ps1). |
 | `app\`                      | A private npm prefix that holds the `pi-pocket` package. It is yours, so updates from the app work.                                                                          |
-| `pi-pocket.cmd`             | Starts the launcher with that Node.js and prefix. Arguments go to `pi-pocket` (`pi-pocket.cmd --help`).                                                                      |
+| `Pi Pocket.exe`             | The desktop app ([desktop-app.md](desktop-app.md)): the icon in the notification area and the window. Setup's build compiles it from `PiPocket.cs`.                          |
+| `pi-pocket.cmd`             | Starts the launcher with that Node.js and prefix, in a console. Arguments go to `pi-pocket` (`pi-pocket.cmd --help`).                                                        |
+| `Edge profile\`             | The Edge profile of the app's window, with its sign-in cookie.                                                                                                               |
+| `launcher.log`              | What the app's launcher and server print, and `launcher.old.log` from the run before. It has no sign-in link.                                                                |
 | `npm-cache\`, `install.log` | npm's cache, and what npm printed during Setup.                                                                                                                              |
 
 Setup always uses its own Node.js, also when you have one: an update of your Node.js, or its removal, does not break Pi Pocket, and in-app updates always have a prefix that they can write. Your own Node.js and npm are not changed.
@@ -29,10 +32,11 @@ Your data (sessions, sign-ins, settings, extensions) stays in `%USERPROFILE%\.pi
 
 Setup also makes:
 
-- a Start menu entry, **Pi Pocket**, which opens the launcher in a console window. New sessions start in your user folder.
-- with the task **Start Pi Pocket when I sign in to Windows** (off by default), a shortcut in your Startup folder. It starts the launcher minimized with `--yes`, so it uses the last access mode without asking.
+- a Start menu entry, **Pi Pocket**, the desktop app. It opens Pi Pocket in a window of its own, already signed in, with no console window, and puts Pi Pocket's icon in the notification area: click it to open the window, or right-click it for **Open Pi Pocket**, **Restart server**, and **Quit Pi Pocket**. The server listens on this PC only. To sign in your phone, use Menu → **Sign in another device** in the window. Opening Pi Pocket again shows the window that runs; a second server never starts. The window is Microsoft Edge in app mode, with a profile of its own; without Edge, your default browser opens Pi Pocket. [desktop-app.md](desktop-app.md) says how it works.
+- a Start menu entry, **Pi Pocket (console)**, which opens the launcher in a console window, as before: there you choose how other devices reach Pi Pocket (the local network, a Cloudflare tunnel, Tailscale), and it shows the sign-in link and its QR code. Close the console window, or press **q** in it, to stop it. When it runs, the app uses its server instead of starting one.
+- with the task **Start Pi Pocket when I sign in to Windows** (off by default), a shortcut in your Startup folder. It starts the app with its icon only, without a window.
 
-Close the console window, or press **q** in it, to stop Pi Pocket.
+New sessions start in your user folder. **Quit Pi Pocket** stops the server, with each command that its agents run, and closes the window.
 
 Inside sessions, `node` and `npm` are the installer's own, and a global npm install (`npm install -g …`) goes into Pi Pocket's prefix. Pi's `bash` tool needs [Git for Windows](https://git-scm.com/download/win), or another `bash.exe` on `PATH` (Pi's own Windows guide is `docs/windows.md` in the `@earendil-works/pi-coding-agent` package). Setup says so at the end when it cannot find Git Bash.
 
@@ -42,7 +46,7 @@ Menu → **Update Pi Pocket** updates the package in `app\`, as for any global n
 
 ## Uninstall
 
-Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
+Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits the app, stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` (with the window's Edge profile) and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
 
 ## Silent install
 
@@ -54,8 +58,8 @@ Leave out `/TASKS=startup` for no sign-in shortcut. The exit code is 20 when the
 
 ## How it is built
 
-[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. It runs beside the npm publish and does not wait for it. Only a release build is signed, and only when the `windows-signing` environment has the signing secrets that the workflow names; limit that environment to `v*` tags and give it a reviewer.
+[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. `Pi Pocket.exe` is compiled with the C# compiler of the .NET Framework 4.x in Windows itself (`csc.exe`), so it needs no download. It runs beside the npm publish and does not wait for it. Only a release build is signed, and only when the `windows-signing` environment has the signing secrets that the workflow names; limit that environment to `v*` tags and give it a reviewer.
 
-[`.github/workflows/windows.yml`](../.github/workflows/windows.yml) runs on each pull request: it builds the installer with a package packed from the pull request, installs it silently, starts Pi Pocket, checks that it answers HTTP and that the sign-in link works, and uninstalls it while it runs. It also runs `npm run check` and the part of the test suite that passes on Windows.
+[`.github/workflows/windows.yml`](../.github/workflows/windows.yml) runs on each pull request: it builds the installer with a package packed from the pull request, installs it silently, starts the console launcher, checks that it answers HTTP and that the sign-in link works, and stops it. Then it opens the app from its Start menu entry, and checks that no console window shows, that Edge's window signed in with a one-time link, that a second start opens the first, and that **Quit** stops everything; it starts the app as the Startup shortcut does, and uninstalls it while it runs. It also runs `npm run check` and the part of the test suite that passes on Windows.
 
-Windows is still the least tested platform. The browser tests and most of the test suite do not run on Windows yet.
+Windows is still the least tested platform. The browser tests and most of the test suite do not run on Windows yet, and the app has been tried only on GitHub's runners, not yet on a PC of its own.
