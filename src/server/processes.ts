@@ -855,11 +855,14 @@ public static class PiPocketProcesses {
 }
 `;
 
+/** The helper's script. Its C# comes in an environment variable: a command line holds at most 32,767 characters. */
 const HELPER_PS = `
 $ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @'
-${HELPER_CS}
-'@
+$ProgressPreference = 'SilentlyContinue'
+try { Add-Type -TypeDefinition $env:PI_POCKET_PROCESSES_CS } catch {
+    [Console]::Out.WriteLine('fatal ' + ($_.Exception.Message -replace '\s+', ' '))
+    exit 1
+}
 [Console]::Out.WriteLine('ready')
 [Console]::Out.Flush()
 while ($null -ne ($line = [Console]::In.ReadLine())) {
@@ -899,7 +902,11 @@ class Helper {
                 "-EncodedCommand",
                 Buffer.from(HELPER_PS, "utf16le").toString("base64"),
             ],
-            { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+            {
+                stdio: ["pipe", "pipe", "pipe"],
+                windowsHide: true,
+                env: { ...process.env, PI_POCKET_PROCESSES_CS: HELPER_CS },
+            },
         );
         const waiting: Waiting[] = [];
         let errors = "";
@@ -946,6 +953,8 @@ class Helper {
 
                     if (line === "ready") {
                         resolve();
+                    } else if (line.startsWith("fatal ")) {
+                        fail(new Error(`The process helper could not load: ${line.slice(6)}`));
                     } else {
                         waiting.shift()?.resolve(line);
                     }
