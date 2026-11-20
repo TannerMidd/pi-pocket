@@ -39,7 +39,7 @@ Inside sessions, `node` and `npm` are the installer's own, and a global npm inst
 Background tasks (Pi's `background` tool) work on Windows since 0.30.0, with Git Bash. Windows has no process groups or signals, so Pi Pocket follows a task's processes another way: a small Windows PowerShell helper (no admin rights) reads the process table, puts each task in a job object, and ends a process only after it checks the process's start time. What is weaker than on Linux and macOS:
 
 - A stop ends the processes by force at once, with no polite stop first.
-- A process that leaves a task's job and its tree (a program started through a service, or one that asks to leave its job) is not followed, and a task does not say what it left running.
+- A task's job does not let its processes leave it (Git Bash leaves a job that allows it), so a program in a task that asks to start a process outside its job gets "access denied". A process started outside the task (through a service or the Task Scheduler) is not followed, and a task does not say what it left running.
 - The task's first process holds a handle to its job, so a restarted server finds the job again while that process runs. Once it ended, a restarted server knows the processes found before the restart, and what they start directly; a process started through Git Bash (which starts a program as a new process) is then not followed.
 - A PowerShell in Constrained Language mode (a locked-down machine) cannot load the helper: then background tasks do not start, and say why.
 

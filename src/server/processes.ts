@@ -131,7 +131,8 @@ interface ProcTable {
     /** A process; `fresh`: from a table newer than the look's start. */
     stat(pid: number, fresh?: boolean): Proc | undefined;
     list(fresh: boolean): Proc[];
-    marked(pid: number, marker: string): boolean;
+    /** `guess`: the answer while the environment is not read yet (macOS), instead of a read. */
+    marked(pid: number, marker: string, guess?: boolean): boolean;
     /** Fetch what the reads since `begin` missed; false when they missed nothing. */
     fill(): Promise<boolean>;
     /** Whether the view has a table at all, however old. */
@@ -339,7 +340,7 @@ class DarwinTable implements ProcTable {
         return this.#scan?.all ?? [];
     }
 
-    marked(pid: number, marker: string): boolean {
+    marked(pid: number, marker: string, guess?: boolean): boolean {
         const info = this.#scan?.byPid.get(pid);
 
         if (info === undefined) {
@@ -349,6 +350,10 @@ class DarwinTable implements ProcTable {
         const env = this.#env.get(`${pid}:${info.start}`);
 
         if (env === undefined) {
+            if (guess !== undefined) {
+                return guess;
+            }
+
             this.#wantEnv.add(pid);
 
             return false;
@@ -485,7 +490,7 @@ class DarwinTable implements ProcTable {
  * the task's; once the leader is gone, a member counts only while one carries the task's marker, so a group id that a
  * new process took after the task's ended is not taken for it.
  */
-function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[] {
+function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: boolean): number[] {
     if (item.pid <= 0 || (item.boot !== undefined && item.boot !== table.boot)) {
         return [];
     }
@@ -500,7 +505,7 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[]
     // The task's own leader: its start, and on macOS its marker too.
     const own = (leader: Proc) =>
         leader.start === item.startTicks &&
-        (!table.coarse || table.marked(leader.pid, item.marker));
+        (!table.coarse || table.marked(leader.pid, item.marker, guess));
 
     if (
         first !== undefined &&
@@ -526,7 +531,7 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[]
         return group.map((each) => each.pid);
     }
 
-    return group.some((each) => table.marked(each.pid, item.marker))
+    return group.some((each) => table.marked(each.pid, item.marker, guess))
         ? group.map((each) => each.pid)
         : [];
 }
@@ -600,9 +605,8 @@ class PosixProcesses implements TaskProcesses {
             return task.pid > 0 && kill(-task.pid, 0);
         }
 
-        this.#table.begin();
-
-        return groupMembers(this.#table, task, true).length > 0;
+        // At once, from the table as it is, outside the looks' turns: an environment not read yet counts as the task's.
+        return groupMembers(this.#table, task, true, true).length > 0;
     }
 
     async left(task: TaskRef): Promise<number[]> {
@@ -877,6 +881,8 @@ class Helper {
     /** Whether it holds jobs: then it stays, or their tasks could no longer be ended by their jobs. */
     holds: () => boolean = () => false;
     failed: string | undefined;
+    /** Asks in a row that got no answer in time: a helper that hangs is started again (its jobs have names). */
+    #late = 0;
 
     #start(): HelperRun {
         const powershell = win32.join(
@@ -990,14 +996,24 @@ class Helper {
         try {
             const text = await withTimeout(answer, 30_000, "The process helper did not answer");
 
+            this.#late = 0;
+
             if (text.startsWith("error ")) {
                 throw new Error(text.slice(6));
             }
 
             return text;
         } catch (error) {
-            // A late answer still goes to its own ask, which stays in the queue: the answers after it keep their order,
-            // and the helper keeps its jobs.
+            // A late answer still goes to its own ask, which stays in the queue: the answers after it keep their order.
+            // A helper that hangs is closed after a second one; a new one opens the jobs again by their names.
+            if (
+                (error as Error).message === "The process helper did not answer" &&
+                ++this.#late >= 2
+            ) {
+                this.#late = 0;
+                this.close();
+            }
+
             throw error;
         } finally {
             clearTimeout(this.#idle);
@@ -1406,6 +1422,11 @@ class WindowsProcesses implements TaskProcesses {
     async killSpawned(task: TaskRef, pid: number): Promise<void> {
         this.#children.get(pid)?.kill();
         await this.#helper.ask(`killjob ${this.#key(task)}`).catch(() => undefined);
+
+        // Without a job, what the start found of it: each checked against its start as it ends.
+        for (const [each, start] of this.#known.get(task.marker) ?? []) {
+            await this.#helper.ask(`kill ${each} ${start}`).catch(() => undefined);
+        }
     }
 
     /** A start cut off: the bash whose pid its wrapper wrote, if it started after the reservation and before the file. */
