@@ -5,7 +5,7 @@ A module is one file that Pi Pocket loads. This page tells what the file must be
 ## The file
 
 - **TypeScript that Node runs as it is.** Use only erasable syntax: no `enum`, no `namespace`, and no constructor parameter properties. A local import ends in `.ts`.
-- **Packages by name.** Import `@earendil-works/pi-durable`, `@earendil-works/pi-ai`, `@earendil-works/pi-mcp` (Pi's MCP client), and the other packages of Pi Pocket by name. The drop-in folder has a `node_modules` link to Pi Pocket's own packages, so a drop-in gets the same modules that the server runs.
+- **Packages by name.** Import `@earendil-works/pi-durable`, `@earendil-works/pi-ai`, `@earendil-works/pi-mcp` (Pi's MCP client), and the other packages of Pi Pocket by name. Pi Pocket resolves a package that a drop-in does not have of its own from its own packages, so a drop-in gets the same modules that the server runs. This needs no link: it also works where the system refuses links. A package in the drop-in's own `node_modules` folder comes first. Where links work, the drop-in folder also has a `node_modules` link to Pi Pocket's packages, for tools that read the folder.
 - **A name of its own.** The file name must be different from the name of each built-in module. For example, Pi Pocket does not load a drop-in named `browser.ts`. Give each extension and tool in it a name with a prefix of your own, for example `my-words` and `my_word_count`. Pi Pocket does not load a module that takes a name that Pi Pocket keeps (such as `pocket-…`, or a built-in tool's), or a name that another module has. See [Names](reference/names.md).
 - **A description.** Start the file with a `/** … */` comment. Its first sentence says what the module does. The Extensions sheet shows it.
 

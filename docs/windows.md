@@ -48,6 +48,10 @@ Background tasks (Pi's `background` tool) work on Windows since 0.30.0, with Git
 - The task's first process holds a handle to its job, so a restarted server finds the job again while that process runs. Once it ended, a restarted server knows the processes found before the restart, and what they start directly; a process started through Git Bash (which starts a program as a new process) is then not followed.
 - A PowerShell in Constrained Language mode (a locked-down machine) cannot load the helper: then background tasks do not start, and say why.
 
+## Machines that block links
+
+Some enterprise policies refuse links and junctions. Drop-in extensions work there too: Pi Pocket resolves the packages that they import (`@earendil-works/pi-mcp`, `preact`, and the rest) from its own packages, with no link. The drop-in folder then has no `node_modules` junction, and the server log says once why. `_pocket.d.ts` is a copy of the types file, and the folder's `tsconfig.json` gives an editor the packages' types. See [extensions/modules.md](extensions/modules.md) and [extensions/reference/types.md](extensions/reference/types.md).
+
 ## Updates
 
 Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
