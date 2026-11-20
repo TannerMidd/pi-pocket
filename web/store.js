@@ -305,8 +305,6 @@ export const store = {
          * server's view of it comes (Appearance's Wait for updates, `holdsFor`): its id, or null.
          */
         holding: null,
-        /** A session opened without a tab-memory view: its pane waits for the device or server, not a boot screen. */
-        pending: null,
         missing: null,
         connection: "connecting",
         notices: [],
@@ -1531,13 +1529,12 @@ function keptView(id) {
 
     if (kept === undefined) {
         // Not in memory: the device may have it (`showKept` reads it). Until that read, or the server's view, the
-        // transcript shows the session's header and a quiet loader, not the full-page boot screen (`pending`).
+        // transcript shows the loading screen in the session's pane.
         return {
             view: emptyView(),
             transcriptFrom: null,
             transcriptPlace: null,
             holding: null,
-            pending: id,
         };
     }
 
@@ -1549,8 +1546,6 @@ function keptView(id) {
         transcriptFrom: place?.from ?? null,
         transcriptPlace: place === null ? null : { keep: place.keep },
         holding: hold ? id : null,
-        // In hand: its quiet loader, from a switch that found nothing in memory, goes.
-        pending: null,
     };
 }
 
@@ -1609,12 +1604,11 @@ function applyView(data) {
         synced = data.conversation.id;
     }
 
-    // A session held for its changes (`holdsFor`) shows with them. Its quiet loader (`pending`) goes with the view.
+    // A session held for its changes (`holdsFor`) shows with them.
     store.set((state) => ({
         view: mergeView(state.view, data),
         missing: null,
         holding: null,
-        pending: null,
     }));
 }
 
@@ -1984,7 +1978,7 @@ const handlers = {
         store.set((state) => ({
             // Said of a session this tab has since left (`show`), it is not what the tab shows.
             ...(state.conversationId === data.conversationId
-                ? { missing: data.message, holding: null, pending: null }
+                ? { missing: data.message, holding: null }
                 : {}),
             ...(state.view.conversation?.id === data.conversationId ? { view: emptyView() } : {}),
         }));
@@ -2610,8 +2604,7 @@ function showKept(id) {
         }
 
         if (found !== undefined) {
-            // In hand from the device: its quiet loader, shown while the read ran, goes.
-            store.set({ ...found, pending: null });
+            store.set(found);
         }
 
         show();
@@ -2714,7 +2707,6 @@ export async function start() {
                 transcriptFrom: null,
                 transcriptPlace: null,
                 holding: null,
-                pending: shown.id,
             });
         } else if (store.state.view.conversation == null) {
             const found = adopt(id, cached);

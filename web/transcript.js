@@ -4042,22 +4042,11 @@ export function Transcript() {
     }
 
     if (!view.conversation || held) {
-        const { connection, sessions, conversationId, pending } = store.state;
+        const { connection, sessions, conversationId } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
 
-        // Nothing kept anywhere: the session's own pane, its title, and a quiet loader, not the full-page boot screen.
-        // A session held for its changes keeps that screen, as before.
-        if (pending === conversationId && !held) {
-            return html`<main class="scroller">
-                <div class="transcript" data-part="transcript">
-                    <div class="loader" role="status">
-                        <${Spinner} label="Loading" />
-                        <span>${title ? `Loading ${title}` : "Loading"}…</span>
-                    </div>
-                </div>
-            </main>`;
-        }
-
+        // Nothing kept anywhere, or a session held for its changes: the loading screen in the session's own pane,
+        // with its title, as before.
         const caption =
             connection === "connecting"
                 ? "connecting"
