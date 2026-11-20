@@ -94,7 +94,7 @@ export function readDesignSystemText(
         );
     }
 
-    // O_NOFOLLOW closes the window between the lstat and this open, where a symlink could appear.
+    // `openNoFollowSync` closes the window between the lstat and this open, where a symlink could appear.
     const fd = openNoFollowSync(path);
 
     try {

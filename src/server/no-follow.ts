@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, type Stats } from "node:fs";
+import { type BigIntStats, closeSync, constants, fstatSync, lstatSync, openSync } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 
 /** `O_RDONLY | O_NONBLOCK` where the system has it: a pipe swapped in for the file does not hold the reader. */
@@ -11,7 +11,8 @@ function linkError(path: string): NodeJS.ErrnoException {
     });
 }
 
-function same(before: Stats, after: Stats): boolean {
+/** As `bigint`: a Windows file ID can be larger than a number holds exactly. */
+function same(before: BigIntStats, after: BigIntStats): boolean {
     return before.dev === after.dev && before.ino === after.ino;
 }
 
@@ -21,7 +22,7 @@ function same(before: Stats, after: Stats): boolean {
  * checked (device and inode), which refuses a link that takes the file's place between the check and the open.
  */
 export function openNoFollowSync(path: string, flags: number = READ_FLAGS): number {
-    const before = lstatSync(path);
+    const before = lstatSync(path, { bigint: true });
 
     if (before.isSymbolicLink()) {
         throw linkError(path);
@@ -30,7 +31,7 @@ export function openNoFollowSync(path: string, flags: number = READ_FLAGS): numb
     const fd = openSync(path, flags | (constants.O_NOFOLLOW ?? 0));
 
     try {
-        if (!same(before, fstatSync(fd))) {
+        if (!same(before, fstatSync(fd, { bigint: true }))) {
             throw linkError(path);
         }
     } catch (error) {
@@ -44,7 +45,7 @@ export function openNoFollowSync(path: string, flags: number = READ_FLAGS): numb
 
 /** `openNoFollowSync`, as a `FileHandle`. */
 export async function openNoFollow(path: string, flags: number = READ_FLAGS): Promise<FileHandle> {
-    const before = await lstat(path);
+    const before = await lstat(path, { bigint: true });
 
     if (before.isSymbolicLink()) {
         throw linkError(path);
@@ -53,7 +54,7 @@ export async function openNoFollow(path: string, flags: number = READ_FLAGS): Pr
     const handle = await open(path, flags | (constants.O_NOFOLLOW ?? 0));
 
     try {
-        if (!same(before, await handle.stat())) {
+        if (!same(before, await handle.stat({ bigint: true }))) {
             throw linkError(path);
         }
     } catch (error) {

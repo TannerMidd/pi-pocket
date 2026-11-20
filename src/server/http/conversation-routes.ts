@@ -1,6 +1,6 @@
 /** `/api/c/:id`: one conversation's routes, for people the API has checked may see it. */
 import { randomUUID } from "node:crypto";
-import { constants, createWriteStream, rmSync } from "node:fs";
+import { createWriteStream, rmSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -502,7 +502,7 @@ export async function conversationRoutes(
         let handle: FileHandle;
 
         try {
-            handle = await openNoFollow(file, constants.O_RDONLY);
+            handle = await openNoFollow(file);
         } catch {
             throw new HttpError(404, "File not found");
         }

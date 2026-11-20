@@ -161,7 +161,7 @@ export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) =
             return worktree.source;
         }
 
-        const mapped = resolve(root, relative(worktree.path, cwd));
+        const mapped = resolve(root, relative(real(worktree.path), real(cwd)));
 
         return !existsSync(mapped) || real(mapped) === original ? worktree.source : mapped;
     };

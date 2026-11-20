@@ -1,5 +1,4 @@
 /** Files for the relay: what Pi sends is read from its session's folder only, and what it fetches is kept there. */
-import { constants } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { basename, extname, relative, resolve, sep } from "node:path";
 import { openNoFollow } from "../../no-follow.ts";
@@ -111,7 +110,7 @@ export async function readFiles(
             );
         }
 
-        const handle = await openNoFollow(real, constants.O_RDONLY);
+        const handle = await openNoFollow(real);
 
         try {
             const stat = await handle.stat();
