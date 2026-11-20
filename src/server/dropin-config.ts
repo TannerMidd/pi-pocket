@@ -123,8 +123,10 @@ export function writeDropInConfig(
     const config = {
         compilerOptions: {
             target: "esnext",
-            module: "nodenext",
-            moduleResolution: "nodenext",
+            // Not `nodenext`: with no `package.json` of type module here, it reads each drop-in as CommonJS, where
+            // `import.meta` and top-level `await` are errors. Node runs them as ES modules.
+            module: "esnext",
+            moduleResolution: "bundler",
             strict: true,
             noEmit: true,
             allowImportingTsExtensions: true,

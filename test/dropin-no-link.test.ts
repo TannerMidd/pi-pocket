@@ -62,8 +62,10 @@ import { useState } from "preact/hooks";
 import { readFileSync } from "node:fs";
 
 const count: number = useState(1)[0];
+// Node runs drop-ins as ES modules: TypeScript must read them so.
+const here: string = await Promise.resolve(import.meta.url);
 
-export type Probe = [Host, ExecutionEnv, typeof McpClient, typeof readFileSync, typeof count];
+export type Probe = [Host, ExecutionEnv, typeof McpClient, typeof readFileSync, typeof count, typeof here];
 `,
     );
 
@@ -86,4 +88,9 @@ export type Probe = [Host, ExecutionEnv, typeof McpClient, typeof readFileSync, 
     );
 
     assert.deepEqual(problems, []);
+
+    // The owner's own file stays as it is.
+    fs.writeFileSync(join(dropIn, "tsconfig.json"), "{}\n");
+    writeDropInConfig(dropIn, packageModules);
+    assert.equal(readFileSync(join(dropIn, "tsconfig.json"), "utf8"), "{}\n");
 });

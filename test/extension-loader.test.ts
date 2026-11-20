@@ -15,6 +15,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { createRegistry, UsageDoc } from "@earendil-works/pi-durable";
@@ -325,7 +326,8 @@ test("a drop-in with no node_modules link imports Pi Pocket's packages: the very
 import * as preact from "preact";
 import * as mcp from "@earendil-works/pi-mcp";
 import * as oauth from "@earendil-works/pi-mcp/oauth";
-globalThis.linkless = { preact, mcp, oauth };
+import { createRequire } from "node:module";
+globalThis.linkless = { preact, mcp, oauth, required: createRequire(import.meta.url)("preact") };
 export default () => ({ name: "t-linkless", v: 1 });
 `,
     );
@@ -335,6 +337,7 @@ export default () => ({ name: "t-linkless", v: 1 });
     assert.equal(probe.linkless?.preact, await import("preact"));
     assert.equal(probe.linkless?.mcp, await import("@earendil-works/pi-mcp"));
     assert.equal(probe.linkless?.oauth, await import("@earendil-works/pi-mcp/oauth"));
+    assert.equal(probe.linkless?.required, createRequire(import.meta.url)("preact"));
 });
 
 test("a drop-in's own copy of a package wins over Pi Pocket's", async () => {

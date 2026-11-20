@@ -3,7 +3,7 @@
  * TypeBox's `Type` from `@earendil-works/pi-ai` as before Pi 1.5. A package a drop-in does not have of its own comes
  * from Pi Pocket's, with no `node_modules` link.
  */
-import { registerHooks } from "node:module";
+import { createRequire, registerHooks } from "node:module";
 import { sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,6 +11,7 @@ const compatUrl = new URL("./extension-document-compat.ts", import.meta.url).hre
 const piAiUrl = new URL("./extension-pi-ai-compat.ts", import.meta.url).href;
 /** Pi Pocket's own package root: a package resolved from here is the very one the server runs. */
 const appUrl = new URL("../../package.json", import.meta.url).href;
+const appRequire = createRequire(appUrl);
 
 /** What Node throws for a package it does not find, from `import` and from `require`. */
 const NOT_FOUND = new Set(["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND"]);
@@ -86,7 +87,10 @@ export function documentImports(directory: string, report: (message: string) => 
                     }
 
                     try {
-                        return nextResolve(specifier, { ...context, parentURL: appUrl });
+                        // `require` ignores another `parentURL`: Pi Pocket's own `require` finds it instead.
+                        return (error as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND"
+                            ? { url: pathToFileURL(appRequire.resolve(specifier)).href }
+                            : nextResolve(specifier, { ...context, parentURL: appUrl });
                     } catch {
                         throw error;
                     }
