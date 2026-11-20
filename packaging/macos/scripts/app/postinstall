@@ -1,0 +1,43 @@
+#!/bin/bash
+# Runs after the payload is in place, as the user: it installs the pi-pocket npm package into the private prefix
+# (install-app.mjs), moves Pi Pocket.app into ~/Applications, and turns the sign-in item off (the "Start Pi Pocket
+# when I sign in" choice, which runs after this, turns it on again; it starts on when the item was on before). A GUI
+# install then starts Pi Pocket.
+# build.sh puts the version and the package spec in place of the two markers below.
+set -u
+APP="$2"
+VERSION="@VERSION@"
+PACKAGE="@PACKAGE@"
+BUNDLE="$HOME/Applications/Pi Pocket.app"
+
+if [ "$(id -u)" = 0 ] || [ "$APP" != "$HOME/Library/Application Support/Pi Pocket" ]; then
+    echo "Pi Pocket installs for the current user only: install it for yourself, without sudo, not in $APP."
+    exit 1
+fi
+
+"$APP/login-item.sh" off
+
+if ! "$APP/node/bin/node" "$APP/install-app.mjs" "$PACKAGE" "$VERSION"; then
+    echo "Could not install the pi-pocket package from npm. Check the internet connection, then install again."
+    echo "The details are in $APP/install.log:"
+    cat "$APP/install.log"
+    exit 1
+fi
+
+cat "$APP/install.log"
+
+# Only an earlier Pi Pocket.app is replaced, not another app of the same name.
+if [ -e "$BUNDLE" ] && [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUNDLE/Contents/Info.plist" \
+    2>/dev/null)" != "io.github.tannermidd.pi-pocket.launcher" ]; then
+    echo "$BUNDLE is another app: Pi Pocket.app stays in $APP."
+else
+    mkdir -p "$HOME/Applications" && rm -rf "$BUNDLE" && mv "$APP/Pi Pocket.app" "$BUNDLE" || exit 1
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$BUNDLE" 2> /dev/null || true
+fi
+
+if [ "${COMMAND_LINE_INSTALL:-}" != 1 ] && [ -d "$BUNDLE" ]; then
+    /usr/bin/open "$BUNDLE" || true
+fi
+
+exit 0
