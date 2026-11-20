@@ -1,7 +1,7 @@
 #!/bin/bash
 # Removes what the macOS package installed: it stops a running Pi Pocket (with the commands that its agents run),
-# removes ~/Applications/Pi Pocket.app, the sign-in item, the package receipts, and this folder. Then it asks whether to
-# delete the data in ~/.pi-pocket. The default is No.
+# removes Pi Pocket.app and Pi Pocket (console).app from ~/Applications, the sign-in item, the package receipts, and
+# this folder. Then it asks whether to delete the data in ~/.pi-pocket. The default is No.
 #
 #   "$HOME/Library/Application Support/Pi Pocket/uninstall.sh" [--yes] [--keep-data | --delete-data]
 #
@@ -10,7 +10,6 @@
 set -u
 
 APP="$HOME/Library/Application Support/Pi Pocket"
-BUNDLE="$HOME/Applications/Pi Pocket.app"
 DATA="$HOME/.pi-pocket"
 PACKAGES="io.github.tannermidd.pi-pocket io.github.tannermidd.pi-pocket.login"
 yes=0
@@ -74,16 +73,22 @@ stopped=$?
 if [ "$stopped" = 2 ]; then
     exit 1
 elif [ "$stopped" != 0 ]; then
-    echo "Pi Pocket still runs. Quit it (press q in its window), then run this again." >&2
+    echo "Pi Pocket still runs. Quit it (Pi Pocket in the menu bar, then Quit), then run this again." >&2
     exit 1
 fi
 
 "$APP/login-item.sh" off > /dev/null
 
-if [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$BUNDLE/Contents/Info.plist" 2>/dev/null)" = \
-    "io.github.tannermidd.pi-pocket.launcher" ]; then
-    rm -rf "$BUNDLE"
-fi
+# Only Pi Pocket's own apps, not other apps of the same names.
+for pair in "Pi Pocket.app:io.github.tannermidd.pi-pocket.launcher" \
+    "Pi Pocket (console).app:io.github.tannermidd.pi-pocket.console"; do
+    bundle="$HOME/Applications/${pair%%:*}"
+
+    if [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$bundle/Contents/Info.plist" 2>/dev/null)" = \
+        "${pair#*:}" ]; then
+        rm -rf "$bundle"
+    fi
+done
 
 for package in $PACKAGES; do
     /usr/sbin/pkgutil --volume "$HOME" --forget "$package" > /dev/null 2>&1

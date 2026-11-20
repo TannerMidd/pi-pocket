@@ -1,6 +1,6 @@
 #!/bin/bash
-# Turns the start of Pi Pocket at sign-in on or off: a LaunchAgent in ~/Library/LaunchAgents that opens
-# "Pi Pocket at sign-in.command" in Terminal when the user signs in, from the next sign-in.
+# Turns the start of Pi Pocket at sign-in on or off: a LaunchAgent in ~/Library/LaunchAgents that opens Pi Pocket.app
+# in the menu bar only (--hidden, no window) when the user signs in, from the next sign-in.
 #
 #   login-item.sh on | off | status
 #
@@ -16,8 +16,29 @@ xml() {
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
+# Pi Pocket.app where postinstall put it: ~/Applications, or this folder when another app has its name there.
+bundle() {
+    local each
+
+    for each in "$HOME/Applications/Pi Pocket.app" "$APP/Pi Pocket.app"; do
+        if [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$each/Contents/Info.plist" 2>/dev/null)" = \
+            io.github.tannermidd.pi-pocket.launcher ]; then
+            echo "$each"
+
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 case "${1:-}" in
     on)
+        if ! app="$(bundle)"; then
+            echo "Pi Pocket.app is not installed." >&2
+            exit 1
+        fi
+
         mkdir -p "$HOME/Library/LaunchAgents" || exit 1
         cat > "$PLIST.tmp" <<EOF || exit 1
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,9 +50,11 @@ case "${1:-}" in
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/open</string>
+        <string>-g</string>
         <string>-a</string>
-        <string>Terminal</string>
-        <string>$(xml "$APP/Pi Pocket at sign-in.command")</string>
+        <string>$(xml "$app")</string>
+        <string>--args</string>
+        <string>--hidden</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -46,7 +69,7 @@ EOF
         fi
 
         mv -f "$PLIST.tmp" "$PLIST"
-        echo "Pi Pocket starts in Terminal when you sign in, from the next sign-in."
+        echo "Pi Pocket starts in the menu bar when you sign in, from the next sign-in."
         ;;
     off)
         /bin/launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
