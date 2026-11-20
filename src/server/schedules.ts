@@ -525,13 +525,24 @@ export class Schedules {
                 );
             }
         } else {
-            const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
-            const submissionId =
-                outcome.status === "completed" ? outcome.result.submissionId : undefined;
+            try {
+                const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
+                const submissionId =
+                    outcome.status === "completed" ? outcome.result.submissionId : undefined;
 
-            // The summary goes in once the conversation is idle: the message goes after it.
-            if (submissionId !== undefined) {
-                await (await app.harness.submission(submissionId, context))?.wait(context);
+                // The summary goes in once the conversation is idle: the message goes after it.
+                if (submissionId !== undefined) {
+                    await (await app.harness.submission(submissionId, context))?.wait(context);
+                }
+            } catch (error) {
+                // Ended by a stop or a restart: the next run of this phase, or the abort, restores the settings.
+                if (runtime.signal.aborted) {
+                    throw error;
+                }
+
+                app.log(
+                    `A schedule in session ${String(conversationId)} did not wait for its compaction: ${describe(error)}`,
+                );
             }
         }
 
