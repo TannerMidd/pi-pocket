@@ -419,12 +419,33 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
 
         const before = relay.config(request.params.id ?? "");
 
-        if (before === undefined || !(await remove(before.id))) {
+        if (before === undefined) {
             throw web.error(404, "No such connector.");
         }
 
-        await bind(request, before.target);
-        web.send("changed");
+        let failure: unknown;
+        let removed = false;
+
+        try {
+            removed = await remove(before.id);
+        } catch (error) {
+            failure = error;
+        }
+
+        if (failure === undefined && !removed) {
+            throw web.error(404, "No such connector.");
+        }
+
+        // A write that failed has still removed the connector from memory (the error says the change is lost at a
+        // restart), so the session must lose its relay tools now, and the page must show it.
+        if (relay.config(before.id) === undefined) {
+            await bind(request, before.target);
+            web.send("changed");
+        }
+
+        if (failure !== undefined) {
+            throw failure;
+        }
 
         return {};
     });
