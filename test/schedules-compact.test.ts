@@ -307,3 +307,38 @@ test("a restart while it compacts sends once, after the summary; a stop while it
     );
     assert.equal(await briefings(id), 2, "a stopped schedule sends nothing");
 });
+
+test("repeats that compact first, due at the same time, leave the settings as they were", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, `old work: ${"x".repeat(4000)}`);
+    const made = await Promise.all(
+        ["A", "B", "C"].map((name) =>
+            app.commands.schedule(id, owner(app), {
+                when: `every 20m briefing ${name}`,
+                zone: "UTC",
+                compactBefore: true,
+            }),
+        ),
+    );
+    const sent = async (count: number) =>
+        (await Promise.all(made.map((each) => runs(id, each.id)))).every((n) => n === count);
+
+    await restartLater(21);
+    await until(() => sent(1), "the first sendings");
+    await until(() => !app.isBusy(id), "idle");
+
+    for (const count of [2, 3]) {
+        await say(app, id, "more work in between");
+        await restartLater(20);
+        await until(() => sent(count), "the next sendings");
+        await until(() => !app.isBusy(id), "idle");
+    }
+
+    await until(async () => {
+        const live = await app.harness.snapshot(LiveDoc, id, context);
+
+        return !app.isBusy(id) && (live?.compactions?.length ?? 0) === 0;
+    }, "idle again");
+    assert.equal(await ownCompaction(id), undefined);
+});
