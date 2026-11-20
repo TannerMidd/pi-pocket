@@ -780,7 +780,7 @@ public static class PiPocketProcesses {
     static IntPtr Find(string key) {
         IntPtr job;
         if (jobs.TryGetValue(key, out job)) { return job; }
-        job = OpenJobObjectW(0x1F001F, false, "Local\pi-pocket-" + key);
+        job = OpenJobObjectW(0x1F001F, false, "Local\\pi-pocket-" + key);
         if (job != IntPtr.Zero) { jobs[key] = job; }
         return job;
     }
@@ -788,7 +788,7 @@ public static class PiPocketProcesses {
     static string Job(string key, uint pid, long start, bool hold) {
         IntPtr job;
         if (!jobs.TryGetValue(key, out job)) {
-            job = CreateJobObjectW(IntPtr.Zero, "Local\pi-pocket-" + key);
+            job = CreateJobObjectW(IntPtr.Zero, "Local\\pi-pocket-" + key);
             if (job == IntPtr.Zero) { return "error job " + Marshal.GetLastWin32Error(); }
             jobs[key] = job;
         }
@@ -860,7 +860,7 @@ const HELPER_PS = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try { Add-Type -TypeDefinition $env:PI_POCKET_PROCESSES_CS } catch {
-    [Console]::Out.WriteLine('fatal ' + ($_.Exception.Message -replace '\s+', ' '))
+    [Console]::Out.WriteLine('fatal ' + ($_.Exception.Message -replace '\\s+', ' '))
     exit 1
 }
 [Console]::Out.WriteLine('ready')
