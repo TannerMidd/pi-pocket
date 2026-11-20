@@ -714,10 +714,8 @@ public static class PiPocketProcesses {
 
     // Each process's pid and parent from one snapshot. A handle opened on each pid of a first snapshot holds that
     // pid, so the second snapshot's parent of it is its own, not one of a process that ended and gave up the pid.
-    static readonly Dictionary<uint, string> names = new Dictionary<uint, string>();
     static Dictionary<uint, uint> Parents(out string error) {
         error = null;
-        names.Clear();
         Dictionary<uint, uint> parents = new Dictionary<uint, uint>();
         IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
         if (snapshot == new IntPtr(-1)) { error = "error snapshot " + Marshal.GetLastWin32Error(); return parents; }
@@ -725,10 +723,7 @@ public static class PiPocketProcesses {
             Entry entry = new Entry();
             entry.dwSize = (uint)Marshal.SizeOf(typeof(Entry));
             for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry)) {
-                if (entry.th32ProcessID != 0) {
-                    parents[entry.th32ProcessID] = entry.th32ParentProcessID;
-                    names[entry.th32ProcessID] = entry.szExeFile.Replace(' ', '_').Replace(',', '_');
-                }
+                if (entry.th32ProcessID != 0) { parents[entry.th32ProcessID] = entry.th32ParentProcessID; }
             }
         } finally { CloseHandle(snapshot); }
         return parents;
@@ -753,7 +748,7 @@ public static class PiPocketProcesses {
                 IntPtr process;
                 if (held.TryGetValue(each.Key, out process)) { start = Start(process); }
                 if (start < 0) { continue; }
-                text.Append(' ').Append(each.Key).Append(',').Append(each.Value).Append(',').Append(start).Append(',').Append(names[each.Key]);
+                text.Append(' ').Append(each.Key).Append(',').Append(each.Value).Append(',').Append(start);
             }
             return text.ToString();
         } finally {
@@ -995,20 +990,12 @@ class Helper {
         try {
             const text = await withTimeout(answer, 30_000, "The process helper did not answer");
 
-            if (process.env.PI_POCKET_PROCESS_DEBUG === "1" && !line.startsWith("list")) {
-                console.error(`[processes] ${line} -> ${text.slice(0, 300)}`);
-            }
-
             if (text.startsWith("error ")) {
                 throw new Error(text.slice(6));
             }
 
             return text;
         } catch (error) {
-            if (process.env.PI_POCKET_PROCESS_DEBUG === "1") {
-                console.error(`[processes] ${line} failed: ${(error as Error).message}`);
-            }
-
             // A late answer still goes to its own ask, which stays in the queue: the answers after it keep their order,
             // and the helper keeps its jobs.
             throw error;
@@ -1045,7 +1032,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
     ]).finally(() => clearTimeout(timer));
 }
 
-type WinProc = { pid: number; ppid: number; start: number; name: string };
+type WinProc = { pid: number; ppid: number; start: number };
 
 /** Git Bash: Git for Windows' launcher first, as Pi's own bash tool looks for it, then a `bash.exe` on PATH. */
 function findGitBash(): string | undefined {
@@ -1133,14 +1120,9 @@ class WindowsProcesses implements TaskProcesses {
         const all = new Map<number, WinProc>();
 
         for (const word of answer.split(" ").slice(1)) {
-            const [pid, ppid, start, name] = word.split(",");
+            const [pid, ppid, start] = word.split(",").map(Number);
 
-            all.set(Number(pid), {
-                pid: Number(pid),
-                ppid: Number(ppid),
-                start: Number(start),
-                name: name ?? "",
-            });
+            all.set(pid!, { pid: pid!, ppid: ppid!, start: start! });
         }
 
         this.#scan = { at, all };
@@ -1356,17 +1338,6 @@ class WindowsProcesses implements TaskProcesses {
         }
 
         const members = this.#members(task, all, job);
-
-        if (process.env.PI_POCKET_PROCESS_DEBUG === "1") {
-            const known = this.#knownOf(task);
-            const near = [...all.values()]
-                .filter((each) => known.has(each.pid) || known.has(each.ppid))
-                .map((each) => `${each.pid}<${each.ppid}@${each.start}:${each.name}`);
-
-            console.error(
-                `[processes] members ${[...known].join(";")} -> ${members.join(",")} near ${near.join(" ")}`,
-            );
-        }
 
         if (members.length === 0 && fresh) {
             this.#done(task);
