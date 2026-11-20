@@ -157,7 +157,7 @@ test("a task quiet for its limit is stopped, with what it printed", async () => 
 test("a restarted server finds a task's processes, and its stop ends them", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
-        command: `${child("restart.pid")} > /dev/null 2>&1 & while [ ! -f release ]; do sleep 0.1; done; echo released`,
+        command: `${child("restart.pid")} > /dev/null 2>&1 & while [ ! -f release ]; do sleep 0.1; done; ${child("after.pid")} > /dev/null 2>&1 & echo released`,
         notify: false,
     });
     const kept = await pidIn(item, "restart.pid");
@@ -168,11 +168,19 @@ test("a restarted server finds a task's processes, and its stop ends them", asyn
     assert.equal(running(kept), true, "the task outlives the server");
     app = await openApp(model, dataDir);
     quick();
+    await wait(1000);
 
+    // A child it starts after the restart, once its shell is gone, is found too (Windows: by its job).
     writeFileSync(join(item.cwd, "release"), "");
+    const later = await pidIn(item, "after.pid");
+
     await wait(1500);
-    assert.equal((await one(id)).status, "running", "its child, found again, keeps it running");
+    assert.equal((await one(id)).status, "running", "its children keep it running");
     assert.equal(await app.background.aliveNow(id, await one(id)), true);
     await app.background.stop(id, item.id);
-    await until(() => !running(kept), "the child to be ended after the restart", 15_000);
+    await until(
+        () => !running(kept) && !running(later),
+        "the children to be ended after the restart",
+        15_000,
+    );
 });

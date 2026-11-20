@@ -697,9 +697,12 @@ public static class PiPocketProcesses {
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint code);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr OpenJobObjectW(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr source, IntPtr targetProcess, out IntPtr target, uint access, bool inherit, uint options);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, IntPtr info, int length, out int returned);
 
-    const uint QUERY = 0x1000, SYNCHRONIZE = 0x100000, TERMINATE = 0x1, SET_QUOTA = 0x100;
+    const uint QUERY = 0x1000, SYNCHRONIZE = 0x100000, TERMINATE = 0x1, SET_QUOTA = 0x100, DUP_HANDLE = 0x40;
     static readonly Dictionary<string, IntPtr> jobs = new Dictionary<string, IntPtr>();
 
     // The start of a live process in ms since 1601; -1 when it is gone, 0 when it is not ours to read.
@@ -772,22 +775,38 @@ public static class PiPocketProcesses {
         try { return TerminateProcess(process, 1) ? "ok" : "no"; } finally { CloseHandle(process); }
     }
 
-    static string Job(string key, uint pid, long start) {
+    // A job by its name, which stays while a handle to it is open: this helper's, or the one its task's first process
+    // holds, so a helper after a restart of the server finds it again.
+    static IntPtr Find(string key) {
+        IntPtr job;
+        if (jobs.TryGetValue(key, out job)) { return job; }
+        job = OpenJobObjectW(0x1F001F, false, "Local\pi-pocket-" + key);
+        if (job != IntPtr.Zero) { jobs[key] = job; }
+        return job;
+    }
+
+    static string Job(string key, uint pid, long start, bool hold) {
         IntPtr job;
         if (!jobs.TryGetValue(key, out job)) {
-            job = CreateJobObjectW(IntPtr.Zero, null);
+            job = CreateJobObjectW(IntPtr.Zero, "Local\pi-pocket-" + key);
             if (job == IntPtr.Zero) { return "error job " + Marshal.GetLastWin32Error(); }
             jobs[key] = job;
         }
-        IntPtr process = Open(pid, start, SET_QUOTA | TERMINATE);
+        IntPtr process = Open(pid, start, SET_QUOTA | TERMINATE | DUP_HANDLE);
         if (process == IntPtr.Zero) { return "no"; }
-        try { return AssignProcessToJobObject(job, process) ? "ok" : "error assign " + Marshal.GetLastWin32Error(); }
-        finally { CloseHandle(process); }
+        try {
+            if (!AssignProcessToJobObject(job, process)) { return "error assign " + Marshal.GetLastWin32Error(); }
+            IntPtr copy;
+            if (hold && !DuplicateHandle(GetCurrentProcess(), job, process, out copy, 0, false, 2)) {
+                return "error hold " + Marshal.GetLastWin32Error();
+            }
+            return "ok";
+        } finally { CloseHandle(process); }
     }
 
     static string Members(string key) {
-        IntPtr job;
-        if (!jobs.TryGetValue(key, out job)) { return "none"; }
+        IntPtr job = Find(key);
+        if (job == IntPtr.Zero) { return "none"; }
         for (int size = 1024; ; size *= 4) {
             int bytes = 8 + size * IntPtr.Size, returned;
             IntPtr buffer = Marshal.AllocHGlobal(bytes);
@@ -822,9 +841,11 @@ public static class PiPocketProcesses {
         switch (words[0]) {
             case "list": return List();
             case "kill": return Kill(uint.Parse(words[1]), long.Parse(words[2]));
-            case "job": return Job(words[1], uint.Parse(words[2]), long.Parse(words[3]));
+            case "job": return Job(words[1], uint.Parse(words[2]), long.Parse(words[3]), words.Length > 4);
             case "members": return Members(words[1]);
-            case "killjob": return jobs.TryGetValue(words[1], out job) && TerminateJobObject(job, 1) ? "ok" : "no";
+            case "killjob":
+                job = Find(words[1]);
+                return job != IntPtr.Zero && TerminateJobObject(job, 1) ? "ok" : "no";
             case "drop":
                 if (jobs.TryGetValue(words[1], out job)) { CloseHandle(job); jobs.Remove(words[1]); }
                 return "ok";
@@ -1205,12 +1226,12 @@ class WindowsProcesses implements TaskProcesses {
     /** The processes in a task's job, each with its start, as the helper read it through a handle in the job. */
     async #job(task: TaskRef): Promise<{ pid: number; start: number }[]> {
         const key = this.#key(task);
-
-        if (!this.#jobs.has(key)) {
-            return [];
-        }
-
         const answer = await this.#helper.ask(`members ${key}`);
+
+        // A job that a helper before a restart made is found again by its name, while the task's first process runs.
+        if (answer !== "none") {
+            this.#jobs.add(key);
+        }
 
         return answer === "none"
             ? []
@@ -1282,8 +1303,9 @@ class WindowsProcesses implements TaskProcesses {
             const known = this.#knownOf(ref);
 
             for (const each of this.#members(ref, all, [])) {
+                // The first process holds a handle to its job too, so its name stays across a restart of the server.
                 const answer = await this.#helper
-                    .ask(`job ${key} ${each} ${known.get(each)}`)
+                    .ask(`job ${key} ${each} ${known.get(each)}${each === pid ? " hold" : ""}`)
                     .catch(() => "no");
 
                 // Without a job, its tree alone holds it: a process whose parent ended before a look found it is not
@@ -1377,11 +1399,7 @@ class WindowsProcesses implements TaskProcesses {
 
     /** Both signals end the processes by force: Windows has no polite stop for a program without a window. */
     async signal(task: TaskRef, _name: Signal): Promise<void> {
-        const key = this.#key(task);
-
-        if (this.#jobs.has(key)) {
-            await this.#helper.ask(`killjob ${key}`).catch(() => undefined);
-        }
+        await this.#helper.ask(`killjob ${this.#key(task)}`).catch(() => undefined);
 
         // Then each process found, parents first, checked against its start time by the helper as it ends it; a pass
         // again for what they started in the meantime.
@@ -1407,12 +1425,7 @@ class WindowsProcesses implements TaskProcesses {
 
     async killSpawned(task: TaskRef, pid: number): Promise<void> {
         this.#children.get(pid)?.kill();
-
-        const key = this.#key(task);
-
-        if (this.#jobs.has(key)) {
-            await this.#helper.ask(`killjob ${key}`).catch(() => undefined);
-        }
+        await this.#helper.ask(`killjob ${this.#key(task)}`).catch(() => undefined);
     }
 
     /** A start cut off: the bash whose pid its wrapper wrote, if it started after the reservation and before the file. */
