@@ -38,7 +38,8 @@ let id: ConversationId;
 before(async () => {
     app = await openApp(scriptedModel(route), join(root, "deadlines"));
     id = await newSession(app);
-    app.background.limits.commandQuietMs = 400;
+    // Git Bash on Windows takes longer than that to start a shell or a program: a longer limit there.
+    app.background.limits.commandQuietMs = process.platform === "win32" ? 3000 : 400;
 });
 
 after(async () => {
