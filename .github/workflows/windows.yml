@@ -98,8 +98,9 @@ jobs:
                   $login = Select-String -Path $out -Pattern 'http://127\.0\.0\.1:8787/\S*' -AllMatches |
                       ForEach-Object { $_.Matches.Value } | Where-Object { $_ -ne "http://127.0.0.1:8787" } | Select-Object -Last 1
                   if ($null -eq $login) { throw "The launcher printed no sign-in link" }
-                  $session = Invoke-WebRequest -Uri $login -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck -MaximumRedirection 0
-                  Write-Host "The sign-in link answered $($session.StatusCode)"
+                  # It signs in, then sends the browser on to the app.
+                  $session = Invoke-WebRequest -Uri $login -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck -SessionVariable cookies
+                  Write-Host "The sign-in link answered $($session.StatusCode), with $($cookies.Cookies.Count) cookies"
                   if ($session.StatusCode -ge 400) { throw "The sign-in link answered $($session.StatusCode)" }
 
             - name: Uninstall silently while Pi Pocket runs
@@ -152,13 +153,11 @@ jobs:
             - run: npm run check
 
             # A part of the suite. The rest is not yet known to pass on Windows. The skipped tests fail on Windows
-            # (pull request #354 lists why): take one out of the list when it passes there.
+            # (pull request #354 lists why), and test/download.test.ts hangs there: take one out when it passes.
             - name: Tests known to pass on Windows
               run: >
-                  node --test --test-concurrency=4
+                  node --test --test-concurrency=4 --test-timeout=300000
                   --test-skip-pattern="limits and invalid sources fail without publishing"
-                  --test-skip-pattern="a session file downloads as it is"
-                  --test-skip-pattern="a download needs a sign-in, a file"
                   --test-skip-pattern="a live holder under a name that is not node"
                   --test-skip-pattern="an update state folder that the server cannot write"
                   --test-skip-pattern="npm stages a real offline tarball"
@@ -187,7 +186,6 @@ jobs:
                   test/extension-loader.test.ts
                   test/docs.test.ts
                   test/watch-tree.test.ts
-                  test/download.test.ts
                   test/folder-favorites.test.ts
                   test/person-storage.test.ts
                   test/artifact-bundles.test.ts

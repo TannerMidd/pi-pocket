@@ -98,15 +98,28 @@ begin
   Result := Code;
 end;
 
+{ A path as a PowerShell single-quoted string. PowerShell takes 4 other characters for a single quote too. }
+function PsQuote(const Path: String): String;
+begin
+  Result := Path;
+  StringChangeEx(Result, , '', True);
+  StringChangeEx(Result, #$2018, #$2018#$2018, True);
+  StringChangeEx(Result, #$2019, #$2019#$2019, True);
+  StringChangeEx(Result, #$201A, #$201A#$201A, True);
+  StringChangeEx(Result, #$201B, #$201B#$201B, True);
+  Result :=  + Result + ;
+end;
+
+function StartsWith(const Folder: String): String;
+begin
+  Result := '$_.Path.StartsWith(' + PsQuote(Folder) + ', [StringComparison]::OrdinalIgnoreCase)';
+end;
+
 { The node.exe processes that run from this install: the launcher, the server, and their Node.js children. }
 function NodeProcesses: String;
-var
-  Folder: String;
 begin
-  Folder := ExpandConstant('{app}\node\');
-  StringChangeEx(Folder, '''', '''''', True);
   Result := '@(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ' +
-    '$_.Path.StartsWith(''' + Folder + ''', [StringComparison]::OrdinalIgnoreCase) })';
+    StartsWith(ExpandConstant('{app}\node\')) + ' })';
 end;
 
 function PiPocketRunning: Boolean;
@@ -114,16 +127,44 @@ begin
   Result := RunPowerShell('if (' + NodeProcesses + '.Count -gt 0) { exit 1 } else { exit 0 }') = 1;
 end;
 
-{ Also the launcher's cloudflared (the tunnel) from the data folder, which would run on without it. }
+{ Each one with its whole process tree (the agents' commands too), and the launcher's cloudflared (the tunnel) from the
+  data folder, which would run on without it. Again until none is left, as the launcher can start a new server. }
 procedure StopPiPocket;
-var
-  Tunnel: String;
 begin
-  Tunnel := ExpandConstant('{%USERPROFILE}\.pi-pocket\bin\');
-  StringChangeEx(Tunnel, '''', '''''', True);
-  RunPowerShell('$all = ' + NodeProcesses + ' + @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and $_.Path.StartsWith(''' + Tunnel + ''', [StringComparison]::OrdinalIgnoreCase) }); ' +
-    '$all | ForEach-Object { try { $_.Kill() } catch {} }; $all | ForEach-Object { try { $null = $_.WaitForExit(10000) } catch {} }');
+  RunPowerShell('for ($round = 0; $round -lt 5; $round++) { ' +
+    '$all = ' + NodeProcesses + ' + @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{%USERPROFILE}\.pi-pocket\bin\')) + ' }); ' +
+    'if ($all.Count -eq 0) { exit 0 }; ' +
+    'foreach ($each in $all) { & taskkill.exe /F /T /PID $each.Id 2>&1 | Out-Null }; Start-Sleep -Seconds 1 }; exit 1');
+end;
+
+{ A folder that Setup may install into: none yet, an empty one, or an earlier install. With /DIR= pointed at another
+  folder, Setup's and the uninstaller's deletes of node, app, and npm-cache would hit files that are not Pi Pocket's. }
+function FolderIsSafe(const Folder: String): Boolean;
+var
+  Find: TFindRec;
+  Found: Boolean;
+begin
+  Result := True;
+
+  if not DirExists(Folder) or FileExists(AddBackslash(Folder) + 'unins000.dat') or
+    FileExists(AddBackslash(Folder) + 'pi-pocket.cmd') then
+    exit;
+
+  if FindFirst(AddBackslash(Folder) + '*', Find) then
+  begin
+    try
+      Found := True;
+      while Found and Result do
+      begin
+        if (Find.Name <> '.') and (Find.Name <> '..') then
+          Result := False;
+        Found := FindNext(Find);
+      end;
+    finally
+      FindClose(Find);
+    end;
+  end;
 end;
 
 { Ask, then stop it. Silent setup takes the default answer: stop it. }
@@ -147,6 +188,12 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+
+  if not FolderIsSafe(ExpandConstant('{app}')) then
+  begin
+    Result := ExpandConstant('{app}') + ' is not empty and holds no Pi Pocket install. Choose an empty folder.';
+    exit;
+  end;
 
   if not MayStopPiPocket('Setup') then
     Result := 'Pi Pocket is still running. Quit it (press q in its window), then run Setup again.';
@@ -208,16 +255,19 @@ begin
       'Pi''s bash tool needs Git for Windows (https://git-scm.com/download/win), unless bash.exe is on your PATH.';
 end;
 
-function InitializeUninstall: Boolean;
-begin
-  Result := MayStopPiPocket('Uninstall');
-end;
-
-{ The data folder holds sessions, sign-ins, and settings. Keep it unless the user says yes; silent uninstall keeps it. }
+{ After the user said yes to the uninstall: stop Pi Pocket, whose files are in use. At the end, the data folder holds
+  sessions, sign-ins, and settings: keep it unless the user says yes. A silent uninstall keeps it. Only the default data
+  folder: one chosen with PI_POCKET_DIR or --data stays. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Data: String;
 begin
+  if (CurUninstallStep = usUninstall) and PiPocketRunning then
+  begin
+    SuppressibleMsgBox('Pi Pocket is running. Uninstall stops it now.', mbInformation, MB_OK, IDOK);
+    StopPiPocket;
+  end;
+
   if CurUninstallStep <> usPostUninstall then
     exit;
 
@@ -227,7 +277,8 @@ begin
     exit;
 
   if SuppressibleMsgBox('Also delete your Pi Pocket data?' + #13#10#13#10 + Data + #13#10#13#10 +
-    'It holds your sessions, sign-ins, settings, and extensions. Another Pi Pocket install on this account uses it too. ' +
+    'It holds your sessions, sign-ins, settings, extensions, and the git worktrees of sessions, with any work in them ' +
+    'that is not committed. Another Pi Pocket install on this account uses it too. ' +
     'Choose No to keep it.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
     DelTree(Data, True, True, True);
 end;

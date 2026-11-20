@@ -5,8 +5,10 @@
 # A run by hand builds the installer for an existing tag (gh workflow run windows-installer.yml -f tag=v0.29.0) from
 # the branch it runs on, as a workflow artifact only: it attaches nothing to the release.
 #
-# Signing is optional. Without the secrets the installer is unsigned, and Windows SmartScreen warns about it. With
-# them, Setup and its uninstaller are signed:
+# Signing is optional, and only for a release. Without the secrets the installer is unsigned, and Windows SmartScreen
+# warns about it. With them, Setup and its uninstaller are signed. Keep them as secrets of the windows-signing
+# environment (Settings → Environments), with deployment tags limited to v* and a required reviewer, not as
+# repository secrets, which any branch's workflow can read:
 # - WINDOWS_SIGNING_CERTIFICATE: the code-signing certificate as a base64 PFX file;
 # - WINDOWS_SIGNING_PASSWORD: its password.
 name: Windows installer
@@ -34,6 +36,8 @@ jobs:
     build:
         runs-on: windows-latest
         timeout-minutes: 30
+        # A release build uses the environment's signing secrets: limit it to v* tags and give it a reviewer.
+        environment: ${{ github.event_name == 'release' && 'windows-signing' || '' }}
         outputs:
             version: ${{ steps.version.outputs.version }}
         steps:
@@ -59,41 +63,38 @@ jobs:
                   fi
                   echo "version=$version" >> "$GITHUB_OUTPUT"
 
-            - name: Import the signing certificate, if there is one
-              id: sign
-              shell: pwsh
-              env:
-                  CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
-                  PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
-              run: |
-                  if (-not $env:CERTIFICATE) {
-                      Write-Host "No signing secrets: the installer is unsigned."
-                      exit 0
-                  }
-                  $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
-                  [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE))
-                  try {
-                      $password = ConvertTo-SecureString $env:PASSWORD -AsPlainText -Force
-                      $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-                  } finally {
-                      Remove-Item -Force $pfx
-                  }
-                  "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-
+            # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Build the installer
               shell: pwsh
               env:
                   VERSION: ${{ steps.version.outputs.version }}
-                  THUMBPRINT: ${{ steps.sign.outputs.thumbprint }}
+                  CERTIFICATE: ${{ github.event_name == 'release' && secrets.WINDOWS_SIGNING_CERTIFICATE || '' }}
+                  PASSWORD: ${{ github.event_name == 'release' && secrets.WINDOWS_SIGNING_PASSWORD || '' }}
               run: |
                   $out = Join-Path $env:RUNNER_TEMP "setup"
-                  ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir $out -SignThumbprint "$env:THUMBPRINT"
+                  $thumbprint = ""
+                  try {
+                      if ($env:CERTIFICATE) {
+                          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+                          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE))
+                          try {
+                              $password = ConvertTo-SecureString $env:PASSWORD -AsPlainText -Force
+                              $thumbprint = (Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password).Thumbprint
+                          } finally {
+                              Remove-Item -Force $pfx
+                          }
+                      } else {
+                          Write-Host "No signing secrets: the installer is unsigned."
+                      }
+                      ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir $out -SignThumbprint $thumbprint
+                  } finally {
+                      if ($thumbprint) {
+                          Remove-Item -Force -DeleteKey "Cert:\CurrentUser\My\$thumbprint"
+                      }
+                  }
                   $setup = Join-Path $out "Pi-Pocket-Setup-$env:VERSION.exe"
                   $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
                   "$hash  Pi-Pocket-Setup-$env:VERSION.exe" | Set-Content -NoNewline -Encoding ascii "$setup.sha256"
-                  if ($env:THUMBPRINT) {
-                      Remove-Item -Force "Cert:\CurrentUser\My\$env:THUMBPRINT"
-                  }
 
             - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:

@@ -42,7 +42,7 @@ Menu → **Update Pi Pocket** updates the package in `app\`, as for any global n
 
 ## Uninstall
 
-Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It stops a running Pi Pocket (it asks), and removes `%LOCALAPPDATA%\Pi Pocket` and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them.
+Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
 
 ## Silent install
 
@@ -54,7 +54,7 @@ Leave out `/TASKS=startup` for no sign-in shortcut. The exit code is 20 when the
 
 ## How it is built
 
-[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. It runs beside the npm publish and does not wait for it. The installer and its uninstaller are signed only when the repository has the signing secrets that the workflow names.
+[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. It runs beside the npm publish and does not wait for it. Only a release build is signed, and only when the `windows-signing` environment has the signing secrets that the workflow names; limit that environment to `v*` tags and give it a reviewer.
 
 [`.github/workflows/windows.yml`](../.github/workflows/windows.yml) runs on each pull request: it builds the installer with a package packed from the pull request, installs it silently, starts Pi Pocket, checks that it answers HTTP and that the sign-in link works, and uninstalls it while it runs. It also runs `npm run check` and the part of the test suite that passes on Windows.
 
