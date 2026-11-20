@@ -3,12 +3,13 @@
 #
 # Pi Pocket is each process that runs this install's Node.js (the launcher, the server, and their Node.js children),
 # with every process that they started (the agents' commands), and the launcher's tunnel (cloudflared from the data
-# folder), which would run on without it. lsof finds them by the executable file that they run, whatever their
-# command line says.
+# folder), which would run on without it. lsof finds them by the executable file that they run (its txt
+# descriptor), whatever their command line says. A program that only reads the file, such as a backup, has no txt
+# descriptor for it, so it stays.
 
 pp_running_file() {
     if [ -e "$1" ]; then
-        /usr/sbin/lsof -t -- "$1" 2>/dev/null | sort -un
+        /usr/sbin/lsof -a -d txt -t -- "$1" 2>/dev/null | sort -un
     fi
 }
 
