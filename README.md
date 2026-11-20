@@ -54,6 +54,10 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 
 **Updating:** Menu → **Update Pi Pocket** updates a git checkout run with `npm start`, or a global npm install (`npm install -g pi-pocket`) that your user can write, and restarts. It goes back by itself if the new version does not start ([features](docs/features.md)). A local install (`npm install pi-pocket` in a project) and `npx pi-pocket` do not update from the app: the sheet says what to run, `npm install pi-pocket@latest` or `npx pi-pocket@latest`. By hand: stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again; for a global install, run `npm install -g pi-pocket@latest`. If the machine stops at the very moment of the switch, `pi-pocket` may not start; `npm install -g pi-pocket` restores it. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 and 0.28.0 upgrade the data one way, so going back needs the backup.
 
+### Windows installer
+
+Download `Pi-Pocket-Setup-<version>.exe` from the [releases](https://github.com/TannerMidd/pi-pocket/releases) and run it. It needs no admin rights and no Node.js: it installs its own Node.js and Pi Pocket in `%LOCALAPPDATA%\Pi Pocket`, adds **Pi Pocket** to the Start menu, and can start it when you sign in. The installer is not code-signed yet, so SmartScreen warns: select **More info**, then **Run anyway**. Menu → **Update Pi Pocket** updates it. The uninstaller asks before it deletes your data. See [docs/windows.md](docs/windows.md).
+
 ### Other ways to run it
 
 - **Docker or Podman:** `docker compose up -d --build`. See [docs/docker.md](docs/docker.md).
