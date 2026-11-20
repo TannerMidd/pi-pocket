@@ -31,6 +31,7 @@ import {
     TAILSCALE_MISSING_MESSAGE,
     tailscaleAddress,
 } from "./access.ts";
+import { RUNNING_FILE, removeRunning, writeRunning } from "./desktop.ts";
 import { fail, parseArgs } from "./options.ts";
 import { removeStaleServe, TailscaleServe } from "./serve.ts";
 // The two server modules the launcher runs itself: both import only Node's own, so an update cannot break the launcher.
@@ -133,6 +134,11 @@ function loadSettings(): { access?: AccessMode } {
 }
 
 function saveSettings(access: AccessMode): void {
+    // The desktop app's own choice (this device only, unless it says otherwise) is not the console's last choice.
+    if (options.desktop) {
+        return;
+    }
+
     try {
         writeFileSync(settingsFile, `${JSON.stringify({ access }, null, "\t")}\n`, { mode: 0o600 });
     } catch (error) {
@@ -576,6 +582,14 @@ function maybeShowPanel(): void {
     }
 
     state.panelPending = false;
+
+    // No sign-in link and no QR code: what the desktop app prints goes to a log file. Its window signs in by itself.
+    if (options.desktop) {
+        log(green(`  ✓ Pi Pocket is ready at ${localUrl()}.`));
+
+        return;
+    }
+
     void showPanel(true);
 }
 
@@ -651,6 +665,7 @@ function startServer(first: boolean): void {
 
         state.everReady = true;
         sendAccess();
+        noteRunning();
 
         if (state.panelPending) {
             maybeShowPanel();
@@ -744,6 +759,20 @@ function startServer(first: boolean): void {
             exited(1, null);
         }
     });
+}
+
+/** Say in the data folder where this launcher's server answers, for the desktop app (`desktop.ts`). */
+function noteRunning(): void {
+    try {
+        writeRunning(options.data, {
+            version: 1,
+            pid: process.pid,
+            url: state.mode === "socket" ? null : localUrl(),
+            desktop: options.desktop,
+        });
+    } catch (error) {
+        log(yellow(`  Could not write ${RUNNING_FILE}: ${(error as Error).message}`));
+    }
 }
 
 function restartServer(): void {
@@ -1115,8 +1144,23 @@ if (process.platform !== "win32") {
 
 process.on("exit", () => {
     restoreTerminal();
+
+    try {
+        removeRunning(options.data, process.pid);
+    } catch {
+        // The desktop app checks that the launcher it names still runs.
+    }
+
     releaseLauncherLock();
 });
+
+// The desktop app holds the other end of standard input: when it quits, or crashes, the launcher stops with it.
+if (options.desktop) {
+    process.stdin.on("error", () => {});
+    process.stdin.on("end", () => void quit(0));
+    process.stdin.on("close", () => void quit(0));
+    process.stdin.resume();
+}
 
 // ─── Start ──────────────────────────────────────────────────────────────
 
@@ -1244,7 +1288,9 @@ async function main(): Promise<void> {
             startTunnel(binary);
         }
 
-        onKeys(onRunKey);
+        if (!options.desktop) {
+            onKeys(onRunKey);
+        }
     } catch (error) {
         stopServe();
 

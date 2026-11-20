@@ -27,6 +27,9 @@ Usage: pi-pocket [options]
                       address and an access mode. Its folder must be owned by you or root and writable
                       by no one else (see Remote access in the README)
       --rotate-token  Replace the owner sign-in link, signing out the devices that used it
+      --desktop       For the desktop app: this device only (unless --access says otherwise), no menu,
+                      no keys, no sign-in link or QR code, and it stops when its input closes. The
+                      access choice is not saved
   -h, --help          Show this help
 
 Environment: PI_POCKET_ACCESS, PI_POCKET_PORT, PI_POCKET_DIR, PI_POCKET_HOST, PI_POCKET_SOCKET,
@@ -41,6 +44,7 @@ export interface Options {
     cwd: string;
     data: string;
     rotateToken: boolean;
+    desktop: boolean;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -54,7 +58,9 @@ export function parseArgs(argv: string[]): Options {
         cwd: process.cwd(),
         data: resolve(process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket")),
         rotateToken: false,
+        desktop: false,
     };
+    let accessGiven = false;
     const tcpFlags: string[] = [];
 
     for (let index = 0; index < argv.length; index++) {
@@ -78,6 +84,7 @@ export function parseArgs(argv: string[]): Options {
             }
 
             options.access = mode as AccessMode;
+            accessGiven = true;
             tcpFlags.push(arg);
         } else if (arg === "--yes" || arg === "-y") {
             options.yes = true;
@@ -99,6 +106,8 @@ export function parseArgs(argv: string[]): Options {
             options.data = resolve(value());
         } else if (arg === "--rotate-token") {
             options.rotateToken = true;
+        } else if (arg === "--desktop") {
+            options.desktop = true;
         } else if (arg === "--help" || arg === "-h") {
             console.log(HELP);
             process.exit(0);
@@ -111,6 +120,16 @@ export function parseArgs(argv: string[]): Options {
         options.socket = parseSocketPath(options.socket);
     } catch (error) {
         fail((error as Error).message);
+    }
+
+    if (options.desktop) {
+        if (options.socket !== undefined) {
+            fail("--desktop cannot be combined with --socket: the app window needs an address");
+        }
+
+        // The app window is on this machine: it shares nothing with other devices unless asked to.
+        options.yes = true;
+        options.access = accessGiven ? options.access : "local";
     }
 
     if (options.socket !== undefined && tcpFlags.length > 0) {
