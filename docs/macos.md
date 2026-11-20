@@ -78,4 +78,6 @@ No `sudo`: the package refuses to install as root. For the sign-in item too, pas
 
 [`.github/workflows/macos.yml`](../.github/workflows/macos.yml) runs on each pull request, on Apple silicon and on Intel: it builds the package with a package packed from the pull request, installs it without `sudo`, starts the console launcher, checks that it answers HTTP and that the sign-in link works, and uninstalls it while it runs. Then it installs it again with the sign-in item and opens Pi Pocket.app: it checks that no Terminal opens, that the window signed in with a one-time link, that a second start opens the first, and that **Quit** stops everything. It starts the sign-in item, installs over the running Pi Pocket (which keeps the sign-in item), and uninstalls it with the data. It also runs `npm run check`. The test suite does not pass on macOS yet: background tasks need Linux, and some tests compare `/var` paths with their real `/private/var` paths.
 
+Background tasks work on macOS since 0.30.0: Pi Pocket reads the process table with `ps`, and the environment of your own processes with `ps -E`, to follow a task's processes.
+
 The install through the Installer app (a double-click), the Gatekeeper steps, signing, and notarization are not tested in CI, and the app has been tried only on GitHub's runners, not yet on a Mac of its own.

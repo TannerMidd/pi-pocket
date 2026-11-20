@@ -34,11 +34,13 @@ const route: FauxResponseStep = (request) => {
 
 let app: App;
 let id: ConversationId;
+/** Git Bash on Windows takes longer than 400 ms to start a shell or a program: a longer limit, and longer commands. */
+const slow = process.platform === "win32";
 
 before(async () => {
     app = await openApp(scriptedModel(route), join(root, "deadlines"));
     id = await newSession(app);
-    app.background.limits.commandQuietMs = 400;
+    app.background.limits.commandQuietMs = slow ? 3000 : 400;
 });
 
 after(async () => {
@@ -74,13 +76,17 @@ test("a bash call that prints nothing for the quiet limit times out with its par
 
 test("a call that keeps printing, or gives its own timeout, runs past the quiet limit", async () => {
     const busy = await run({
-        command: "for i in 1 2 3 4 5 6; do echo tick$i; sleep 0.2; done",
+        command: `for i in 1 2 3 4 5 6; do echo tick$i; sleep ${slow ? 1 : 0.2}; done`,
     });
 
     assert.match(busy.text, /tick6/);
     assert.doesNotMatch(busy.text, /timed out/);
 
-    const own = await run({ command: "sleep 0.8; echo late", timeout: 5 });
+    // Longer than the quiet limit in all, as the loop above is.
+    const own = await run({
+        command: `sleep ${slow ? 4 : 0.8}; echo late`,
+        timeout: slow ? 10 : 5,
+    });
 
     assert.match(own.text, /late/);
 });

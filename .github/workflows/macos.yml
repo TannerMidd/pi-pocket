@@ -6,7 +6,8 @@
 #   this Mac only, a window that signed in with a one-time link, one instance only, and Quit that stops it all. It
 #   starts the sign-in item (the app in the menu bar only), installs over the running Pi Pocket (which keeps the
 #   sign-in item), and uninstalls it with the data.
-# - checks: the type check. The test suite does not pass on macOS yet (docs/macos.md says why).
+# - checks: the type check, and the background task and quiet-limit tests. The rest of the test suite does not pass on
+#   macOS yet (docs/macos.md says why).
 name: macOS
 
 on:
@@ -388,7 +389,7 @@ jobs:
                   grep -E "installd|package_script_service|installer\[" /var/log/install.log | tail -150 || true
 
     checks:
-        name: Type check
+        name: Type check and tests
         runs-on: macos-latest
         timeout-minutes: 40
         steps:
@@ -404,3 +405,6 @@ jobs:
             - run: npm ci
 
             - run: npm run check
+
+            - name: Background task and quiet-limit tests
+              run: node --test --test-concurrency=1 --test-timeout=180000 test/background-platforms.test.ts test/deadlines.test.ts
