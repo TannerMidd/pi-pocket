@@ -302,19 +302,12 @@ jobs:
 
             - run: npm run check
 
-            # A part of the suite. The rest is not yet known to pass on Windows. The skipped tests fail on Windows
-            # (pull request #354 lists why), and test/download.test.ts hangs there: take one out when it passes.
+            # A part of the suite: the files known to pass on Windows, not yet the others. The browser tests are left
+            # out: on the runner the browser can take longer than its 20 s limit to start (`browser/cdp.ts`).
             - name: Tests known to pass on Windows
               run: >
                   node --test --test-concurrency=4 --test-timeout=300000
-                  --test-skip-pattern="limits and invalid sources fail without publishing"
-                  --test-skip-pattern="a live holder under a name that is not node"
-                  --test-skip-pattern="an update state folder that the server cannot write"
-                  --test-skip-pattern="npm stages a real offline tarball"
-                  --test-skip-pattern="npm ignores the dot sibling"
-                  --test-skip-pattern="a session lists them as /skill: commands"
-                  --test-skip-pattern="a session in its own worktree starts with the folder"
-                  --test-skip-pattern="a worktree another session works in stays"
+                  --test-skip-pattern="a real sandbox loads relative CSS"
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/launcher-desktop.test.ts
@@ -343,4 +336,6 @@ jobs:
                   test/artifact-bundles.test.ts
                   test/files.test.ts
                   test/worktrees.test.ts
+                  test/download.test.ts
+                  test/no-follow.test.ts
                   test/main.test.ts

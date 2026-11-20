@@ -3,11 +3,9 @@
 import { randomUUID } from "node:crypto";
 import {
     closeSync,
-    constants,
     fstatSync,
     lstatSync,
     mkdirSync,
-    openSync,
     readSync,
     renameSync,
     rmSync,
@@ -17,6 +15,7 @@ import { join } from "node:path";
 import { arr, bool, obj, opt, str, union, unknown } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
+import { openNoFollowSync } from "../no-follow.ts";
 import { TOKEN_TYPES, boundedText } from "./tokens-base.ts";
 import { checkTokensBlock, scanProject, scanReport, scanRoot } from "./scan.ts";
 import type { Draft } from "./scan-scales.ts";
@@ -95,8 +94,8 @@ export function readDesignSystemText(
         );
     }
 
-    // O_NOFOLLOW closes the window between the lstat and this open, where a symlink could appear.
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    // `openNoFollowSync` closes the window between the lstat and this open, where a symlink could appear.
+    const fd = openNoFollowSync(path);
 
     try {
         if (!fstatSync(fd).isFile()) {

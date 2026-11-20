@@ -37,7 +37,11 @@ function fixture(t: TestContext) {
 
     /** A live child process. With `hold`, it has taken the lock, under a name that is not `node`. */
     async function child(hold = false) {
-        const executable = join(dir, "pocket-host");
+        // Windows starts a program only by a name that ends in `.exe`.
+        const executable = join(
+            dir,
+            process.platform === "win32" ? "pocket-host.exe" : "pocket-host",
+        );
 
         symlinkSync(process.execPath, executable);
 

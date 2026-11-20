@@ -6,8 +6,6 @@
  * the call, so a replayed call finds the version it already wrote instead of writing another.
  */
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
@@ -30,6 +28,7 @@ import {
     type ArtifactVersion,
 } from "../docs.ts";
 import { APP_ROOT } from "../config.ts";
+import { openNoFollow } from "../no-follow.ts";
 import type { PocketHost } from "../host.ts";
 import { localFolder } from "../design/files.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
@@ -52,10 +51,7 @@ export function slugify(value: string): string {
 
 /** Agent-local files, not browser file access: parent links are allowed, the final file must not be a link. */
 async function readFileBytes(path: string, limit: number): Promise<Buffer> {
-    const handle = await open(
-        path,
-        constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
-    );
+    const handle = await openNoFollow(path);
 
     try {
         const info = await handle.stat();

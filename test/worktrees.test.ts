@@ -62,6 +62,8 @@ const gitIn = (cwd: string, ...args: string[]) =>
 before(async () => {
     mkdirSync(join(repo, "app"), { recursive: true });
     gitIn(repo, "init", "-q");
+    // As written: a Windows runner's `core.autocrlf` would check files out with CRLF.
+    gitIn(repo, "config", "core.autocrlf", "false");
     gitIn(repo, "config", "user.email", "t@example.com");
     gitIn(repo, "config", "user.name", "T");
     writeFileSync(join(repo, "app", "main.ts"), "export const answer = 1;\n");

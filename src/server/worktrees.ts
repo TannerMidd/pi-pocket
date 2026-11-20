@@ -127,16 +127,21 @@ export async function createWorktree(
     }
 }
 
+/**
+ * A path as the system has it: links resolved, and on Windows the long name of each part with its case on disk, so
+ * that `C:\Users\RUNNER~1` and `C:\Users\runneradmin` (or a path git gives with `/`) compare equal. The path itself
+ * when it does not exist.
+ */
+function real(path: string): string {
+    try {
+        return realpathSync.native(path);
+    } catch {
+        return resolve(path);
+    }
+}
+
 /** Whether a folder is the worktree's or one inside it, also when reached through a symbolic link. */
 export function inWorktree(worktree: Worktree, cwd: string): boolean {
-    const real = (path: string) => {
-        try {
-            return realpathSync(path);
-        } catch {
-            return resolve(path);
-        }
-    };
-
     const base = real(worktree.path);
     const folder = real(cwd);
 
@@ -149,22 +154,16 @@ export function inWorktree(worktree: Worktree, cwd: string): boolean {
  */
 export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) => string> {
     const root = await repositoryOf(worktree.source);
-    let original: string | undefined;
-
-    try {
-        original = realpathSync(worktree.source);
-    } catch {
-        original = undefined;
-    }
+    const original = existsSync(worktree.source) ? real(worktree.source) : undefined;
 
     return (cwd) => {
         if (root === undefined) {
             return worktree.source;
         }
 
-        const mapped = resolve(root, relative(worktree.path, cwd));
+        const mapped = resolve(root, relative(real(worktree.path), real(cwd)));
 
-        return mapped === original || !existsSync(mapped) ? worktree.source : mapped;
+        return !existsSync(mapped) || real(mapped) === original ? worktree.source : mapped;
     };
 }
 
