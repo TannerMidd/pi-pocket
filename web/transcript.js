@@ -4031,8 +4031,7 @@ export function Transcript() {
         const { connection, sessions, conversationId } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
 
-        // Nothing kept anywhere, or a session held for its changes: the loading screen in the session's own pane,
-        // with its title, as before.
+        // Nothing kept anywhere, or a session held for its changes: the loading screen in the session's own pane.
         const caption =
             connection === "connecting"
                 ? "connecting"
