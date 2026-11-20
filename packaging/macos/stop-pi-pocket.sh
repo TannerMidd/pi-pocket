@@ -17,12 +17,15 @@ pp_node_pids() {
     pp_running_file "$APP/node/bin/node"
 }
 
-# Pi Pocket.app, which starts a launcher of its own, where postinstall put it.
+# Pi Pocket.app, which starts a launcher of its own, where postinstall put it: by its executable, and by its command
+# line, which LaunchServices starts with the executable's path.
 pp_app_pids() {
-    {
-        pp_running_file "$HOME/Applications/Pi Pocket.app/Contents/MacOS/Pi Pocket"
-        pp_running_file "$APP/Pi Pocket.app/Contents/MacOS/Pi Pocket"
-    } | sort -un
+    local each
+
+    for each in "$HOME/Applications/Pi Pocket.app/Contents/MacOS/Pi Pocket" "$APP/Pi Pocket.app/Contents/MacOS/Pi Pocket"; do
+        pp_running_file "$each"
+        /usr/bin/pgrep -f -- "^$each( |\$)" 2>/dev/null
+    done | sort -un
 }
 
 # Each process given, with all of its descendants.

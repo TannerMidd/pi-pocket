@@ -137,11 +137,15 @@ begin
 end;
 
 { The processes that run from this install: the desktop app first, then the node.exe processes (the launcher, the
-  server, and their Node.js children). }
+  server, and their Node.js children), then Edge's processes for the app's window, by its profile folder (the job of the
+  app ends them, but Edge's crash reporter can start outside it). }
 function NodeProcesses: String;
 begin
   Result := '(' + DesktopProcesses + ' + @(Get-Process -Name node -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{app}\node\')) + ' }))';
+    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{app}\node\')) + ' }) + ' +
+    '@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq ''msedge.exe'' -and ' +
+    '$_.CommandLine -and $_.CommandLine.Contains(' + PsQuote(ExpandConstant('{app}\Edge profile')) + ') } | ' +
+    'ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }))';
 end;
 
 function PiPocketRunning: Boolean;

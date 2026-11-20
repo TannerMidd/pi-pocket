@@ -410,7 +410,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
-    /// Quit: stop the launcher this app started, then quit. One that another launcher started keeps running.
+    /// Quit: stop the launcher this app started, then quit. One that another launcher started keeps running. It waits
+    /// here, on the main thread, for at most 20 seconds: the launcher usually stops in one or two.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         quitting = true
 
@@ -418,25 +419,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             return .terminateNow
         }
 
-        statusItem?.button?.toolTip = "Pi Pocket (stopping)"
-        DispatchQueue.global().async {
-            // Its input closes, and it gets SIGTERM: either way the launcher stops its server and its tunnel, as on q.
-            try? self.lifeline?.fileHandleForWriting.close()
-            process.terminate()
-            let started = Date()
+        log("Quit: stopping the launcher.")
+        // Its input closes, and it gets SIGTERM: either way the launcher stops its server and its tunnel, as on q.
+        try? lifeline?.fileHandleForWriting.close()
+        kill(process.processIdentifier, SIGTERM)
+        let started = Date()
 
-            while process.isRunning && Date().timeIntervalSince(started) < 20 {
-                Thread.sleep(forTimeInterval: 0.1)
+        while kill(process.processIdentifier, 0) == 0 && Date().timeIntervalSince(started) < 20 {
+            var status: Int32 = 0
+
+            // The launcher is this app's child: reap it here, so that the check above sees it gone.
+            if waitpid(process.processIdentifier, &status, WNOHANG) == process.processIdentifier {
+                break
             }
 
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-
-            DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
+            usleep(100_000)
         }
 
-        return .terminateLater
+        if kill(process.processIdentifier, 0) == 0 {
+            log("Quit: the launcher did not stop in 20 seconds; killing it.")
+            kill(process.processIdentifier, SIGKILL)
+        }
+
+        log("Quit: done.")
+
+        return .terminateNow
     }
 
     // MARK: Menus

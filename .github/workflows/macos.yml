@@ -123,7 +123,7 @@ jobs:
                   pkgutil --volume "$HOME" --pkg-info io.github.tannermidd.pi-pocket
                   # A command-line install must not start Pi Pocket: only a GUI install does.
                   sleep 10
-                  if lsof -t "$APP/node/bin/node" "$BUNDLE/Contents/MacOS/Pi Pocket" > /dev/null 2>&1; then
+                  if { pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" || lsof -t "$APP/node/bin/node"; } > /dev/null 2>&1; then
                       echo "The command-line install started Pi Pocket"
                       exit 1
                   fi
@@ -246,7 +246,7 @@ jobs:
                       echo "Terminal runs: the app must not open it"
                       exit 1
                   fi
-                  apps="$(lsof -a -d txt -t -- "$BUNDLE/Contents/MacOS/Pi Pocket" | wc -l | tr -d ' ')"
+                  apps="$(pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" | wc -l | tr -d ' ')"
                   if [ "$apps" != 1 ]; then
                       echo "$apps Pi Pocket.app processes run"
                       exit 1
@@ -313,16 +313,16 @@ jobs:
                       exit 1
                   fi
                   wait "$second"
-                  [ "$(lsof -a -d txt -t -- "$BUNDLE/Contents/MacOS/Pi Pocket" | wc -l | tr -d ' ')" = 1 ]
+                  [ "$(pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" | wc -l | tr -d ' ')" = 1 ]
                   "$BUNDLE/Contents/MacOS/Pi Pocket" --quit
                   for try in $(seq 1 40); do
-                      if ! lsof -t "$BUNDLE/Contents/MacOS/Pi Pocket" "$APP/node/bin/node" > /dev/null 2>&1; then
+                      if ! { pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" || lsof -t "$APP/node/bin/node"; } > /dev/null 2>&1; then
                           break
                       fi
                       sleep 1
                   done
                   cat "$LOG"
-                  if lsof -t "$BUNDLE/Contents/MacOS/Pi Pocket" "$APP/node/bin/node" > /dev/null 2>&1; then
+                  if { pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" || lsof -t "$APP/node/bin/node"; } > /dev/null 2>&1; then
                       echo "Quit left Pi Pocket running"
                       exit 1
                   fi
@@ -353,7 +353,7 @@ jobs:
                       ps -axo pid,ppid,command | grep -F "Pi Pocket" | grep -v grep || true
                       exit 1
                   fi
-                  lsof -t "$BUNDLE/Contents/MacOS/Pi Pocket"
+                  pgrep -fl "Pi Pocket.app/Contents/MacOS/Pi Pocket"
                   if pgrep -x Terminal; then
                       echo "Terminal runs: the sign-in item must not open it"
                       exit 1
@@ -362,7 +362,7 @@ jobs:
             - name: Install over the running Pi Pocket, which keeps the sign-in item
               run: |
                   installer -pkg "$PKG" -target CurrentUserHomeDirectory
-                  if pgrep -fl "Pi Pocket/node/bin/node" || lsof -t "$BUNDLE/Contents/MacOS/Pi Pocket"; then
+                  if pgrep -fl "Pi Pocket/node/bin/node" || pgrep -fl "Pi Pocket.app/Contents/MacOS/Pi Pocket"; then
                       echo "Pi Pocket still runs after the install over it"
                       exit 1
                   fi
