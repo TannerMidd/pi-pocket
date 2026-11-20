@@ -26,9 +26,7 @@ export interface ApprovalEvents {
 }
 
 export interface PendingApprovalsApi {
-    /** Pending approvals visible to the requester and everyone who can see `source`. */
     list(source: ConversationId): readonly PendingApproval[];
-    /** Subscribe before listing; reconcile by id. Pass the returned disposer to `web.onDispose`. */
     on<E extends keyof ApprovalEvents>(
         source: ConversationId,
         event: E,

@@ -42,7 +42,6 @@ export function parseSocketPath(value: string | undefined): string | undefined {
     return value;
 }
 
-/** Whether another user than this one (or root) can change the entries of a folder with this owner and mode. */
 function othersMayWrite(stat: { uid: number; mode: number }, sticky: boolean): boolean {
     if (stat.uid !== process.getuid!() && stat.uid !== 0) {
         return true;
@@ -52,12 +51,7 @@ function othersMayWrite(stat: { uid: number; mode: number }, sticky: boolean): b
     return (stat.mode & 0o022) !== 0 && !(sticky && (stat.mode & 0o1000) !== 0);
 }
 
-/**
- * Check the folder, and remove a stale socket that no server answers on, before listening. Refuses a folder that is a
- * symlink or reached through one, that another user owns, or that its group or others may write; and a folder above it
- * that another user could rename or replace (a sticky one, such as /tmp, is fine). Refuses any entry at the path that
- * is not a socket: it never follows a symlink or removes another kind of file.
- */
+/** Check the folder, and remove a stale socket that no server answers on, before listening. */
 export async function prepareSocketPath(path: string): Promise<void> {
     const folder = dirname(path);
     let stat;
@@ -124,7 +118,6 @@ export async function prepareSocketPath(path: string): Promise<void> {
     unlinkSync(path);
 }
 
-/** Whether a server accepts connections on the socket at `path`. */
 function answers(path: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
         const probe = connect({ path });
