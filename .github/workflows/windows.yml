@@ -56,7 +56,7 @@ jobs:
             - name: Block npm, as a company network can
               run: |
                   $hosts = Join-Path $env:WINDIR "System32\drivers\etc\hosts"
-                  Add-Content -Path $hosts -Value "`r`n127.0.0.1 registry.npmjs.org`r`n127.0.0.1 registry.npmjs.com`r`n"
+                  Add-Content -Path $hosts -Value "`r`n127.0.0.1 registry.npmjs.org`r`n127.0.0.1 registry.npmjs.com`r`n::1 registry.npmjs.org`r`n::1 registry.npmjs.com`r`n"
                   ipconfig /flushdns | Out-Null
                   "NPM_CONFIG_REGISTRY=http://127.0.0.1:9/" >> $env:GITHUB_ENV
                   $env:NPM_CONFIG_REGISTRY = "http://127.0.0.1:9/"
@@ -70,6 +70,8 @@ jobs:
                       Write-Host "registry.npmjs.org is blocked: $($_.Exception.Message)"
                   }
                   if ($reached) { throw "registry.npmjs.org still answers" }
+                  # npm's failure above is the expected one: it must not be the step's exit code.
+                  exit 0
 
             - name: Install silently
               run: |
@@ -87,6 +89,7 @@ jobs:
                       "pi-pocket.cmd",
                       "Pi Pocket.exe",
                       "app\node_modules\pi-pocket\bin\pi-pocket.js",
+                      "app\setup-finished.txt",
                       "unins000.exe"
                   )
                   foreach ($file in $expected) {

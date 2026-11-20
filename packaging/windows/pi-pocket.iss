@@ -368,6 +368,15 @@ begin
     FileExists(ExpandConstant('{commonpf32}\Git\bin\bash.exe'));
 end;
 
+{ Last of all: the mark that the package in the app folder is whole. Pi Pocket.exe refuses a package without it, which
+  an install that stopped while it copied the package leaves. }
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SaveStringToFile(ExpandConstant('{app}\app\setup-finished.txt'),
+      'Pi Pocket Setup {#AppVersion} put the package in this folder in place.' + #13#10, False);
+end;
+
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if (CurPageID = wpFinished) and not GitBashFound then

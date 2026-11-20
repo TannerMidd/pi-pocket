@@ -133,10 +133,12 @@ chmod 755 "$root/pi-pocket" "$root/Pi Pocket.command" "$root/login-item.sh" "$ro
 # of the packages. Without the identity they stay as npm delivers them.
 if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
     while IFS= read -r -d '' file; do
-        if file -b "$file" | grep -q Mach-O; then
-            codesign --force --sign "$APP_SIGN_IDENTITY" --options runtime --timestamp "$file"
-            echo "Signed ${file#"$root/"}"
-        fi
+        case "$(file -b "$file")" in
+            *Mach-O*)
+                codesign --force --sign "$APP_SIGN_IDENTITY" --options runtime --timestamp "$file"
+                echo "Signed ${file#"$root/"}"
+                ;;
+        esac
     done < <(find "$root/app.new" -type f \( -name '*.node' -o -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print0)
 fi
 

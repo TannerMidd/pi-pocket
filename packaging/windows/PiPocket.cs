@@ -509,8 +509,9 @@ namespace PiPocket
             Log("Pi Pocket desktop app " + Program.Version + ", " + DateTime.Now.ToString("u"));
         }
 
-        /// What is wrong with the pi-pocket package that Setup put in app\, as a title and what to do; null when nothing is.
-        /// A package older than this app is one that Setup did not replace: an older launcher refuses --desktop, so it
+        /// What is wrong with the pi-pocket package that Setup put in app\, as a title and what to do; null when nothing
+        /// is. Setup writes app\setup-finished.txt after it copied the package: without it, the copy stopped. A package
+        /// older than this app is one that Setup did not replace: an older launcher refuses --desktop, so it
         /// must not start. A newer one is an in-app update, and stays.
         string[] PackageProblem()
         {
@@ -533,9 +534,14 @@ namespace PiPocket
                 version = null;
             }
 
-            if (version == null)
+            if (version == null || !File.Exists(Path.Combine(appDir, @"app\setup-finished.txt")))
             {
-                return new string[] { "Pi Pocket is not fully installed: " + folder + " holds no pi-pocket package.", again };
+                return new string[]
+                {
+                    "Pi Pocket is not fully installed: Setup did not finish putting the pi-pocket package in " +
+                        folder + ".",
+                    again
+                };
             }
 
             if (!string.Equals(Program.Version, "0.0.0-dev") && Program.CompareVersions(version, Program.Version) < 0)

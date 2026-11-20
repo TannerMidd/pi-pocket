@@ -105,7 +105,12 @@ export function placeApp(here, version, log) {
             throw error;
         }
 
-        rmSync(old, { recursive: true, force: true });
+        try {
+            rmSync(old, { recursive: true, force: true });
+        } catch (error) {
+            log(`Could not delete ${old}: ${error instanceof Error ? error.message : error}`);
+        }
+
         log(
             `Installed pi-pocket ${version}${current === undefined ? "" : ` in place of ${current}`}.`,
         );
