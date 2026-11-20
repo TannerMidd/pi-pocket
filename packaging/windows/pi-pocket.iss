@@ -102,7 +102,8 @@ begin
 end;
 
 { stop-pi-pocket.ps1 with Windows PowerShell, for this install: what it prints goes to Setup's or the uninstaller's
-  log. Setup runs its own copy from {tmp}; the uninstaller the one in the install folder, which it deletes after. }
+  log. Setup runs its own copy from its temporary folder; the uninstaller the one in the install folder, which it
+  deletes after. }
 function RunStopScript(const Arguments: String): Integer;
 var
   Script: String;
