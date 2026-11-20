@@ -39,14 +39,12 @@ function parseArgs(argv: string[]) {
     const options = {
         host: process.env.PI_POCKET_HOST ?? "127.0.0.1",
         port: Number(process.env.PI_POCKET_PORT ?? 8787),
-        /** A Unix socket to listen on instead of host and port. */
         socket: process.env.PI_POCKET_SOCKET as string | undefined,
         cwd: process.cwd(),
         data: dataDir(),
         rotateToken: false,
         keepAliveSeconds: Number(process.env.PI_POCKET_KEEPALIVE_SECONDS?.trim() || 5),
     };
-    /** A flag that chose a TCP address, which a Unix socket replaces. */
     let tcpFlag: string | undefined;
 
     for (let index = 0; index < argv.length; index++) {
@@ -309,7 +307,6 @@ if (launcher) {
         loginPath: `/login?token=${token}`,
     });
 } else if (options.socket !== undefined) {
-    // No http link reaches a Unix socket: the owner opens the path at the reverse proxy's address.
     console.log(`\nPi Pocket is running on the Unix socket ${options.socket}.`);
     console.log(`  data:     ${options.data}`);
     console.log(`  sessions: new sessions start in ${options.cwd}`);

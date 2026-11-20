@@ -99,7 +99,6 @@ async function recordResponse(response: Response): Promise<ResponseFacts> {
             cancel();
         }
     } catch {
-        // If the response cannot be copied or read, the adapter's error and HTTP status still reach the classifier.
         return facts;
     }
 }
@@ -899,7 +898,6 @@ export class LimitGate {
         );
     }
 
-    /** The next delay when no reset is known. */
     #backoff(gate: Gate): number {
         const { backoffMs, minWaitMs, subscriptionBackoffMs } = this.#tuning;
         // No tries are counted yet when a manual try moved the scope: the first delay.
