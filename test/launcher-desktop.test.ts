@@ -42,6 +42,11 @@ test("--desktop means this device only and no questions, unless --access says ot
         }
     }
 
+    // Windows may refuse the socket path first.
+    if (process.platform === "win32") {
+        return;
+    }
+
     const socket = spawnSync(
         process.execPath,
         [
@@ -167,9 +172,11 @@ test("the desktop app's launcher: a ready file, a window that signs in once, no 
             desktop: true,
         });
 
-        const token = (JSON.parse(readFileSync(join(data, "config.json"), "utf8")) as {
-            ownerToken: string;
-        }).ownerToken;
+        const token = (
+            JSON.parse(readFileSync(join(data, "config.json"), "utf8")) as {
+                ownerToken: string;
+            }
+        ).ownerToken;
         const ask = (headers: Record<string, string>) =>
             fetch(`${running.url}/api/sign-in-link`, { method: "POST", headers });
 
@@ -203,7 +210,9 @@ test("the desktop app's launcher: a ready file, a window that signs in once, no 
         });
 
         assert.equal(guest.status, 200);
-        const next = (await (await ask({ authorization: `Bearer ${token}`, "x-pocket": "1" })).json()) as {
+        const next = (await (
+            await ask({ authorization: `Bearer ${token}`, "x-pocket": "1" })
+        ).json()) as {
             path: string;
         };
         const switched = await fetch(`${running.url}${next.path}`, {

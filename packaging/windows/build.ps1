@@ -1,9 +1,11 @@
 # Builds Pi-Pocket-Setup-<version>.exe on Windows: it downloads the pinned Node.js zip and Inno Setup, checks each
-# against the SHA256 below, and compiles pi-pocket.iss. The workflows run it (.github/workflows/windows*.yml).
+# against the SHA256 below, compiles the desktop app (PiPocket.cs) with the C# compiler of the .NET Framework that
+# Windows has, and compiles pi-pocket.iss. The workflows run it (.github/workflows/windows*.yml).
 #
 #   pwsh packaging/windows/build.ps1 -Version 0.29.0 [-OutDir out] [-SignThumbprint <certificate SHA1>]
 #
-# -SignThumbprint signs Setup and its uninstaller with that certificate from the user's certificate store.
+# -SignThumbprint signs Pi Pocket.exe, Setup, and its uninstaller with that certificate from the user's certificate
+# store.
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$OutDir = (Join-Path $PSScriptRoot "out"),
@@ -50,6 +52,32 @@ if (-not (Test-Path (Join-Path $nodeDir "node.exe"))) {
     throw "The Node.js zip has no $nodeName\node.exe"
 }
 
+# Pi Pocket.exe: C# 5, for the compiler that every Windows 10 and 11 has in its .NET Framework 4.x. Nothing to download.
+$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+
+if (-not (Test-Path $csc)) {
+    throw "No C# compiler of the .NET Framework at $csc"
+}
+
+$desktop = Join-Path $work "desktop"
+New-Item -ItemType Directory -Force $desktop | Out-Null
+$numeric = ($Version -replace '-.*$', '') + ".0"
+$source = Get-Content -Raw (Join-Path $PSScriptRoot "PiPocket.cs")
+$source = $source.Replace('Version = "0.0.0-dev"', "Version = `"$Version`"")
+$source = $source.Replace('NumericVersion = "0.0.0.0"', "NumericVersion = `"$numeric`"")
+$sourceFile = Join-Path $desktop "PiPocket.cs"
+[IO.File]::WriteAllText($sourceFile, $source, (New-Object Text.UTF8Encoding $false))
+$appExe = Join-Path $desktop "Pi Pocket.exe"
+& $csc /nologo /target:winexe /optimize+ /platform:anycpu /warnaserror+ `
+    "/win32icon:$(Join-Path $PSScriptRoot 'pi-pocket.ico')" "/win32manifest:$(Join-Path $PSScriptRoot 'PiPocket.manifest')" `
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/out:$appExe" $sourceFile
+
+if ($LASTEXITCODE -ne 0) {
+    throw "csc exited with $LASTEXITCODE"
+}
+
+Write-Host "Built $appExe"
+
 $innoSetup = Join-Path $work "innosetup-$InnoVersion-x64.exe"
 $innoDir = Join-Path $work "inno"
 Get-Checked "https://github.com/jrsoftware/issrc/releases/download/is-$($InnoVersion.Replace('.', '_'))/innosetup-$InnoVersion-x64.exe" $innoSetup $InnoSha256
@@ -67,7 +95,7 @@ if (-not (Test-Path $iscc)) {
     throw "No ISCC.exe in $innoDir"
 }
 
-$arguments = @("/Qp", "/DAppVersion=$Version", "/DNodeDir=$nodeDir", "/DOutputDir=$OutDir")
+$arguments = @("/Qp", "/DAppVersion=$Version", "/DNodeDir=$nodeDir", "/DOutputDir=$OutDir", "/DDesktopDir=$desktop")
 
 if ($SignThumbprint -ne "") {
     $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
@@ -78,6 +106,12 @@ if ($SignThumbprint -ne "") {
 
     if ($null -eq $signtool) {
         throw "No signtool.exe in $kits"
+    }
+
+    & $signtool.FullName sign /sha1 $SignThumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 $appExe
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "signtool could not sign $appExe"
     }
 
     # ISCC puts a quote for each `$q and the quoted file name for `$f.

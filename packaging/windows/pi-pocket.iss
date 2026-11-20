@@ -1,8 +1,11 @@
 ; Pi Pocket's Windows installer (Inno Setup). It installs for the current user only, without admin rights:
 ; - a portable Node.js (the official win-x64 zip, checked by build.ps1) in {app}\node;
 ; - the pi-pocket npm package in a private npm prefix, {app}\app, which the user owns, so in-app updates work;
-; - pi-pocket.cmd, which starts the launcher with that Node.js and prefix, and Start menu and sign-in shortcuts.
-; build.ps1 compiles it: ISCC /DAppVersion=0.29.0 /DNodeDir=<unpacked Node.js> pi-pocket.iss
+; - Pi Pocket.exe, the desktop app (PiPocket.cs): an icon in the notification area and a window, with no console;
+; - pi-pocket.cmd, which starts the launcher with that Node.js and prefix in a console, and Start menu and sign-in
+;   shortcuts.
+; build.ps1 compiles it: ISCC /DAppVersion=0.29.0 /DNodeDir=<unpacked Node.js> /DDesktopDir=<Pi Pocket.exe's folder>
+; pi-pocket.iss
 ; Setup takes /PACKAGE=<npm spec or .tgz> to install another package than pi-pocket@<AppVersion> (the CI test does).
 
 #ifndef AppVersion
@@ -10,6 +13,9 @@
 #endif
 #ifndef NodeDir
   #error Define NodeDir, the folder of the unpacked Node.js zip
+#endif
+#ifndef DesktopDir
+  #error Define DesktopDir, the folder of the compiled Pi Pocket.exe
 #endif
 #ifndef OutputDir
   #define OutputDir "out"
@@ -35,7 +41,7 @@ MinVersion=10.0.17763
 OutputDir={#OutputDir}
 OutputBaseFilename=Pi-Pocket-Setup-{#AppVersion}
 SetupIconFile=pi-pocket.ico
-UninstallDisplayIcon={app}\pi-pocket.ico
+UninstallDisplayIcon={app}\Pi Pocket.exe
 UninstallDisplayName=Pi Pocket
 LicenseFile=..\..\LICENSE
 Compression=lzma2/max
@@ -58,16 +64,20 @@ Type: files; Name: "{autostartup}\Pi Pocket.lnk"; Tasks: not startup
 
 [Files]
 Source: "{#NodeDir}\*"; DestDir: "{app}\node"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#DesktopDir}\Pi Pocket.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "pi-pocket.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install-app.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "pi-pocket.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Pi Pocket"; Filename: "{app}\pi-pocket.cmd"; WorkingDir: "{%USERPROFILE}"; IconFilename: "{app}\pi-pocket.ico"; Comment: "Start the Pi Pocket server"
-Name: "{autostartup}\Pi Pocket"; Filename: "{app}\pi-pocket.cmd"; Parameters: "--yes"; WorkingDir: "{%USERPROFILE}"; IconFilename: "{app}\pi-pocket.ico"; Flags: runminimized; Tasks: startup
+; The app, and the console launcher for access modes, tunnels, and the sign-in QR code. The sign-in shortcut starts the
+; app with its icon only, without a window.
+Name: "{autoprograms}\Pi Pocket"; Filename: "{app}\Pi Pocket.exe"; WorkingDir: "{%USERPROFILE}"; Comment: "Open Pi Pocket"
+Name: "{autoprograms}\Pi Pocket (console)"; Filename: "{app}\pi-pocket.cmd"; WorkingDir: "{%USERPROFILE}"; IconFilename: "{app}\pi-pocket.ico"; Comment: "Start Pi Pocket in a console window, to choose how other devices reach it"
+Name: "{autostartup}\Pi Pocket"; Filename: "{app}\Pi Pocket.exe"; Parameters: "--hidden"; WorkingDir: "{%USERPROFILE}"; Tasks: startup
 
 [Run]
-Filename: "{app}\pi-pocket.cmd"; WorkingDir: "{%USERPROFILE}"; Description: "Start Pi Pocket now"; Flags: postinstall nowait skipifsilent shellexec; Check: AppInstalled
+Filename: "{app}\Pi Pocket.exe"; WorkingDir: "{%USERPROFILE}"; Description: "Open Pi Pocket now"; Flags: postinstall nowait skipifsilent; Check: AppInstalled
 
 [UninstallDelete]
 ; npm made these, so Inno Setup does not know their files.
@@ -75,6 +85,10 @@ Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\npm-cache"
 Type: filesandordirs; Name: "{app}\node"
 Type: files; Name: "{app}\install.log"
+Type: files; Name: "{app}\launcher.log"
+Type: files; Name: "{app}\launcher.old.log"
+; The app window's Edge profile, with its sign-in cookie.
+Type: filesandordirs; Name: "{app}\Edge profile"
 Type: dirifempty; Name: "{app}"
 
 [Code]
@@ -115,11 +129,19 @@ begin
   Result := '$_.Path.StartsWith(' + PsQuote(Folder) + ', [StringComparison]::OrdinalIgnoreCase)';
 end;
 
-{ The node.exe processes that run from this install: the launcher, the server, and their Node.js children. }
+{ The desktop app (Pi Pocket.exe) of this install. }
+function DesktopProcesses: String;
+begin
+  Result := '@(Get-Process -Name ''Pi Pocket'' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ' +
+    '$_.Path.Equals(' + PsQuote(ExpandConstant('{app}\Pi Pocket.exe')) + ', [StringComparison]::OrdinalIgnoreCase) })';
+end;
+
+{ The processes that run from this install: the desktop app first, then the node.exe processes (the launcher, the
+  server, and their Node.js children). }
 function NodeProcesses: String;
 begin
-  Result := '@(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ' +
-    StartsWith(ExpandConstant('{app}\node\')) + ' })';
+  Result := '(' + DesktopProcesses + ' + @(Get-Process -Name node -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{app}\node\')) + ' }))';
 end;
 
 function PiPocketRunning: Boolean;
@@ -130,7 +152,17 @@ end;
 { Each one with its whole process tree (the agents' commands too), and the launcher's cloudflared (the tunnel) from the
   data folder, which would run on without it. Again until none is left, as the launcher can start a new server. }
 procedure StopPiPocket;
+var
+  Code: Integer;
 begin
+  { The desktop app first, as its Quit does: it closes its launcher's input, and the launcher stops the server and the
+    tunnel. What is left after 25 seconds is stopped below. }
+  if FileExists(ExpandConstant('{app}\Pi Pocket.exe')) then
+  begin
+    Exec(ExpandConstant('{app}\Pi Pocket.exe'), '--quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    RunPowerShell('for ($wait = 0; $wait -lt 25 -and ' + DesktopProcesses + '.Count -gt 0; $wait++) { Start-Sleep -Seconds 1 }');
+  end;
+
   RunPowerShell('for ($round = 0; $round -lt 5; $round++) { ' +
     '$all = ' + NodeProcesses + ' + @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue | ' +
     'Where-Object { $_.Path -and ' + StartsWith(ExpandConstant('{%USERPROFILE}\.pi-pocket\bin\')) + ' }); ' +
@@ -196,7 +228,7 @@ begin
   end;
 
   if not MayStopPiPocket('Setup') then
-    Result := 'Pi Pocket is still running. Quit it (press q in its window), then run Setup again.';
+    Result := 'Pi Pocket is still running. Quit it (Pi Pocket''s icon in the notification area, then Quit), then run Setup again.';
 end;
 
 function PackageSpec: String;
