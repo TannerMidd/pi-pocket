@@ -37,7 +37,6 @@ export interface Options {
     yes: boolean;
     host: string | undefined;
     port: number;
-    /** A Unix socket to listen on instead of host and port; no access mode applies. */
     socket: string | undefined;
     cwd: string;
     data: string;
@@ -56,7 +55,6 @@ export function parseArgs(argv: string[]): Options {
         data: resolve(process.env.PI_POCKET_DIR ?? join(homedir(), ".pi-pocket")),
         rotateToken: false,
     };
-    /** Flags that choose a TCP address or an access mode, which a Unix socket replaces. */
     const tcpFlags: string[] = [];
 
     for (let index = 0; index < argv.length; index++) {

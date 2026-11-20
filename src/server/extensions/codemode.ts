@@ -102,7 +102,6 @@ function toolHooks(extensions: readonly Extension[]): { before: BeforeTool[]; af
     return { before, after };
 }
 
-/** Whether `execute()` parked (Pi Durable 1.6): a script's call cannot sleep, so it fails. */
 function parked(returned: ToolExecutionResult | ToolPark): returned is ToolPark {
     return returned.sleep !== undefined || returned.wait !== undefined;
 }

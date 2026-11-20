@@ -376,7 +376,6 @@ async function ensureCloudflared(): Promise<string | undefined> {
 
 // ─── State ──────────────────────────────────────────────────────────────
 
-/** `socket`: listening on a Unix socket for a reverse proxy (`--socket`), which no browser opens directly. */
 type Mode = AccessMode | "custom" | "socket";
 
 const state = {
@@ -529,7 +528,7 @@ async function showPanel(withQr: boolean): Promise<void> {
     const base = (reachable() ? appUrl() : localUrl()).replace(/\/+$/, "");
     const login = state.loginPath === undefined ? undefined : `${base}${state.loginPath}`;
 
-    // No http link reaches a Unix socket: show the path to open at the reverse proxy's address, with no QR code.
+    // No http link reaches a Unix socket, so no QR code.
     if (state.mode === "socket" && state.loginPath !== undefined) {
         lines.push(row("Sign in", `${state.loginPath} ${dim("at your reverse proxy's address")}`));
         lines.push("");
@@ -1152,7 +1151,6 @@ async function main(): Promise<void> {
         fail(TAILSCALE_MISSING_MESSAGE);
     }
 
-    // A socket replaces the access modes: the launcher runs no tunnel and no `tailscale serve` for it.
     let mode: Mode | undefined = options.socket === undefined ? options.access : "socket";
 
     if (mode === undefined && options.host !== undefined) {

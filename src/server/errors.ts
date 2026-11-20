@@ -27,7 +27,6 @@ export function optionalText(value: unknown, name: string): string | undefined {
     return value;
 }
 
-/** A request field that must be true or false when present. */
 export function optionalFlag(value: unknown, name: string): boolean | undefined {
     if (value === undefined || value === null) {
         return undefined;
