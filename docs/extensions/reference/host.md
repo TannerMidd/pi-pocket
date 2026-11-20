@@ -246,6 +246,97 @@ web.onDispose(
 );
 ```
 
+## Approval observations
+
+### `pendingApprovals`
+
+```ts
+readonly pendingApprovals: PendingApprovals;
+```
+
+Since 0.30.0 · Experimental
+
+Read-only snapshots and events for tool approvals and questions that wait for a person. This is the public observation API; the mutable approval service remains internal. It never approves, denies, or answers a question. Check that this member exists on older servers.
+
+Each call names a top-level `source` session. It acts for the person Pi works for there, as `linkedSessions` does. An unknown session, a PiP, a source with no known requester, or a requester who no longer sees the source is refused. The snapshot includes only waits that the requester **and everyone who can see the source** can see. This prevents a tool from copying a private session's status into a shared transcript. Subagents use their parent session's audience. PiP waits are never exposed.
+
+Snapshots and events are frozen copies. Arguments, commands, paths, free-text reasons, question titles and fields, answer values, and the answering person's name are withheld. `tool` and `summary` describe only the kind of action; an unknown tool name becomes `tool`. This deliberately withholds all argument text, not just text that looks like a secret.
+
+#### `pendingApprovals.list`
+
+```ts
+list(source: ConversationId): readonly PendingApproval[];
+```
+
+Since 0.30.0 · Experimental
+
+The currently pending, visible waits, including waits in other visible sessions. Resolved waits are not kept as history. Subscribe first, then list, and reconcile by `id`. Re-list after a reload, reconnect, audience change, or restart. On a restart the durable guard hook reconstructs pending waits as runs resume; the snapshot can be empty until that happens. The same guard wait keeps its `id` and original `createdAt`. An old wait made before this API gets a time on its first replay with this version. Questions from `host.ask` keep their existing interrupted-call behavior: a retried question can have a new id.
+
+#### `pendingApprovals.on`
+
+```ts
+on<E extends keyof ApprovalEvents>(
+    source: ConversationId,
+    event: E,
+    listener: (approval: ApprovalEvents[E]) => unknown,
+): () => void;
+```
+
+Since 0.30.0 · Experimental
+
+Listen to `created` or `resolved`, and pass the returned disposer to `web.onDispose`. The subscription binds to the source's current requester. Core checks that person's current access and the source's whole current audience again before each delivery. Removing access stops delivery; it does not synthesize a resolved event. Reconcile a snapshot when access changes.
+
+Listeners run after the change and do not block an approval. A throwing or rejecting listener is logged without its error text; other listeners still run. Events are live notifications, not a durable queue. A restarted server can emit `created` again for the same pending id; subscribers must handle duplicates. A stop or server shutdown cancels an in-memory wait, but a restart can reconstruct that same guard wait. Use `resolved` with `cancelled` as the end of this wait, not as a denial.
+
+### `PendingApproval`
+
+```ts
+interface PendingApproval {
+    readonly id: string;
+    readonly conversationId: ConversationId;
+    readonly session: ConversationId;
+    readonly createdAt: number;
+    readonly tool: "bash" | "write" | "edit" | "ask" | "tool";
+    readonly summary: string;
+    readonly state: "pending";
+}
+```
+
+Since 0.30.0 · Experimental
+
+- `id`: the approval's stable id, also used by its card in the app. It grants no permission to answer it.
+- `conversationId`: the conversation that waits, which can belong to a subagent.
+- `session`: the top-level session that contains it. A browser module can use `pocket.openConversation(Number(approval.session))` to open the session for a person.
+- `createdAt`: Unix time in milliseconds.
+- `tool`, `summary`: the kind of action, with all arguments redacted.
+- `state`: always `pending` in a snapshot or `created` event.
+
+### `ResolvedApproval`
+
+```ts
+interface ResolvedApproval extends Omit<PendingApproval, "state"> {
+    readonly state: "resolved";
+    readonly outcome: "allowed" | "denied" | "cancelled" | "superseded";
+}
+```
+
+Since 0.30.0 · Experimental
+
+The same metadata, with `state: "resolved"` and an `outcome`. `allowed` and `denied` record the person's decision (submitted and declined for a question). `cancelled` means the waiting context ended without a decision; `superseded` means another request replaced this id. No answer values or person's name are included.
+
+### `ApprovalEvents`
+
+```ts
+interface ApprovalEvents {
+    readonly created: PendingApproval;
+    readonly resolved: ResolvedApproval;
+}
+```
+
+Since 0.30.0 · Experimental
+
+What each `pendingApprovals.on` listener receives. These events are source-scoped, not global `host.on` events.
+
 ## Asking people, hiding values, and the browser
 
 These came in 0.22.0, and are experimental. [People's values and the browser](../people-values.md) tells how to use them together.
@@ -843,7 +934,7 @@ The page, with what Pi's `browser` tool does, but no script to run in it.
 
 The host has more members, for Pi Pocket's built-in modules only. They are not in the types file, and they can change in any release without notice. Do not use them in a drop-in. [API stability](../policies/api-stability.md) tells you what this means.
 
-- `approvals`: tool calls that wait for a person to allow them.
+- `approvals`: the mutable approval service, for the guard and app only. For public, read-only snapshots and events, use [`pendingApprovals`](#pendingapprovals).
 - `guard`: Lancet Guard.
 - `schedules`: scheduled messages, for the schedule tool. `schedules.limits` holds the limits in force (`perSession`, `chars`, `repeatMinutes`, `aheadDays`); the schedules module copies the owner's settings into it, so a module should read it and not change it. A server from before 0.24.0 has no `limits`.
 - `background`: commands Pi runs in the background, for the background tool: `start`, `read`, `stop`, `list`, and `limits` (`running`, which the background module copies from the owner's setting). A server from before 0.24.0 has none.

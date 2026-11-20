@@ -101,3 +101,4 @@ Each member in the reference has its own Since line. These parts came together:
 | `linkedSessions.reports`: a lead turns off run-end answers (experimental)                                                                                         | 0.29.0 |
 | `options.artifact` and `options.version` in `pocket.openConversation`: open an artifact of that session (experimental)                                            | 0.29.0 |
 | `subagents: "always"` on a tool: the tool comes with every subagent that has a tool list (experimental)                                                           | 0.29.0 |
+| `host.pendingApprovals`: read-only approval snapshots and events (experimental)                                                                                   | 0.30.0 |
