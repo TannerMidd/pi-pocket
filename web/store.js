@@ -1301,6 +1301,9 @@ store.subscribe((state) => {
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
         saveShown();
+    } else if (source?.silent?.(1.5)) {
+        // Back from the background: a stream that missed its ping died there, though it never said so.
+        connect();
     }
 });
 
@@ -2198,11 +2201,18 @@ function streamEvents(query) {
     /** The first batch arrived whole: the session's view, or the session list when no session is open. */
     let settled = false;
     const settles = named !== null ? ["view", "missing"] : ["sessions"];
+    /** When this stream last said anything, and how often the server pings it: unknown until a first ping. */
+    let heardAt = Date.now();
+    let pingMs = 0;
+    let watchdog;
     const connection = {
         close() {
             clearTimeout(fallback);
+            clearInterval(watchdog);
             events.close();
         },
+        /** No error comes when a stream goes half-open or the phone suspended the page: only a missed ping shows it. */
+        silent: (missed) => pingMs > 0 && Date.now() - heardAt > pingMs * missed,
     };
     // Some tunnels hold the stream back. A Cloudflare quick tunnel passes it on in 64 KiB blocks and keeps the rest, so
     // a long session's first view can stop partway after its small first events got through. The stream counts as
@@ -2218,8 +2228,23 @@ function streamEvents(query) {
               connect();
           }, 6000);
 
+    events.addEventListener("ping", (event) => {
+        if (pingMs === 0) {
+            pingMs = JSON.parse(event.data).every;
+            watchdog = setInterval(() => {
+                if (source === connection && connection.silent(2.5)) {
+                    connect();
+                }
+            }, pingMs);
+        }
+
+        heardAt = Date.now();
+    });
+
     for (const [name, handler] of Object.entries(handlers)) {
         events.addEventListener(name, (event) => {
+            heardAt = Date.now();
+
             if (source !== connection) {
                 return;
             }

@@ -27,7 +27,7 @@ const STALLED_MS = 30_000;
 const MAX_BEHIND_BYTES = 128 * 1024 * 1024;
 
 /**
- * How often a stream sends a comment, which keeps proxies from closing it, and checks that its tab keeps up; and how long
+ * How often a stream sends a ping, which keeps proxies from closing it, and checks that its tab keeps up; and how long
  * a polling session lives after its last poll or answer, when no poll comes.
  */
 const eventTiming = { pingMs: 15_000, pollExpireMs: 60_000 };
@@ -176,7 +176,11 @@ export function createEventStreams(app: PocketApp) {
         });
         write("retry: 1500\n\n");
         // The ping checks too: a tab far behind with nothing new for it would otherwise hold its backlog until the next event.
-        const ping = setInterval(() => keepsUp() && write(": ping\n\n"), eventTiming.pingMs);
+        // It is an event, not a comment, so the tab sees it: one that hears nothing for long knows its stream is dead.
+        const ping = setInterval(
+            () => keepsUp() && write(`event: ping\ndata: {"every":${eventTiming.pingMs}}\n\n`),
+            eventTiming.pingMs,
+        );
 
         request.on("close", () => {
             clearInterval(ping);
