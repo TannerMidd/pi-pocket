@@ -147,6 +147,24 @@ test("nested calls are checked like direct ones: hooks that rewrite or block, an
     assert.equal(values[2], "ran rewritten ✓");
 });
 
+test("a nested call cannot park (Pi Durable 1.6): the tool's cancel runs, and the call fails", async () => {
+    const cancelled: unknown[] = [];
+    const waits = defineTool({
+        name: "waits",
+        description: "Waits for a wake",
+        parameters: obj({}, { open: true }),
+        execute: async () => ({ sleep: { checkpoint: { step: 1 }, until: Date.now() + 60_000 } }),
+        cancel: async (_args, api) => void cancelled.push(api.checkpoint),
+    });
+    const result = await run(
+        fakeApi([waits]),
+        `try { await tools.waits({}); return "no error"; } catch (error) { return error.message; }`,
+    );
+
+    assert.match(result.text, /Tool waits waits to be woken, which a codemode script cannot do/);
+    assert.deepEqual(cancelled, [{ step: 1 }]);
+});
+
 test("store() values last across scripts; failed scripts keep their output and change nothing", async () => {
     const fake = fakeApi([echo]);
 

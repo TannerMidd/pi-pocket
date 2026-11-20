@@ -55,6 +55,7 @@ Since 0.29.0, experimental: it can change in a minor release. This is an additio
 - Pi Durable 1.2 renamed the result field `content` to `output`. Pi Pocket still reads `content` from what `execute` of a drop-in's tool returns, but new code must use `output`. A hook (`afterTool`) or a wrap (`wrapTool`) that reads or returns a result must use `output` too. A module that returns `output` exports `pocketApi = 2` ([API versions](reference/api-versions.md)): Pi Pocket 0.18 then refuses it with a clear message.
 - To give the model an error, throw an `Error`. The model gets its message as an error result.
 - `api.output(text)` streams output while the tool runs. When `execute` returns no `output`, this output becomes the result.
+- Since Pi 1.6 (Pi Pocket 0.30.0), `execute` can return a park (`{ sleep: … }` or `{ wait: … }`) in place of a result, as Pi Durable's README tells. A park has no result fields: a wrap (`wrapTool`) that reads a result must let a park through. A call from a codemode script cannot park: Pi Pocket calls the tool's `cancel`, and the script's call fails with an error.
 
 ## Restarts and replays
 

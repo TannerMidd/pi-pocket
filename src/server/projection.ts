@@ -249,7 +249,8 @@ export type ClientToolSlot = {
     callId: string;
     taskId?: number;
     name: string;
-    status: "pending" | "running" | "done";
+    /** `waiting` and `sleeping`: a call that parked (Pi Durable 1.6); tabs show it as running. */
+    status: "pending" | "running" | "waiting" | "sleeping" | "done";
     output?: string;
     details?: unknown;
 };

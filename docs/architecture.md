@@ -13,6 +13,8 @@ Pi Durable 1.4.0 migrates SQLite storage to schema version 2 when it opens. Olde
 
 Pi Durable 1.5.0 keeps schema version 2, but it stores `pi.live` at version 3, and its tool and generation tasks at newer versions, as soon as a conversation runs. An older Pi Pocket then does not start on that data folder: it stops with "Document … (pi.live) has newer version 3 than 1". Back up the complete data folder with the server stopped before upgrading to Pi Pocket 0.28.0, and do not go back to an older version with the same folder.
 
+Pi Durable 1.6.0 stores its tool tasks (`pi.tool`) at version 4 and its generation tasks (`pi.generation`) at version 3. An older Pi Durable does not run such tasks (`task_too_old`), and takes a sleep without `until` as due. Back up the complete data folder with the server stopped before upgrading to Pi Pocket 0.30.0, and do not go back to an older version with the same folder.
+
 Scheduled messages, PR watches, repository watches, and PiP reports held while PiP is off use durable `sleepUntil()` checkpoints. A sleeping task holds no invocation and resumes at its saved phase when the harness clock reaches its deadline. The task graph includes these tasks with status `sleeping`.
 
 Some state lives in this process alone, and a restart forgets it. For example:
