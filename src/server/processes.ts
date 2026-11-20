@@ -467,12 +467,12 @@ class DarwinTable implements ProcTable {
             const full = envs.get(key);
             const command = commands.get(key);
 
-            this.#env.set(
-                key,
-                full !== undefined && command !== undefined && full.startsWith(command)
-                    ? full.slice(command.length)
-                    : "",
-            );
+            // A process that ran `exec` between the two reads shows two commands: it is read again at the next look.
+            if (full !== undefined && command !== undefined && full.startsWith(command)) {
+                this.#env.set(key, full.slice(command.length));
+            } else if (full === undefined && command === undefined) {
+                this.#env.set(key, "");
+            }
         }
     }
 
@@ -1197,8 +1197,15 @@ class WindowsProcesses implements TaskProcesses {
             found.push(`${pid} ${start}\n`);
         };
 
+        // A pid the task had before, now another process's: that one is new, and may be the task's too.
+        const knownNow = (pid: number, start: number) => known.get(pid) === start;
+
         for (const each of job) {
-            if (each.start > 0 && !known.has(each.pid) && all.get(each.pid)?.start === each.start) {
+            if (
+                each.start > 0 &&
+                !knownNow(each.pid, each.start) &&
+                all.get(each.pid)?.start === each.start
+            ) {
                 add(each.pid, each.start);
             }
         }
@@ -1208,7 +1215,7 @@ class WindowsProcesses implements TaskProcesses {
 
             if (
                 parent !== undefined &&
-                !known.has(info.pid) &&
+                !knownNow(info.pid, info.start) &&
                 info.start > 0 &&
                 all.get(info.ppid)?.start === parent &&
                 info.start >= parent
