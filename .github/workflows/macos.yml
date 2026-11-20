@@ -1,0 +1,277 @@
+# Checks Pi Pocket on macOS for each pull request. It publishes nothing.
+# - installer: on Apple silicon and on Intel, builds the package (packaging/macos) with a package packed from this
+#   checkout, installs it for the current user without sudo, starts Pi Pocket without the interactive launcher, checks
+#   that it answers HTTP and that the sign-in link works, and uninstalls it while it runs, which must stop it and keep
+#   the data folder. Then it installs it again with the sign-in item, opens Pi Pocket.app, starts the sign-in item,
+#   installs over the running Pi Pocket (which keeps the sign-in item), and uninstalls it with the data.
+# - checks: the type check. The test suite does not pass on macOS yet (docs/macos.md says why).
+name: macOS
+
+on:
+    pull_request:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: macos-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    installer:
+        name: Installer (${{ matrix.arch }})
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: macos-latest
+                      arch: arm64
+                    - runner: macos-15-intel
+                      arch: x86_64
+        runs-on: ${{ matrix.runner }}
+        timeout-minutes: 40
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 26
+
+            - name: Pack this checkout
+              run: |
+                  version="$(node -p "require('./package.json').version")"
+                  npm pack --pack-destination "$RUNNER_TEMP"
+                  {
+                      echo "VERSION=$version"
+                      echo "PACKAGE=$RUNNER_TEMP/pi-pocket-$version.tgz"
+                      echo "PKG=$RUNNER_TEMP/pkg/Pi-Pocket-$version.pkg"
+                      echo "APP=$HOME/Library/Application Support/Pi Pocket"
+                      echo "BUNDLE=$HOME/Applications/Pi Pocket.app"
+                      echo "AGENT=$HOME/Library/LaunchAgents/io.github.tannermidd.pi-pocket.plist"
+                  } >> "$GITHUB_ENV"
+
+            - name: Build the package
+              run: packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/pkg" --package "$PACKAGE"
+
+            - name: Check the package
+              run: |
+                  domains="$(installer -pkg "$PKG" -dominfo)"
+                  echo "$domains"
+                  if [ "$domains" != "CurrentUserHomeDirectory" ]; then
+                      echo "The package must install in the home folder only"
+                      exit 1
+                  fi
+                  pkgutil --check-signature "$PKG" || true
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory -showChoicesXML > "$RUNNER_TEMP/choices-shown.plist"
+                  plutil -p "$RUNNER_TEMP/choices-shown.plist"
+
+            - name: Install for the current user, without sudo
+              run: |
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory -verbose
+                  cat "$APP/install.log"
+                  for file in node/bin/node node/bin/npm pi-pocket "Pi Pocket.command" uninstall.sh \
+                      app/lib/node_modules/pi-pocket/bin/pi-pocket.js; do
+                      if [ ! -e "$APP/$file" ]; then
+                          echo "The package did not install $file"
+                          exit 1
+                      fi
+                  done
+                  if [ -e "$APP/Pi Pocket.app" ] || [ ! -x "$BUNDLE/Contents/MacOS/Pi Pocket" ]; then
+                      echo "Pi Pocket.app is not in ~/Applications"
+                      exit 1
+                  fi
+                  plutil -lint "$BUNDLE/Contents/Info.plist"
+                  if [ -e "$AGENT" ]; then
+                      echo "The sign-in item is there, but its choice is off by default"
+                      exit 1
+                  fi
+                  others="$(find "$APP" "$BUNDLE" ! -user "$(id -un)" | head -5)"
+                  if [ -n "$others" ]; then
+                      echo "Files that the user does not own: $others"
+                      exit 1
+                  fi
+                  lipo -archs "$APP/node/bin/node"
+                  [ "$(lipo -archs "$APP/node/bin/node")" = "x86_64 arm64" ] || [ "$(lipo -archs "$APP/node/bin/node")" = "arm64 x86_64" ]
+                  codesign --verify --strict --all-architectures "$APP/node/bin/node"
+                  echo "Native: $("$APP/node/bin/node" -p 'process.arch + " " + process.version')"
+                  if [ "$(uname -m)" = arm64 ] && arch -x86_64 /usr/bin/true 2> /dev/null; then
+                      echo "With Rosetta: $(arch -x86_64 "$APP/node/bin/node" -p 'process.arch + " " + process.version')"
+                  fi
+                  root="$(NPM_CONFIG_PREFIX="$APP/app" "$APP/node/bin/npm" root -g)"
+                  if [ "$root" != "$APP/app/lib/node_modules" ]; then
+                      echo "npm root -g is $root: in-app updates would not find the install"
+                      exit 1
+                  fi
+                  pkgutil --volume "$HOME" --pkg-info io.github.tannermidd.pi-pocket
+                  # A command-line install must not start Pi Pocket: only a GUI install does.
+                  sleep 10
+                  if lsof -t "$APP/node/bin/node" > /dev/null 2>&1; then
+                      echo "The command-line install started Pi Pocket"
+                      exit 1
+                  fi
+
+            - name: Start Pi Pocket and check that it answers HTTP
+              run: |
+                  out="$RUNNER_TEMP/pi-pocket.log"
+                  # Input from /dev/null, not a terminal: the launcher asks nothing and prints no key menu.
+                  (cd "$HOME" && nohup "$APP/pi-pocket" --access local --yes --port 8787 < /dev/null > "$out" 2>&1 &)
+                  code=000
+                  for try in $(seq 1 180); do
+                      sleep 1
+                      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8787/ || true)"
+                      if [ "$code" != 000 ] && [ "$code" -lt 500 ]; then
+                          break
+                      fi
+                  done
+                  cat "$out"
+                  echo "GET / answered $code after about $try seconds"
+                  if [ "$code" != 200 ]; then
+                      exit 1
+                  fi
+                  login="$(grep -oE 'http://127\.0\.0\.1:8787/[^[:space:]]+' "$out" | tail -1 || true)"
+                  if [ -z "$login" ]; then
+                      echo "The launcher printed no sign-in link"
+                      exit 1
+                  fi
+                  # It signs in, then sends the browser on to the app.
+                  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -c "$RUNNER_TEMP/cookies" "$login")"
+                  echo "The sign-in link answered $code, with $(grep -vc '^#' "$RUNNER_TEMP/cookies" || true) cookies"
+                  if [ "$code" -ge 400 ]; then
+                      exit 1
+                  fi
+
+            - name: Uninstall while Pi Pocket runs
+              run: |
+                  "$APP/uninstall.sh" --yes < /dev/null
+                  for path in "$APP" "$BUNDLE" "$AGENT"; do
+                      if [ -e "$path" ]; then
+                          echo "The uninstall left $path"
+                          exit 1
+                      fi
+                  done
+                  if pgrep -fl "Pi Pocket/node/bin/node"; then
+                      echo "Pi Pocket still runs after the uninstall"
+                      exit 1
+                  fi
+                  if curl -s -o /dev/null --max-time 5 http://127.0.0.1:8787/; then
+                      echo "Port 8787 still answers after the uninstall"
+                      exit 1
+                  fi
+                  if pkgutil --volume "$HOME" --pkgs | grep -F io.github.tannermidd.pi-pocket; then
+                      echo "The uninstall left the package receipt"
+                      exit 1
+                  fi
+                  if [ ! -d "$HOME/.pi-pocket" ]; then
+                      echo "An uninstall without a terminal must keep the data folder"
+                      exit 1
+                  fi
+                  echo "Uninstalled; the data folder stays."
+
+            - name: Install again with the sign-in item
+              run: |
+                  cat > "$RUNNER_TEMP/choices.plist" <<'EOF'
+                  <?xml version="1.0" encoding="UTF-8"?>
+                  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                  <plist version="1.0">
+                  <array>
+                      <dict>
+                          <key>attributeSetting</key>
+                          <integer>1</integer>
+                          <key>choiceAttribute</key>
+                          <string>selected</string>
+                          <key>choiceIdentifier</key>
+                          <string>login</string>
+                      </dict>
+                  </array>
+                  </plist>
+                  EOF
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory -applyChoiceChangesXML "$RUNNER_TEMP/choices.plist"
+                  plutil -lint "$AGENT"
+                  plutil -p "$AGENT"
+                  command="$(plutil -extract ProgramArguments.3 raw "$AGENT")"
+                  if [ ! -x "$command" ]; then
+                      echo "The sign-in item opens $command, which is not there"
+                      exit 1
+                  fi
+
+            - name: Open Pi Pocket.app
+              run: |
+                  open "$BUNDLE"
+                  # It opens Terminal, which runs the launcher. The launcher waits in its access menu.
+                  for try in $(seq 1 90); do
+                      sleep 1
+                      if lsof -t "$APP/node/bin/node" > /dev/null 2>&1; then
+                          echo "The launcher runs after about $try seconds"
+                          break
+                      fi
+                  done
+                  ps -axo pid,ppid,command | grep -F "Pi Pocket" | grep -v grep || true
+                  APP="$APP" bash -c '. "$APP/stop-pi-pocket.sh"; pi_pocket_running && stop_pi_pocket' || {
+                      echo "Pi Pocket.app did not start the launcher, or it did not stop"
+                      exit 1
+                  }
+
+            - name: Start the sign-in item and check that it answers HTTP
+              run: |
+                  launchctl bootstrap "gui/$(id -u)" "$AGENT"
+                  code=000
+                  for try in $(seq 1 180); do
+                      sleep 1
+                      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8787/ || true)"
+                      if [ "$code" != 000 ] && [ "$code" -lt 500 ]; then
+                          break
+                      fi
+                  done
+                  echo "GET / answered $code after about $try seconds"
+                  [ "$code" = 200 ]
+
+            - name: Install over the running Pi Pocket, which keeps the sign-in item
+              run: |
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory
+                  if pgrep -fl "Pi Pocket/node/bin/node"; then
+                      echo "Pi Pocket still runs after the install over it"
+                      exit 1
+                  fi
+                  if [ ! -e "$AGENT" ]; then
+                      echo "The install over an earlier one turned the sign-in item off"
+                      exit 1
+                  fi
+                  [ -x "$BUNDLE/Contents/MacOS/Pi Pocket" ]
+                  [ -f "$APP/app/lib/node_modules/pi-pocket/bin/pi-pocket.js" ]
+
+            - name: Uninstall with the data
+              run: |
+                  "$APP/uninstall.sh" --yes --delete-data < /dev/null
+                  for path in "$APP" "$BUNDLE" "$AGENT" "$HOME/.pi-pocket"; do
+                      if [ -e "$path" ]; then
+                          echo "The uninstall left $path"
+                          exit 1
+                      fi
+                  done
+
+            - name: Show the logs
+              if: failure()
+              run: |
+                  cat "$APP/install.log" "$RUNNER_TEMP/pi-pocket.log" 2> /dev/null || true
+                  grep -E "installd|package_script_service|installer\[" /var/log/install.log | tail -150 || true
+
+    checks:
+        name: Type check
+        runs-on: macos-latest
+        timeout-minutes: 40
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 26
+                  cache: npm
+
+            - run: npm ci
+
+            - run: npm run check

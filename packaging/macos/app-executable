@@ -1,0 +1,4 @@
+#!/bin/sh
+# The executable of Pi Pocket.app (Contents/MacOS/Pi Pocket). It opens the launcher in a Terminal window and exits.
+# open -a Terminal needs no permission to control Terminal, and Terminal runs the file in the user's login shell.
+exec /usr/bin/open -a Terminal "$HOME/Library/Application Support/Pi Pocket/Pi Pocket.command"

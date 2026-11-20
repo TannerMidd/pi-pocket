@@ -1,0 +1,11 @@
+#!/bin/bash
+# The "Start Pi Pocket when I sign in" choice (off by default): it adds the sign-in item, after the main package's
+# postinstall turned it off.
+set -u
+
+if [ "$(id -u)" = 0 ]; then
+    echo "Pi Pocket installs for the current user only."
+    exit 1
+fi
+
+exec "$HOME/Library/Application Support/Pi Pocket/login-item.sh" on

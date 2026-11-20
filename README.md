@@ -58,6 +58,10 @@ While it runs: **q** quit · **r** restart server · **a** change access · **o*
 
 Download `Pi-Pocket-Setup-<version>.exe` from the [releases](https://github.com/TannerMidd/pi-pocket/releases) and run it. It needs no admin rights and no Node.js: it installs its own Node.js and Pi Pocket in `%LOCALAPPDATA%\Pi Pocket`, adds **Pi Pocket** to the Start menu, and can start it when you sign in. The installer is not code-signed yet, so SmartScreen warns: select **More info**, then **Run anyway**. Menu → **Update Pi Pocket** updates it. The uninstaller asks before it deletes your data. See [docs/windows.md](docs/windows.md).
 
+### macOS package
+
+Download `Pi-Pocket-<version>.pkg` from the [releases](https://github.com/TannerMidd/pi-pocket/releases) and open it. It needs no admin password and no Node.js: it installs its own Node.js and Pi Pocket in `~/Library/Application Support/Pi Pocket` for your user only, adds **Pi Pocket.app** to `~/Applications`, and can start it when you sign in. The package is not signed yet, so Gatekeeper blocks it: open System Settings → Privacy & Security, then select **Open Anyway**. Menu → **Update Pi Pocket** updates it. Its uninstaller asks before it deletes your data. See [docs/macos.md](docs/macos.md).
+
 ### Other ways to run it
 
 - **Docker or Podman:** `docker compose up -d --build`. See [docs/docker.md](docs/docker.md).
