@@ -10,8 +10,6 @@ name: Windows
 on:
     pull_request:
     workflow_dispatch:
-    push:
-        branches: [feat/desktop-app] # TEMPORARY: remove before the pull request is final
 
 permissions:
     contents: read
