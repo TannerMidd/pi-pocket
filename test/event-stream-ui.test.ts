@@ -108,3 +108,78 @@ test(
         }
     },
 );
+
+test("a first stream that hears nothing at all is made again", real, async () => {
+    const page = await browsers.open(3);
+
+    await page.navigate(url);
+    const streams = await page.evaluate(`
+        const { connect } = await import("/store.js");
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const made = [], Real = EventSource;
+        // No stream hears anything, not even the first ping: the tab knows the server's ping period, but must not wait for it.
+        globalThis.EventSource = class extends Real {
+            constructor(...a) { super(...a); made.push(this); }
+            addEventListener() {}
+        };
+        connect();
+        await wait(11_500);
+        return JSON.stringify(made.length);
+    `);
+
+    assert.ok(Number(streams) >= 2, `${streams} streams: the silent first one was kept`);
+});
+
+test(
+    "a poll that hangs, away from this computer, is given up and asked again",
+    { skip: real.skip || (lan === undefined ? "no address but loopback" : false) },
+    async () => {
+        const far = createServer(
+            createHandler({ app, listen: { host: lan!, port: 0 }, restart() {} }),
+        );
+
+        await new Promise<void>((resolve) => far.listen(0, lan, resolve));
+        const token = encodeURIComponent(app.config.ownerToken);
+        const page = await browsers.open(4);
+
+        try {
+            await page.navigate(
+                `http://${lan}:${(far.address() as { port: number }).port}/login?token=${token}`,
+            );
+            const polls = await page.evaluate(`
+            const { connect } = await import("/store.js");
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const real = fetch;
+            let polls = 0;
+            // The first answer says the server holds a poll 300 ms; the second poll hangs, as on a half-open connection.
+            globalThis.fetch = async (input, init) => {
+                if (!String(input).includes("/api/poll?") || String(input).includes("close=1")) {
+                    return real(input, init);
+                }
+
+                polls++;
+
+                if (polls === 2) {
+                    return new Promise((_, reject) =>
+                        init.signal.addEventListener("abort", () => reject(new DOMException("stop", "AbortError"))),
+                    );
+                }
+
+                const response = await real(input, init);
+                const data = await response.json();
+
+                return new Response(JSON.stringify({ ...data, hold: 300 }), { status: response.status });
+            };
+            localStorage.setItem("pocket.transport", "poll:" + Date.now());
+            connect();
+            await wait(5000);
+            localStorage.removeItem("pocket.transport");
+            return JSON.stringify(polls);
+        `);
+
+            assert.ok(Number(polls) >= 3, `${polls} polls: the hung one was waited on`);
+        } finally {
+            far.close();
+        }
+    },
+);

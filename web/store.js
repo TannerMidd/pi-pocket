@@ -2048,6 +2048,12 @@ const pollHere = () => {
     return mode === "poll" && Date.now() - Number(at) < POLL_FOR_MS;
 };
 
+/**
+ * A new stream hears the server's first ping at once. One that hears nothing at all for this long (times the tries in a
+ * row) is stuck before it began, as on a half-open connection: it is made again.
+ */
+const FIRST_DATA_MS = 10_000;
+
 /** Event stream reconnects in a row that the browser gave up on, for the pause before the next one. */
 let streamRetries = 0;
 /** The server's ping period, from the last stream that heard a ping: a new stream is watched from its start. */
@@ -2206,10 +2212,12 @@ function streamEvents(query) {
     let heardAt = Date.now();
     let pingMs = pingPeriod;
     let pings = 0;
+    let heardAny = false;
     let watchdog;
     const connection = {
         close() {
             clearTimeout(fallback);
+            clearTimeout(firstData);
             clearInterval(watchdog);
             events.close();
         },
@@ -2229,6 +2237,19 @@ function streamEvents(query) {
               localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
               connect();
           }, 6000);
+    // Away from this computer the fallback above polls first; here, or with a fallback that has nothing to do, a
+    // stream that never hears its first ping must not leave the tab at "connecting".
+    const firstData = setTimeout(
+        () => {
+            if (heardAny || source !== connection) {
+                return;
+            }
+
+            streamRetries++;
+            connect();
+        },
+        FIRST_DATA_MS * (streamRetries + 1),
+    );
 
     // A stream that dies before its first ping (a phone locked within one period) is watched too.
     const watch = () => {
@@ -2259,12 +2280,14 @@ function streamEvents(query) {
         }
 
         pings++;
+        heardAny = true;
         heardAt = Date.now();
     });
 
     for (const [name, handler] of Object.entries(handlers)) {
         events.addEventListener(name, (event) => {
             heardAt = Date.now();
+            heardAny = true;
 
             if (source !== connection) {
                 return;
@@ -2384,10 +2407,36 @@ function show() {
     });
 }
 
+/** A first poll waits for its session's first view to be built, which can take long on a large session. */
+const FIRST_POLL_MS = 60_000;
+/** A poll that hears nothing past its hold, and a margin for a slow link, hangs on a half-open connection. */
+const pollStallMs = (hold) => hold * 1.5 + 2000;
+
+/** Read a poll's answer, with `progress` called as each part of it comes. */
+async function readJson(response, progress) {
+    const reader = response.body.getReader();
+    const parts = [];
+
+    for (;;) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+            break;
+        }
+
+        parts.push(value);
+        progress();
+    }
+
+    return JSON.parse(await new Blob(parts).text());
+}
+
 /** Long polling: each request waits for events and returns them; the next one acknowledges what arrived. */
 function pollEvents() {
     let session = null;
     let ack = 0;
+    /** How long the server holds a poll with nothing to say: it says so in each answer. */
+    let hold = 25_000;
     let stopped = false;
     let request = null;
     const connection = {
@@ -2410,6 +2459,18 @@ function pollEvents() {
             const named = store.state.conversationId;
             let fresh = false;
             const generation = accountGeneration;
+            // A request that hears nothing for too long is given up and asked again: the next one, on a new
+            // connection, gets what this one would have brought, as it acknowledges no more.
+            let stall;
+
+            const quiet = (ms) => {
+                clearTimeout(stall);
+                const asking = request;
+
+                stall = setTimeout(() => asking.abort(), ms);
+            };
+
+            quiet(session === null ? FIRST_POLL_MS : pollStallMs(hold));
 
             try {
                 // A poll the server no longer knows (it started again, or this tab fell far behind) attaches afresh: it
@@ -2430,10 +2491,17 @@ function pollEvents() {
                     throw new Error(`HTTP ${response.status}`);
                 }
 
-                const data = await response.json();
+                quiet(pollStallMs(hold));
+                const data = await readJson(response, () => quiet(pollStallMs(hold)));
+
+                clearTimeout(stall);
 
                 if (stopped || source !== connection) {
                     return;
+                }
+
+                if (data.hold > 0) {
+                    hold = data.hold;
                 }
 
                 if (data.session !== session) {
@@ -2468,6 +2536,8 @@ function pollEvents() {
                     show();
                 }
             } catch {
+                clearTimeout(stall);
+
                 if (stopped) {
                     return;
                 }

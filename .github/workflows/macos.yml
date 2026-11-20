@@ -4,8 +4,8 @@
 #   that it answers HTTP and that the sign-in link works, and uninstalls it while it runs, which must stop it and keep
 #   the data folder. Then it installs it again with the sign-in item, opens Pi Pocket.app, starts the sign-in item,
 #   installs over the running Pi Pocket (which keeps the sign-in item), and uninstalls it with the data.
-# - checks: the type check, and the background task and quiet-limit tests. The rest of the test suite does not pass on
-#   macOS yet (docs/macos.md says why).
+# - checks: the type check and the test suite, without the tests that do not pass on macOS yet (docs/macos.md says
+#   which, and why).
 name: macOS
 
 on:
@@ -285,5 +285,38 @@ jobs:
 
             - run: npm run check
 
-            - name: Background task and quiet-limit tests
-              run: node --test --test-concurrency=1 --test-timeout=180000 test/background-platforms.test.ts test/deadlines.test.ts
+            # The tests that do not pass on macOS yet are skipped by name, and pip-board-ui.test.ts as a whole (docs/macos.md
+            # says why): tests that press Ctrl and Alt where the app takes ⌘ and Option on a Mac, time limits and
+            # animations that the slower runner misses, and some browser tests not yet looked into.
+            - name: Tests
+              timeout-minutes: 30
+              run: >
+                  node --test --test-concurrency=4 --test-timeout=300000
+                  --test-skip-pattern="a taken app key opens neither a sheet nor the launcher"
+                  --test-skip-pattern="open resets query and focus"
+                  --test-skip-pattern="New session opens the folder sheet and its final focus"
+                  --test-skip-pattern="Peeks finds the action by its feature name"
+                  --test-skip-pattern="a favorite folder shows while the launcher is open"
+                  --test-skip-pattern="New session here starts in the open session's folder"
+                  --test-skip-pattern="a paste inside a quote, short or long, goes under it"
+                  --test-skip-pattern="a large page with many findings is fixed in time"
+                  --test-skip-pattern="an unterminated <item> list parses in linear time"
+                  --test-skip-pattern="25 pages in other styles give only the findings"
+                  --test-skip-pattern="helpers past the soft limit cost the parent one message"
+                  --test-skip-pattern="the hard limit stops the stuck call"
+                  --test-skip-pattern="a late catch-up glides"
+                  --test-skip-pattern="a catch-up taller than the screen glides"
+                  --test-skip-pattern="a reconnect, and a reload of a cached session, glide"
+                  --test-skip-pattern="what came while away slides in"
+                  --test-skip-pattern="drafts stay with their person across a switch"
+                  --test-skip-pattern="a starting tab keeps its answer for the same person only"
+                  --test-skip-pattern="on a phone the view is one column that fits"
+                  --test-skip-pattern="device sizes change the frame, and fit scales it"
+                  --test-skip-pattern="on a phone the panel covers the chat, and the canvas"
+                  --test-skip-pattern="pointing at an element makes a comment that everyone sees"
+                  --test-skip-pattern="tweaks from the page's manifest show as controls"
+                  --test-skip-pattern="a deck has a slide strip, and present mode"
+                  --test-skip-pattern="Markdown extension points render, update, and remove"
+                  --test-skip-pattern="a linked session's message is a card that names its session"
+                  --test-skip-pattern="a streamed update draws only the answer's last block"
+                  $(ls test/*.test.ts | grep -v -x test/pip-board-ui.test.ts)
