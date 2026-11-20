@@ -174,13 +174,13 @@ export function createEventStreams(app: PocketApp) {
             ...(encoding === undefined ? {} : { "content-encoding": encoding }),
             vary: "accept-encoding",
         });
-        write("retry: 1500\n\n");
+        // The ping is an event, not a comment, so the tab sees it: one that hears nothing for long knows its stream is
+        // dead. The first goes at once, so a stream that dies before the next one is watched too.
+        const pingEvent = `event: ping\ndata: {"every":${eventTiming.pingMs}}\n\n`;
+
+        write(`retry: 1500\n\n${pingEvent}`);
         // The ping checks too: a tab far behind with nothing new for it would otherwise hold its backlog until the next event.
-        // It is an event, not a comment, so the tab sees it: one that hears nothing for long knows its stream is dead.
-        const ping = setInterval(
-            () => keepsUp() && write(`event: ping\ndata: {"every":${eventTiming.pingMs}}\n\n`),
-            eventTiming.pingMs,
-        );
+        const ping = setInterval(() => keepsUp() && write(pingEvent), eventTiming.pingMs);
 
         request.on("close", () => {
             clearInterval(ping);

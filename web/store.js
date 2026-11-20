@@ -2245,8 +2245,9 @@ function streamEvents(query) {
     events.addEventListener("ping", (event) => {
         const every = Number(JSON.parse(event.data).every);
 
-        if (watchdog === undefined && every > 0) {
+        if (every > 0 && every !== pingMs) {
             pingMs = pingPeriod = every;
+            clearInterval(watchdog);
             watch();
         }
 
