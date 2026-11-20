@@ -1526,10 +1526,19 @@ export class Commands {
         app.spend.check(user, id);
         const conversation = await app.conversation(id);
         const held = (await app.harness.snapshot(HeldDoc, id, context))?.items ?? [];
+        let sent = 0;
 
-        for (const item of held) {
-            await conversation.submit(
-                {
+        for (const { key } of held) {
+            // Each goes in the commit that takes it from the list: one withdrawn meanwhile is not there to send.
+            const went = await app.harness.commit(async (tx) => {
+                const doc = await tx.doc(HeldDoc, id);
+                const item = doc.items.find((each) => each.key === key);
+
+                if (item === undefined) {
+                    return false;
+                }
+
+                await conversation.submit(tx, {
                     type: "input",
                     content: item.content as unknown as UserInput,
                     whenBusy: item.mode,
@@ -1537,28 +1546,24 @@ export class Commands {
                     ...(item.entry === undefined
                         ? {}
                         : { entry: item.entry as unknown as InputEntry }),
-                },
-                context,
-            );
+                });
+                doc.items = doc.items.filter((each) => each.key !== key);
+
+                return true;
+            }, context);
+
+            sent += went ? 1 : 0;
         }
 
-        const sent = new Set(held.map((item) => item.key));
-
-        await app.harness.commit(async (tx) => {
-            const doc = await tx.doc(HeldDoc, id);
-
-            doc.items = doc.items.filter((item) => !sent.has(item.key));
-        }, context);
-
-        if (held.length > 0) {
+        if (sent > 0) {
             await app.collab.activity(
                 id,
                 user,
-                `sent the ${held.length === 1 ? "held message" : `${held.length} held messages`}`,
+                `sent the ${sent === 1 ? "held message" : `${sent} held messages`}`,
             );
         }
 
-        return held.length;
+        return sent;
     }
 
     /** Take a held message away for good. Anyone may their own; someone else's needs the right to drive, as in the queue. */
