@@ -115,6 +115,11 @@ const gone = (info: Proc) => info.state === "Z" || info.state === "X";
  */
 interface ProcTable {
     readonly boot: string | undefined;
+    /**
+     * Whether start times are whole seconds (macOS): a pid that another process took in the same second has the same
+     * start, so a leader counts only with the task's marker too.
+     */
+    readonly coarse: boolean;
     unsupported(): string | undefined;
     /** A new look starts: what is fresh is from after this moment. */
     begin(): void;
@@ -129,6 +134,7 @@ interface ProcTable {
 }
 
 class LinuxTable implements ProcTable {
+    readonly coarse = false;
     readonly boot = (() => {
         try {
             return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
@@ -268,6 +274,7 @@ function byPid(text: string): Map<number, string> {
 }
 
 class DarwinTable implements ProcTable {
+    readonly coarse = true;
     readonly boot = (() => {
         const read = spawnSync("sysctl", ["-n", "kern.bootsessionuuid"], {
             encoding: "utf8",
@@ -478,12 +485,17 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[]
 
     const first = table.stat(item.pid);
 
+    // The task's own leader: its start, and on macOS its marker too.
+    const own = (leader: Proc) =>
+        leader.start === item.startTicks &&
+        (!table.coarse || table.marked(leader.pid, item.marker));
+
     if (
         first !== undefined &&
         !gone(first) &&
         first.pgid === item.pid &&
         item.startTicks !== undefined &&
-        first.start === item.startTicks
+        own(first)
     ) {
         return [item.pid];
     }
@@ -498,10 +510,7 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean): number[]
 
     const leader = group.find((each) => each.pid === item.pid);
 
-    if (
-        leader !== undefined &&
-        (item.startTicks === undefined || leader.start === item.startTicks)
-    ) {
+    if (leader !== undefined && (item.startTicks === undefined || own(leader))) {
         return group.map((each) => each.pid);
     }
 
@@ -913,12 +922,20 @@ class Helper {
         try {
             const text = await withTimeout(answer, 15_000, "The process helper did not answer");
 
+            if (process.env.PI_POCKET_PROCESS_DEBUG === "1" && !line.startsWith("list")) {
+                console.error(`[processes] ${line} -> ${text.slice(0, 300)}`);
+            }
+
             if (text.startsWith("error ")) {
                 throw new Error(text.slice(6));
             }
 
             return text;
         } catch (error) {
+            if (process.env.PI_POCKET_PROCESS_DEBUG === "1") {
+                console.error(`[processes] ${line} failed: ${(error as Error).message}`);
+            }
+
             // A helper that does not answer in time is out of step with its answers: a new one starts next time.
             if ((error as Error).message === "The process helper did not answer") {
                 this.close();
