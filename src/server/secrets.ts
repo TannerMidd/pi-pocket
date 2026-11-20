@@ -58,15 +58,17 @@ function label(text: string): string {
 
 /** `.env`, `.env.local`, `.plane.env`, `prod.env`: a file of variables. Templates (`.env.example`) are not. */
 export function isEnvFile(name: string): boolean {
-    if (name === ".env") {
+    const lower = name.toLowerCase();
+
+    if (lower === ".env") {
         return true;
     }
 
-    if (name.startsWith(".env.")) {
-        return !/^\.env\.(example|sample|template|dist|defaults)$/i.test(name);
+    if (lower.startsWith(".env.")) {
+        return !/^\.env\.(example|sample|template|dist|defaults)$/.test(lower);
     }
 
-    return name.length > 4 && name.endsWith(".env");
+    return lower.length > 4 && lower.endsWith(".env");
 }
 
 /** The same in a command's words: there `process.env` is code, not a file, so only names that start with a dot count. */

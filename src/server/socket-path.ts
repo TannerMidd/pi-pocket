@@ -30,6 +30,15 @@ export function parseSocketPath(value: string | undefined): string | undefined {
         );
     }
 
+    // A Unix socket address holds 108 bytes on Linux and 104 on macOS, with the final zero byte.
+    const limit = process.platform === "darwin" ? 103 : 107;
+
+    if (Buffer.byteLength(value) > limit) {
+        throw new SocketPathError(
+            `--socket path ${value} is ${Buffer.byteLength(value)} bytes long; this system allows ${limit} at most. Use a shorter path.`,
+        );
+    }
+
     return value;
 }
 

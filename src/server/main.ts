@@ -86,10 +86,6 @@ function parseArgs(argv: string[]) {
         }
     }
 
-    if (!Number.isInteger(options.port) || options.port <= 0) {
-        throw new Error("--port must be a number");
-    }
-
     if (
         !Number.isInteger(options.keepAliveSeconds) ||
         options.keepAliveSeconds < 1 ||
@@ -104,6 +100,10 @@ function parseArgs(argv: string[]) {
 
     if (options.socket !== undefined && tcpFlag !== undefined) {
         throw new Error(`--socket cannot be combined with ${tcpFlag}`);
+    }
+
+    if (options.socket === undefined && (!Number.isInteger(options.port) || options.port <= 0)) {
+        throw new Error("--port must be a number");
     }
 
     return options;
