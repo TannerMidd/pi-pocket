@@ -629,6 +629,8 @@ function startServer(first: boolean): void {
             PI_POCKET_LAUNCHER: "1",
             PI_POCKET_ROLLBACK: "1",
             PI_POCKET_NPM_ROLLBACK: "1",
+            // The socket goes as `--socket` when it is used; `--desktop` drops the variable, so the server must too.
+            PI_POCKET_SOCKET: undefined,
         },
     });
     /** This start said it was ready: a stop after that is not a new version that cannot start. */
