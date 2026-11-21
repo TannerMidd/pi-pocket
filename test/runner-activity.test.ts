@@ -1,6 +1,7 @@
 // Whether sessions work on the computer, for a program that runs the runner (`src/runner/activity.ts`): the smoothing
 // on its own with a clock of its own, then a real runner with the server's `Runners` and the real pi-env daemon.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -141,7 +142,7 @@ describe("a runner's activity", () => {
 
         const { port } = server.address() as AddressInfo;
         const { code } = runners.makeCode(`Computer ${randomUUID().slice(0, 6)}`, "owner");
-        const linked = runners.redeem(code);
+        const linked = linkInProcess((request) => runners.redeem(request), code);
         const work = join(root, "project");
 
         mkdirSync(work);

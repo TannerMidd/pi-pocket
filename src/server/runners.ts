@@ -20,7 +20,16 @@ import {
     type Reply,
     type RequestOptions,
 } from "@earendil-works/pi-env";
-import { type RawData, type WebSocket, WebSocketServer } from "ws";
+import { type RawData, WebSocketServer } from "ws";
+import {
+    checkLinkRequest,
+    fingerprint,
+    isPublicKey,
+    linkAnswerProof,
+    type LinkAnswer,
+    type LinkRequest,
+    ServerLinkSocket,
+} from "../runner/secure-link.ts";
 import {
     type ControlMessage,
     FRAME,
@@ -127,11 +136,18 @@ const CONFIRM_MS = 120_000;
 /** How long a runner has to say hello after it connects. */
 const HELLO_MS = 10_000;
 
+/** The link socket a runner talks over, sealed with the link's keys (`secure-link.ts`). */
+type WebSocket = ServerLinkSocket;
+
 /** A computer, as people see it. */
 export type RunnerView = {
     id: string;
     name: string;
     online: boolean;
+    /** Linked before the secure link: it must link again, with a code made for it (`makeCode` with its id). */
+    relink?: true;
+    /** Its runner's key, as a person can compare it with what `pi-pocket runner status` shows there. */
+    fingerprint?: string;
     /** Offline, with its work waiting for it (its daemon session is kept until it is back). */
     away: boolean;
     lastSeen?: number;
@@ -444,6 +460,11 @@ export class RunnerLink {
     shutdown(): void {
         this.#closed = true;
         this.#drop(1001, "The server is restarting");
+    }
+
+    /** Its computer was linked again: the connection with the old key ends; the new runner connects with its own. */
+    relinked(): void {
+        this.#drop(1000, "This computer was linked again");
     }
 
     /** The live session, after `info` waited for one; lost when its runner started over meanwhile. */
@@ -1541,6 +1562,13 @@ export class Runners {
                     id: runner.id,
                     name: runner.name,
                     createdBy: runner.createdBy,
+                    ...(runner.publicKey === undefined
+                        ? { relink: true as const }
+                        : user === undefined ||
+                            user.role === "owner" ||
+                            runner.createdBy === user.id
+                          ? { fingerprint: fingerprint(runner.publicKey) }
+                          : {}),
                     ...(user?.role === "owner"
                         ? {
                               users: (runner.users ?? []).flatMap((id) => {
@@ -1573,18 +1601,28 @@ export class Runners {
             });
     }
 
-    /** A one-time code that links a computer named `name`: `pi-pocket runner link <server> <code>` on it. */
+    /**
+     * A one-time code that links a computer named `name`: `pi-pocket runner link <server> <code>` on it. With `runner`, a
+     * code that links that computer again: its runner gets a new key, and it keeps its id, people, and sessions.
+     */
     makeCode(
         name: string,
         createdBy: string,
-    ): { code: string; expiresAt: number; package: string } {
-        const clean = name.replace(/\s+/g, " ").trim().slice(0, 60);
+        runner?: string,
+    ): { code: string; expiresAt: number; package: string; fingerprint: string } {
+        const again = runner === undefined ? undefined : this.#config.runnerById(runner);
+
+        if (runner !== undefined && again === undefined) {
+            throw new HttpError(404, "No such computer");
+        }
+
+        const clean = again?.name ?? name.replace(/\s+/g, " ").trim().slice(0, 60);
 
         if (clean === "") {
             throw new HttpError(400, "Give the computer a name.");
         }
 
-        if (this.#config.runners.some((runner) => runner.name === clean)) {
+        if (again === undefined && this.#config.runners.some((each) => each.name === clean)) {
             throw new HttpError(
                 409,
                 `A computer named ${clean} is already linked. Choose another name.`,
@@ -1597,21 +1635,34 @@ export class Runners {
         const code = `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
         const expiresAt = Date.now() + CODE_MINUTES * 60_000;
 
-        this.#config.addRunnerCode(code, clean, createdBy, expiresAt);
+        this.#config.addRunnerCode(code, clean, createdBy, expiresAt, again?.id);
 
-        return { code, expiresAt, package: runnerPackage() };
+        return {
+            code,
+            expiresAt,
+            package: runnerPackage(),
+            fingerprint: fingerprint(this.#config.serverIdentity.publicKey),
+        };
     }
 
     /**
-     * A runner gives its one-time code: it gets its computer's key, kept only there. `address`: the client's
+     * A runner proves it knows a one-time code and gives its public key (`secure-link.ts`): it gets this server's key
+     * and proof that this server knows the code too. The code never travels. `address`: the client's
      * (`link-limits.ts` `clientAddress`). Wrong codes are counted: too many from one address lock it out, and its
      * third lockout bans it; too many in all pause new linking and void the open codes. Linked computers and their keys
      * stay as they are.
      */
-    redeem(code: string, address = "unknown"): { id: string; name: string; key: string } {
+    redeem(request: LinkRequest, address = "unknown"): LinkAnswer {
         this.#linkLimits.check(address);
 
-        const found = this.#config.takeRunnerCode(code.trim().toUpperCase());
+        if (!isPublicKey(request.runnerKey) || typeof request.proof !== "string") {
+            throw new HttpError(
+                400,
+                "Update Pi Pocket's runner on this computer, then link it again.",
+            );
+        }
+
+        const found = this.#config.takeRunnerCode((hash) => checkLinkRequest(hash, request));
 
         if (found === undefined) {
             const result = this.#linkLimits.wrong(address);
@@ -1638,12 +1689,30 @@ export class Runners {
             throw new HttpError(403, WRONG_CODE);
         }
 
-        const { runner, key } = this.#config.addRunner(found.name, found.createdBy);
+        const again =
+            found.runner === undefined
+                ? undefined
+                : this.#config.relinkRunner(found.runner, request.runnerKey);
 
-        this.log(`${runner.name} was linked.`);
+        if (found.runner !== undefined && again === undefined) {
+            throw new HttpError(404, "That computer was removed. Make a new link code in Runners.");
+        }
+
+        const runner =
+            again ?? this.#config.addRunner(found.name, found.createdBy, request.runnerKey);
+
+        // Linked again: the old connection, with the old key, ends now.
+        if (again !== undefined) {
+            this.#links.get(runner.id)?.relinked();
+        }
+
+        this.log(`${runner.name} was ${again === undefined ? "linked" : "linked again"}.`);
         this.changed();
 
-        return { id: runner.id, name: runner.name, key };
+        const serverKey = this.#config.serverIdentity.publicKey;
+        const answer = { id: runner.id, name: runner.name, serverKey };
+
+        return { ...answer, proof: linkAnswerProof(found.codeHash, request.runnerKey, answer) };
     }
 
     /** Forget a computer: its runner is sent away, and its key stops working. */
@@ -1685,16 +1754,6 @@ export class Runners {
             );
         };
 
-        const auth = request.headers.authorization ?? "";
-        const key = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-        const runner = key === "" ? undefined : this.#config.runnerByKey(key);
-
-        if (runner === undefined) {
-            refuse(401, "Unknown runner key");
-
-            return true;
-        }
-
         const offered = String(request.headers["sec-websocket-protocol"] ?? "")
             .split(",")
             .map((each) => each.trim());
@@ -1705,7 +1764,25 @@ export class Runners {
             return true;
         }
 
-        this.#server.handleUpgrade(request, socket, head, (ws) => this.#accept(ws, runner));
+        this.#server.handleUpgrade(request, socket, head, (ws) => {
+            // Who it is comes from the handshake: the runner proves its computer's key (`secure-link.ts`).
+            const link = new ServerLinkSocket(ws, {
+                identity: this.#config.serverIdentity,
+                runnerKey: (id) => this.#config.runnerById(id)?.publicKey,
+                unknown: CLOSE.removed,
+            });
+
+            link.once("open", () => {
+                const runner = this.#config.runnerById(link.id!);
+
+                if (runner === undefined) {
+                    link.close(CLOSE.removed, "Removed");
+                } else {
+                    this.#accept(link, runner);
+                }
+            });
+            link.on("error", () => {});
+        });
 
         return true;
     }
@@ -1713,7 +1790,8 @@ export class Runners {
     #accept(socket: WebSocket, runner: StoredRunner): void {
         const timer = setTimeout(() => socket.close(1002, "No hello"), HELLO_MS);
 
-        socket.once("message", (data, binary) => {
+        socket.once("close", () => clearTimeout(timer));
+        socket.once("message", (data: RawData, binary: boolean) => {
             clearTimeout(timer);
 
             const hello = binary ? undefined : parseControl(toBuffer(data).toString("utf8"));

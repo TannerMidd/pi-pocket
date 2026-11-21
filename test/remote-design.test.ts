@@ -1,5 +1,6 @@
 // Design uses a server mirror but the session's existing runner permission supplies every project read and write.
 import { cleanUp, context, openApp, owner, root, scriptedModel, until } from "./helpers.ts";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -71,7 +72,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const { code } = app.runners.makeCode("Design computer", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runner = new Runner({
         link: { server: base, ...linked },

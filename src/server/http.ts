@@ -111,19 +111,31 @@ export function createHandler(options: HttpOptions) {
                 return await linkRoute(app, request, response, token, url);
             }
 
-            // A runner on another computer trades its one-time code for that computer's key (`runners.ts`): the code
-            // is the whole of the access, as a sign-in link's token is.
+            // A runner on another computer proves it knows a one-time code and gives its key (`runners.ts`,
+            // `secure-link.ts`): the code is the whole of the access, as a sign-in link's token is.
             if (path === LINK_CODE_PATH && request.method === "POST") {
-                const body = await readJson<{ code?: unknown }>(request);
+                const body = await readJson<{
+                    runnerKey?: unknown;
+                    proof?: unknown;
+                    code?: unknown;
+                }>(request);
 
-                if (typeof body.code !== "string" || body.code.length > 64) {
-                    throw new HttpError(400, "Give the link code.");
+                if (typeof body.runnerKey !== "string" || typeof body.proof !== "string") {
+                    throw new HttpError(
+                        400,
+                        typeof body.code === "string"
+                            ? "Update Pi Pocket's runner on this computer, then link it again."
+                            : "Give the link request.",
+                    );
                 }
 
                 return json(
                     response,
                     200,
-                    app.runners.redeem(body.code, await clientAddress(request, app.access?.mode)),
+                    app.runners.redeem(
+                        { runnerKey: body.runnerKey, proof: body.proof.slice(0, 100) },
+                        await clientAddress(request, app.access?.mode),
+                    ),
                 );
             }
 

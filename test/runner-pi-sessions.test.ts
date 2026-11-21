@@ -10,6 +10,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -134,7 +135,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const { code } = app.runners.makeCode("Test laptop", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runnerId = linked.id;
     runner = new Runner({

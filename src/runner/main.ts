@@ -41,7 +41,6 @@ import {
     writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { Agent, fetch as undiciFetch } from "undici";
 import { createInterface } from "node:readline";
 import { createInterface as createQuestions } from "node:readline/promises";
 import { dirname, join, resolve } from "node:path";
@@ -61,6 +60,7 @@ import {
 } from "../launcher/term.ts";
 import { authenticatorLink, checkCode, newSecret, type TotpState } from "./totp.ts";
 import { LINK_CODE_PATH } from "./protocol.ts";
+import { fingerprint, LinkProblem, linkWithCode, publicOf } from "./secure-link.ts";
 import {
     Runner,
     type RunnerLinkFile,
@@ -218,10 +218,19 @@ function readLink(file: string): Link | undefined {
             typeof value.name === "string" &&
             typeof value.key === "string"
         ) {
+            // Linked before the secure link: its key was one the server also knew, and the server's own is unknown.
+            if (typeof value.serverKey !== "string") {
+                throw new Problem(
+                    `This computer was linked by an older Pi Pocket runner, without the server's key. Link it again: in Menu > Runners, choose Link again on ${value.name}, then run pi-pocket runner link ${value.server} <code>. It keeps its sessions.`,
+                );
+            }
+
             return value as Link;
         }
-    } catch {
-        // Below.
+    } catch (error) {
+        if (error instanceof Problem) {
+            throw error;
+        }
     }
 
     throw new Problem(
@@ -362,61 +371,43 @@ async function checkServer(server: string): Promise<void> {
     }
 }
 
-/** Trade a one-time code for this computer's link to `server`. */
+/**
+ * Link this computer to `server` with a one-time code (`secure-link.ts`): it makes this computer's key, proves the code
+ * without sending it, and pins the server's key once the server proves it knows the code too.
+ */
 async function redeem(server: string, code: string, settings: RunnerSettings): Promise<Link> {
-    let response: Response;
     // Over plain HTTP to this computer or a tailnet device: only to the addresses checked (`pinnedLookup`).
     const lookup = pinnedLookup(await checkTransport(server, settings.allowHttp === true));
-    const dispatcher = lookup === undefined ? undefined : new Agent({ connect: { lookup } });
 
     try {
-        response = (await undiciFetch(`${server}${LINK_CODE_PATH}`, {
-            method: "POST",
-            headers: { "content-type": "application/json", "x-pocket": "1" },
-            body: JSON.stringify({ code: code.trim() }),
-            signal: AbortSignal.timeout(15_000),
-            ...(dispatcher === undefined ? {} : { dispatcher }),
-        })) as unknown as Response;
+        return {
+            server,
+            ...(await linkWithCode(`${server}${LINK_CODE_PATH}`, code, lookup)),
+            settings,
+        };
     } catch (error) {
-        throw new Problem(
-            `Could not reach ${server} (${(error as Error).message}). Check the address and network, then try again.`,
-        );
-    }
-
-    const text = await response.text();
-
-    if (!response.ok) {
-        let message = text;
-
-        try {
-            message = (JSON.parse(text) as { error?: string }).error ?? text;
-        } catch {
-            // As it is.
+        if (!(error instanceof LinkProblem)) {
+            throw error;
         }
 
-        // The server's message says what to do (a new code in Menu → Runners); say it only when it does not.
-        throw new Problem(
-            message
-                ? `${server} did not accept the code: ${message}`
-                : `${server} did not accept the code (${response.statusText}). Get a new one in Menu > Runners > Link a computer.`,
-        );
+        switch (error.kind) {
+            case "unreachable":
+                throw new Problem(
+                    `Could not reach ${server} (${error.message}). Check the address and network, then try again.`,
+                );
+            case "refused":
+                // The server's message says what to do (a new code in Menu → Runners).
+                throw new Problem(`${server} did not accept the code: ${error.message}`);
+            case "invalid":
+                throw new Problem(
+                    `${server} returned an invalid link. Check the server address and update Pi Pocket there, then make a new code in Menu > Runners.`,
+                );
+            case "unproven":
+                throw new Problem(
+                    `${server} did not prove it made this code. Someone may be in the middle: nothing was saved. Check the address, then try again.`,
+                );
+        }
     }
-
-    let got: { id?: unknown; name?: unknown; key?: unknown } = {};
-
-    try {
-        got = JSON.parse(text) as typeof got;
-    } catch {
-        // Below.
-    }
-
-    if (typeof got.id !== "string" || typeof got.name !== "string" || typeof got.key !== "string") {
-        throw new Problem(
-            `${server} returned an invalid link. Check the server address, then make a new code in Menu > Runners.`,
-        );
-    }
-
-    return { server, id: got.id, name: got.name, key: got.key, settings };
 }
 
 /** What linking trusts, said where people link (the Runners sheet and the desktop app say it too). */
@@ -1277,6 +1268,9 @@ async function status(file: string): Promise<string> {
         `Runner: Pi Pocket ${pocketVersion()}`,
         `Computer: ${saved.name}`,
         `Server: ${saved.server}`,
+        // As Menu > Runners shows them: each side's key, to compare by eye.
+        `Server key: ${fingerprint(saved.serverKey)}`,
+        `This computer's key: ${fingerprint(publicOf(saved.key))}`,
         `Link file: ${file}`,
         tools,
         `Stop asking on new sessions: ${settings.confirm ? "off" : "on"}`,

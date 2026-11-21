@@ -24,6 +24,18 @@ The server takes the client address from the connection. It believes a proxy's h
 
 The computer connects out to the server over a WebSocket. It needs no open port, SSH, or provider key. Pi, its models, the provider keys, and session history stay on the server. Sessions read and write files and run commands, including git, on the linked computer.
 
+## Secure link
+
+The link has its own keys, like SSH, on top of HTTPS (`src/runner/secure-link.ts`):
+
+- The server has one key, made once and kept in its data folder. It does not change when the website certificate renews.
+- Each computer makes its own key when it links. Its private key stays on that computer; the server keeps only its public key.
+- The link code never travels. The runner proves it knows the code, and the server proves it knows the code too, so someone in the middle at link time cannot put in their own key.
+- The runner keeps the server's key. On each connection, each side proves its key, and every message after that is encrypted and signed. A server without the key, even one with a valid certificate, is refused, and the runner stops with: "… did not prove it is the server this computer linked to."
+- `pi-pocket runner status` shows both keys' fingerprints. **Runners** shows the server's where it makes the code, and each computer's on its card. They should match.
+
+A computer linked by an older runner shows **Link again** in **Runners**. It makes a code for that computer: link it with that code, and it keeps its sessions and people. Replacing the server's data folder makes a new server key: every computer must link again.
+
 ## Commands
 
 Run these commands on the linked computer:
@@ -183,7 +195,7 @@ The state is smoothed, so short requests do not make it flicker. A folder shows 
 
 ## Plain HTTP
 
-The runner sends this computer's key and every command to the server, so it uses HTTPS. It allows plain HTTP only:
+The link encrypts every command (see [Secure link](#secure-link)), but the runner still uses HTTPS. It allows plain HTTP only:
 
 - To this computer (`localhost`, `127.x`).
 - To a device on your tailnet. The runner asks Tailscale itself (`tailscale whois`), so an address that only looks like a Tailscale address is not enough. Tailscale encrypts the traffic.

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { StoredLinkLimits } from "./link-limits.ts";
+import { codeHash, newIdentity, type Identity } from "../runner/secure-link.ts";
 
 /** The repository root: `web/` and `src/` live here, and `node_modules/` too, except in an npx or local install. */
 export const APP_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -82,12 +83,16 @@ export interface StoredInvite {
 
 /**
  * A computer whose runner (`pi-pocket runner`) may connect, so sessions can run their tools there (`runners.ts`). Kept by
- * its key's sha256; the key itself is only on that computer.
+ * its public key: its private key is only on that computer, and proves each connection (`secure-link.ts`).
  */
 export interface StoredRunner {
     id: string;
     name: string;
-    keyHash: string;
+    /**
+     * The runner's Ed25519 public key, raw base64url. Absent: linked before the secure link, so it must link again (a
+     * code made for this computer keeps its id, and so its sessions).
+     */
+    publicKey?: string;
     createdAt: number;
     /** Who linked it: the owner, who changes its settings and access. */
     createdBy: string;
@@ -106,10 +111,13 @@ export interface StoredRunner {
 
 /** A one-time code that links a computer, not yet used: kept by its sha256, for a few minutes. */
 export interface StoredRunnerCode {
+    /** The code's SHA-256 (`secure-link.ts` `codeHash`): the key of the runner's proof that it knows the code. */
     codeHash: string;
     name: string;
     createdBy: string;
     expiresAt: number;
+    /** A code to link a known computer again (a new key, the same id and sessions); absent: a new computer. */
+    runner?: string;
 }
 
 /** The theme (a theme folder's id, or "pocket") and the colors ("desktop", a palette's id, or a folder's) a browser
@@ -160,6 +168,11 @@ interface PocketConfig {
     runners?: StoredRunner[];
     /** One-time codes that link a computer, not yet used. */
     runnerCodes?: StoredRunnerCode[];
+    /**
+     * This server's own key for the runner link (`secure-link.ts`): made once, and pinned by every runner it links. A
+     * new one means every runner links again.
+     */
+    serverIdentity?: Identity;
     /** Wrong link codes (`link-limits.ts`): each address's lockouts toward a ban, and the banned addresses. */
     runnerLinkLimits?: StoredLinkLimits;
     /**
@@ -205,6 +218,7 @@ export class ConfigStore {
 
         if (existsSync(this.file)) {
             this.#config = JSON.parse(readFileSync(this.file, "utf8")) as PocketConfig;
+            this.#migrate();
         } else {
             const ownerToken = newToken();
 
@@ -221,6 +235,26 @@ export class ConfigStore {
                     },
                 ],
             };
+            this.save();
+        }
+    }
+
+    /**
+     * Bring an older file up to date. A computer linked before the secure link (`secure-link.ts`) loses its shared
+     * key, which no longer opens anything: it links again, keeping its id and sessions. Open link codes stay: they
+     * were kept by the same hash.
+     */
+    #migrate(): void {
+        let changed = false;
+
+        for (const runner of this.#config.runners ?? []) {
+            if ("keyHash" in runner) {
+                delete (runner as StoredRunner & { keyHash?: string }).keyHash;
+                changed = true;
+            }
+        }
+
+        if (changed) {
             this.save();
         }
     }
@@ -591,24 +625,38 @@ export class ConfigStore {
         return this.#config.runners ?? [];
     }
 
-    /** The computer a runner key belongs to. */
-    runnerByKey(key: string): StoredRunner | undefined {
-        const hash = hashToken(key);
+    /** This server's key for the runner link: made the first time it is asked for, then kept. */
+    get serverIdentity(): Identity {
+        if (this.#config.serverIdentity === undefined) {
+            this.#config.serverIdentity = newIdentity();
+            this.save();
+        }
 
-        return this.#config.runners?.find((runner) => sameHash(runner.keyHash, hash));
+        return this.#config.serverIdentity;
     }
 
     runnerById(id: string): StoredRunner | undefined {
         return this.#config.runners?.find((runner) => runner.id === id);
     }
 
-    /** Add a computer; returns it and its key, which only its runner keeps. */
-    addRunner(name: string, createdBy: string): { runner: StoredRunner; key: string } {
-        const key = newToken();
+    /** Give a computer linked again its runner's new public key. */
+    relinkRunner(id: string, publicKey: string): StoredRunner | undefined {
+        const runner = this.runnerById(id);
+
+        if (runner !== undefined) {
+            runner.publicKey = publicKey;
+            this.save();
+        }
+
+        return runner;
+    }
+
+    /** Add a computer with its runner's public key; its private key stays on that computer. */
+    addRunner(name: string, createdBy: string, publicKey: string): StoredRunner {
         const runner: StoredRunner = {
             id: randomUUID(),
             name,
-            keyHash: hashToken(key),
+            publicKey,
             createdAt: Date.now(),
             createdBy,
         };
@@ -616,7 +664,7 @@ export class ConfigStore {
         this.#config.runners = [...(this.#config.runners ?? []), runner];
         this.save();
 
-        return { runner, key };
+        return runner;
     }
 
     updateRunner(
@@ -661,12 +709,26 @@ export class ConfigStore {
     }
 
     /** Keep a one-time code that links a computer named `name`, until `expiresAt`. */
-    addRunnerCode(code: string, name: string, createdBy: string, expiresAt: number): void {
+    addRunnerCode(
+        code: string,
+        name: string,
+        createdBy: string,
+        expiresAt: number,
+        runner?: string,
+    ): void {
         const now = Date.now();
 
         this.#config.runnerCodes = [
-            ...(this.#config.runnerCodes ?? []).filter((each) => each.expiresAt >= now),
-            { codeHash: hashToken(code), name, createdBy, expiresAt },
+            ...(this.#config.runnerCodes ?? []).filter(
+                (each) => each.expiresAt >= now && (runner === undefined || each.runner !== runner),
+            ),
+            {
+                codeHash: codeHash(code),
+                name,
+                createdBy,
+                expiresAt,
+                ...(runner === undefined ? {} : { runner }),
+            },
         ];
         this.save();
     }
@@ -689,12 +751,14 @@ export class ConfigStore {
         }
     }
 
-    /** Use a one-time code: returns what it was for and forgets it; undefined when it is unknown or expired. */
-    takeRunnerCode(code: string): StoredRunnerCode | undefined {
-        const hash = hashToken(code);
+    /**
+     * Use a one-time code: returns what it was for and forgets it; undefined when none fits or it expired. The code
+     * itself never comes here: `proves(hash)` says whether the runner proved it knows the code kept as `hash`.
+     */
+    takeRunnerCode(proves: (hash: string) => boolean): StoredRunnerCode | undefined {
         const now = Date.now();
         const codes = this.#config.runnerCodes ?? [];
-        const found = codes.find((each) => sameHash(each.codeHash, hash));
+        const found = codes.find((each) => proves(each.codeHash));
         const left = codes.filter((each) => each !== found && each.expiresAt >= now);
 
         if (found !== undefined || left.length !== codes.length) {

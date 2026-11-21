@@ -1,4 +1,5 @@
 // Artifacts and kept images across a real runner link. The server must not fall back to its disk for session files.
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import {
     type App,
     cleanUp,
@@ -116,7 +117,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     const { code } = app.runners.makeCode("Image computer", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runner = new Runner({
         link: { server: base, ...linked },

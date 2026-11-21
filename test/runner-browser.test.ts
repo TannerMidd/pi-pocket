@@ -3,6 +3,7 @@
 // through the runner, which opens the connections on its computer; here that computer is this machine, so the runner's
 // count of opened connections proves the path, and the test sites count what reaches them.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { type AddressInfo, connect } from "node:net";
@@ -191,7 +192,7 @@ before(async () => {
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 
     const { code } = app.runners.makeCode("Laptop", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runnerId = linked.id;
     // The daemon takes its temporary folder from its environment, as on a person's computer.

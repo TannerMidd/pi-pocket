@@ -2,6 +2,7 @@
 // connects over a real WebSocket to a real pi-env daemon, and Pi's tools in a session there run there. Here the "other
 // computer" is this one, in a folder of its own that the server's sessions never use.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -133,7 +134,7 @@ before(async () => {
 
     const { port } = server.address() as AddressInfo;
     const { code } = app.runners.makeCode("Laptop", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runnerId = linked.id;
     runnerOptions = {

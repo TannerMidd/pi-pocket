@@ -1,5 +1,6 @@
 // Wrong runner link codes (`src/server/link-limits.ts`): per client address, bans after repeated lockouts, a ceiling for
 // the server that voids the open codes, and which address counts.
+import { linkInProcess, publicOf } from "../src/runner/secure-link.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -224,29 +225,28 @@ describe("link code limits", () => {
         const data = mkdtempSync(join(root, "data-"));
         const config = new ConfigStore(data);
         const runners = new Runners({ config, log: () => {}, now: time.now });
-        const linked = runners.redeem(runners.makeCode("Server", "owner").code, "198.51.100.200");
+        const redeem = (code: string, address: string) =>
+            linkInProcess((request) => runners.redeem(request, address), code);
+        const linked = redeem(runners.makeCode("Server", "owner").code, "198.51.100.200");
         const good = runners.makeCode("Laptop", "owner").code;
 
         for (let each = 0; each < ADDRESS_WRONG; each++) {
-            assert.throws(
-                () => runners.redeem("WRONG-CODE-0000", "203.0.113.5"),
-                /wrong, already used/,
-            );
+            assert.throws(() => redeem("WRONG-CODE-0000", "203.0.113.5"), /wrong, already used/);
         }
 
-        assert.throws(() => runners.redeem(good, "203.0.113.5"), /Too many wrong link codes/);
+        assert.throws(() => redeem(good, "203.0.113.5"), /Too many wrong link codes/);
 
         // Banned: a right code gets the wrong code's answer, and the ban is saved with the config.
         for (let block = 1; block < BLOCKS_TO_BAN; block++) {
             time.move(LOCK_MS + 1);
 
             for (let each = 0; each < ADDRESS_WRONG; each++) {
-                assert.throws(() => runners.redeem("WRONG-CODE-0000", "203.0.113.5"));
+                assert.throws(() => redeem("WRONG-CODE-0000", "203.0.113.5"));
             }
         }
 
         time.move(LOCK_MS + 1);
-        assert.throws(() => runners.redeem(good, "203.0.113.5"), { message: WRONG_CODE });
+        assert.throws(() => redeem(good, "203.0.113.5"), { message: WRONG_CODE });
         assert.deepEqual(
             new ConfigStore(data).runnerLinkLimits?.bans.map((ban) => ban.address),
             ["203.0.113.5"],
@@ -258,18 +258,18 @@ describe("link code limits", () => {
         const other = runners.makeCode("Desktop", "owner").code;
 
         for (let each = 0; each < SERVER_WRONG; each++) {
-            assert.throws(() => runners.redeem("WRONG-CODE-0000", `192.0.2.${each % 200}`));
+            assert.throws(() => redeem("WRONG-CODE-0000", `192.0.2.${each % 200}`));
         }
 
-        assert.throws(() => runners.redeem(other, "198.51.100.1"), /linking is paused/);
+        assert.throws(() => redeem(other, "198.51.100.1"), /linking is paused/);
         time.move(LOCK_MS + 1);
-        assert.throws(() => runners.redeem(other, "198.51.100.1"), /wrong, already used/);
+        assert.throws(() => redeem(other, "198.51.100.1"), /wrong, already used/);
         assert.deepEqual(
             config.runners.map((runner) => runner.id),
             [linked.id],
             "the linked computer and its key stay",
         );
-        assert.equal(config.runnerByKey(linked.key)?.id, linked.id);
+        assert.equal(config.runnerById(linked.id)?.publicKey, publicOf(linked.key));
         runners.close();
     });
 });

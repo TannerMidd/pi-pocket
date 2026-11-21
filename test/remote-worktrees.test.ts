@@ -1,5 +1,6 @@
 // Worktrees on a linked computer: the real runner gate, git, copies, tools, forks, and removal on its disk.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -75,7 +76,8 @@ before(async () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as AddressInfo;
-    const linked = app.runners.redeem(
+    const linked = linkInProcess(
+        (request) => app.runners.redeem(request),
         app.runners.makeCode("Worktree computer", owner(app).id).code,
     );
 

@@ -3,6 +3,7 @@
 // runner, and never this server's disk. Here the "other computer" is this one, in a git repository of its own; with the
 // runner stopped, the folder is still on this disk, so anything that falls back to it would still answer.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -94,7 +95,7 @@ before(async () => {
     port = (server.address() as AddressInfo).port;
 
     const { code } = app.runners.makeCode("Laptop", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runner = new Runner({
         link: { server: `http://127.0.0.1:${port}`, ...linked },

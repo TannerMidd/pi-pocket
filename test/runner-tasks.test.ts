@@ -1,4 +1,5 @@
 // Real app, runner, and pi-env: task lifetime belongs only to the runner process.
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import {
     type App,
     cleanUp,
@@ -62,7 +63,10 @@ before(async () => {
         }
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const linked = app.runners.redeem(app.runners.makeCode("Task computer", owner(app).id).code);
+    const linked = linkInProcess(
+        (request) => app.runners.redeem(request),
+        app.runners.makeCode("Task computer", owner(app).id).code,
+    );
 
     computer = linked.id;
     options = {

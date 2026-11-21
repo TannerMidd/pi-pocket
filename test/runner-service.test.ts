@@ -38,7 +38,13 @@ function linkFile(): string {
 
     writeFileSync(
         file,
-        JSON.stringify({ server: "https://pocket.example.com", id: "x", name: "Build", key: "k" }),
+        JSON.stringify({
+            server: "https://pocket.example.com",
+            id: "x",
+            name: "Build",
+            key: "k",
+            serverKey: "A".repeat(43),
+        }),
         { mode: 0o600 },
     );
 

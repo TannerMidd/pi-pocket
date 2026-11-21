@@ -1,6 +1,7 @@
 // Session permission, its expiry, and authenticator codes (`src/runner/approvals.ts`, `request-gate.ts`, `totp.ts`):
 // the server's `Runners`, a real WebSocket, the runner, and the real pi-env daemon, all on this machine.
 import assert from "node:assert/strict";
+import { linkInProcess, newIdentity } from "../src/runner/secure-link.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs";
@@ -180,7 +181,7 @@ type Computer = {
 /** Link a computer and start its runner, with settings kept in memory as the link file keeps them. */
 async function start(setup: Setup, more: Partial<RunnerOptions> = {}): Promise<Computer> {
     const { code } = setup.runners.makeCode(`Computer ${randomUUID().slice(0, 6)}`, "owner");
-    const linked = setup.runners.redeem(code);
+    const linked = linkInProcess((request) => setup.runners.redeem(request), code);
     const computer: Computer = {
         id: linked.id,
         settings: {},
@@ -1035,6 +1036,7 @@ describe("pi-pocket runner totp, sessions, and unlink", () => {
                 id: "id",
                 name: "Computer",
                 key: "secret-key",
+                serverKey: newIdentity().publicKey,
                 settings,
             }),
             { mode: 0o600 },

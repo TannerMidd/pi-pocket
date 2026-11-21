@@ -661,12 +661,16 @@ export function createApi(options: HttpOptions, auth: Auth) {
         if (first === "runners" && second === "code" && method === "POST") {
             requireOwner(user);
 
-            const body = await readJson<{ name?: unknown }>(request);
+            const body = await readJson<{ name?: unknown; runner?: unknown }>(request);
 
             return json(
                 response,
                 200,
-                app.runners.makeCode(typeof body.name === "string" ? body.name : "", user.id),
+                app.runners.makeCode(
+                    typeof body.name === "string" ? body.name : "",
+                    user.id,
+                    typeof body.runner === "string" ? body.runner : undefined,
+                ),
             );
         }
 

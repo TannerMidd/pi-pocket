@@ -10,6 +10,7 @@ import {
     scriptedModel,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import fs, { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { syncBuiltinESMExports } from "node:module";
@@ -79,7 +80,7 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const { code } = app.runners.makeCode("Read computer", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runnerId = linked.id;
     runner = new Runner({

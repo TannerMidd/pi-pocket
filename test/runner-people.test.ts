@@ -1,4 +1,5 @@
 // Per-person access to linked computers: a real App, a real WebSocket, and a real runner with its pi-env daemon.
+import { linkInProcess, newIdentity } from "../src/runner/secure-link.ts";
 import {
     type App,
     cleanUp,
@@ -91,10 +92,14 @@ before(async () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const { code } = app.runners.makeCode("Laptop", owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
 
     runnerId = linked.id;
-    otherRunnerId = app.config.addRunner("Another computer", owner(app).id).runner.id;
+    otherRunnerId = app.config.addRunner(
+        "Another computer",
+        owner(app).id,
+        newIdentity().publicKey,
+    ).id;
     runner = new Runner({
         link: { server: address, ...linked },
         version: "test",
@@ -547,7 +552,10 @@ describe("people granted a computer", () => {
         );
     });
     it("keeps the server up when a computer is removed while its session is open, and still archives it", async () => {
-        const linked = app.runners.redeem(app.runners.makeCode("Spare", owner(app).id).code);
+        const linked = linkInProcess(
+            (request) => app.runners.redeem(request),
+            app.runners.makeCode("Spare", owner(app).id).code,
+        );
         const spare = new Runner({
             link: { server: address, ...linked },
             version: "test",

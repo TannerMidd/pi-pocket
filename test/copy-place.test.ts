@@ -3,6 +3,7 @@
 // this machine, each in a folder of its own. Also: each session's repository (`repo.ts`), the folder a copy suggests,
 // and the folder picker's Recent and Favorites per computer.
 import assert from "node:assert/strict";
+import { linkInProcess } from "../src/runner/secure-link.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -60,7 +61,7 @@ async function link(name: string): Promise<Computer> {
 
     mkdirSync(folder, { recursive: true });
     const { code } = app.runners.makeCode(name, owner(app).id);
-    const linked = app.runners.redeem(code);
+    const linked = linkInProcess((request) => app.runners.redeem(request), code);
     const runner = new Runner({
         link: { server: `http://127.0.0.1:${port}`, ...linked },
         version: "test",
@@ -430,7 +431,7 @@ describe("a copy with a place", () => {
 
         // Linked, but its runner never started.
         const { code } = app.runners.makeCode("Shelf", owner(app).id);
-        const shelf = app.runners.redeem(code);
+        const shelf = linkInProcess((request) => app.runners.redeem(request), code);
 
         await assert.rejects(
             app.commands.fork(id, owner(app), { entryId: reply, place: { runner: shelf.id } }),
