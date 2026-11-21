@@ -215,6 +215,13 @@ export interface Host {
      */
     requesterOf(conversationId: ConversationId): string | undefined;
     /**
+     * Read-only, redacted approval snapshots and events, filtered for a source session's requester and whole audience.
+     * No approval or denial methods. Check for this member on older servers.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly pendingApprovals: PendingApprovals;
+    /**
      * The conversation's current working folder or workspace URI.
      * @since 0.28.0
      * @experimental
@@ -250,6 +257,12 @@ export interface Host {
      * @experimental
      */
     commandEnv(provider: CommandEnvProvider): () => void;
+    /**
+     * Adds a note for the model right after a person's message, as a separate entry of the transcript: `annotate` returns its text, or undefined for none. The note is stored once, in the same commit as the message, and stays in context like any entry. Only a message placed at once (an idle conversation with nothing queued) gets notes. `name` (1 to 60 letters, digits, `.`, `_`, `:`, `-`) shows with each note, and the model reads `Note from extension <name>:` before each note's text. Returns how to stop: pass it to `web.onDispose`.
+     * @since 0.30.0
+     * @experimental
+     */
+    annotateTurns(name: string, annotate: TurnAnnotator): () => void;
     /**
      * A session's browser page, the one Pi and people use: opened when `open` is true, else only when it is open already. Undefined while the Browser module is off.
      * @since 0.22.0
@@ -318,6 +331,73 @@ export interface Host {
 }
 
 /**
+ * A tool approval or question waiting for a person. Arguments, reasons, fields, and answers are withheld.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface PendingApproval {
+    /** Stable across a replay of the same guard wait. */
+    readonly id: string;
+    /** The conversation that waits, including a subagent's. */
+    readonly conversationId: ConversationId;
+    /** The top-level session it belongs to. */
+    readonly session: ConversationId;
+    /** Unix time in milliseconds. A guard wait keeps its original time across a restart. */
+    readonly createdAt: number;
+    /** Unknown tool names are withheld, too. */
+    readonly tool: "bash" | "write" | "edit" | "ask" | "tool";
+    /** Short fixed text for the action, never copied from arguments or a question. */
+    readonly summary: string;
+    readonly state: "pending";
+}
+
+/**
+ * A wait that ended. It does not say who answered or include an answer's values.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface ResolvedApproval extends Omit<PendingApproval, "state"> {
+    readonly state: "resolved";
+    readonly outcome: "allowed" | "denied" | "cancelled" | "superseded";
+}
+
+/**
+ * The events of `host.pendingApprovals.on`.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface ApprovalEvents {
+    readonly created: PendingApproval;
+    readonly resolved: ResolvedApproval;
+}
+
+/**
+ * Approval observations for a source session, never a way to answer one. PiP approvals are not exposed.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface PendingApprovals {
+    /**
+     * Pending waits visible to the person Pi works for in `source`, and to everyone who can see that session.
+     * Throws for an unknown source, a PiP, or a source with no known requester. The returned values are frozen copies.
+     * @since 0.30.0
+     * @experimental
+     */
+    list(source: ConversationId): readonly PendingApproval[];
+    /**
+     * Listen as the current requester of `source`, with access checked again on delivery. Subscribe before listing,
+     * then reconcile by id. Returns how to stop; pass it to `web.onDispose`. Listeners cannot delay an approval.
+     * @since 0.30.0
+     * @experimental
+     */
+    on<E extends keyof ApprovalEvents>(
+        source: ConversationId,
+        event: E,
+        listener: (approval: ApprovalEvents[E]) => unknown,
+    ): () => void;
+}
+
+/**
  * Makes text from other places safe for Pi to read. Tell Pi in the same place that the text is data.
  * @since 0.14.0
  */
@@ -365,6 +445,12 @@ export interface AppEvents {
      * @experimental
      */
     "session.archived": { conversationId: number; archived: boolean };
+    /**
+     * The owner removed an archived session from the app. Its id is not shown again.
+     * @since 0.30.0
+     * @experimental
+     */
+    "session.removed": { conversationId: number };
     /**
      * A person sent Pi a message: its words as stored, attachments left out. `via` names what sent it for them.
      * @since 0.22.0
@@ -668,6 +754,63 @@ export interface CommandRun {
 export type CommandEnvProvider = (
     run: CommandRun,
 ) => Record<string, string> | undefined | Promise<Record<string, string> | undefined>;
+
+/**
+ * One person's message, as a `host.annotateTurns` annotator gets it before Pi answers.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface Turn {
+    /**
+     * The session.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly conversationId: number;
+    /**
+     * The id of the person whose message it is.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly by: string;
+    /**
+     * What sent it for them (PiP, a linked session, a webhook), when it is not their own typing.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly via?: string;
+    /**
+     * Their words as stored: hidden values hidden, attachments left out.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly text: string;
+    /**
+     * When the message came, in milliseconds since 1970.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly at: number;
+    /**
+     * The newest time of a message, an answer, or a tool result among the session's last 32 entries, also from before a reset. Undefined when there is none.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly previousActivityAt?: number;
+    /**
+     * Aborts when the time for annotators ends (2 seconds).
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly signal: AbortSignal;
+}
+
+/**
+ * Gives the text of a note for one turn, or nothing. At most 4,000 characters.
+ * @since 0.30.0
+ * @experimental
+ */
+export type TurnAnnotator = (turn: Turn) => string | undefined | Promise<string | undefined>;
 
 /**
  * What an extension points at on a page: a ref from the snapshot, a CSS selector, a visible label, or a point.

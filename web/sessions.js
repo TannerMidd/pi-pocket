@@ -703,9 +703,8 @@ function stateMark(session, working, marked, unseen = finishedUnseen(session), t
         return { shape: "waiting", label: "Waiting for approval" };
     }
 
-    // Pi's request waits for the provider's limit to clear: working, held up, until a time or a try.
     if (session.limited !== undefined) {
-        return { shape: "limited", label: "Waiting for a usage limit" };
+        return { shape: "limited", label: "Waiting to retry" };
     }
 
     if (session.busy || working) {
@@ -979,7 +978,7 @@ function SessionRow({
                     html`<span
                         class="session-limit"
                         data-part="session-limit"
-                        title=${`Waiting for a usage limit to clear, at ${limit}`}
+                        title=${`Next try at ${limit}`}
                     >
                         <${Icon} name="clock" size=${10} />${limit}
                     </span>`

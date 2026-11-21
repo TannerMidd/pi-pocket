@@ -23,10 +23,12 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 const dataDir = join(root, "data");
 const dropIns = join(dataDir, "extensions");
 
-/** A drop-in that imports Pi Durable and pi-ai by name (with TypeBox's `Type`, which drop-ins still get from pi-ai), offers a tool (with the old `content` result, which Pi Pocket still reads), and blocks bash with a hook. It returns a frozen list. */
+/** Old names that drop-ins still use: `Type` from pi-ai, `runEndTask` (Pi Durable 1.6 renamed it `hookTask`), and a `content` result. */
 const shout = (suffix: string) => `/** Shout offers a tool that shouts${suffix}. */
 import { Type } from "@earendil-works/pi-ai";
-import { defineExtension, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, hook, runEndTask, ToolTask } from "@earendil-works/pi-durable";
+
+if (typeof runEndTask !== "function") throw new Error("runEndTask is gone");
 
 export default () =>
 	Object.freeze([defineExtension({
@@ -161,6 +163,8 @@ test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, an
 
     await app.attach(tab.client);
     app.loader.watch();
+    // On macOS a watch starts a moment after the call: a write before that is not seen.
+    await new Promise((resolve) => setTimeout(resolve, process.platform === "darwin" ? 1000 : 0));
 
     try {
         writeFileSync(join(dropIns, "shout.ts"), shout("!!"));

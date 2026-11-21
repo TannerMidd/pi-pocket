@@ -331,15 +331,27 @@ export class Workspace {
             return file;
         }
 
+        // The name on disk (case, long names, no `\\?\` prefix), and names compared without case where the disk does.
+        const fold = (path: string) =>
+            process.platform === "win32" || process.platform === "darwin"
+                ? path.toLowerCase()
+                : path;
+
         const real = (target: string) => {
             try {
-                return realpathSync(target);
+                return fold(realpathSync.native(target));
             } catch {
-                return resolve(target);
+                return fold(resolve(target));
             }
         };
 
         const target = real(file);
+
+        // A UNC or device path can name a local folder by another name: the owner's alone.
+        if (process.platform === "win32" && target.startsWith("\\\\")) {
+            throw new HttpError(404, "Not found");
+        }
+
         const inside = (root: string) => target === root || target.startsWith(root + sep);
         const data = real(this.#app.dataDir);
 
@@ -360,18 +372,16 @@ export class Workspace {
     #lineage(id: ConversationId): ConversationId[] {
         const lineage = [id];
 
-        for (
-            let meta = this.#app.sessionMeta(id);
-            meta?.forkedFrom !== undefined && lineage.length < 64;
-        ) {
-            const parent = meta.forkedFrom.id as unknown as ConversationId;
+        // A removed session in between still links its fork to the sessions before it (`session-cleanup.ts`).
+        for (let from = this.#app.forkedFrom(id); from !== undefined && lineage.length < 64;) {
+            const parent = from.id as unknown as ConversationId;
 
             if (lineage.includes(parent)) {
                 break;
             }
 
             lineage.push(parent);
-            meta = this.#app.sessionMeta(parent);
+            from = this.#app.forkedFrom(parent);
         }
 
         return lineage;

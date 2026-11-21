@@ -92,6 +92,7 @@ const emptyView = () => ({
     viewers: [],
     approvals: [],
     artifacts: [],
+    artifactsEnded: {},
     subagents: [],
     authors: {},
     linkedPeers: {},
@@ -305,8 +306,6 @@ export const store = {
          * server's view of it comes (Appearance's Wait for updates, `holdsFor`): its id, or null.
          */
         holding: null,
-        /** A session opened without a tab-memory view: its pane waits for the device or server, not a boot screen. */
-        pending: null,
         missing: null,
         connection: "connecting",
         notices: [],
@@ -1303,6 +1302,9 @@ store.subscribe((state) => {
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
         saveShown();
+    } else if (source?.silent?.(1.5)) {
+        // Back from the background: a stream that missed its ping died there, though it never said so.
+        connect();
     }
 });
 
@@ -1531,13 +1533,12 @@ function keptView(id) {
 
     if (kept === undefined) {
         // Not in memory: the device may have it (`showKept` reads it). Until that read, or the server's view, the
-        // transcript shows the session's header and a quiet loader, not the full-page boot screen (`pending`).
+        // transcript shows the loading screen in the session's pane.
         return {
             view: emptyView(),
             transcriptFrom: null,
             transcriptPlace: null,
             holding: null,
-            pending: id,
         };
     }
 
@@ -1549,8 +1550,6 @@ function keptView(id) {
         transcriptFrom: place?.from ?? null,
         transcriptPlace: place === null ? null : { keep: place.keep },
         holding: hold ? id : null,
-        // In hand: its quiet loader, from a switch that found nothing in memory, goes.
-        pending: null,
     };
 }
 
@@ -1609,12 +1608,11 @@ function applyView(data) {
         synced = data.conversation.id;
     }
 
-    // A session held for its changes (`holdsFor`) shows with them. Its quiet loader (`pending`) goes with the view.
+    // A session held for its changes (`holdsFor`) shows with them.
     store.set((state) => ({
         view: mergeView(state.view, data),
         missing: null,
         holding: null,
-        pending: null,
     }));
 }
 
@@ -1721,6 +1719,7 @@ function mergeView(current, data) {
         // The server sends these again only when they change: a missing one keeps its last value.
         inbox: data.inbox ?? base.inbox,
         artifacts: data.artifacts ?? base.artifacts,
+        artifactsEnded: data.artifactsEnded ?? base.artifactsEnded,
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
         linkedPeers: data.linkedPeers ?? base.linkedPeers,
@@ -1984,7 +1983,7 @@ const handlers = {
         store.set((state) => ({
             // Said of a session this tab has since left (`show`), it is not what the tab shows.
             ...(state.conversationId === data.conversationId
-                ? { missing: data.message, holding: null, pending: null }
+                ? { missing: data.message, holding: null }
                 : {}),
             ...(state.view.conversation?.id === data.conversationId ? { view: emptyView() } : {}),
         }));
@@ -2051,8 +2050,18 @@ const pollHere = () => {
     return mode === "poll" && Date.now() - Number(at) < POLL_FOR_MS;
 };
 
+/**
+ * A new stream hears the server's first ping at once. One that hears nothing at all for this long (times the tries in a
+ * row) is stuck before it began, as on a half-open connection: it is made again.
+ */
+const FIRST_DATA_MS = 10_000;
+
 /** Event stream reconnects in a row that the browser gave up on, for the pause before the next one. */
 let streamRetries = 0;
+/** The server's ping period, from the last stream that heard a ping: a new stream is watched from its start. */
+let pingPeriod = 0;
+/** Streams in a row on this page that went quiet after a whole first batch and at most one ping (`streamEvents`). */
+let quietStreams = 0;
 
 const connected = () => store.state.connection !== "open" && store.set({ connection: "open" });
 
@@ -2204,11 +2213,20 @@ function streamEvents(query) {
     /** The first batch arrived whole: the session's view, or the session list when no session is open. */
     let settled = false;
     const settles = named !== null ? ["view", "missing"] : ["sessions"];
+    let heardAt = Date.now();
+    let pingMs = pingPeriod;
+    let pings = 0;
+    let heardAny = false;
+    let watchdog;
     const connection = {
         close() {
             clearTimeout(fallback);
+            clearTimeout(firstData);
+            clearInterval(watchdog);
             events.close();
         },
+        /** No error comes when a stream goes half-open or the phone suspended the page: only a missed ping shows it. */
+        silent: (missed) => pingMs > 0 && Date.now() - heardAt > pingMs * missed,
     };
     // Some tunnels hold the stream back. A Cloudflare quick tunnel passes it on in 64 KiB blocks and keeps the rest, so
     // a long session's first view can stop partway after its small first events got through. The stream counts as
@@ -2223,9 +2241,64 @@ function streamEvents(query) {
               localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
               connect();
           }, 6000);
+    // Away from this computer the fallback above polls first; here, or with a fallback that has nothing to do, a
+    // stream that never hears its first ping must not leave the tab at "connecting".
+    const firstData = setTimeout(
+        () => {
+            if (heardAny || source !== connection) {
+                return;
+            }
+
+            streamRetries++;
+            connect();
+        },
+        Math.min(60_000, FIRST_DATA_MS * (streamRetries + 1)),
+    );
+
+    // A stream that dies before its first ping (a phone locked within one period) is watched too.
+    const watch = () => {
+        watchdog = setInterval(() => {
+            if (source === connection && connection.silent(2.5)) {
+                // A whole first batch, then no ping after the first: the path holds small events back (a tunnel, an
+                // older server), so a new stream would go quiet too. Poll instead, as the first-batch fallback does,
+                // but only the second time in a row: one can be a healthy path cut off (a network change, a lock).
+                if (!local && settled && pings <= 1 && ++quietStreams >= 2) {
+                    localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
+                }
+
+                connect();
+            }
+        }, pingMs);
+    };
+
+    if (pingMs > 0) {
+        watch();
+    }
+
+    events.addEventListener("ping", (event) => {
+        const every = Number(JSON.parse(event.data).every);
+
+        if (every > 0 && every !== pingMs) {
+            pingMs = pingPeriod = every;
+            clearInterval(watchdog);
+            watch();
+        }
+
+        pings++;
+        heardAny = true;
+
+        if (pings > 1) {
+            quietStreams = 0;
+        }
+
+        heardAt = Date.now();
+    });
 
     for (const [name, handler] of Object.entries(handlers)) {
         events.addEventListener(name, (event) => {
+            heardAt = Date.now();
+            heardAny = true;
+
             if (source !== connection) {
                 return;
             }
@@ -2344,10 +2417,35 @@ function show() {
     });
 }
 
+/** A first poll waits for its session's first view to be built, which can take long on a large session. */
+const FIRST_POLL_MS = 60_000;
+/** A poll that hears nothing past its hold, and a margin for a slow link, hangs on a half-open connection. */
+const pollStallMs = (hold) => hold * 1.5 + 2000;
+
+async function readJson(response, progress) {
+    const reader = response.body.getReader();
+    const parts = [];
+
+    for (;;) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+            break;
+        }
+
+        parts.push(value);
+        progress();
+    }
+
+    return JSON.parse(await new Blob(parts).text());
+}
+
 /** Long polling: each request waits for events and returns them; the next one acknowledges what arrived. */
 function pollEvents() {
     let session = null;
     let ack = 0;
+    /** How long the server holds a poll with nothing to say: it says so in each answer. */
+    let hold = 25_000;
     let stopped = false;
     let request = null;
     const connection = {
@@ -2370,6 +2468,22 @@ function pollEvents() {
             const named = store.state.conversationId;
             let fresh = false;
             const generation = accountGeneration;
+            // A request that hears nothing for too long is given up and asked again: the next one, on a new
+            // connection, gets what this one would have brought, as it acknowledges no more.
+            let stall;
+
+            const quiet = (ms) => {
+                clearTimeout(stall);
+                const asking = request;
+
+                stall = setTimeout(() => asking.abort(), ms);
+            };
+
+            // Until its headers come, the server may build a whole first view (a session it no longer knows), which a
+            // retry would start again: each try in a row waits twice as long.
+            quiet(
+                (session === null ? FIRST_POLL_MS : pollStallMs(hold)) * 2 ** Math.min(failures, 4),
+            );
 
             try {
                 // A poll the server no longer knows (it started again, or this tab fell far behind) attaches afresh: it
@@ -2380,6 +2494,7 @@ function pollEvents() {
                 );
 
                 if (response.status === 401) {
+                    clearTimeout(stall);
                     stopped = true;
                     store.set({ me: null });
 
@@ -2390,10 +2505,17 @@ function pollEvents() {
                     throw new Error(`HTTP ${response.status}`);
                 }
 
-                const data = await response.json();
+                quiet(pollStallMs(hold));
+                const data = await readJson(response, () => quiet(pollStallMs(hold)));
+
+                clearTimeout(stall);
 
                 if (stopped || source !== connection) {
                     return;
+                }
+
+                if (data.hold > 0) {
+                    hold = data.hold;
                 }
 
                 if (data.session !== session) {
@@ -2428,6 +2550,8 @@ function pollEvents() {
                     show();
                 }
             } catch {
+                clearTimeout(stall);
+
                 if (stopped) {
                     return;
                 }
@@ -2610,8 +2734,7 @@ function showKept(id) {
         }
 
         if (found !== undefined) {
-            // In hand from the device: its quiet loader, shown while the read ran, goes.
-            store.set({ ...found, pending: null });
+            store.set(found);
         }
 
         show();
@@ -2714,7 +2837,6 @@ export async function start() {
                 transcriptFrom: null,
                 transcriptPlace: null,
                 holding: null,
-                pending: shown.id,
             });
         } else if (store.state.view.conversation == null) {
             const found = adopt(id, cached);
@@ -2976,6 +3098,7 @@ const ROW_KINDS = new Set([
     "shell",
     "command",
     "note",
+    "turnNote",
     "fromPi",
 ]);
 

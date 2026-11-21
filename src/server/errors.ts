@@ -27,6 +27,18 @@ export function optionalText(value: unknown, name: string): string | undefined {
     return value;
 }
 
+export function optionalFlag(value: unknown, name: string): boolean | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value !== "boolean") {
+        throw new HttpError(400, `${name} must be true or false`);
+    }
+
+    return value;
+}
+
 /** The message of anything thrown. */
 export function describe(error: unknown): string {
     return error instanceof Error ? error.message : String(error);

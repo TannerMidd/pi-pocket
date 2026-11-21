@@ -15,6 +15,7 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { createRegistry, UsageDoc } from "@earendil-works/pi-durable";
@@ -215,6 +216,8 @@ test("what the loader says about modules goes to the owner alone", async () => {
     loader.watch();
 
     try {
+        // macOS's FSEvents can miss a write made just as the watch starts, more so on a busy runner.
+        await new Promise((resolve) => setTimeout(resolve, 500));
         // An edit that fails to load names what failed: words for the owner, as they can quote a secret.
         writeFileSync(
             join(dropIn, "tell.ts"),
@@ -312,4 +315,55 @@ test("an event that leaves a module's file as it was loads nothing: Windows repo
     } finally {
         await loader.close();
     }
+});
+
+test("a drop-in with no node_modules link imports Pi Pocket's packages: the very modules the server runs", async () => {
+    const { dropIn, loader, installed } = setUp();
+    const probe = globalThis as unknown as { linkless?: Record<string, unknown> };
+
+    // Where a system refuses links, the folder has none: Node alone finds no package from here.
+    writeFileSync(
+        join(dropIn, "linkless.ts"),
+        `/** Linkless. */
+import * as preact from "preact";
+import * as mcp from "@earendil-works/pi-mcp";
+import * as oauth from "@earendil-works/pi-mcp/oauth";
+import { createRequire } from "node:module";
+globalThis.linkless = { preact, mcp, oauth, required: createRequire(import.meta.url)("preact") };
+export default () => ({ name: "t-linkless", v: 1 });
+`,
+    );
+    await loader.reload("linkless.ts");
+    assert.deepEqual(installed(), ["t-linkless@1"]);
+    // One copy of each: a second one would have its own state, as an MCP client's or a component's.
+    assert.equal(probe.linkless?.preact, await import("preact"));
+    assert.equal(probe.linkless?.mcp, await import("@earendil-works/pi-mcp"));
+    assert.equal(probe.linkless?.oauth, await import("@earendil-works/pi-mcp/oauth"));
+    assert.equal(probe.linkless?.required, createRequire(import.meta.url)("preact"));
+});
+
+test("a drop-in's own copy of a package wins over Pi Pocket's", async () => {
+    const { dropIn, loader, installed } = setUp();
+    const own = join(dropIn, "node_modules", "preact");
+    const probe = globalThis as unknown as { owned?: Record<string, unknown> };
+
+    mkdirSync(own, { recursive: true });
+    writeFileSync(
+        join(own, "package.json"),
+        JSON.stringify({ name: "preact", type: "module", exports: "./index.js" }),
+    );
+    writeFileSync(join(own, "index.js"), 'export const copy = "own";\n');
+    writeFileSync(
+        join(dropIn, "owned.ts"),
+        `/** Owned. */
+import { copy } from "preact";
+import { McpClient } from "@earendil-works/pi-mcp";
+globalThis.owned = { copy, McpClient };
+export default () => ({ name: "t-owned", v: 1 });
+`,
+    );
+    await loader.reload("owned.ts");
+    assert.deepEqual(installed(), ["t-owned@1"]);
+    assert.equal(probe.owned?.copy, "own");
+    assert.equal(probe.owned?.McpClient, (await import("@earendil-works/pi-mcp")).McpClient);
 });

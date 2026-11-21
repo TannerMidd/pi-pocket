@@ -26,6 +26,18 @@ const rebased = {
         info.deltasSinceBase >= 64,
 };
 
+/**
+ * A change that deletes a whole item (`items.<id>`) is a base too: the storage drops the revisions before it, so what
+ * was deleted (`artifacts.ts`) is not kept in them.
+ */
+const rebasedOnDelete = {
+    checkpointWhen: (_value: unknown, ops: unknown, info: CheckpointInfo) =>
+        info.deltasSinceBase >= 64 ||
+        (ops as readonly (readonly [string, (readonly unknown[])?])[]).some(
+            (op) => op[0] === "d" && (op[1]?.length ?? 0) <= 2,
+        ),
+};
+
 export type SessionMeta = {
     title?: string;
     cwd: string;
@@ -54,6 +66,34 @@ export type SessionMeta = {
      */
     pip?: string;
 };
+
+/**
+ * Its catalogue entry went in the same commit that wrote this. `conversations`: what a later purge takes. `done`: when
+ * Pocket's own files went; until then, each start goes on with them.
+ */
+export type RemovedSession = {
+    title?: string;
+    cwd: string;
+    conversations: number[];
+    by: string;
+    at: number;
+    worktree?: Worktree;
+    /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
+    forkedFrom?: { id: number; entryId?: number };
+    /** Uploads folders a live fork still reads (`workspace.ts`). */
+    keepUploads?: number[];
+    done?: number;
+    left?: string[];
+};
+
+/** Stored data: never rename the kind. */
+export const DeletedDoc = defineDoc<{ items: Record<string, RemovedSession> }>({
+    kind: "pocket.deleted",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ items: {} }),
+});
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
 export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
@@ -222,11 +262,14 @@ export type ArtifactMeta = {
     versions: ArtifactVersion[];
 };
 
-/** The artifacts of one conversation, newest version last. Bodies live in `ArtifactBodyDoc`. */
-export const ArtifactsDoc = defineDoc<{ items: Record<string, ArtifactMeta> }>({
+/** Newest version last. `ended`: each deleted artifact's last version number, so that a number is never reused. */
+export const ArtifactsDoc = defineDoc<{
+    items: Record<string, ArtifactMeta>;
+    ended?: Record<string, number>;
+}>({
     kind: "pocket.artifacts",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",
@@ -267,7 +310,7 @@ export const ArtifactStateDoc = defineDoc<{
 }>({
     kind: "pocket.artifact-state",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "initial",
@@ -290,11 +333,23 @@ export type ArtifactShare = {
     expiresAt?: number;
 };
 
+/**
+ * Asset hashes that deleted artifacts used, each with the number of when it came: `artifacts.ts` retires an asset's bytes
+ * once no artifact in any conversation names it, and a new version that stores the hash takes it out of here.
+ */
+export const ArtifactSweepDoc = defineDoc<{ seq: number; hashes: Record<string, number> }>({
+    kind: "pocket.artifact-sweep",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ seq: 0, hashes: {} }),
+});
+
 /** The artifact shares of the whole app, by their token. */
 export const ArtifactSharesDoc = defineDoc<{ items: Record<string, ArtifactShare> }>({
     kind: "pocket.artifact-shares",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "session",
     initial: () => ({ items: {} }),
 });
@@ -563,6 +618,10 @@ export type Schedule = {
     revision?: number;
     /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
     paused?: { at: number; by: string };
+    /** Summarize everything before the message it sent last, before each sending (`schedules.ts`). */
+    compactBefore?: true;
+    /** While this schedule compacts: another schedule of the session does not compact meanwhile. */
+    compacting?: true;
 };
 
 /** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */
@@ -1023,7 +1082,7 @@ export type DesignItem = {
 export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }>({
     kind: "pocket.design-comments",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",

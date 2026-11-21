@@ -13,6 +13,8 @@ import {
     FROM_PREFIX,
     type FromPiData,
     NOTE_ENTRY,
+    TURN_NOTE_ENTRY,
+    type TurnNoteData,
     SHELL_ENTRY,
     type ShellData,
     splitAttachments,
@@ -86,6 +88,7 @@ export type ClientEntry =
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
     | ({ id: number; kind: "command"; truncated?: number } & CommandData)
     | { id: number; kind: "note"; text: string; name: string }
+    | { id: number; kind: "turnNote"; text: string; source: string }
     | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
 
@@ -98,6 +101,7 @@ const ROW_KINDS = new Set([
     "shell",
     "command",
     "note",
+    "turnNote",
     "fromPi",
 ]);
 
@@ -249,24 +253,25 @@ export type ClientToolSlot = {
     callId: string;
     taskId?: number;
     name: string;
-    status: "pending" | "running" | "done";
+    /** `waiting` and `sleeping`: a call that parked (Pi Durable 1.6); tabs show it as running. */
+    status: "pending" | "running" | "waiting" | "sleeping" | "done";
     output?: string;
     details?: unknown;
 };
 
-/** A run waiting for a provider's limit to clear (`limit-gate.ts`), as a tab shows it. Times are the server's clock. */
+/** A run waiting to retry (`limit-gate.ts`), as a tab shows it. Times are the server's clock. */
 export type ClientLimit = {
     provider: string;
     modelId?: string;
-    /** `account`: every model of the provider waits. `model`: this one does. */
-    scope: "account" | "model";
+    /** `account`: every model waits. `model`: one model waits. `request`: only this request waits. */
+    scope: WaitView["scope"];
     /** `reset`: until a time the provider gave. `backoff`: no time is known, so it tries again at intervals. */
     kind: "reset" | "backoff";
     /** When the next request goes out. */
     until: number;
     /** The reset the provider gave, when it gave one. */
     resetAt?: number;
-    /** What the provider said, as one short line of plain text. */
+    /** A fixed description of what happened, never the provider's text. */
     reason: string;
     tries: number;
     /** The request that finds out is out now. */
@@ -639,6 +644,17 @@ export function projectEntry(
                 kind: "note",
                 text: String(data?.text ?? ""),
                 name: String(data?.name ?? "Someone"),
+            };
+        }
+
+        case TURN_NOTE_ENTRY: {
+            const data = entry.data as Partial<TurnNoteData> | undefined;
+
+            return {
+                id,
+                kind: "turnNote",
+                text: String(data?.text ?? ""),
+                source: String(data?.source ?? ""),
             };
         }
 
@@ -1152,7 +1168,7 @@ export function peekLines(
     }
 
     if (live.limit !== undefined) {
-        lines.push({ kind: "event", text: `Waiting for ${live.limit.provider}'s limit to clear` });
+        lines.push({ kind: "event", text: `Waiting to retry: ${live.limit.reason}` });
     }
 
     return lines.slice(-count);

@@ -43,6 +43,8 @@ stdenv.mkDerivation {
       ../web
       ../test
       ../docs
+      # The installers: test/packaging-app.test.ts runs bundle-app.mjs and place-app.mjs.
+      ../packaging
       # The reference check in `npm run check`; the rest of the docs site stays out.
       ../docs-site/check-reference.mjs
       ../docs-site/src/reference-check.mjs

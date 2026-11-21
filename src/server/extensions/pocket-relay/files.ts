@@ -1,8 +1,9 @@
 /** Files for the relay: what Pi sends is read from its session's folder only, and what it fetches is kept there. */
-import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { basename, extname, relative, resolve, sep } from "node:path";
+import { openNoFollow } from "../../no-follow.ts";
 import { workspaceScheme } from "../../paths.ts";
+import { isEnvFile } from "../../secrets.ts";
 import type { RelayOutFile } from "./types.ts";
 
 /** What one reply sends in all, whatever the connector's caps: the relay holds it in memory while it sends. */
@@ -103,7 +104,13 @@ export async function readFiles(
             );
         }
 
-        const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW);
+        if (isEnvFile(basename(real))) {
+            throw new Error(
+                `${shown} is a file of variables, which can hold secrets: the relay does not send it. Nothing was sent.`,
+            );
+        }
+
+        const handle = await openNoFollow(real);
 
         try {
             const stat = await handle.stat();

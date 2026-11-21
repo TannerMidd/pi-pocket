@@ -92,6 +92,8 @@ test("a compressed event stream delivers each event as it happens", async () => 
                 });
                 inflate.on("error", reject);
                 until(() => seen.includes("hello"), "the first event")
+                    // The tab's stream watch starts at once: a ping comes before the first view (#334).
+                    .then(() => assert.equal(seen[0], "ping"))
                     // A new session reaches the open stream, though the stream has not ended.
                     .then(() => newSession(app))
                     .then(() =>

@@ -386,7 +386,12 @@ export class LinkedSessions implements LinkedSessionsApi {
 
             const leadMeta = this.#app.sessionMeta(lead);
 
-            if (leadMeta?.archived === true || leadMeta?.linkedReports === false) {
+            // A lead removed from the app (`session-cleanup.ts`) has no entry: it takes no reports, as an archived one.
+            if (
+                leadMeta === undefined ||
+                leadMeta.archived === true ||
+                leadMeta.linkedReports === false
+            ) {
                 return;
             }
 
@@ -418,7 +423,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             if (
                 run.conversationId !== run.session ||
                 lead === undefined ||
-                this.#app.sessionMeta(lead)?.archived === true ||
+                (this.#app.sessionMeta(lead) ?? { archived: true }).archived === true ||
                 !this.#leads(lead, id)
             ) {
                 return;

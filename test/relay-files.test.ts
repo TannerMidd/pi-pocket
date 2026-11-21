@@ -85,6 +85,27 @@ test("files go only from the session's folder: no escape, no link out, no hidden
     );
 });
 
+test("a file of variables is not sent, wherever it is and whatever its name says", async () => {
+    const root = folder();
+
+    mkdirSync(join(root, "config"));
+    writeFileSync(join(root, "prod.env"), `TOKEN=${TOKEN}`);
+    writeFileSync(join(root, "config", "staging.env"), `TOKEN=${TOKEN}`);
+    writeFileSync(join(root, "env.example.txt"), "TOKEN=");
+
+    for (const path of ["prod.env", "config/staging.env"]) {
+        await assert.rejects(
+            readFiles(root, join(root, "data"), [path], caps),
+            /can hold secrets.*Nothing was sent/,
+            path,
+        );
+    }
+
+    const [sent] = await readFiles(root, join(root, "data"), ["env.example.txt"], caps);
+
+    assert.equal(sent!.name, "env.example.txt");
+});
+
 function fakeInbox() {
     const delivered: InboxDelivery[] = [];
     const inbox: InboxApi = {

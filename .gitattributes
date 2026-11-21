@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.heic binary
 *.heif binary
+*.cmd text eol=crlf
+*.ico binary

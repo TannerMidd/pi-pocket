@@ -30,6 +30,7 @@ import {
     type ToolExecutionApi,
     type ToolExecutionResult,
     type ToolHooks,
+    type ToolPark,
     type ToolRegistration,
     ToolTask,
     wrapTool,
@@ -99,6 +100,10 @@ function toolHooks(extensions: readonly Extension[]): { before: BeforeTool[]; af
     }
 
     return { before, after };
+}
+
+function parked(returned: ToolExecutionResult | ToolPark): returned is ToolPark {
+    return returned.sleep !== undefined || returned.wait !== undefined;
 }
 
 /** A result's text as the model would read it: text parts, then its diagnostics. */
@@ -373,7 +378,28 @@ export default function createCodemode(host: PocketHost, web?: ExtensionWeb) {
                         // The script gets text; a nested call's details stay with it.
                         details: async () => {},
                     };
-                    let result = await tool.execute(callArgs, toolApi, scope);
+                    const returned = await tool.execute(callArgs, toolApi, scope);
+
+                    if (parked(returned)) {
+                        // Clean up what the park started: the script cannot wait for its wake.
+                        await tool
+                            .cancel?.(
+                                callArgs,
+                                {
+                                    ...toolApi,
+                                    checkpoint:
+                                        returned.sleep?.checkpoint ?? returned.wait?.checkpoint,
+                                },
+                                scope,
+                            )
+                            .catch(() => {});
+
+                        throw new Error(
+                            `Tool ${tool.name} waits to be woken, which a codemode script cannot do: call it directly`,
+                        );
+                    }
+
+                    let result: ToolExecutionResult = returned;
 
                     if (result.output === undefined) {
                         result = {

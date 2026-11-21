@@ -2097,6 +2097,56 @@ test("a held message is withdrawn by its sender or the driver, and edited by its
     }
 });
 
+test("a held message withdrawn while the held ones are sent does not go", async () => {
+    const id = await newSession();
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hw-1" });
+    await until(() => app.isBusy(id), "the run to start");
+    await app.commands.submit(id, owner(), { text: "sent while held", requestId: "hw-2" });
+    await app.commands.submit(id, owner(), { text: "withdrawn while held", requestId: "hw-3" });
+    await app.commands.abort(id, owner());
+    await until(() => !app.isBusy(id), "the run to stop");
+    const [, withdrawn] = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+    const snapshot = app.harness.snapshot.bind(app.harness) as (...args: unknown[]) => unknown;
+
+    let release = () => {};
+
+    const paused = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let read = false;
+    // Send reads the held list, then waits, while someone withdraws the second message.
+    const held = mock.method(app.harness, "snapshot", async (...args: unknown[]) => {
+        const found = await snapshot(...args);
+
+        if (args[0] === HeldDoc && !read) {
+            read = true;
+            await paused;
+        }
+
+        return found;
+    });
+
+    try {
+        const sending = app.commands.sendHeld(id, owner());
+
+        await until(() => read, "the held list to be read");
+        await app.commands.dropHeld(id, owner(), withdrawn!.key);
+        release();
+        assert.equal(await sending, 1);
+        await until(() => !app.isBusy(id), "its answer");
+    } finally {
+        release();
+        held.mock.restore();
+    }
+
+    const texts = (await modelTexts(app, id)).join("\n");
+
+    assert.match(texts, /sent while held/);
+    assert.doesNotMatch(texts, /withdrawn while held/);
+    assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
+});
+
 test("the held messages show in the room, with who wrote them", async () => {
     const id = await newSession();
     const tab = fakeTab(id, owner(), 6);

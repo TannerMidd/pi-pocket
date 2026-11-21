@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -222,6 +222,29 @@ test("what came is delivered once, also after a restart in the middle", async ()
     assert.deepEqual(one.sender, { name: "someone", id: "someone", trusted: false });
     assert.match(one.instructions!, /relay_reply with connector "mock one"/);
     assert.match(one.payload, /^event: 1\nchannel: \(chan\)\n\nmessage 1$/);
+});
+
+test("a remove whose files cannot be written says so, as a save does", async () => {
+    const where = folder();
+    const { inbox } = fakeInbox();
+    const first = open(where, inbox);
+
+    first.register(scripted().connector);
+    await first.put(config("mock"));
+    chmodSync(where, 0o500);
+
+    try {
+        await assert.rejects(first.remove("c-mock"), /lost at a restart/);
+        await first.stop();
+    } finally {
+        chmodSync(where, 0o700);
+    }
+
+    const second = open(where, inbox);
+
+    await second.ready;
+    assert.ok(second.config("c-mock") !== undefined);
+    await second.stop();
 });
 
 test("bots, messages without a mention, and authors past their limit are not delivered; the owner has no limit", async () => {

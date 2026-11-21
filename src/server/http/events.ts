@@ -27,7 +27,7 @@ const STALLED_MS = 30_000;
 const MAX_BEHIND_BYTES = 128 * 1024 * 1024;
 
 /**
- * How often a stream sends a comment, which keeps proxies from closing it, and checks that its tab keeps up; and how long
+ * How often a stream sends a ping, which keeps proxies from closing it, and checks that its tab keeps up; and how long
  * a polling session lives after its last poll or answer, when no poll comes.
  */
 const eventTiming = { pingMs: 15_000, pollExpireMs: 60_000 };
@@ -174,9 +174,13 @@ export function createEventStreams(app: PocketApp) {
             ...(encoding === undefined ? {} : { "content-encoding": encoding }),
             vary: "accept-encoding",
         });
-        write("retry: 1500\n\n");
+        // The ping is an event, not a comment, so the tab sees it: one that hears nothing for long knows its stream is
+        // dead. The first goes at once, so a stream that dies before the next one is watched too.
+        const pingEvent = `event: ping\ndata: {"every":${eventTiming.pingMs}}\n\n`;
+
+        write(`retry: 1500\n\n${pingEvent}`);
         // The ping checks too: a tab far behind with nothing new for it would otherwise hold its backlog until the next event.
-        const ping = setInterval(() => keepsUp() && write(": ping\n\n"), eventTiming.pingMs);
+        const ping = setInterval(() => keepsUp() && write(pingEvent), eventTiming.pingMs);
 
         request.on("close", () => {
             clearInterval(ping);
@@ -200,6 +204,7 @@ export function createEventStreams(app: PocketApp) {
         if (response !== undefined && !response.writableEnded) {
             json(response, 200, {
                 session: poller.id,
+                hold: POLL_HOLD_MS,
                 events: poller.queue.map(({ seq, event, data }) => ({ seq, event, data })),
             });
 
@@ -379,7 +384,7 @@ export function createEventStreams(app: PocketApp) {
             if (!pollers.has(created.id)) {
                 app.detach(created.client);
 
-                return json(response, 200, { session: created.id, events: [] });
+                return json(response, 200, { session: created.id, hold: POLL_HOLD_MS, events: [] });
             }
 
             // The tab went while its first view was built: nothing waits for it now, so it goes at once.

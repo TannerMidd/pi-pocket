@@ -1,6 +1,6 @@
 /**
- * What happens in the app, for extensions (`host.on`, since 0.22.0, experimental): sessions made, renamed, and
- * archived, messages people send to Pi, and runs that start and end. Each comes after its commit, so what it names is
+ * What happens in the app, for extensions (`host.on`, since 0.22.0, experimental): sessions made, renamed, archived,
+ * and removed, messages people send to Pi, and runs that start and end. Each comes after its commit, so what it names is
  * stored. PiP's conversations are private and send none.
  *
  * A listener runs after the change, never in its way: one that throws or rejects is logged, and the others run.
@@ -18,6 +18,8 @@ export interface AppEvents {
     };
     "session.renamed": { conversationId: number; title: string };
     "session.archived": { conversationId: number; archived: boolean };
+    /** The owner removed an archived session from the app (since 0.30.0): its id is never shown again. */
+    "session.removed": { conversationId: number };
     /**
      * A person sent Pi a message (also a steer or a queued one): who, and its words as stored (hidden values hidden,
      * attachments left out). `via` names what sent it for them: PiP, a schedule, a webhook.
@@ -50,6 +52,7 @@ export const APP_EVENTS: readonly AppEventName[] = [
     "session.created",
     "session.renamed",
     "session.archived",
+    "session.removed",
     "message.sent",
     "run.started",
     "run.ended",

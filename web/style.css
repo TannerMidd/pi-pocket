@@ -9418,6 +9418,33 @@ div.group-head {
     gap: 10px;
 }
 
+/* A card with its delete button over the cover's corner: two buttons side by side, not one inside the other. */
+.artifact-tile {
+    position: relative;
+    display: flex;
+    min-width: 0;
+}
+
+.artifact-tile > .artifact-card {
+    flex: 1;
+}
+
+.artifact-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    color: var(--muted);
+}
+
+.artifact-delete:hover,
+.viewer-head .icon-button.danger:hover {
+    color: var(--err);
+}
+
+.viewer-gone {
+    padding: 24px 20px;
+}
+
 .artifact-card {
     display: flex;
     flex-direction: column;
@@ -9497,8 +9524,16 @@ div.group-head {
     .viewer-head {
         flex-wrap: wrap;
     }
-    .viewer-title {
+    /* The title and Close share the first row; the other buttons wrap below it. */
+    .viewer-head > * {
+        order: 2;
+    }
+    .viewer-head > .viewer-title {
         flex-basis: calc(100% - 50px);
+        order: 0;
+    }
+    .viewer-head > .viewer-close {
+        order: 1;
     }
     .artifact-grid {
         grid-template-columns: 1fr;
@@ -16224,6 +16259,27 @@ textarea.notes {
     text-align: center;
     font-size: 12.5px;
     color: var(--muted);
+}
+
+.turn-note-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.turn-note-text.open {
+    display: block;
 }
 
 .link.danger {
