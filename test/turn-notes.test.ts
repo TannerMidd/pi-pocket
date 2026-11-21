@@ -1,6 +1,3 @@
-// Turn notes (`host.annotateTurns`, `turn-notes.ts`): a note an extension adds for the model after a person's message,
-// as its own entry in the same commit, only for a message placed at once. It is stored once, so every model request
-// starts with the exact bytes of the one before it, and a restart keeps it.
 import {
     type App,
     cleanUp,
@@ -27,11 +24,9 @@ import { projectEntry } from "../src/server/projection.ts";
 
 const dataDir = join(root, "data");
 const DAY = 86_400_000;
-/** How far the app's clock is moved ahead. */
 let offset = 0;
 const now = () => Date.now() + offset;
 
-/** Every model request's messages, as the provider gets them, in order. */
 const requests: string[] = [];
 /** Holds a turn open while it is set: what is sent then waits in the queue. */
 let hold: Promise<void> | undefined;
@@ -59,7 +54,6 @@ after(async () => {
     cleanUp();
 });
 
-/** The conversation's entries, oldest first. */
 async function entries(id: ConversationId): Promise<EntryRecord[]> {
     const page = await (
         await app.conversation(id)
@@ -77,7 +71,6 @@ const inUserMessages = (request: string, words: string) =>
 const notes = async (id: ConversationId) =>
     (await entries(id)).filter((entry) => entry.kind === TURN_NOTE_ENTRY);
 
-/** A note for each message that asks for one, and how many times the annotator was asked. */
 function noter(
     text = (turn: { text: string }) => `<system-reminder>\nnoted ${turn.text}\n</system-reminder>`,
 ) {
@@ -102,7 +95,6 @@ test("a note follows the message as its own entry, once, and is not the person's
 
         await (await app.harness.submission(first.submissionId, context))!.wait(context);
 
-        // A retry of the same request: no second message, no second note, and no annotator asked again.
         const again = await app.commands.submit(id, owner(app), { text: "note me", requestId });
 
         assert.equal(again.submissionId, first.submissionId);
@@ -123,7 +115,6 @@ test("a note follows the message as its own entry, once, and is not the person's
             source: "x.noter",
             text: "<system-reminder>\nnoted note me\n</system-reminder>",
         });
-        // One run for the message: the note asks the model nothing of its own.
         assert.equal(requests.length - before, 1);
         assert.match(requests.at(-1)!, /noted note me/);
     } finally {
@@ -217,7 +208,6 @@ test("a queued message gets no note, and no annotator is asked", async () => {
         release();
         await (await app.harness.submission(busy.submissionId, context))!.wait(context);
         await (await app.harness.submission(queued.submissionId, context))!.wait(context);
-        // Only the first message, placed at once, asked.
         assert.deepEqual(asked, ["busy"]);
         assert.equal((await notes(id)).length, 0);
     } finally {
@@ -234,7 +224,6 @@ test("an annotator that throws or is late adds nothing, and the message still go
         }),
         app.turnNotes.add("x.slow", () => new Promise<undefined>(() => {})),
         app.turnNotes.add("x.fine", () => "fine note"),
-        // The word the timer once gave is a note like any other.
         app.turnNotes.add("x.word", () => "late"),
     ];
 

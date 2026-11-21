@@ -240,7 +240,6 @@ test("a remove whose files cannot be written says so, as a save does", async () 
         chmodSync(where, 0o700);
     }
 
-    // What the error says is true: after a restart, the connector is back.
     const second = open(where, inbox);
 
     await second.ready;

@@ -1,4 +1,3 @@
-// A tab whose event stream goes quiet past its pings connects again, though the stream never reports an error (#334).
 import { type App, cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";

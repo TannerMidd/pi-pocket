@@ -1,6 +1,3 @@
-// What the desktop apps (packaging/windows, packaging/macos) rely on: the launcher's `--desktop` mode, the
-// `launcher-running.json` it writes, and the one-time sign-in link that signs the app's window in without the token on a
-// command line.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
