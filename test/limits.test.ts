@@ -70,6 +70,38 @@ test("what clears with time waits, for the account or the model, until the time 
     );
 });
 
+test("Anthropic scopes explicit Fable claims to the model, not the whole account", () => {
+    const reset = String(now / 1000 + 3_600);
+
+    for (const [window, claim, long] of [
+        ["unified", "fable", false],
+        ["unified-5h", "five_hour_fable", false],
+        ["unified-7d", "seven_day_fable", true],
+    ] as const) {
+        assert.deepEqual(
+            ask(
+                "429 rate_limit_error",
+                429,
+                {
+                    [`anthropic-ratelimit-${window}-status`]: "rejected",
+                    [`anthropic-ratelimit-${window}-reset`]: reset,
+                    "anthropic-ratelimit-unified-representative-claim": claim,
+                },
+                "anthropic",
+            ),
+            {
+                type: "limit",
+                scope: "model",
+                resetAt: now + 3_600_000,
+                source: "header",
+                backoff: false,
+                ...(long ? { long: true } : {}),
+                reason: "429 rate_limit_error",
+            },
+        );
+    }
+});
+
 test("a person's problem, a refused request, or a monthly plan limit never waits", () => {
     for (const [text, status] of [
         ["insufficient_quota: you exceeded your current quota", undefined],

@@ -154,6 +154,37 @@ test("a limit that covers the account holds every model of the provider, with on
     assert.deepEqual(await stops(a, b), ["stop", "stop"]);
 });
 
+test("a Fable-specific wait does not block a request to Opus", async () => {
+    const now = Date.parse("2026-11-21T11:38:35Z");
+    const g = gate({ now: () => now });
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": String(now / 1000 + 3 * 3_600),
+        "anthropic-ratelimit-unified-representative-claim": "fable",
+    };
+    const rt = fake([{ fail: "429 rate_limit_error", headers }], { ok: true });
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const fable = ask(rt, "claude-fable-5-2", "anthropic", {
+        signal: stop.signal,
+        fetch: async () => new Response("", { status: 429, headers }),
+    });
+
+    try {
+        await until(() => g.gates().length === 1);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+        assert.equal((await ask(rt, "claude-opus-5-5", "anthropic")).stopReason, "stop");
+        assert.equal(rt.calls.length, 2);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+    } finally {
+        stop.abort();
+        await fable;
+        g.close();
+    }
+});
+
 test("the gate opens at the canary's first content, not when its whole stream ends", async () => {
     const g = gate();
     const rt = fake();

@@ -224,6 +224,7 @@ function fromHeaders(
     // Claude subscription: windows that cover the sign-in. A claim for one model's cap (seven_day_opus) is the model's.
     const unified = headers["anthropic-ratelimit-unified-status"];
     const claim = headers["anthropic-ratelimit-unified-representative-claim"] ?? "";
+    const modelClaim = /opus|sonnet|haiku|fable/i.test(claim);
 
     // The windows by name: a rejected 5-hour window waits for its reset; a rejected 7-day window is days away.
     const week = headers["anthropic-ratelimit-unified-7d-status"] === "rejected";
@@ -238,8 +239,8 @@ function fromHeaders(
 
         return {
             ...(reset === undefined ? {} : { resetAt: reset }),
-            account: !/opus|sonnet|haiku/i.test(claim),
-            model: /opus|sonnet|haiku/i.test(claim),
+            account: !modelClaim,
+            model: modelClaim,
             ...(week ? { long: true as const } : {}),
         };
     }
@@ -252,8 +253,8 @@ function fromHeaders(
         if (rejected) {
             return {
                 ...(reset === undefined ? {} : { resetAt: reset }),
-                account: !/opus|sonnet|haiku/i.test(claim),
-                model: /opus|sonnet|haiku/i.test(claim),
+                account: !modelClaim,
+                model: modelClaim,
             };
         }
     }
