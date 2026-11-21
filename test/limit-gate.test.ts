@@ -196,7 +196,7 @@ test("a conversation failure frees the shared canary without declaring the model
         rt.calls[2]!.end();
         assert.equal((await b).stopReason, "stop");
         assert.equal(g.waitFor(1)?.scope, "request");
-        assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 1, gates: [] });
+        assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 2, gates: [] });
     } finally {
         stop.abort();
         await a;
@@ -669,6 +669,26 @@ test("a missing or damaged file means no limit is known", () => {
         writeFileSync(file, text);
         assert.equal(gate({ file }).gates().length, 0, text);
     }
+});
+
+test("an Anthropic account gate that 0.30.0 kept is dropped once; other gates stay", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "limit-gate-")), "provider-limits.json");
+    const now = Date.now();
+    const kept = (provider: string) => ({
+        ...{ state: "waiting", key: provider, scope: "account", provider, kind: "reset" },
+        ...{ since: now, until: now + 3_600_000, subscription: true, reason: "429", tries: 1 },
+    });
+    const gates = [kept("anthropic"), kept("openai")];
+
+    writeFileSync(file, JSON.stringify({ version: 1, gates }));
+    assert.deepEqual(
+        gate({ file })
+            .gates()
+            .map((each) => each.provider),
+        ["openai"],
+    );
+    writeFileSync(file, JSON.stringify({ version: 2, gates }));
+    assert.equal(gate({ file }).gates().length, 2);
 });
 
 test("an adapter that refuses a custom fetch (Google) gets none", async () => {

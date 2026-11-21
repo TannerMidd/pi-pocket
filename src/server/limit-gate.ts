@@ -1404,7 +1404,7 @@ export class LimitGate {
             }));
 
         try {
-            writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, gates }), { mode: 0o600 });
+            writeFileSync(`${file}.tmp`, JSON.stringify({ version: 2, gates }), { mode: 0o600 });
             renameSync(`${file}.tmp`, file);
         } catch (error) {
             this.#deps.log(`Provider limits not saved: ${String(error)}`);
@@ -1430,7 +1430,7 @@ export class LimitGate {
         try {
             const saved = JSON.parse(text) as { version?: unknown; gates?: unknown };
 
-            if (saved.version !== 1 || !Array.isArray(saved.gates)) {
+            if ((saved.version !== 1 && saved.version !== 2) || !Array.isArray(saved.gates)) {
                 return;
             }
 
@@ -1438,8 +1438,13 @@ export class LimitGate {
 
             for (const each of saved.gates.slice(0, 200) as Record<string, unknown>[]) {
                 const gate = this.#restored(each, now);
+                // Before 0.30.1 a Fable limit was kept as the whole Claude sign-in's: one canary finds out again.
+                const fable =
+                    saved.version === 1 &&
+                    gate?.provider === "anthropic" &&
+                    gate.scope === "account";
 
-                if (gate !== undefined) {
+                if (gate !== undefined && !fable) {
                     this.#gates.set(gate.key, gate);
                 }
             }
