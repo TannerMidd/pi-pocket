@@ -8,9 +8,11 @@ const ask = (
     status?: number,
     headers: Record<string, string> = {},
     provider = "p",
+    modelId?: string,
 ) =>
     classify({
         provider,
+        ...(modelId === undefined ? {} : { modelId }),
         message,
         now,
         ...(status === undefined ? {} : { facts: { status, headers } }),
@@ -99,6 +101,38 @@ test("Anthropic scopes explicit Fable claims to the model, not the whole account
                 reason: "429 rate_limit_error",
             },
         );
+    }
+});
+
+test("an ambiguous Anthropic Fable 429 keeps its reset but does not block other models", () => {
+    const message = "This request would exceed your account's rate limit. Please try again later.";
+    const reset = String(now / 1000 + 3_600);
+    const claimHeader = "anthropic-ratelimit-unified-representative-claim";
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": reset,
+    };
+
+    for (const claim of [undefined, "unknown_window", "five_hour", "seven_day"]) {
+        const facts = claim === undefined ? headers : { ...headers, [claimHeader]: claim };
+
+        assert.deepEqual(ask(message, 429, facts, "anthropic", "claude-fable-5-2"), {
+            type: "limit",
+            scope: claim === "five_hour" || claim === "seven_day" ? "account" : "model",
+            resetAt: now + 3_600_000,
+            source: "header",
+            backoff: false,
+            reason: message,
+        });
+    }
+
+    for (const [provider, model] of [
+        ["anthropic", "claude-opus-5-5"],
+        ["other", "claude-fable-5-2"],
+    ] as const) {
+        const verdict = ask(message, 429, headers, provider, model);
+
+        assert.equal(verdict.type === "limit" && verdict.scope, "account");
     }
 });
 
