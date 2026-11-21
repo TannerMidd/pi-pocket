@@ -17,6 +17,7 @@ import {
     PublicLinksDoc,
     type RemovedSession,
     RepoWatchesDoc,
+    type SessionMeta,
     SessionsDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
@@ -200,20 +201,32 @@ export class SessionCleanup {
         return join(this.#app.dataDir, "background", String(id));
     }
 
-    /** The sessions whose uploads a live session reads: itself, and the sessions it was forked from (`workspace.ts`). */
-    #readByForks(leaving: ReadonlySet<number>): Set<number> {
+    /**
+     * The sessions whose uploads a live session reads: itself, and the sessions it was forked from (`workspace.ts`).
+     * `items`: the sessions as a transaction reads them, instead of the app's.
+     */
+    #readByForks(leaving: ReadonlySet<number>, items?: Record<string, SessionMeta>): Set<number> {
         const read = new Set<number>();
+        const live =
+            items === undefined
+                ? this.#app.sessions().map((session) => session.id)
+                : Object.entries(items)
+                      .filter(([, meta]) => meta.pip === undefined)
+                      .map(([key]) => Number(key));
+        const forkedFrom = (id: number) =>
+            items?.[String(id)]?.forkedFrom ??
+            this.#app.forkedFrom(id as unknown as ConversationId);
 
-        for (const session of this.#app.sessions()) {
-            if (leaving.has(session.id)) {
+        for (const id of live) {
+            if (leaving.has(id)) {
                 continue;
             }
 
-            let at = this.#app.forkedFrom(session.id as unknown as ConversationId);
+            let at = forkedFrom(id);
 
             for (let depth = 0; at !== undefined && depth < 64; depth++) {
                 read.add(at.id);
-                at = this.#app.forkedFrom(at.id as unknown as ConversationId);
+                at = forkedFrom(at.id);
             }
         }
 
@@ -475,6 +488,7 @@ export class SessionCleanup {
         const worktree =
             plan.worktree?.state === "clean" ? app.sessionMeta(id)?.worktree : undefined;
         const watchTasks: TaskId[] = [];
+        let keepUploads = false;
 
         // The plan took a while (sizes): a run that started meanwhile keeps the session.
         if (tree.some((each) => app.isBusy(each as unknown as ConversationId))) {
@@ -490,6 +504,8 @@ export class SessionCleanup {
             }
 
             delete sessions.items[String(id)];
+            // From this transaction: a fork made while the plan ran reads these uploads too.
+            keepUploads = this.#readByForks(leaving, sessions.items).has(Number(id));
             const record: RemovedSession = {
                 ...(meta.title === undefined ? {} : { title: meta.title }),
                 cwd: meta.cwd,
@@ -498,7 +514,7 @@ export class SessionCleanup {
                 by: userId,
                 at: Date.now(),
                 ...(worktree === undefined ? {} : { worktree }),
-                ...(plan.uploads.kept ? { keepUploads: [Number(id)] } : {}),
+                ...(keepUploads ? { keepUploads: [Number(id)] } : {}),
             };
 
             (await tx.doc(DeletedDoc)).items[String(id)] = record;
@@ -561,7 +577,7 @@ export class SessionCleanup {
             done: true,
             bytes:
                 (worktreeGone ? plan.worktree!.bytes : 0) +
-                (plan.uploads.kept ? 0 : plan.uploads.bytes) +
+                (keepUploads ? 0 : plan.uploads.bytes) +
                 plan.logs,
         };
     }

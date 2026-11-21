@@ -213,6 +213,33 @@ test("uncommitted changes in its worktree keep a session; a live fork keeps the 
     assert.equal(existsSync(parentFiles.uploads), false);
 });
 
+test("a fork made while the removal checks the session keeps the uploads it reads", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "hello");
+    const files = filesOf(id);
+    const entryId = (await app.transcripts.allEntries(id, false)).at(-1)!.id;
+    const get = app.watches.get.bind(app.watches);
+    let fork: ConversationId | undefined;
+
+    await archive(id);
+
+    // The plan's slow steps: a person forks the session in the meantime.
+    app.watches.get = async (each) => {
+        fork ??= (await app.commands.fork(id, owner(app), { entryId })).id;
+
+        return get(each);
+    };
+
+    const done = await call("/api/x/session-cleanup/remove", { ids: [id] }).finally(() => {
+        app.watches.get = get;
+    });
+
+    assert.equal(done.data.outcomes[0].done, true);
+    assert.ok(fork !== undefined && app.sessionMeta(fork) !== undefined);
+    assert.equal(existsSync(files.uploads), true, "the fork reads them");
+});
+
 test("a removal that a restart cut short goes on at the next start", async () => {
     const id = await newSession(app);
     const files = filesOf(id);
