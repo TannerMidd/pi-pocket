@@ -240,6 +240,28 @@ test("a fork made while the removal checks the session keeps the uploads it read
     assert.equal(existsSync(files.uploads), true, "the fork reads them");
 });
 
+test("a fork that a removal overtakes is refused, so it never reads uploads that go", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "hello");
+    const files = filesOf(id);
+    const entryId = (await app.transcripts.allEntries(id, false)).at(-1)!.id;
+    const agentState = app.agentState.bind(app);
+
+    await archive(id);
+
+    // The fork has passed its checks; the removal commits before the fork does.
+    app.agentState = async (each) => {
+        app.agentState = agentState;
+        assert.equal((await call("/api/x/session-cleanup/remove", { ids: [id] })).status, 200);
+
+        return agentState(each);
+    };
+
+    await assert.rejects(app.commands.fork(id, owner(app), { entryId }), { status: 409 });
+    assert.equal(existsSync(files.uploads), false);
+});
+
 test("a removal that a restart cut short goes on at the next start", async () => {
     const id = await newSession(app);
     const files = filesOf(id);

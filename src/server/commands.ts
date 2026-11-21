@@ -43,6 +43,7 @@ import type { User } from "./config.ts";
 import {
     AuthorsDoc,
     ChatDoc,
+    DeletedDoc,
     HeldDoc,
     type HeldMessage,
     InterruptsDoc,
@@ -2885,6 +2886,11 @@ export class Commands {
             at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
 
         const init: ConversationCreateOptions["init"] = async (tx, forked) => {
+            // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
+            if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
+                throw new HttpError(409, "That session was removed.");
+            }
+
             const sessions = await tx.doc(SessionsDoc);
 
             sessions.items[String(forked)] = {
