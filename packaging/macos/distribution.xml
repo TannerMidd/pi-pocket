@@ -36,7 +36,7 @@
     <choice
         id="app"
         title="Pi Pocket"
-        description="Node.js, the Pi Pocket launcher, Pi Pocket.app, and Pi Pocket (console).app in the Applications folder of your home folder. The installer gets the pi-pocket package from npm, so it needs the internet."
+        description="Node.js, the Pi Pocket launcher, Pi Pocket.app, and Pi Pocket (console).app in the Applications folder of your home folder."
         enabled="false"
         selected="true">
         <pkg-ref id="io.github.tannermidd.pi-pocket"/>
