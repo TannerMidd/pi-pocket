@@ -2060,6 +2060,8 @@ const FIRST_DATA_MS = 10_000;
 let streamRetries = 0;
 /** The server's ping period, from the last stream that heard a ping: a new stream is watched from its start. */
 let pingPeriod = 0;
+/** Streams in a row on this page that went quiet after a whole first batch and at most one ping (`streamEvents`). */
+let quietStreams = 0;
 
 const connected = () => store.state.connection !== "open" && store.set({ connection: "open" });
 
@@ -2258,8 +2260,9 @@ function streamEvents(query) {
         watchdog = setInterval(() => {
             if (source === connection && connection.silent(2.5)) {
                 // A whole first batch, then no ping after the first: the path holds small events back (a tunnel, an
-                // older server), so a new stream would go quiet too. Poll instead, as the first-batch fallback does.
-                if (!local && settled && pings <= 1) {
+                // older server), so a new stream would go quiet too. Poll instead, as the first-batch fallback does,
+                // but only the second time in a row: one can be a healthy path cut off (a network change, a lock).
+                if (!local && settled && pings <= 1 && ++quietStreams >= 2) {
                     localStorage.setItem(TRANSPORT_KEY, `poll:${Date.now()}`);
                 }
 
@@ -2283,6 +2286,11 @@ function streamEvents(query) {
 
         pings++;
         heardAny = true;
+
+        if (pings > 1) {
+            quietStreams = 0;
+        }
+
         heardAt = Date.now();
     });
 
