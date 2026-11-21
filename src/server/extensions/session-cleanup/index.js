@@ -15,7 +15,7 @@ const stays = (count) =>
         ? "Its transcript stays in Pi Pocket's database until Pi Durable can remove it. This cannot be undone."
         : "Their transcripts stay in Pi Pocket's database until Pi Durable can remove them. This cannot be undone.";
 
-export function bytes(count) {
+function bytes(count) {
     if (count < 1024) {
         return `${count} B`;
     }
@@ -35,7 +35,7 @@ export function bytes(count) {
 const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
 /** What a removal frees: the clean worktree, the uploads no fork reads, the logs. */
-export function freed(plan) {
+function freed(plan) {
     return (
         (plan.worktree?.state === "clean" ? plan.worktree.bytes : 0) +
         (plan.uploads.kept ? 0 : plan.uploads.bytes) +
@@ -44,7 +44,7 @@ export function freed(plan) {
 }
 
 /** What a removal of these sessions ends, in one line; "" for nothing. */
-export function endsLine(plans) {
+function endsLine(plans) {
     const sum = (key) => plans.reduce((total, plan) => total + Number(plan.ends[key]), 0);
     const parts = [
         [sum("schedules"), "schedule"],

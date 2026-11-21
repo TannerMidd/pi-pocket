@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The first line of a `tsconfig.json` Pi Pocket made: it refreshes only such a file, never the owner's own. */
-export const CONFIG_MARK =
+const CONFIG_MARK =
     "// Pi Pocket made this file so editors find its packages: it refreshes it at each start. Edits here are lost.\n";
 
 /** Conditions that lead to a package's types, in the order TypeScript reads them for an `import`. */

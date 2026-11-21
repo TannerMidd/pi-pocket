@@ -2,7 +2,7 @@ import { type BigIntStats, closeSync, constants, fstatSync, lstatSync, openSync 
 import { lstat, open, type FileHandle } from "node:fs/promises";
 
 /** `O_RDONLY | O_NONBLOCK` where the system has it: a pipe swapped in for the file does not hold the reader. */
-export const READ_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
+const READ_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 
 function linkError(path: string): NodeJS.ErrnoException {
     return Object.assign(new Error(`ELOOP: a link is not followed, open '${path}'`), {

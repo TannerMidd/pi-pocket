@@ -188,7 +188,7 @@ class LinuxTable implements ProcTable {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** `ps`'s `lstart` in the C locale and UTC, such as `Thu Nov 20 20:01:02 2026`, in seconds since 1970. */
-export function parseLstart(text: string): number | undefined {
+function parseLstart(text: string): number | undefined {
     const parts = /^\w{3}\s+(\w{3})\s+(\d+)\s+(\d+):(\d+):(\d+)\s+(\d+)$/.exec(text.trim());
     const month = MONTHS.indexOf(parts?.[1] ?? "");
 

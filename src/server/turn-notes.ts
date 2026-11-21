@@ -32,8 +32,8 @@ export type Turn = {
 export type TurnAnnotator = (turn: Turn) => string | undefined | Promise<string | undefined>;
 
 /** For all annotators together: the message goes without the late ones. */
-export const ANNOTATE_TIMEOUT_MS = 2000;
-export const NOTE_MAX = 4000;
+const ANNOTATE_TIMEOUT_MS = 2000;
+const NOTE_MAX = 4000;
 
 const NAME = /^[A-Za-z0-9][\w.:-]{0,59}$/;
 
