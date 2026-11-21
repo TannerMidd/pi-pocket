@@ -394,6 +394,18 @@ Since 0.22.0 · Experimental
 
 A session's browser page: the one that Pi's `browser` tool and the people in the session use. With `open: true`, it opens the page when it is not open. It is `undefined` while the Browser module is off, and without `open`, when no page is open. See [`BrowserPageHandle`](#browserpagehandle).
 
+## Turn notes
+
+### `annotateTurns`
+
+```ts
+annotateTurns(name: string, annotate: TurnAnnotator): () => void;
+```
+
+Since 0.30.0 · Experimental
+
+Adds a note for the model right after a person's message, as a separate entry of the transcript. `annotate` gets the [`Turn`](#turn) and returns the note's text, or `undefined` for none. Pi Pocket stores the note in the same commit as the message, and never computes it again. Only a message placed at once gets notes: Pi does not work in the session, and nothing is queued. A queued message, an Interrupt, a scheduled message, and PiP's own conversation get none. The annotators of all modules have 2 seconds together; one that is late, throws, or returns more than 4,000 characters adds nothing, and the session shows a warning. `name` is 1 to 60 letters, digits, `.`, `_`, `:`, or `-`, and the transcript shows it with each note. Pass the returned function to `web.onDispose`. See [Turn notes](../turn-notes.md).
+
 ## Notices and text
 
 ### `notice`
@@ -851,6 +863,34 @@ type CommandEnvProvider = (
 Since 0.22.0 · Experimental
 
 Gives the variables to add to one command. A name is letters, digits, and `_`, not starting with a digit; a value has no NUL. A variable that breaks these is left out. The variables of all providers for one command are 256 KB at most.
+
+### `Turn`
+
+```ts
+interface Turn {
+    readonly conversationId: number;
+    readonly by: string;
+    readonly via?: string;
+    readonly text: string;
+    readonly at: number;
+    readonly previousActivityAt?: number;
+    readonly signal: AbortSignal;
+}
+```
+
+Since 0.30.0 · Experimental
+
+One person's message, before Pi answers it: its session, the person's id, what sent it for them (`via`, when it is not their own typing), their words as stored (hidden values hidden, attachments left out), and when it came. `previousActivityAt` is the newest time of a message, an answer, or a tool result among the session's last 32 entries, also from before a reset. It is `undefined` when there is none. `signal` aborts when the time for annotators ends.
+
+### `TurnAnnotator`
+
+```ts
+type TurnAnnotator = (turn: Turn) => string | undefined | Promise<string | undefined>;
+```
+
+Since 0.30.0 · Experimental
+
+Gives the text of a note for one turn, at most 4,000 characters, or `undefined` for no note. Pi Pocket trims the text; an empty text is no note.
 
 ### `BrowserTarget`
 

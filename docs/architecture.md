@@ -53,6 +53,8 @@ Extensions never see `PocketApp`. They get `PocketHost` (`host.ts`), whose funct
 
 `host.pendingApprovals` (`pending-approvals.ts`) observes the internal approval service in `host.ts`. It filters waits for the source session's requester and everyone who can see the source. It does not pass on commands, arguments, reasons, or answers. The guard hook keeps a wait's first creation time in its Durable call memo, so a resumed run can show the same wait. Approval decisions still use the app's existing paths.
 
+`host.annotateTurns` (`turn-notes.ts`) relies on Pi Durable's admission: an input to an idle conversation with an empty `pi.inbox` is placed in the admitting commit, so `Commands.submit` admits it with `submit(tx, draft)` and appends each `pocket.turn-note` entry after it in that commit. A queued input is placed later by Durable's boundary, which no Pocket code joins, so it gets no note. Pi Durable would need an input draft that carries its own entries (placed at the same boundary, dropped on withdraw) for queued turns.
+
 ## Workspace execution providers
 
 `PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The provider's module, a drop-in outside the core package, owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.

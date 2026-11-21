@@ -145,6 +145,16 @@ export class Shares {
         let token = "";
 
         await app.harness.commit(async (tx) => {
+            // Deleted since it was read above (`artifacts.ts`): a link to it must not stay.
+            const items = (await tx.doc(ArtifactsDoc, conversation)).items;
+
+            if (
+                !Object.hasOwn(items, id) ||
+                !items[id]!.versions.some((each) => each.version === found.version)
+            ) {
+                throw new HttpError(404, "No such artifact");
+            }
+
             const doc = await tx.doc(ArtifactSharesDoc);
 
             // Shares that closed show nothing and are listed nowhere: they go, and count for nothing.

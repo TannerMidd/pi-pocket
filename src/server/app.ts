@@ -48,6 +48,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { CodingTools, createCodingTools } from "@earendil-works/pi-durable/tools";
 import { Alerts } from "./alerts.ts";
+import { sweepAssets } from "./artifacts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
 import { Browsers } from "./browser.ts";
 import type { BrowserState } from "./browser/page.ts";
@@ -144,6 +145,7 @@ import { BackgroundTasks } from "./background.ts";
 import { SessionCleanup } from "./session-cleanup.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { TurnNotes } from "./turn-notes.ts";
 import { withQuietLimit } from "./deadline.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
@@ -456,6 +458,8 @@ export class PocketApp {
     );
     /** What extensions add to the environment of each command (`hidden.ts`, `host.commandEnv`). */
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
+    /** What extensions add for the model after a person's message (`turn-notes.ts`, `host.annotateTurns`). */
+    readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
     /** Updates of Pi Pocket itself: the newest release, and updating to it (`updates.ts`). */
@@ -935,6 +939,7 @@ export class PocketApp {
             ask: (request, askContext) => ask(this.approvals, request, askContext),
             hide: (value) => this.hidden.add(value),
             commandEnv: (provider) => this.commandEnvs.add(provider),
+            annotateTurns: (name, annotate) => this.turnNotes.add(name, annotate),
             browser: (conversationId, options) =>
                 browserFor(
                     this.browsers,
@@ -1116,6 +1121,10 @@ export class PocketApp {
         void this.sessionCleanup
             .resume()
             .catch((error: unknown) => this.#log(`Removals could not go on: ${describe(error)}`));
+        // Asset bytes that a deleted artifact left, if a restart cut its sweep off (`artifacts.ts`).
+        void sweepAssets(this).catch((error: unknown) =>
+            this.#log(`Unused artifact assets could not be removed: ${describe(error)}`),
+        );
     }
 
     /**

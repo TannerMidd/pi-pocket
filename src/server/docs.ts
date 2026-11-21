@@ -26,6 +26,19 @@ const rebased = {
         info.deltasSinceBase >= 64,
 };
 
+/**
+ * As `rebased`, and a change that deletes a whole item (`items.<id>`) is a base too: the storage drops the revisions
+ * before it, so what was deleted (an artifact, its share, its saved state, its comments: `artifacts.ts`) is not kept in
+ * them. A smaller delete, such as one person's saved state, stays a delta.
+ */
+const rebasedOnDelete = {
+    checkpointWhen: (_value: unknown, ops: unknown, info: CheckpointInfo) =>
+        info.deltasSinceBase >= 64 ||
+        (ops as readonly (readonly [string, (readonly unknown[])?])[]).some(
+            (op) => op[0] === "d" && (op[1]?.length ?? 0) <= 2,
+        ),
+};
+
 export type SessionMeta = {
     title?: string;
     cwd: string;
@@ -254,11 +267,18 @@ export type ArtifactMeta = {
     versions: ArtifactVersion[];
 };
 
-/** The artifacts of one conversation, newest version last. Bodies live in `ArtifactBodyDoc`. */
-export const ArtifactsDoc = defineDoc<{ items: Record<string, ArtifactMeta> }>({
+/**
+ * The artifacts of one conversation, newest version last. Bodies live in `ArtifactBodyDoc`. `ended` keeps the last
+ * version number of each deleted artifact (`artifacts.ts`), so an artifact published again under its id never reuses
+ * a number that a card in a reply names.
+ */
+export const ArtifactsDoc = defineDoc<{
+    items: Record<string, ArtifactMeta>;
+    ended?: Record<string, number>;
+}>({
     kind: "pocket.artifacts",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",
@@ -299,7 +319,7 @@ export const ArtifactStateDoc = defineDoc<{
 }>({
     kind: "pocket.artifact-state",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "initial",
@@ -322,11 +342,23 @@ export type ArtifactShare = {
     expiresAt?: number;
 };
 
+/**
+ * Asset hashes that deleted artifacts used, each with the number of when it came: `artifacts.ts` retires an asset's bytes
+ * once no artifact in any conversation names it, and a new version that stores the hash takes it out of here.
+ */
+export const ArtifactSweepDoc = defineDoc<{ seq: number; hashes: Record<string, number> }>({
+    kind: "pocket.artifact-sweep",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ seq: 0, hashes: {} }),
+});
+
 /** The artifact shares of the whole app, by their token. */
 export const ArtifactSharesDoc = defineDoc<{ items: Record<string, ArtifactShare> }>({
     kind: "pocket.artifact-shares",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "session",
     initial: () => ({ items: {} }),
 });
@@ -1064,7 +1096,7 @@ export type DesignItem = {
 export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }>({
     kind: "pocket.design-comments",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",

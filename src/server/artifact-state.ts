@@ -113,16 +113,18 @@ export async function writeState(
     }
 
     return app.harness.commit(async (tx) => {
+        // Deleted since the check above (`artifacts.ts`): its state went with it, and must not come back.
+        if (!Object.hasOwn((await tx.doc(ArtifactsDoc, id)).items, artifact)) {
+            throw new HttpError(404, "No such artifact");
+        }
+
         const doc = await tx.doc(ArtifactStateDoc, id);
         const own = Object.hasOwn(doc.items, artifact);
 
+        // The artifact's entry stays, empty: deleting it stores the whole document again (`rebasedOnDelete`).
         if (value === null) {
             if (own) {
                 delete doc.items[artifact]![user.id];
-
-                if (Object.keys(doc.items[artifact]!).length === 0) {
-                    delete doc.items[artifact];
-                }
             }
 
             return { at: null };
