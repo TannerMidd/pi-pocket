@@ -71,6 +71,7 @@ const WORKTREE_STAYS = {
     changes: "it has uncommitted changes",
     shared: "another session works in it",
     busy: "Pi works in it now",
+    env: "it has an env file that git ignores",
 };
 
 export default function setup(pocket) {

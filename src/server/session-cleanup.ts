@@ -10,7 +10,7 @@
  */
 import { existsSync } from "node:fs";
 import { lstat, opendir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -27,9 +27,12 @@ import {
 import { describe, HttpError } from "./errors.ts";
 import { git } from "./git.ts";
 import { sessionKey } from "./memory.ts";
+import { isEnvFile } from "./secrets.ts";
 import { inWorktree, removeWorktree, type Worktree } from "./worktrees.ts";
 
 const context = BACKGROUND_CONTEXT;
+
+const ENV_STAYS = "Its worktree has an env file that git ignores. Move or delete it first.";
 
 /** The most files a size counts in one folder tree: a huge one shows as at least that much. */
 const MAX_COUNTED = 200_000;
@@ -39,9 +42,10 @@ export const MAX_SESSIONS = 500;
 
 /**
  * A session's worktree, as cleaning up finds it: `clean` goes; `changes` has uncommitted changes and stays; `shared`
- * is where another session works, and stays; `busy` is where Pi works now.
+ * is where another session works, and stays; `busy` is where Pi works now; `env` holds an env file that git ignores
+ * (`git worktree remove` would delete it), and stays.
  */
-export type WorktreeState = "clean" | "changes" | "shared" | "busy";
+export type WorktreeState = "clean" | "changes" | "shared" | "busy" | "env";
 
 /** What cleaning up or removing a session would do. */
 export type SessionPlan = {
@@ -113,6 +117,55 @@ async function sizeOf(path: string): Promise<number> {
     await walk(path);
 
     return bytes;
+}
+
+/**
+ * Whether a worktree holds an env file (`.env`, `prod.env`) that git ignores, also inside an ignored folder:
+ * `git worktree remove` deletes such files with no word. Other ignored files (`node_modules`, `dist`) do not count.
+ */
+async function hasIgnoredEnv(path: string): Promise<boolean> {
+    const listed = await git(path, ["status", "--porcelain", "-z", "--ignored"]);
+    let counted = 0;
+
+    const walk = async (folder: string): Promise<boolean> => {
+        let dir;
+
+        try {
+            dir = await opendir(folder);
+        } catch {
+            return false;
+        }
+
+        for await (const entry of dir) {
+            if (++counted > MAX_COUNTED) {
+                return false;
+            }
+
+            if (isEnvFile(entry.name)) {
+                return true;
+            }
+
+            if (entry.isDirectory() && (await walk(join(folder, entry.name)))) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    for (const entry of listed.split("\0")) {
+        if (!entry.startsWith("!! ")) {
+            continue;
+        }
+
+        const name = entry.slice(3);
+
+        if (name.endsWith("/") ? await walk(join(path, name)) : isEnvFile(basename(name))) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 export class SessionCleanup {
@@ -199,6 +252,8 @@ export class SessionCleanup {
 
             if (status.trim() !== "") {
                 state = "changes";
+            } else if (await hasIgnoredEnv(worktree.path).catch(() => true)) {
+                state = "env";
             }
         }
 
@@ -257,7 +312,9 @@ export class SessionCleanup {
                     ? "Pi is working in its worktree. Stop it first."
                     : worktree?.state === "changes"
                       ? "Its worktree has uncommitted changes. Commit or discard them first."
-                      : undefined;
+                      : worktree?.state === "env"
+                        ? ENV_STAYS
+                        : undefined;
 
         return {
             id: Number(id),
@@ -334,6 +391,14 @@ export class SessionCleanup {
 
             if (meta.worktree === undefined) {
                 outcomes.push({ id: Number(id), done: false, why: "It has no worktree." });
+                continue;
+            }
+
+            if (
+                existsSync(meta.worktree.path) &&
+                (await hasIgnoredEnv(meta.worktree.path).catch(() => true))
+            ) {
+                outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
                 continue;
             }
 
@@ -548,9 +613,17 @@ export class SessionCleanup {
         await step("its PR watch", () => app.watches.stop(id));
 
         if (record.worktree !== undefined) {
-            await step(`its worktree ${record.worktree.path}`, () =>
-                removeWorktree(record.worktree!, false),
-            );
+            await step(`its worktree ${record.worktree.path}`, async () => {
+                // One may have come since the plan, or before a restart.
+                if (
+                    existsSync(record.worktree!.path) &&
+                    (await hasIgnoredEnv(record.worktree!.path).catch(() => true))
+                ) {
+                    throw new Error(ENV_STAYS);
+                }
+
+                await removeWorktree(record.worktree!, false);
+            });
         }
 
         for (const each of record.conversations) {

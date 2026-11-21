@@ -251,3 +251,22 @@ test("a removal that a restart cut short goes on at the next start", async () =>
     assert.equal(existsSync(files.logs), false);
     assert.equal((await call(`/api/c/${id}/trust`)).status, 404, "still out of the app");
 });
+
+test("an env file that git ignores keeps a worktree, also in an ignored folder", async () => {
+    const id = await worktreeSession("Secrets");
+    const env = join(app.sessionMeta(id)!.worktree!.path, "deps", "a", "prod.env");
+
+    writeFileSync(join(repo, ".git", "info", "exclude"), "deps/\n");
+    mkdirSync(join(env, ".."), { recursive: true });
+    writeFileSync(env, "KEY=1\n");
+    await archive(id);
+
+    const [plan] = (await call("/api/x/session-cleanup/plan", { ids: [id] })).data.sessions;
+    const [kept] = (await call("/api/x/session-cleanup/clean-up", { ids: [id] })).data.outcomes;
+    const [stays] = (await call("/api/x/session-cleanup/remove", { ids: [id] })).data.outcomes;
+
+    assert.equal(plan.worktree.state, "env");
+    assert.match(kept.why, /env file that git ignores/);
+    assert.equal(stays.done, false);
+    assert.ok(existsSync(env));
+});
