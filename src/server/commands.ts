@@ -19,12 +19,14 @@ import {
 import {
     type AgentChange,
     AgentDoc,
+    type Conversation,
     type ConversationCreateOptions,
     type ConversationId,
     type Cursor,
     defineTask,
     type EntryId,
     type InputEntry,
+    type InputSubmissionDraft,
     InboxDoc,
     LiveDoc,
     type ModelRef,
@@ -923,20 +925,16 @@ export class Commands {
         // Only a person's own message interrupts, never one sent for them (`via`). The same durable handoff as a
         // queued message's Interrupt keeps everything waiting, before it stops the run. Admission releases its lease
         // once that handoff is stored, not while the task stops the run and puts the messages back.
+        const draft = {
+            type: "input" as const,
+            content,
+            whenBusy: request.mode === "steer" ? ("steer" as const) : ("followUp" as const),
+            requestId,
+        };
         const admitted = await (
             request.mode === "interrupt" && via === undefined
                 ? this.#interrupt(id, { content, requestId }, submitContext)
-                : conversation
-                      .submit(
-                          {
-                              type: "input",
-                              content,
-                              whenBusy: request.mode === "steer" ? "steer" : "followUp",
-                              requestId,
-                          },
-                          submitContext,
-                      )
-                      .then((submission) => ({ submissionId: submission.id }))
+                : this.#submitInput(conversation, draft, user, via, text, known, submitContext)
         ).finally(() => admission?.afterSubmit());
         let submissionId: SubmissionId;
 
@@ -986,6 +984,37 @@ export class Commands {
         }
 
         return { submissionId: submission.id, requestId };
+    }
+
+    /**
+     * Admit a person's input: with the notes extensions add (`turn-notes.ts`) in the same commit when the conversation
+     * places it at once, else as it is. A retry (`known`) asks no annotator again, and PiP's conversation gets no notes.
+     */
+    async #submitInput(
+        conversation: Conversation,
+        draft: InputSubmissionDraft & { requestId: string },
+        user: User,
+        via: string | undefined,
+        text: string,
+        known: boolean,
+        submitContext: Context,
+    ): Promise<{ submissionId: SubmissionId }> {
+        const app = this.#app;
+        const noted =
+            !known && app.pip.ownerOf(conversation.id) === undefined
+                ? await app.turnNotes.submit(
+                      conversation,
+                      draft,
+                      { by: user.id, ...(via === undefined ? {} : { via }), text, at: app.now() },
+                      submitContext,
+                  )
+                : undefined;
+
+        if (noted !== undefined) {
+            return { submissionId: noted };
+        }
+
+        return { submissionId: (await conversation.submit(draft, submitContext)).id };
     }
 
     /** Submissions `message.sent` went out for lately: a retry that raced its first try finds its id here. */

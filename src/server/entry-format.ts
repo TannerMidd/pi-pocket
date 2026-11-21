@@ -12,6 +12,14 @@ export const FILE_BLOCK = '<file name="';
 export const CONTEXT_BLOCK = "<pocket-context";
 /** The entry kind of a note about what a person did (`Commands.note`). */
 export const NOTE_ENTRY = "pocket.note";
+/**
+ * The entry kind of a turn note (`host.annotateTurns`, `turn-notes.ts`): text an extension added for the model right
+ * after a person's message. It is not the person's words.
+ */
+export const TURN_NOTE_ENTRY = "pocket.turn-note";
+
+/** What a turn note holds: the name its extension gave, and the text the model reads. */
+export type TurnNoteData = { source: string; text: string };
 
 /** The speaker prefix Pi Pocket adds to messages when several people share the server. */
 export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;

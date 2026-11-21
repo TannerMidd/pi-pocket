@@ -16226,6 +16226,16 @@ textarea.notes {
     color: var(--muted);
 }
 
+/* A turn note's text: kept to three lines, its line breaks kept. */
+.turn-note-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .link.danger {
     color: var(--err);
     font-weight: 700;

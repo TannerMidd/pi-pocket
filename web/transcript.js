@@ -2678,6 +2678,14 @@ function NoteEntry({ entry }) {
     </div>`;
 }
 
+/** A note an extension added for Pi after a person's message (`host.annotateTurns`): never the person's words. */
+function TurnNoteEntry({ entry }) {
+    return html`<div class="note-line turn-note" id=${`entry-${entry.id}`}>
+        <span class="muted">Note for Pi from ${entry.source}:</span>
+        <span class="turn-note-text">${entry.text}</span>
+    </div>`;
+}
+
 /** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
 const PENDING_MS = 11 * 60_000;
 
@@ -2752,6 +2760,10 @@ function EntryView({ entry }) {
 
     if (entry.kind === "note") {
         return html`<${NoteEntry} entry=${entry} />`;
+    }
+
+    if (entry.kind === "turnNote") {
+        return html`<${TurnNoteEntry} entry=${entry} />`;
     }
 
     if (entry.kind === "user") {

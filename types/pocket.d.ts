@@ -258,6 +258,12 @@ export interface Host {
      */
     commandEnv(provider: CommandEnvProvider): () => void;
     /**
+     * Adds a note for the model right after a person's message, as a separate entry of the transcript: `annotate` returns its text, or undefined for none. The note is stored once, in the same commit as the message, and stays in context like any entry. Only a message placed at once (an idle conversation with nothing queued) gets notes. `name` (1 to 60 letters, digits, `.`, `_`, `:`, `-`) shows with each note. Returns how to stop: pass it to `web.onDispose`.
+     * @since 0.30.0
+     * @experimental
+     */
+    annotateTurns(name: string, annotate: TurnAnnotator): () => void;
+    /**
      * A session's browser page, the one Pi and people use: opened when `open` is true, else only when it is open already. Undefined while the Browser module is off.
      * @since 0.22.0
      * @experimental
@@ -742,6 +748,63 @@ export interface CommandRun {
 export type CommandEnvProvider = (
     run: CommandRun,
 ) => Record<string, string> | undefined | Promise<Record<string, string> | undefined>;
+
+/**
+ * One person's message, as a `host.annotateTurns` annotator gets it before Pi answers.
+ * @since 0.30.0
+ * @experimental
+ */
+export interface Turn {
+    /**
+     * The session.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly conversationId: number;
+    /**
+     * The id of the person whose message it is.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly by: string;
+    /**
+     * What sent it for them (PiP, a linked session, a webhook), when it is not their own typing.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly via?: string;
+    /**
+     * Their words as stored: hidden values hidden, attachments left out.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly text: string;
+    /**
+     * When the message came, in milliseconds since 1970.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly at: number;
+    /**
+     * The newest time in the session's model context before this message: a message, an answer, or a tool result. Undefined in a new session.
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly previousActivityAt?: number;
+    /**
+     * Aborts when the time for annotators ends (2 seconds).
+     * @since 0.30.0
+     * @experimental
+     */
+    readonly signal: AbortSignal;
+}
+
+/**
+ * Gives the text of a note for one turn, or nothing. At most 4,000 characters.
+ * @since 0.30.0
+ * @experimental
+ */
+export type TurnAnnotator = (turn: Turn) => string | undefined | Promise<string | undefined>;
 
 /**
  * What an extension points at on a page: a ref from the snapshot, a CSS selector, a visible label, or a point.
