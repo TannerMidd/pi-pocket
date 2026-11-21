@@ -60,7 +60,7 @@ The desktop app checks the package before it starts it: when `app\` holds an old
 
 ## Uninstall
 
-Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits the app, stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` (with the window's Edge profile) and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
+Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits the app, stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` (with the window's Edge profile) and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT /SUPPRESSMSGBOXES`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
 
 ## Silent install
 
