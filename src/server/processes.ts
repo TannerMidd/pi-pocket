@@ -1153,10 +1153,6 @@ class WindowsProcesses implements TaskProcesses {
         if (known === undefined) {
             known = new Map();
 
-            if (task.pid > 0 && task.startTicks !== undefined) {
-                known.set(task.pid, task.startTicks);
-            }
-
             try {
                 for (const line of readFileSync(`${task.files}.pids`, "utf8").split("\n")) {
                     const [pid, start] = line.split(" ").map(Number);
@@ -1170,6 +1166,11 @@ class WindowsProcesses implements TaskProcesses {
             }
 
             this.#known.set(task.marker, known);
+        }
+
+        // Also when a look before its start (a stop with no pid yet) made the map: the first process is always known.
+        if (task.pid > 0 && task.startTicks !== undefined) {
+            known.set(task.pid, task.startTicks);
         }
 
         return known;
