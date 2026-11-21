@@ -258,7 +258,7 @@ export interface Host {
      */
     commandEnv(provider: CommandEnvProvider): () => void;
     /**
-     * Adds a note for the model right after a person's message, as a separate entry of the transcript: `annotate` returns its text, or undefined for none. The note is stored once, in the same commit as the message, and stays in context like any entry. Only a message placed at once (an idle conversation with nothing queued) gets notes. `name` (1 to 60 letters, digits, `.`, `_`, `:`, `-`) shows with each note. Returns how to stop: pass it to `web.onDispose`.
+     * Adds a note for the model right after a person's message, as a separate entry of the transcript: `annotate` returns its text, or undefined for none. The note is stored once, in the same commit as the message, and stays in context like any entry. Only a message placed at once (an idle conversation with nothing queued) gets notes. `name` (1 to 60 letters, digits, `.`, `_`, `:`, `-`) shows with each note, and the model reads `Note from extension <name>:` before each note's text. Returns how to stop: pass it to `web.onDispose`.
      * @since 0.30.0
      * @experimental
      */

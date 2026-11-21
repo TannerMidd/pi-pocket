@@ -9,6 +9,7 @@ An extension can add a short note for the model to a person's message. For examp
 - A note is a separate entry in the transcript, right after the person's message. The person's message, its attachments, and its sender do not change.
 - Pi Pocket stores the note in the same commit as the message. A restart cannot lose it or write it two times. A retry of a message that is already stored does not ask the annotators again. Two tries of one message at the same moment can both ask them, but only one note is stored.
 - The model reads the note as a user message, on this turn and on all later turns, until compaction or a reset removes it. Compaction treats it like any other entry.
+- The model reads the note's source first: `Note from extension <name>:` on its own line, then the text. `<name>` is the name the module gave to `annotateTurns`, and a note cannot change it. So a note that tries to look like a person or another source still shows where it came from. Pi Pocket writes this label into the stored entry one time, when it stores the note.
 - A note never starts a run. The person's message starts the run, as usual.
 - Pi Pocket writes the text one time and does not compute it again. Nothing older in the transcript changes, so the provider's prompt cache stays valid for each earlier request.
 - The transcript shows the note as "Note for Pi from `name`", with its first 3 lines of text. A tap shows all of it. It never shows as a person's words.

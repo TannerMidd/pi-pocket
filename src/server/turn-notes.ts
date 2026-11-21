@@ -4,7 +4,8 @@
  * conversation is idle and has no queued items, so the note goes in the same commit as the message. A queued message
  * gets none, since Pi Durable places queued writes at the next boundary, not with the message.
  *
- * A note is written once and stored. Nothing recomputes it, and nothing older in the transcript changes, so the
+ * The model reads each note after a label with the name its annotator was added with (`modelText`). A note is written
+ * once and stored. Nothing recomputes it, and nothing older in the transcript changes, so the
  * provider's prompt cache keeps every earlier request.
  */
 import type { Context } from "@earendil-works/chord/context";
@@ -136,7 +137,7 @@ export class TurnNotes {
                         model: [
                             {
                                 role: "user",
-                                content: [{ type: "text", text: note.text }],
+                                content: [{ type: "text", text: modelText(note) }],
                                 timestamp,
                             },
                         ],
@@ -228,6 +229,14 @@ export class TurnNotes {
 
         return results.filter((note) => note !== undefined);
     }
+}
+
+/**
+ * What the model reads of a note: its source first, the name its annotator was added with, then its text. The text
+ * cannot come first, so a note that tries to look like a person or another source still shows where it came from.
+ */
+export function modelText(note: TurnNoteData): string {
+    return `Note from extension ${note.source}:\n${note.text}`;
 }
 
 /** The newest timestamp of a model message among the conversation's last 32 entries, a reset's or not. */
