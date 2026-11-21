@@ -2,7 +2,7 @@
 
 Each release has `Pi-Pocket-Setup-<version>.exe` on its [GitHub release page](https://github.com/TannerMidd/pi-pocket/releases), with a `.sha256` file beside it. It installs Pi Pocket for your Windows account, with no admin rights and no Node.js of your own. Windows 10 (1809) or newer on x64, or Windows 11 on Arm through x64 emulation.
 
-The installer is thin: it puts Node.js and a small start script on the disk, then installs the `pi-pocket` npm package. Setup needs the internet for that step.
+The installer holds everything: Node.js, the `pi-pocket` package of its release with its dependencies, and the desktop app. Setup needs no internet and no npm, so it works behind a company proxy or firewall that blocks npm, and as soon as the release is out, before npm has it.
 
 ## SmartScreen
 
@@ -16,16 +16,16 @@ Get-FileHash .\Pi-Pocket-Setup-0.29.0.exe -Algorithm SHA256
 
 Everything goes in `%LOCALAPPDATA%\Pi Pocket` (`C:\Users\<you>\AppData\Local\Pi Pocket`):
 
-| Folder or file              | What it is                                                                                                                                                                   |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node\`                     | A portable Node.js LTS, the official `win-x64` zip. The build checks its SHA256 against the value pinned in [`packaging/windows/build.ps1`](../packaging/windows/build.ps1). |
-| `app\`                      | A private npm prefix that holds the `pi-pocket` package. It is yours, so updates from the app work.                                                                          |
-| `Pi Pocket.exe`             | The desktop app ([desktop-app.md](desktop-app.md)): the icon in the notification area and the window. Setup's build compiles it from `PiPocket.cs`.                          |
-| `pi-pocket.cmd`             | Starts the launcher with that Node.js and prefix, in a console. Arguments go to `pi-pocket` (`pi-pocket.cmd --help`).                                                        |
-| `stop-pi-pocket.ps1`        | What stops a running Pi Pocket for Setup and the uninstaller: the app, its launcher and server with the agents' commands, the window's Edge, and the tunnel.                 |
-| `Edge profile\`             | The Edge profile of the app's window, with its sign-in cookie.                                                                                                               |
-| `launcher.log`              | What the app's launcher and server print, and `launcher.old.log` from the run before. It has no sign-in link.                                                                |
-| `npm-cache\`, `install.log` | npm's cache, and what npm printed during Setup.                                                                                                                              |
+| Folder or file       | What it is                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node\`              | A portable Node.js LTS, the official `win-x64` zip. The build checks its SHA256 against the value pinned in [`packaging/windows/build.ps1`](../packaging/windows/build.ps1). |
+| `app\`               | A private npm prefix that holds the `pi-pocket` package. It is yours, so updates from the app work. The installer's build made it with npm, as `npm install --global` does.  |
+| `Pi Pocket.exe`      | The desktop app ([desktop-app.md](desktop-app.md)): the icon in the notification area and the window. Setup's build compiles it from `PiPocket.cs`.                          |
+| `pi-pocket.cmd`      | Starts the launcher with that Node.js and prefix, in a console. Arguments go to `pi-pocket` (`pi-pocket.cmd --help`).                                                        |
+| `stop-pi-pocket.ps1` | What stops a running Pi Pocket for Setup and the uninstaller: the app, its launcher and server with the agents' commands, the window's Edge, and the tunnel.                 |
+| `Edge profile\`      | The Edge profile of the app's window, with its sign-in cookie.                                                                                                               |
+| `launcher.log`       | What the app's launcher and server print, and `launcher.old.log` from the run before. It has no sign-in link.                                                                |
+| `npm-cache\`         | npm's cache, for in-app updates.                                                                                                                                             |
 
 Setup always uses its own Node.js, also when you have one: an update of your Node.js, or its removal, does not break Pi Pocket, and in-app updates always have a prefix that they can write. Your own Node.js and npm are not changed.
 
@@ -54,7 +54,9 @@ Some enterprise policies refuse links and junctions. Drop-in extensions work the
 
 ## Updates
 
-Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
+Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts; it needs npm's registry. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js and its own package; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
+
+The desktop app checks the package before it starts it: when `app\` holds an older `pi-pocket` than the app itself (an install that did not finish), it says so in a message and starts nothing. Run the same Setup again to put its package back.
 
 ## Uninstall
 
@@ -66,12 +68,12 @@ Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits t
 .\Pi-Pocket-Setup-0.29.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=startup
 ```
 
-Leave out `/TASKS=startup` for no sign-in shortcut. The exit code is 20 when the npm step fails; `install.log` says why.
+Leave out `/TASKS=startup` for no sign-in shortcut.
 
 ## How it is built
 
-[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. `Pi Pocket.exe` is compiled with the C# compiler of the .NET Framework 4.x in Windows itself (`csc.exe`), so it needs no download. It runs beside the npm publish and does not wait for it. Only a release build is signed, and only when the `windows-signing` environment has the signing secrets that the workflow names; limit that environment to `v*` tags and give it a reviewer.
+[`.github/workflows/windows-installer.yml`](../.github/workflows/windows-installer.yml) builds it on GitHub's Windows runner for each published release, with Inno Setup (its installer checked against a pinned SHA256 too), and attaches it to the release. [`packaging/bundle-app.mjs`](../packaging/bundle-app.mjs) makes `app\` there: with the pinned Node.js and its npm, it packs the release tag (with `npm-shrinkwrap.json`, as the npm release has it), installs that package globally into a new prefix without install scripts, and checks the version, the start script, the shrinkwrap, and that no dependency is for one platform only. `Pi Pocket.exe` is compiled with the C# compiler of the .NET Framework 4.x in Windows itself (`csc.exe`), so it needs no download. It runs beside the npm publish and does not need it. Only a release build is signed, and only when the `windows-signing` environment has the signing secrets that the workflow names; limit that environment to `v*` tags and give it a reviewer.
 
-[`.github/workflows/windows.yml`](../.github/workflows/windows.yml) runs on each pull request: it builds the installer with a package packed from the pull request, installs it silently, starts the console launcher, checks that it answers HTTP and that the sign-in link works, and stops it. Then it opens the app from its Start menu entry, and checks that no console window shows, that Edge's window signed in with a one-time link, that a second start opens the first, and that **Quit** stops everything; it starts the app as the Startup shortcut does, and uninstalls it while it runs. It also runs `npm run check` and the part of the test suite that passes on Windows.
+[`.github/workflows/windows.yml`](../.github/workflows/windows.yml) runs on each pull request: it builds the installer with the package of the pull request, blocks npm's registry (its names in `hosts`, and an `NPM_CONFIG_REGISTRY` that refuses), installs it silently, starts the console launcher, checks that it answers HTTP and that the sign-in link works, and stops it. Then it opens the app from its Start menu entry, and checks that no console window shows, that Edge's window signed in with a one-time link, that a second start opens the first, and that **Quit** stops everything. With an older version in the package's `package.json`, the app must show its message and start nothing, and Setup must put its own package back; with a newer one, Setup must keep it. It starts the app as the Startup shortcut does, and uninstalls it while it runs. It also runs `npm run check` and the part of the test suite that passes on Windows.
 
 Windows is still the least tested platform. The browser tests and most of the test suite do not run on Windows yet, and the app has been tried only on GitHub's runners, not yet on a PC of its own.

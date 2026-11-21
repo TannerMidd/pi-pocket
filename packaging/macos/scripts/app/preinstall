@@ -1,6 +1,8 @@
 #!/bin/bash
 # Runs before the payload goes in, as the user (the package installs in the home folder only): it stops a running
-# Pi Pocket of this install, and removes the old Node.js, so that no file of an older one stays in the new one.
+# Pi Pocket of this install, and removes the old Node.js, so that no file of an older one stays in the new one. It also
+# removes what an earlier install left: an app folder that was not put in place, and the files of the installs that
+# got the package from npm (install-app.mjs, and the tarball of a CI build).
 # $2 is the install folder, ~/Library/Application Support/Pi Pocket.
 set -u
 APP="$2"
@@ -24,4 +26,5 @@ if ! stop_pi_pocket; then
     exit 1
 fi
 
-rm -rf "$APP/node" "$APP/Pi Pocket.app" "$APP/Pi Pocket (console).app" "$APP/Pi Pocket at sign-in.command"
+rm -rf "$APP/node" "$APP/Pi Pocket.app" "$APP/Pi Pocket (console).app" "$APP/Pi Pocket at sign-in.command" \
+    "$APP/app.new" "$APP/app.old" "$APP/install-app.mjs" "$APP"/pi-pocket-*.tgz

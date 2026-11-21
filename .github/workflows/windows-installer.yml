@@ -1,6 +1,7 @@
 # Builds the Windows installer (packaging/windows) for each published release, and attaches
 # Pi-Pocket-Setup-<version>.exe and its SHA256 to the release. It runs beside publish.yml and does not wait for it: a
-# failure here does not stop or change the npm publish. Setup gets pi-pocket@<version> from npm when it runs.
+# failure here does not stop or change the npm publish. Setup holds the package of the release tag with its dependencies
+# (packaging/bundle-app.mjs packs the tag here), so it needs neither npm nor the npm release when it runs.
 #
 # A run by hand builds the installer for an existing tag (gh workflow run windows-installer.yml -f tag=v0.29.0) from
 # the branch it runs on, as a workflow artifact only: it attaches nothing to the release.
@@ -59,6 +60,8 @@ jobs:
                       exit 1
                   fi
                   echo "version=$version" >> "$GITHUB_OUTPUT"
+                  # The package to bundle is the tag's, also for a run by hand on another branch.
+                  git worktree add --detach "$RUNNER_TEMP/source" "refs/tags/$TAG"
 
             # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
             - name: Build the installer
@@ -83,7 +86,7 @@ jobs:
                       } else {
                           Write-Host "No signing secrets: the installer is unsigned."
                       }
-                      ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir $out -SignThumbprint $thumbprint
+                      ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir $out -Source (Join-Path $env:RUNNER_TEMP "source") -SignThumbprint $thumbprint
                   } finally {
                       if ($thumbprint) {
                           Remove-Item -Force -DeleteKey "Cert:\CurrentUser\My\$thumbprint"

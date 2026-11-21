@@ -1,11 +1,13 @@
 # Checks Pi Pocket on macOS for each pull request. It publishes nothing.
-# - installer: on Apple silicon and on Intel, builds the package (packaging/macos) with a package packed from this
-#   checkout, installs it for the current user without sudo, starts the console launcher without its menu, checks
-#   that it answers HTTP and that the sign-in link works, and uninstalls it while it runs, which must stop it and keep
-#   the data folder. Then it installs it again with the sign-in item and opens Pi Pocket.app: no Terminal, a server on
-#   this Mac only, a window that signed in with a one-time link, one instance only, and Quit that stops it all. It
-#   starts the sign-in item (the app in the menu bar only), installs over the running Pi Pocket (which keeps the
-#   sign-in item), and uninstalls it with the data.
+# - installer: on Apple silicon and on Intel, builds the package (packaging/macos) with the package of this checkout
+#   in it, then blocks npm, as a company network can: the install and Pi Pocket must work without it. It installs it
+#   for the current user without sudo, starts the console launcher without its menu, checks that it answers HTTP and
+#   that the sign-in link works, and uninstalls it while it runs, which must stop it and keep the data folder. Then it
+#   installs it again with the sign-in item and opens Pi Pocket.app: no Terminal, a server on this Mac only, a window
+#   that signed in with a one-time link, one instance only, and Quit that stops it all. An older package makes the app
+#   show its error and start nothing, and an install puts its own package back; a newer one stays. It starts the
+#   sign-in item (the app in the menu bar only), installs over the running Pi Pocket (which keeps the sign-in item),
+#   and uninstalls it with the data.
 # - checks: the type check and the test suite, without the tests that do not pass on macOS yet (docs/macos.md says
 #   which, and why).
 name: macOS
@@ -43,13 +45,12 @@ jobs:
               with:
                   node-version: 26
 
-            - name: Pack this checkout
+            - name: Read the version
               run: |
                   version="$(node -p "require('./package.json').version")"
-                  npm pack --pack-destination "$RUNNER_TEMP"
                   {
                       echo "VERSION=$version"
-                      echo "PACKAGE=$RUNNER_TEMP/pi-pocket-$version.tgz"
+                      echo "MANIFEST=$HOME/Library/Application Support/Pi Pocket/app/lib/node_modules/pi-pocket/package.json"
                       echo "PKG=$RUNNER_TEMP/pkg/Pi-Pocket-$version.pkg"
                       echo "APP=$HOME/Library/Application Support/Pi Pocket"
                       echo "BUNDLE=$HOME/Applications/Pi Pocket.app"
@@ -60,7 +61,9 @@ jobs:
                   } >> "$GITHUB_ENV"
 
             - name: Build the package
-              run: packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/pkg" --package "$PACKAGE"
+              run: |
+                  packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/pkg"
+                  echo "The package is $(du -h "$PKG" | cut -f 1)"
 
             - name: Check the package
               run: |
@@ -74,17 +77,41 @@ jobs:
                   installer -pkg "$PKG" -target CurrentUserHomeDirectory -showChoicesXML > "$RUNNER_TEMP/choices-shown.plist"
                   plutil -p "$RUNNER_TEMP/choices-shown.plist"
 
+            # From here on, nothing reaches npm's registry: its names point to this Mac, where nothing listens, and npm
+            # gets an address that refuses.
+            - name: Block npm, as a company network can
+              run: |
+                  printf '\n127.0.0.1 registry.npmjs.org\n127.0.0.1 registry.npmjs.com\n::1 registry.npmjs.org\n::1 registry.npmjs.com\n' | sudo tee -a /etc/hosts > /dev/null
+                  sudo dscacheutil -flushcache
+                  sudo killall -HUP mDNSResponder || true
+                  echo "NPM_CONFIG_REGISTRY=http://127.0.0.1:9/" >> "$GITHUB_ENV"
+                  if NPM_CONFIG_REGISTRY=http://127.0.0.1:9/ npm view pi-pocket version --fetch-retries=0 --prefer-online; then
+                      echo "npm still reaches a registry"
+                      exit 1
+                  fi
+                  if curl -s -o /dev/null --max-time 10 https://registry.npmjs.org/pi-pocket; then
+                      echo "registry.npmjs.org still answers"
+                      exit 1
+                  fi
+                  echo "registry.npmjs.org is blocked"
+
             - name: Install for the current user, without sudo
               run: |
                   installer -pkg "$PKG" -target CurrentUserHomeDirectory -verbose
                   cat "$APP/install.log"
-                  for file in node/bin/node node/bin/npm pi-pocket "Pi Pocket.command" uninstall.sh \
-                      app/lib/node_modules/pi-pocket/bin/pi-pocket.js; do
+                  for file in node/bin/node node/bin/npm pi-pocket "Pi Pocket.command" uninstall.sh place-app.mjs \
+                      app/bin/pi-pocket app/lib/node_modules/pi-pocket/bin/pi-pocket.js; do
                       if [ ! -e "$APP/$file" ]; then
                           echo "The package did not install $file"
                           exit 1
                       fi
                   done
+                  installed="$("$APP/node/bin/node" -p "require(process.argv[1]).version" "$MANIFEST")"
+                  if [ "$installed" != "$VERSION" ] || [ -e "$APP/app.new" ] || [ -e "$APP/app.old" ]; then
+                      echo "The package left pi-pocket $installed, not $VERSION, or app.new or app.old"
+                      exit 1
+                  fi
+                  echo "The package installed pi-pocket $installed, with $(find "$APP/app" -type f | wc -l | tr -d ' ') files in app/"
                   if [ -e "$APP/Pi Pocket.app" ] || [ ! -x "$BUNDLE/Contents/MacOS/Pi Pocket" ]; then
                       echo "Pi Pocket.app is not in ~/Applications"
                       exit 1
@@ -334,6 +361,76 @@ jobs:
                       exit 1
                   fi
 
+            - name: An older package makes the app show its error, and an install puts its own back
+              run: |
+                  cp "$MANIFEST" "$RUNNER_TEMP/package.json"
+                  "$APP/node/bin/node" -e '
+                      const fs = require("node:fs");
+                      const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                      manifest.version = process.argv[2];
+                      fs.writeFileSync(process.argv[1], JSON.stringify(manifest, null, 2));
+                  ' "$MANIFEST" 0.0.1
+                  open "$BUNDLE"
+                  expected="The pi-pocket package of Pi Pocket is version 0.0.1, older than this app ($VERSION)."
+                  for try in $(seq 1 60); do
+                      if grep -qF "$expected" "$LOG"; then
+                          break
+                      fi
+                      sleep 1
+                  done
+                  cat "$LOG"
+                  if ! grep -qF "$expected" "$LOG"; then
+                      echo "The app did not say that the package is older"
+                      exit 1
+                  fi
+                  sleep 3
+                  screencapture -x "$RUNNER_TEMP/macos-app-older-${{ matrix.arch }}.png" || true
+                  app="$(pgrep -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" || true)"
+                  started="$(pgrep -f "Pi Pocket/app/lib/node_modules/pi-pocket" || true)"
+                  pkill -9 -f "Pi Pocket.app/Contents/MacOS/Pi Pocket" || true
+                  if [ -z "$app" ]; then
+                      echo "The app exited without its alert"
+                      exit 1
+                  fi
+                  if [ -n "$started" ]; then
+                      echo "The app started the older package"
+                      exit 1
+                  fi
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory
+                  installed="$("$APP/node/bin/node" -p "require(process.argv[1]).version" "$MANIFEST")"
+                  if [ "$installed" != "$VERSION" ]; then
+                      echo "The install left pi-pocket $installed, not $VERSION"
+                      exit 1
+                  fi
+                  echo "The install put pi-pocket $installed back"
+
+            - name: An install keeps a newer package that the app updated to
+              run: |
+                  "$APP/node/bin/node" -e '
+                      const fs = require("node:fs");
+                      const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                      manifest.version = process.argv[2];
+                      fs.writeFileSync(process.argv[1], JSON.stringify(manifest, null, 2));
+                  ' "$MANIFEST" 99.0.0
+                  installer -pkg "$PKG" -target CurrentUserHomeDirectory
+                  cat "$APP/install.log"
+                  installed="$("$APP/node/bin/node" -p "require(process.argv[1]).version" "$MANIFEST")"
+                  if [ "$installed" != 99.0.0 ] || [ -e "$APP/app.new" ]; then
+                      echo "The install replaced the newer pi-pocket with $installed, or left app.new"
+                      exit 1
+                  fi
+                  grep -qF "pi-pocket 99.0.0 is newer than $VERSION: it stays." "$APP/install.log"
+                  cp "$RUNNER_TEMP/package.json" "$MANIFEST"
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              if: always()
+              continue-on-error: true
+              with:
+                  name: macos-app-older-screenshot-${{ matrix.arch }}
+                  path: ${{ runner.temp }}/macos-app-older-*.png
+                  if-no-files-found: ignore
+                  retention-days: 7
+
             - name: Start the sign-in item and check that it answers HTTP
               run: |
                   launchctl bootstrap "gui/$(id -u)" "$AGENT"
@@ -371,6 +468,7 @@ jobs:
                   fi
                   [ -x "$BUNDLE/Contents/MacOS/Pi Pocket" ]
                   [ -f "$APP/app/lib/node_modules/pi-pocket/bin/pi-pocket.js" ]
+                  [ "$("$APP/node/bin/node" -p "require(process.argv[1]).version" "$MANIFEST")" = "$VERSION" ]
 
             - name: Uninstall with the data
               run: |

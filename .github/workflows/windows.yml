@@ -1,9 +1,11 @@
 # Checks Pi Pocket on Windows for each pull request. It publishes nothing.
-# - installer: builds the installer (packaging/windows) with a package packed from this checkout, installs it
-#   silently, starts the console launcher without its menu, checks that it answers HTTP and that the sign-in link
-#   works, and stops it. Then it opens the desktop app (Pi Pocket.exe) as the Start menu does: no console window, a
-#   server on this PC only, an Edge app window that signed in with a one-time link, one instance only, and Quit that
-#   stops it all. It uninstalls while the app runs, which must stop it and keep the data folder.
+# - installer: builds the installer (packaging/windows) with the package of this checkout in it, then blocks npm, as a
+#   company network can: Setup and Pi Pocket must work without it. It installs silently, starts the console launcher
+#   without its menu, checks that it answers HTTP and that the sign-in link works, and stops it. Then it opens the
+#   desktop app (Pi Pocket.exe) as the Start menu does: no console window, a server on this PC only, an Edge app window
+#   that signed in with a one-time link, one instance only, and Quit that stops it all. An older package makes the app
+#   show its error and start nothing, and Setup puts its own package back; a newer one stays. It uninstalls while the
+#   app runs, which must stop it and keep the data folder.
 # - checks: the type check and the part of the test suite that is known to pass on Windows, with the background task
 #   and quiet-limit tests.
 name: Windows
@@ -36,26 +38,47 @@ jobs:
               with:
                   node-version: 26
 
-            - name: Pack this checkout
+            - name: Read the version
               run: |
                   $version = node -p "require('./package.json').version"
-                  npm pack --pack-destination $env:RUNNER_TEMP
-                  if ($LASTEXITCODE -ne 0) { throw "npm pack failed" }
                   "VERSION=$version" >> $env:GITHUB_ENV
-                  "PACKAGE=$(Join-Path $env:RUNNER_TEMP "pi-pocket-$version.tgz")" >> $env:GITHUB_ENV
                   "APP=$(Join-Path $env:LOCALAPPDATA 'Pi Pocket')" >> $env:GITHUB_ENV
+                  "SETUP=$(Join-Path $env:RUNNER_TEMP "setup\Pi-Pocket-Setup-$version.exe")" >> $env:GITHUB_ENV
+                  "MANIFEST=$(Join-Path $env:LOCALAPPDATA 'Pi Pocket\app\node_modules\pi-pocket\package.json')" >> $env:GITHUB_ENV
 
             - name: Build the installer
-              run: ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir (Join-Path $env:RUNNER_TEMP "setup")
+              run: |
+                  ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir (Join-Path $env:RUNNER_TEMP "setup")
+                  Write-Host "Setup is $([math]::Round((Get-Item $env:SETUP).Length / 1MB, 1)) MB"
+
+            # From here on, nothing reaches npm's registry: its names point to this PC, where nothing listens, and npm
+            # gets an address that refuses.
+            - name: Block npm, as a company network can
+              run: |
+                  $hosts = Join-Path $env:WINDIR "System32\drivers\etc\hosts"
+                  Add-Content -Path $hosts -Value "`r`n127.0.0.1 registry.npmjs.org`r`n127.0.0.1 registry.npmjs.com`r`n::1 registry.npmjs.org`r`n::1 registry.npmjs.com`r`n"
+                  ipconfig /flushdns | Out-Null
+                  "NPM_CONFIG_REGISTRY=http://127.0.0.1:9/" >> $env:GITHUB_ENV
+                  $env:NPM_CONFIG_REGISTRY = "http://127.0.0.1:9/"
+                  npm view pi-pocket version --fetch-retries=0 --prefer-online
+                  if ($LASTEXITCODE -eq 0) { throw "npm still reaches a registry" }
+                  $reached = $false
+                  try {
+                      Invoke-WebRequest -Uri "https://registry.npmjs.org/pi-pocket" -UseBasicParsing -TimeoutSec 10 | Out-Null
+                      $reached = $true
+                  } catch {
+                      Write-Host "registry.npmjs.org is blocked: $($_.Exception.Message)"
+                  }
+                  if ($reached) { throw "registry.npmjs.org still answers" }
+                  # npm's failure above is the expected one: it must not be the step's exit code.
+                  exit 0
 
             - name: Install silently
               run: |
-                  $setup = Join-Path $env:RUNNER_TEMP "setup\Pi-Pocket-Setup-$env:VERSION.exe"
                   $log = Join-Path $env:RUNNER_TEMP "setup.log"
-                  $run = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @(
-                      "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log", "/PACKAGE=$env:PACKAGE"
+                  $run = Start-Process -FilePath $env:SETUP -Wait -PassThru -ArgumentList @(
+                      "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log"
                   )
-                  Get-Content (Join-Path $env:APP "install.log") -ErrorAction SilentlyContinue
                   if ($run.ExitCode -ne 0) {
                       Get-Content $log
                       throw "Setup exited with $($run.ExitCode)"
@@ -66,11 +89,17 @@ jobs:
                       "pi-pocket.cmd",
                       "Pi Pocket.exe",
                       "app\node_modules\pi-pocket\bin\pi-pocket.js",
+                      "app\setup-finished.txt",
                       "unins000.exe"
                   )
                   foreach ($file in $expected) {
                       if (-not (Test-Path (Join-Path $env:APP $file))) { throw "Setup did not install $file" }
                   }
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne $env:VERSION) { throw "Setup installed pi-pocket $installed, not $env:VERSION" }
+                  if (Test-Path (Join-Path $env:APP "install-app.mjs")) { throw "Setup installed install-app.mjs" }
+                  $count = @(Get-ChildItem -Recurse -File (Join-Path $env:APP "app")).Count
+                  Write-Host "Setup installed pi-pocket $installed, with $count files in app\"
                   $shell = New-Object -ComObject WScript.Shell
                   $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
                   foreach ($each in @(@("Pi Pocket.lnk", "Pi Pocket.exe"), @("Pi Pocket (console).lnk", "pi-pocket.cmd"))) {
@@ -235,6 +264,76 @@ jobs:
                       throw "Port 8787 still answers after Quit"
                   } catch [System.Net.Http.HttpRequestException] {}
                   Get-Content (Join-Path $env:APP "launcher.log")
+
+            - name: An older package makes the app show its error, and Setup puts its own back
+              run: |
+                  $text = Get-Content -Raw $env:MANIFEST
+                  $older = $text -replace ('"version":\s*"' + [regex]::Escape($env:VERSION) + '"'), '"version": "0.0.1"'
+                  if ($older -eq $text) { throw "No version $env:VERSION in $env:MANIFEST" }
+                  [IO.File]::WriteAllText($env:MANIFEST, $older)
+                  $app = Start-Process -FilePath (Join-Path $env:APP "Pi Pocket.exe") -PassThru
+                  $log = Join-Path $env:APP "launcher.log"
+                  $expected = "The pi-pocket package of Pi Pocket is version 0.0.1, older than this app ($env:VERSION)."
+                  $said = $false
+                  for ($try = 0; $try -lt 60 -and -not $said; $try++) {
+                      Start-Sleep -Seconds 1
+                      $said = (Test-Path $log) -and (Select-String -Path $log -SimpleMatch $expected -Quiet)
+                  }
+                  Get-Content $log -ErrorAction SilentlyContinue
+                  if (-not $said) { throw "The app did not say that the package is older" }
+                  $app.Refresh()
+                  for ($try = 0; $try -lt 20 -and -not $app.HasExited -and $app.MainWindowHandle -eq 0; $try++) {
+                      Start-Sleep -Milliseconds 500
+                      $app.Refresh()
+                  }
+                  if ($app.HasExited) { throw "The app exited without its message window" }
+                  Write-Host "The app shows the window '$($app.MainWindowTitle)'"
+                  if ($app.MainWindowHandle -eq 0 -or $app.MainWindowTitle -ne "Pi Pocket") { throw "The app shows no message window" }
+                  try {
+                      Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+                      $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                      $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+                      [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+                      $bitmap.Save((Join-Path $env:RUNNER_TEMP "windows-app-older.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+                  } catch {
+                      Write-Host "No screenshot: $($_.Exception.Message)"
+                  }
+                  $nodes = @(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$env:APP\*" })
+                  Stop-Process -Id $app.Id -Force
+                  if ($nodes.Count -gt 0) { throw "The app started the older package" }
+                  $run = Start-Process -FilePath $env:SETUP -Wait -PassThru -ArgumentList @(
+                      "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$(Join-Path $env:RUNNER_TEMP 'setup-again.log')"
+                  )
+                  if ($run.ExitCode -ne 0) { throw "Setup exited with $($run.ExitCode)" }
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne $env:VERSION) { throw "Setup left pi-pocket $installed, not $env:VERSION" }
+                  Write-Host "Setup put pi-pocket $installed back"
+
+            - name: Setup keeps a newer package that the app updated to
+              run: |
+                  $text = Get-Content -Raw $env:MANIFEST
+                  [IO.File]::WriteAllText($env:MANIFEST, ($text -replace ('"version":\s*"' + [regex]::Escape($env:VERSION) + '"'), '"version": "99.0.0"'))
+                  $log = Join-Path $env:RUNNER_TEMP "setup-newer.log"
+                  $run = Start-Process -FilePath $env:SETUP -Wait -PassThru -ArgumentList @(
+                      "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log"
+                  )
+                  if ($run.ExitCode -ne 0) { throw "Setup exited with $($run.ExitCode)" }
+                  Select-String -Path $log -SimpleMatch "pi-pocket"
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne "99.0.0") { throw "Setup replaced the newer pi-pocket with $installed" }
+                  if (-not (Select-String -Path $log -SimpleMatch "pi-pocket 99.0.0 is newer than $env:VERSION" -Quiet)) {
+                      throw "Setup's log does not say that the newer package stays"
+                  }
+                  [IO.File]::WriteAllText($env:MANIFEST, $text)
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              if: always()
+              continue-on-error: true
+              with:
+                  name: windows-app-older-screenshot
+                  path: ${{ runner.temp }}/windows-app-older.png
+                  if-no-files-found: ignore
+                  retention-days: 7
 
             - name: Start the app without a window, as the sign-in shortcut does
               run: |
