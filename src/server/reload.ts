@@ -214,12 +214,10 @@ function moduleFiles(directory: string): string[] {
 }
 
 /**
- * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages for editors and other tools. Drop-ins
- * import Pi Pocket's packages without it too (`documentImports` resolves them), and get the very modules the server
- * runs. A `node_modules` folder the owner made there stays as it is; a link to another place is replaced. Where npm
- * split Pi Pocket's packages between folders (a local install beside other versions of them), `packageModules` says
- * where each is, and the link leads to a hidden folder with a link to each one instead. A link the system refuses (an
- * enterprise policy, say) is left out: the first such error comes back, for one line in the log.
+ * Make the drop-in folder, with a `node_modules` link to Pi Pocket's own packages for editors; drop-ins import them
+ * without it too. A `node_modules` folder the owner made stays; a link to another place is replaced. Where npm split
+ * the packages between folders, the link leads to a hidden folder with a link to each. A link the system refuses is
+ * left out: the first such error comes back, for one line in the log.
  */
 export function prepareDropInFolder(
     directory: string,

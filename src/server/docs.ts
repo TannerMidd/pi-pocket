@@ -27,9 +27,8 @@ const rebased = {
 };
 
 /**
- * As `rebased`, and a change that deletes a whole item (`items.<id>`) is a base too: the storage drops the revisions
- * before it, so what was deleted (an artifact, its share, its saved state, its comments: `artifacts.ts`) is not kept in
- * them. A smaller delete, such as one person's saved state, stays a delta.
+ * A change that deletes a whole item (`items.<id>`) is a base too: the storage drops the revisions before it, so what
+ * was deleted (`artifacts.ts`) is not kept in them.
  */
 const rebasedOnDelete = {
     checkpointWhen: (_value: unknown, ops: unknown, info: CheckpointInfo) =>
@@ -69,29 +68,25 @@ export type SessionMeta = {
 };
 
 /**
- * A session the owner removed from the app (`session-cleanup.ts`): its catalogue entry went in the same commit that
- * wrote this. Its transcript stays in storage until Pi Durable can purge a conversation; `conversations` are the ones
- * such a purge takes. `done` is when Pocket's own files went: until then, each start goes on with them.
+ * Its catalogue entry went in the same commit that wrote this. `conversations`: what a later purge takes. `done`: when
+ * Pocket's own files went; until then, each start goes on with them.
  */
 export type RemovedSession = {
     title?: string;
     cwd: string;
-    /** The session and its subagents' conversations. */
     conversations: number[];
-    /** Who removed it, and when. */
     by: string;
     at: number;
     worktree?: Worktree;
     /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
     forkedFrom?: { id: number; entryId?: number };
-    /** Uploads folders a live fork still reads (`workspace.ts`), which stay. */
+    /** Uploads folders a live fork still reads (`workspace.ts`). */
     keepUploads?: number[];
     done?: number;
-    /** What could not be removed, in words, for the log. */
     left?: string[];
 };
 
-/** Sessions removed from the app, by id: the queue of a later purge. Stored data: never rename the kind. */
+/** Stored data: never rename the kind. */
 export const DeletedDoc = defineDoc<{ items: Record<string, RemovedSession> }>({
     kind: "pocket.deleted",
     version: 1,
@@ -267,11 +262,7 @@ export type ArtifactMeta = {
     versions: ArtifactVersion[];
 };
 
-/**
- * The artifacts of one conversation, newest version last. Bodies live in `ArtifactBodyDoc`. `ended` keeps the last
- * version number of each deleted artifact (`artifacts.ts`), so an artifact published again under its id never reuses
- * a number that a card in a reply names.
- */
+/** Newest version last. `ended`: each deleted artifact's last version number, so that a number is never reused. */
 export const ArtifactsDoc = defineDoc<{
     items: Record<string, ArtifactMeta>;
     ended?: Record<string, number>;
@@ -627,14 +618,9 @@ export type Schedule = {
     revision?: number;
     /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
     paused?: { at: number; by: string };
-    /**
-     * Compact before each sending: everything before the message it sent last is summarized, so a run starts on the
-     * last run and what was said since (`schedules.ts`).
-     */
+    /** Summarize everything before the message it sent last, before each sending (`schedules.ts`). */
     compactBefore?: true;
-    /**
-     * Set while this schedule compacts with its own cut: another schedule of the session does not compact meanwhile.
-     */
+    /** While this schedule compacts: another schedule of the session does not compact meanwhile. */
     compacting?: true;
 };
 

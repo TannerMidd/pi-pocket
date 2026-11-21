@@ -1,12 +1,7 @@
 /**
- * Deleting an artifact (`DELETE /api/c/:id/artifacts/:artifact`). One commit takes its index entry, its version
- * bodies, its share links, what its page saved, and its design comments, so after a restart it is either all there or
- * all gone. Each of those documents then stores a base, which drops the stored revisions that held them. Asset bytes
- * are shared by content hash with every version and session that has the same file: the commit puts the deleted
- * artifact's hashes on a durable list, and a sweep retires the bytes of each that no artifact in any conversation names
- * any more. The sweep runs after each delete and at startup, so one that a restart cut off finishes later.
- *
- * What stays: Pi's own messages, whose tool calls hold the text Pi sent, as the transcript is history.
+ * One commit deletes an artifact's index entry, versions, share links, saved state, and design comments, so a restart
+ * finds it all there or all gone. Asset bytes are shared by content hash: the commit lists the artifact's hashes, and a
+ * sweep, after each delete and at start, retires the bytes no artifact names. Pi's own messages stay, as history.
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, Cursor, Tx } from "@earendil-works/pi-durable";
@@ -25,10 +20,7 @@ import { HttpError } from "./errors.ts";
 
 const context = BACKGROUND_CONTEXT;
 
-/**
- * The number of an artifact's next version: one past its newest, or past the last one it had before it was deleted, so
- * a number never names two pages.
- */
+/** One past its newest, or past the last one it had before a delete, so that a number never names two pages. */
 export function nextVersion(
     doc: {
         items: Record<string, { versions: { version: number }[] }>;
@@ -58,13 +50,10 @@ export async function keepAssets(tx: Tx, hashes: Iterable<string>): Promise<void
     }
 }
 
-/** The asset sweep that the last delete started, which ends after the delete answers. */
+/** Ends after the delete answers. */
 export let sweeping: Promise<unknown> = Promise.resolve();
 
-/**
- * Delete one artifact of a conversation with all its versions. Anyone who sees the session and steers may; the API
- * checked the seeing. Its share links stop at once.
- */
+/** Anyone who sees the session and steers may: the API checked the seeing. */
 export async function deleteArtifact(
     app: PocketApp,
     conversation: ConversationId,
@@ -137,9 +126,8 @@ export async function deleteArtifact(
 }
 
 /**
- * Retire the bytes of each listed asset that no artifact in any conversation names: every conversation's index is
- * read, archived ones and subagents' too. A hash that a commit stored again, or listed again, while this read keeps its
- * bytes, or waits for the next sweep. Returns how many went.
+ * Reads every conversation's index, archived ones and subagents' too. A hash that a commit stored or listed again
+ * during this read keeps its bytes, or waits for the next sweep.
  */
 export async function sweepAssets(app: PocketApp): Promise<number> {
     const listed = { ...((await app.harness.snapshot(ArtifactSweepDoc, context))?.hashes ?? {}) };

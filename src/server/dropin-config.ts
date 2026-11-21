@@ -12,7 +12,6 @@ export const CONFIG_MARK =
 /** Conditions that lead to a package's types, in the order TypeScript reads them for an `import`. */
 const CONDITIONS = ["types", "import", "node", "default"];
 
-/** The types file an `exports` entry leads to, as a path in the package, or undefined when it has none. */
 function typesOf(entry: unknown, folder: string): string | undefined {
     if (typeof entry === "string") {
         if (/\.d\.[cm]?ts$/.test(entry)) {
@@ -46,7 +45,6 @@ function typesOf(entry: unknown, folder: string): string | undefined {
     return undefined;
 }
 
-/** `paths` entries for one package in `modules`: each of its exports leads to its types, as Node resolves it. */
 function pathsOf(name: string, modules: string): [string, string[]][] {
     const folder = join(modules, name);
     let manifest: { exports?: unknown };
@@ -91,11 +89,7 @@ function pathsOf(name: string, modules: string): [string, string[]][] {
     return paths;
 }
 
-/**
- * Write `tsconfig.json` in the drop-in folder: TypeScript's `paths` lead each of Pi Pocket's packages (`packageModules`
- * says where each is) to its types, and `typeRoots` to Node's own. A file the owner made stays as it is; Pi Pocket's
- * own is written again when its folders change (an update moves them).
- */
+/** A file the owner made stays as it is; Pi Pocket's own is written again when its folders change (an update). */
 export function writeDropInConfig(
     directory: string,
     packageModules: Readonly<Record<string, string>>,
@@ -105,9 +99,7 @@ export function writeDropInConfig(
 
     try {
         current = readFileSync(file, "utf8");
-    } catch {
-        // Missing: written below.
-    }
+    } catch {}
 
     if (current !== undefined && !current.startsWith(CONFIG_MARK)) {
         return;

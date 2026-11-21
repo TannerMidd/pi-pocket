@@ -655,7 +655,7 @@ export interface PocketHost {
     cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
-    /** Archived sessions cleaned up and removed from the app: the session cleanup module's routes are the owner's way to it. */
+    /** Archived sessions cleaned up and removed from the app. */
     readonly sessionCleanup: Pick<SessionCleanup, "plan" | "cleanUp" | "remove">;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
     readonly background: Pick<

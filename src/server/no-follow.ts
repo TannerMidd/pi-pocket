@@ -43,7 +43,6 @@ export function openNoFollowSync(path: string, flags: number = READ_FLAGS): numb
     return fd;
 }
 
-/** `openNoFollowSync`, as a `FileHandle`. */
 export async function openNoFollow(path: string, flags: number = READ_FLAGS): Promise<FileHandle> {
     const before = await lstat(path, { bigint: true });
 

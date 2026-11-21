@@ -13,10 +13,9 @@ const piAiUrl = new URL("./extension-pi-ai-compat.ts", import.meta.url).href;
 const appUrl = new URL("../../package.json", import.meta.url).href;
 const appRequire = createRequire(appUrl);
 
-/** What Node throws for a package it does not find, from `import` and from `require`. */
 const NOT_FOUND = new Set(["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND"]);
 
-/** A package name, not a path or a URL: `preact`, `@earendil-works/pi-mcp/oauth`. */
+/** Not a path or a URL: `preact`, `@earendil-works/pi-mcp/oauth`. */
 function isBare(specifier: string): boolean {
     return !/^(\.{0,2}\/|[a-zA-Z][a-zA-Z\d+.-]*:|#|\\)/.test(specifier);
 }

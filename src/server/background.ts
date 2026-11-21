@@ -288,7 +288,6 @@ export class BackgroundTasks {
     #sweeper: ReturnType<typeof setInterval> | undefined;
     /** Whether `split` was found. */
     #split = false;
-    /** How this platform finds, follows, and stops a task's processes. */
     readonly #procs: TaskProcesses = taskProcesses();
     /** The durable task behind each background command; the background extension installs it. */
     readonly task: Task<WatchInput, WatchState, null, object>;
@@ -482,7 +481,6 @@ export class BackgroundTasks {
         return items !== undefined && Object.hasOwn(items, id) ? items[id] : undefined;
     }
 
-    /** What a task's processes are known by. */
     #ref(conversationId: ConversationId, item: BackgroundTask): TaskRef {
         return {
             pid: item.pid,
@@ -1675,12 +1673,12 @@ export class BackgroundTasks {
         return (await this.list(conversationId)).find((item) => String(item.taskId) === taskId);
     }
 
-    /** Whether any process of a task's group runs, from what is known at once: for a count, tests, and checks. */
+    /** From what is known at once: for a count, tests, and checks. */
     alive(conversationId: ConversationId, item: BackgroundTask): boolean {
         return this.#procs.aliveSync(this.#ref(conversationId, item));
     }
 
-    /** Whether any process of a task runs, from a fresh look. */
+    /** From a fresh look. */
     aliveNow(conversationId: ConversationId, item: BackgroundTask): Promise<boolean> {
         return this.#alive(conversationId, item, true);
     }

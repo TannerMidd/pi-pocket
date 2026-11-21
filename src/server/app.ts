@@ -446,7 +446,6 @@ export class PocketApp {
     readonly folderFavorites = new FolderFavorites(this);
     /** Artifacts published to anyone with their address (`share.ts`), which needs no sign-in. */
     readonly shares = new Shares(this);
-    /** Archived sessions' worktrees removed, and sessions taken out of the app (`session-cleanup.ts`). */
     readonly sessionCleanup = new SessionCleanup(this);
     /** Extension modules' pages for anyone with the address (`public-links.ts`), which need no sign-in. */
     readonly publicLinks = new PublicLinks(this);
@@ -458,7 +457,6 @@ export class PocketApp {
     );
     /** What extensions add to the environment of each command (`hidden.ts`, `host.commandEnv`). */
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
-    /** What extensions add for the model after a person's message (`turn-notes.ts`, `host.annotateTurns`). */
     readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
@@ -503,7 +501,7 @@ export class PocketApp {
     /** Each conversation's subagents, and those with a report on its way to it: for the board and the session list. */
     readonly #subagents = new Map<ConversationId, SubagentsOf>();
     #sessions: Record<string, SessionMeta> = {};
-    /** The conversations of sessions removed from the app (`DeletedDoc`): nobody sees them again. */
+    /** The conversations of sessions removed from the app: nobody sees them again. */
     #removed = new Set<string>();
     /** The session each removed session was forked from: a live fork still reads its uploads through it. */
     #removedForks = new Map<string, NonNullable<SessionMeta["forkedFrom"]>>();

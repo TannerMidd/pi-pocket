@@ -1,74 +1,50 @@
 /**
- * How background tasks (`background.ts`) find, follow, and stop their processes, on each platform. A stop must never
- * hit a process that is not the task's, so each process is known by its pid and its start time together: a pid that
- * another process took later has another start time.
- *
- * - Linux reads `/proc`: each process's group, state, and start time, and its environment for the task's marker.
- * - macOS reads the same from `ps`: the process table in one call, and the environment of the user's own processes
- *   only at the moments that need it (an end, a stop, a recovery), kept for each process, as it cannot change.
- * - Both run a task as the leader of its own process group, and stop it with signals to the group, and to each process
- *   with its marker that left the group (`setsid`, a daemon).
- * - Windows has no process groups or signals, and one process cannot read another's environment. A task's processes
- *   are its first process and its descendants, by parent pid and start time, and the members of a job object that
- *   holds them all while this server runs. A small PowerShell helper reads the table, keeps the jobs, and ends a
- *   process only through a handle it opened and checked the start time of, so no pid taken in between can be hit. The
- *   processes found are written to a file next to the task's log, so a restarted server knows them again. A stop ends
- *   them by force at once: Windows has no polite stop for a program without a window.
+ * A stop must never hit a process that is not the task's: each process is known by its pid and its start time.
+ * Linux and macOS run a task as the leader of its own process group; its marker in the environment finds what left it.
+ * Windows has no groups, signals, or readable environments: a task is its first process, its descendants, and a job
+ * object, and a PowerShell helper ends a process only through a handle whose start time it checked.
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { win32 } from "node:path";
 
-/** The environment variable that marks each process of a task: `<data folder>#<conversation>/<id>`. */
 export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
 
-/** What a task's processes are known by. */
 export type TaskRef = {
-    /** The first process, the group's leader on Linux and macOS; 0 while it is not known. */
+    /** 0 while it is not known. */
     pid: number;
-    /** When it started, in the platform's clock: with `pid`, what says it is still the same process. */
     startTicks?: number;
     boot?: string;
-    /** The value of `BACKGROUND_MARKER` in its processes. */
     marker: string;
-    /** Its files, without an extension: `<folder>/<id>`. */
     files: string;
-    /** When its start was reserved (ms since 1970). */
     startedAt: number;
 };
 
 export type Signal = "SIGTERM" | "SIGKILL";
 
 export interface TaskProcesses {
-    /** This boot of the machine: a task from another boot has no process left. */
+    /** A task from another boot has no process left. */
     readonly boot: string | undefined;
-    /** Why tasks cannot run on this machine, or undefined when they can. */
     unsupported(): Promise<string | undefined>;
-    /** The bash that runs the wrapper; undefined when there is none. */
     shell(): string | undefined;
-    /** Start the wrapper detached, as its own group or job: its pid, and its start where it is read at once (Windows). */
     spawn(
         script: string,
         cwd: string,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
     ): Promise<{ pid: number; start?: number }>;
-    /** The start time of a process, for a task's record. */
     startOf(pid: number): Promise<number | undefined>;
-    /** The live processes of a task's group (Linux, macOS) or tree (Windows). */
     members(task: TaskRef, fresh?: boolean): Promise<number[]>;
-    /** Whether a task has a live process, at once, from what is known now: for a count while the watches are off. */
+    /** At once, from what is known now: for a count while the watches are off. */
     aliveSync(task: TaskRef): boolean;
-    /** The processes with a task's marker that run outside its group: what it left behind. */
+    /** The processes with the task's marker that run outside its group. */
     left(task: TaskRef): Promise<number[]>;
-    /** Of `pids` a task left, those that still run and are still its. */
     stillLeft(task: TaskRef, pids: readonly number[]): Promise<number[]>;
-    /** Send a signal to every process of a task, found afresh. */
     signal(task: TaskRef, name: Signal): Promise<void>;
-    /** End the process a start just spawned, before its record: a stop came first, or the record failed. */
+    /** Before the task's record: a stop came first, or the record failed. */
     killSpawned(task: TaskRef, pid: number): Promise<void>;
-    /** A start a crash cut off: the first process it finds of the task, with its start when that is sure. */
+    /** A start a crash cut off; `start` only when it is sure. */
     find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined>;
     close(): void;
 }
@@ -108,34 +84,23 @@ function spawnDetached(
     return child;
 }
 
-// ─── Linux and macOS ────────────────────────────────────────────────────────
-
 type Proc = { pid: number; pgid: number; state: string; start: number };
 
 const gone = (info: Proc) => info.state === "Z" || info.state === "X";
 
-/**
- * A view of the process table that answers at once. A read the view cannot answer yet (macOS: a table older than the
- * look, or an environment not read yet) is noted, and `fill` fetches it; the look then runs again.
- */
+/** A read the view cannot answer yet (macOS) is noted; `fill` fetches it, and the look runs again. */
 interface ProcTable {
     readonly boot: string | undefined;
-    /**
-     * Whether start times are whole seconds (macOS): a pid that another process took in the same second has the same
-     * start, so a leader counts only with the task's marker too.
-     */
+    /** Start times in whole seconds (macOS): a reused pid can have the same start, so a leader needs the marker too. */
     readonly coarse: boolean;
     unsupported(): string | undefined;
-    /** A new look starts: what is fresh is from after this moment. */
     begin(): void;
-    /** A process; `fresh`: from a table newer than the look's start. */
     stat(pid: number, fresh?: boolean): Proc | undefined;
     list(fresh: boolean): Proc[];
-    /** `guess`: the answer while the environment is not read yet (macOS), instead of a read. */
+    /** `guess`: the answer while the environment is not read yet (macOS). */
     marked(pid: number, marker: string, guess?: boolean): boolean;
-    /** Fetch what the reads since `begin` missed; false when they missed nothing. */
+    /** False when the reads since `begin` missed nothing. */
     fill(): Promise<boolean>;
-    /** Whether the view has a table at all, however old. */
     known(): boolean;
     forget(): void;
 }
@@ -160,7 +125,6 @@ class LinuxTable implements ProcTable {
 
     begin(): void {}
 
-    /** A process's group, state, and start time, from `/proc/<pid>/stat`. */
     stat(pid: number): Proc | undefined {
         try {
             const text = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -173,7 +137,7 @@ class LinuxTable implements ProcTable {
         }
     }
 
-    /** Every process's stat, read once for all the watches that look in the same moment. */
+    /** Shared by the watches that look in the same moment. */
     list(fresh: boolean): Proc[] {
         const now = Date.now();
 
@@ -198,7 +162,6 @@ class LinuxTable implements ProcTable {
         return all;
     }
 
-    /** Whether a process carries a marker in its environment; false for a process not ours to read. */
     marked(pid: number, marker: string): boolean {
         try {
             return readFileSync(`/proc/${pid}/environ`, "utf8")
@@ -265,7 +228,6 @@ function run(file: string, args: string[]): Promise<string> {
     });
 }
 
-/** The lines of `ps -o pid=,lstart=,command=` output by `pid:start`. */
 function byProcess(text: string): Map<string, string> {
     const lines = new Map<string, string>();
 
@@ -293,7 +255,7 @@ class DarwinTable implements ProcTable {
     })();
 
     #scan: { at: number; all: Proc[]; byPid: Map<number, Proc> } | undefined;
-    /** The environment of each process, by `pid:start`: it cannot change once the process runs. */
+    /** By `pid:start`: an environment cannot change once the process runs. */
     #env = new Map<string, string>();
     #epoch = 0;
     #wantScan = false;
@@ -431,7 +393,6 @@ class DarwinTable implements ProcTable {
 
         this.#scan = { at, all, byPid: table };
 
-        // What was kept for processes that are gone goes.
         for (const key of this.#env.keys()) {
             const [pid, start] = key.split(":").map(Number);
 
@@ -442,9 +403,8 @@ class DarwinTable implements ProcTable {
     }
 
     /**
-     * The environments of some processes. `ps -E` adds the environment to the command, joined by spaces, so the part
-     * after the command alone (from a second `ps` without `-E`) is the environment: an argument that names the marker
-     * is no marker. A process of another user shows no environment.
+     * `ps -E` adds the environment to the command; the command alone, from a second `ps`, is cut off, so an argument
+     * that names the marker is no marker. A process of another user shows no environment.
      */
     async #readEnv(pids: number[]): Promise<void> {
         const list = pids.join(",");
@@ -485,24 +445,18 @@ class DarwinTable implements ProcTable {
     }
 }
 
-/**
- * The live processes of a task's group. While its leader runs (the same pid, started at the same time), the group is
- * the task's; once the leader is gone, a member counts only while one carries the task's marker, so a group id that a
- * new process took after the task's ended is not taken for it.
- */
+/** Once the leader is gone, a member counts only while one carries the marker: a group id can be reused. */
 function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: boolean): number[] {
     if (item.pid <= 0 || (item.boot !== undefined && item.boot !== table.boot)) {
         return [];
     }
 
-    // Cheap first, as most looks go: no process in the group at all, or its leader still the same.
     if (!kill(-item.pid, 0)) {
         return [];
     }
 
     const first = table.stat(item.pid, fresh);
 
-    // The task's own leader: its start, and on macOS its marker too.
     const own = (leader: Proc) =>
         leader.start === item.startTicks &&
         (!table.coarse || table.marked(leader.pid, item.marker, guess));
@@ -517,7 +471,6 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: b
         return [item.pid];
     }
 
-    // The leader is gone and the group is not: what is left of it, from a scan.
     let group = table.list(fresh).filter((each) => each.pgid === item.pid);
 
     // A scan from before the task started does not know it yet.
@@ -536,7 +489,6 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: b
         : [];
 }
 
-/** Every live process that carries a task's marker, wherever it is: its group, or one that left it. */
 function markedProcesses(table: ProcTable, marker: string): Proc[] {
     return table.list(true).filter((each) => table.marked(each.pid, marker));
 }
@@ -552,10 +504,9 @@ class PosixProcesses implements TaskProcesses {
         return this.#table.boot;
     }
 
-    /** The look under way: looks take turns, as each one's view is the table's. */
+    /** Looks take turns: each one's view is the shared table. */
     #turn: Promise<unknown> = Promise.resolve();
 
-    /** Run a look until the view had all it read. */
     #look<T>(read: () => T): Promise<T> {
         const look = this.#turn.then(async () => {
             this.#table.begin();
@@ -664,16 +615,12 @@ class PosixProcesses implements TaskProcesses {
     close(): void {}
 }
 
-// ─── Windows ────────────────────────────────────────────────────────────────
-
 /** Milliseconds from 1601, Windows' epoch of its process times, to 1970. */
 const WINDOWS_EPOCH_MS = 11_644_473_600_000;
 
 /**
- * The helper's code: the process table (pid, parent, start time in ms since 1601) from one Toolhelp snapshot, jobs that
- * hold each task's processes, and ends of processes through a handle whose start time it checked first. A job has no
- * limits: it does not let its processes leave (Git Bash's runtime leaves a job that allows it), and it does not end
- * them when its handle closes, so a task runs on after a restart of the server.
+ * A job has no limits: one that allows a breakaway lets Git Bash's runtime leave it, and one that ends its processes
+ * when its handle closes would end the tasks at a restart of the server.
  */
 const HELPER_CS = String.raw`
 using System;
@@ -874,14 +821,13 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 type Waiting = { resolve: (line: string) => void; reject: (error: Error) => void };
 type HelperRun = { child: ChildProcess; ready: Promise<void>; waiting: Waiting[] };
 
-/** One PowerShell process that answers a line for each line it is sent, started when first needed. */
 class Helper {
     #current: HelperRun | undefined;
     #idle: ReturnType<typeof setTimeout> | undefined;
     /** Whether it holds jobs: then it stays, or their tasks could no longer be ended by their jobs. */
     holds: () => boolean = () => false;
     failed: string | undefined;
-    /** Asks in a row that got no answer in time: a helper that hangs is started again (its jobs have names). */
+    /** Asks in a row with no answer in time: a helper that hangs is started again (its jobs have names). */
     #late = 0;
 
     #start(): HelperRun {
@@ -1089,9 +1035,8 @@ class WindowsProcesses implements TaskProcesses {
     readonly #helper = new Helper();
     #shell: string | undefined | null = null;
     #scan: { at: number; all: Map<number, WinProc> } | undefined;
-    /** Each task's processes found so far, pid to start, also in `<files>.pids`. */
+    /** Pid to start, also in `<files>.pids`. */
     #known = new Map<string, Map<number, number>>();
-    /** The jobs the helper holds, by key. */
     #jobs = new Set<string>();
     /** What this server spawned: a handle Node keeps while the process runs, so its pid cannot be another's. */
     #children = new Map<number, ChildProcess>();
@@ -1146,7 +1091,6 @@ class WindowsProcesses implements TaskProcesses {
         return all;
     }
 
-    /** The processes found of a task: its first one, and those in its file. */
     #knownOf(task: TaskRef): Map<number, number> {
         let known = this.#known.get(task.marker);
 
@@ -1161,9 +1105,7 @@ class WindowsProcesses implements TaskProcesses {
                         known.set(pid!, start!);
                     }
                 }
-            } catch {
-                // None found yet.
-            }
+            } catch {}
 
             this.#known.set(task.marker, known);
         }
@@ -1177,9 +1119,8 @@ class WindowsProcesses implements TaskProcesses {
     }
 
     /**
-     * A task's live processes in a table: what it knew, what its job holds, and each process whose parent is one of
-     * them, still running with its start time, and that started after it (a parent's pid that a later process took
-     * is not that process's parent).
+     * What it knew, what its job holds, and each process whose parent is one of them and that started after that
+     * parent: a later process that took a parent's pid is not the parent.
      */
     #members(
         task: TaskRef,
@@ -1238,7 +1179,6 @@ class WindowsProcesses implements TaskProcesses {
             .map(([pid]) => pid);
     }
 
-    /** The processes in a task's job, each with its start, as the helper read it through a handle in the job. */
     async #job(task: TaskRef): Promise<{ pid: number; start: number }[]> {
         const key = this.#key(task);
         const answer = await this.#helper.ask(`members ${key}`);
@@ -1370,7 +1310,6 @@ class WindowsProcesses implements TaskProcesses {
         return members;
     }
 
-    /** A task with no process left: its job goes, and what was kept for it. */
     #done(task: TaskRef): void {
         const key = this.#key(task);
 
@@ -1468,7 +1407,6 @@ class WindowsProcesses implements TaskProcesses {
     }
 }
 
-/** The processes of this platform. */
 export function taskProcesses(platform: NodeJS.Platform = process.platform): TaskProcesses {
     switch (platform) {
         case "win32":

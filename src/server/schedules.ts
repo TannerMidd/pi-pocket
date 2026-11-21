@@ -6,9 +6,7 @@
  * spend limit is reached; otherwise it is cancelled, with a line in the chat saying why. A repeat whose last message
  * still waits in the session's queue sends no other: that time is skipped, counted on the schedule, and said in the
  * chat, so messages do not pile up behind a session that cannot answer. One in PiP's conversation
- * waits while PiP is turned off, and goes out once it is back. A schedule set to compact first (`compactBefore`)
- * summarizes everything before its last message, then sends: each run starts on its last run and what was said since,
- * not on months of runs. The schedules extension
+ * waits while PiP is turned off, and goes out once it is back. The schedules extension
  * (`extensions/schedules.ts`) installs the task and gives Pi a tool to schedule its own follow-ups; while it is off,
  * nothing goes out.
  */
@@ -69,11 +67,7 @@ export const DEFAULT_SCHEDULE_LIMITS: Readonly<ScheduleLimits> = {
  * (while it has sent `runs` in all), so the check for a message that still waits finds that one too.
  */
 type ScheduleInput = { scheduleId: string; last?: { runs: number; request: string } };
-/**
- * `compact`: compacting before a sending, with the conversation's own compaction settings as they were before
- * (`restore`, null for none) and, once started, the compaction's task. `send` after it: `compacted`, so it is not
- * compacted again.
- */
+/** `restore`: the conversation's own compaction settings from before, null for none. */
 type ScheduleState =
     | { phase: "wait" }
     | { phase: "send"; compacted?: true }
@@ -389,10 +383,9 @@ export class Schedules {
     }
 
     /**
-     * Compact everything before the message the schedule sent last (`last`, its request id). Pi Durable keeps the newest
-     * `keepRecentTokens` and cuts at the first entry it may from there, so until the compaction is done the setting is
-     * the estimate of that message and all after it, for its model too (a model's setting beats a conversation's).
-     * False when the session is busy or compacting (the cut would move meanwhile), or when nothing comes before.
+     * Pi Durable keeps the newest `keepRecentTokens`, so until the compaction is done that setting is the estimate of
+     * the last message and all after it, for its model too (a model's setting beats a conversation's). False when the
+     * session is busy or compacting (the cut would move meanwhile), or when nothing comes before.
      */
     async #startCompaction(
         id: string,
@@ -786,7 +779,6 @@ export class Schedules {
             /** The version the change was made from (its `revision`): one edited since is refused. */
             version?: string;
             by: { id: string; name: string };
-            /** Compact before each sending; absent: as it was. */
             compactBefore?: boolean;
         },
     ): Promise<Schedule> {

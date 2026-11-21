@@ -1,12 +1,7 @@
 /**
- * Archived sessions cleaned up by the owner (`extensions/session-cleanup.ts` is their way to it). Cleaning up removes
- * the worktrees of archived sessions; their transcripts stay. Removing takes a session out of the app: its work ends,
- * its webhooks, repository watches, shares, public links, and lessons go, and Pocket's own files of it are removed (its worktree, its
- * uploads, its background logs). The transcript stays in storage: Pi Durable cannot purge a conversation yet, and
- * Pocket never writes to its tables. `pocket.deleted` keeps each removed session, the queue for such a purge.
- *
- * A removal is one commit (the catalogue entry goes as the queue entry comes), then the files. A restart between them
- * goes on with the files (`resume`), so nothing is left half done.
+ * Removing a session takes it out of the app, but its transcript stays in storage: Pi Durable cannot purge a
+ * conversation yet. `pocket.deleted` keeps each removed session, the queue for such a purge. A removal is one commit,
+ * then the files: after a restart, `resume` goes on with the files.
  */
 import { existsSync } from "node:fs";
 import { lstat, opendir, rm } from "node:fs/promises";
@@ -37,30 +32,21 @@ const ENV_STAYS = "Its worktree has an env file that git ignores. Move or delete
 /** The most files a size counts in one folder tree: a huge one shows as at least that much. */
 const MAX_COUNTED = 200_000;
 
-/** How many sessions one request may name. */
 export const MAX_SESSIONS = 500;
 
-/**
- * A session's worktree, as cleaning up finds it: `clean` goes; `changes` has uncommitted changes and stays; `shared`
- * is where another session works, and stays; `busy` is where Pi works now; `env` holds an env file that git ignores
- * (`git worktree remove` would delete it), and stays.
- */
+/** `env`: an env file that git ignores, which `git worktree remove` would delete. Only `clean` goes. */
 export type WorktreeState = "clean" | "changes" | "shared" | "busy" | "env";
 
-/** What cleaning up or removing a session would do. */
 export type SessionPlan = {
     id: number;
     title: string;
     updatedAt: number;
     archived: boolean;
-    /** Why it cannot be removed now; absent: it can. */
     blocked?: string;
     worktree?: { path: string; branch: string; bytes: number; state: WorktreeState };
     /** Its uploads; `kept`: a live fork reads them, so they stay. */
     uploads: { bytes: number; kept: boolean };
-    /** Its background logs. */
     logs: number;
-    /** What a removal ends. */
     ends: {
         schedules: number;
         background: number;
@@ -75,7 +61,7 @@ export type SessionPlan = {
 
 export type CleanupOutcome = { id: number; done: boolean; why?: string; bytes?: number };
 
-/** The bytes of the files under `path`, links not followed: 0 when it is not there. */
+/** Links not followed; 0 when it is not there. */
 async function sizeOf(path: string): Promise<number> {
     let bytes = 0;
     let counted = 0;
@@ -353,7 +339,7 @@ export class SessionCleanup {
         };
     }
 
-    /** What cleaning up or removing these sessions would do. Sessions that are not there, and PiP, are left out. */
+    /** Sessions that are not there, and PiP, are left out. */
     async plan(userId: string, ids: readonly unknown[]): Promise<SessionPlan[]> {
         this.#requireOwner(userId);
         const chosen = this.#ids(ids);
@@ -372,10 +358,7 @@ export class SessionCleanup {
         return plans;
     }
 
-    /**
-     * Remove the worktrees of these archived sessions, as the session's own Remove worktree does: one with uncommitted
-     * changes, or where Pi or another session works, stays. The sessions and their transcripts stay.
-     */
+    /** Removes only the worktrees: the sessions and their transcripts stay. */
     async cleanUp(userId: string, ids: readonly unknown[]): Promise<CleanupOutcome[]> {
         this.#requireOwner(userId);
         const user = this.#app.config.userById(userId)!;
@@ -415,10 +398,7 @@ export class SessionCleanup {
         return outcomes;
     }
 
-    /**
-     * Take these archived sessions out of the app, and remove Pocket's own files of them. Each is checked again first:
-     * one that cannot go now (see `SessionPlan.blocked`) stays, with why.
-     */
+    /** Each is checked again first: one that cannot go now stays, with why. */
     async remove(userId: string, ids: readonly unknown[]): Promise<CleanupOutcome[]> {
         this.#requireOwner(userId);
 
@@ -575,7 +555,7 @@ export class SessionCleanup {
         };
     }
 
-    /** End a removed session's work and remove its files. Each step can run again: a restart runs what is left. */
+    /** Each step can run again: a restart runs what is left. */
     async #finish(id: ConversationId, record: RemovedSession): Promise<void> {
         const app = this.#app;
         const left: string[] = [];
@@ -655,7 +635,7 @@ export class SessionCleanup {
         }, context);
     }
 
-    /** Remove the uploads that removed sessions kept for their forks, once no session that stays reads them. */
+    /** Once no session that stays reads them. */
     async #releaseUploads(): Promise<void> {
         const items = (await this.#app.harness.snapshot(DeletedDoc, context))?.items ?? {};
         const read = this.#readByForks(new Set());
@@ -688,7 +668,7 @@ export class SessionCleanup {
         }
     }
 
-    /** At start: go on with the removals a restart cut short, and remove uploads that no fork reads any more. */
+    /** Also removes uploads that no fork reads any more. */
     async resume(): Promise<void> {
         const items = (await this.#app.harness.snapshot(DeletedDoc, context))?.items ?? {};
 

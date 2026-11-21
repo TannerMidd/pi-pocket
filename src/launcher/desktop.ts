@@ -1,8 +1,6 @@
 /**
- * What the desktop apps (packaging/windows, packaging/macos) read from a launcher: `launcher-running.json` in the data folder
- * says which launcher runs and where its server answers on this machine. The launcher writes it each time its server
- * is ready and removes it when it quits. It holds no secret: the apps sign in with a one-time link
- * (docs/desktop-app.md). Installed apps read it across versions, so its fields only ever grow.
+ * `launcher-running.json` says which launcher runs and where its server answers, for the desktop apps. It holds no
+ * secret: the apps sign in with a one-time link. Installed apps read it across versions, so its fields only ever grow.
  */
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +9,6 @@ export const RUNNING_FILE = "launcher-running.json";
 
 export interface Running {
     version: 1;
-    /** The launcher's process. */
     pid: number;
     /** The server's address for a browser on this machine, such as `http://127.0.0.1:8787`; null on a Unix socket. */
     url: string | null;

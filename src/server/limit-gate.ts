@@ -209,7 +209,6 @@ type Gate = {
     reason: string;
     tries: number;
     state: "waiting" | "probing" | "refusing";
-    /** What a request meeting a refusing gate fails with. */
     refusal?: string;
     canary?: Waiter;
     /** When the canary went. */
