@@ -6,11 +6,11 @@
 ; - Pi Pocket.exe, the desktop app (PiPocket.cs): an icon in the notification area and a window, with no console;
 ; - pi-pocket.cmd, which starts the launcher with that Node.js and prefix in a console, and Start menu and sign-in
 ;   shortcuts.
-; build.ps1 compiles it: ISCC /DAppVersion=0.29.0 /DNodeDir=<unpacked Node.js> /DDesktopDir=<Pi Pocket.exe's folder>
+; build.ps1 compiles it: ISCC /DAppVersion=0.30.0 /DNodeDir=<unpacked Node.js> /DDesktopDir=<Pi Pocket.exe's folder>
 ; /DAppDir=<the app folder> pi-pocket.iss
 
 #ifndef AppVersion
-  #error Define AppVersion, such as /DAppVersion=0.29.0
+  #error Define AppVersion, such as /DAppVersion=0.30.0
 #endif
 #ifndef NodeDir
   #error Define NodeDir, the folder of the unpacked Node.js zip

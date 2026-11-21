@@ -14,7 +14,7 @@ The package is not signed or notarized yet, so macOS does not open it with a dou
 On macOS 14 and older, Control-click the package in Finder, select **Open**, then **Open** again. Download it only from the release page, and compare its SHA256 with the `.sha256` file if you want to be sure that it is the same file:
 
 ```sh
-shasum -a 256 ~/Downloads/Pi-Pocket-0.29.0.pkg
+shasum -a 256 ~/Downloads/Pi-Pocket-0.30.0.pkg
 ```
 
 ## What it installs, and where
@@ -69,7 +69,7 @@ Run it in Terminal, not from a Pi Pocket session: it must stop Pi Pocket, so it 
 ## Install from Terminal
 
 ```sh
-installer -pkg Pi-Pocket-0.29.0.pkg -target CurrentUserHomeDirectory
+installer -pkg Pi-Pocket-0.30.0.pkg -target CurrentUserHomeDirectory
 ```
 
 No `sudo`: the package refuses to install as root. For the sign-in item too, pass `-applyChoiceChangesXML` with a file that selects the choice `login`, as [`.github/workflows/macos.yml`](../.github/workflows/macos.yml) does. The install fails when `place-app.mjs` cannot put the package in place; `install.log` says why.

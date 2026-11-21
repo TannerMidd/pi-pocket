@@ -3,7 +3,7 @@
 # Windows has, and compiles pi-pocket.iss. It puts the pi-pocket package of a checkout in it, with its dependencies
 # (packaging/bundle-app.mjs), so Setup needs no npm and no network. The workflows run it (.github/workflows/windows*.yml).
 #
-#   pwsh packaging/windows/build.ps1 -Version 0.29.0 [-OutDir out] [-Source <checkout>] [-SignThumbprint <SHA1>]
+#   pwsh packaging/windows/build.ps1 -Version 0.30.0 [-OutDir out] [-Source <checkout>] [-SignThumbprint <SHA1>]
 #
 # -Source is the checkout to pack, with -Version in its package.json: by default the one this script is in (the release
 # workflow gives the release tag's).

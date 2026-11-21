@@ -9,7 +9,7 @@ The installer holds everything: Node.js, the `pi-pocket` package of its release 
 The installer is not code-signed yet, so Windows SmartScreen says "Windows protected your PC" the first time. To run it, select **More info**, then **Run anyway**. Download it only from the release page, and compare its SHA256 with the `.sha256` file if you want to be sure that it is the same file:
 
 ```powershell
-Get-FileHash .\Pi-Pocket-Setup-0.29.0.exe -Algorithm SHA256
+Get-FileHash .\Pi-Pocket-Setup-0.30.0.exe -Algorithm SHA256
 ```
 
 ## What it installs, and where
@@ -65,7 +65,7 @@ Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits t
 ## Silent install
 
 ```powershell
-.\Pi-Pocket-Setup-0.29.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=startup
+.\Pi-Pocket-Setup-0.30.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=startup
 ```
 
 Leave out `/TASKS=startup` for no sign-in shortcut.
