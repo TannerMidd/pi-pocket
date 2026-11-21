@@ -16253,7 +16253,6 @@ textarea.notes {
     color: var(--muted);
 }
 
-/* A turn note's text: three lines until tapped, its line breaks kept. */
 .turn-note-text {
     display: -webkit-box;
     -webkit-line-clamp: 3;

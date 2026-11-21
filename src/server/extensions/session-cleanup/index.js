@@ -1,6 +1,4 @@
-// Session cleanup's browser module, the owner's alone: "Remove and clean up" on archived sessions in the list, and a
-// sheet that cleans up every archived session not used for a while. Each change shows what goes, and its size, first.
-// It uses only `pocket`.
+// The owner's alone. It uses only `pocket`.
 export const pocketApi = 2;
 
 /** Lucide's archive-x icon. */
@@ -12,13 +10,11 @@ const AGES = [
     { days: 30, label: "30 days" },
     { days: 90, label: "90 days" },
 ];
-/** What stays, and that it is for good, for `count` sessions. */
 const stays = (count) =>
     count === 1
         ? "Its transcript stays in Pi Pocket's database until Pi Durable can remove it. This cannot be undone."
         : "Their transcripts stay in Pi Pocket's database until Pi Durable can remove them. This cannot be undone.";
 
-/** A size in words: 0 B, 12 KB, 3.4 MB, 1.2 GB. */
 export function bytes(count) {
     if (count < 1024) {
         return `${count} B`;
@@ -66,7 +62,6 @@ export function endsLine(plans) {
     return parts.length === 0 ? "" : `These end too: ${parts.join(", ")}.`;
 }
 
-/** Why a worktree stays, in words. */
 const WORKTREE_STAYS = {
     changes: "it has uncommitted changes",
     shared: "another session works in it",
@@ -82,10 +77,7 @@ export default function setup(pocket) {
         return;
     }
 
-    /**
-     * The server's plan for `body` (`{ ids }` or `{ olderThanDays }`), loaded as the sheet opens, and again when `body`
-     * or `round` changes.
-     */
+    /** Loaded as the sheet opens, and again when `body` or `round` changes. */
     function usePlan(body, round = 0) {
         const [state, setState] = useState({ loading: true });
         const key = `${JSON.stringify(body)} ${round}`;
@@ -107,7 +99,6 @@ export default function setup(pocket) {
         return state;
     }
 
-    /** The sessions that stay, each with why. */
     function Stays({ plans }) {
         if (plans.length === 0) {
             return null;
@@ -129,7 +120,6 @@ export default function setup(pocket) {
         </details>`;
     }
 
-    /** The confirm of a removal: what goes, its size, and what stays. */
     function RemoveConfirm({ plans, close, onDone }) {
         const going = plans.filter((plan) => plan.blocked === undefined);
         const staying = plans.filter((plan) => plan.blocked !== undefined);
@@ -215,7 +205,6 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    /** "Remove and clean up" on sessions in the list: the confirm, for the sessions chosen. */
     function RemoveSheet({ close, sessions }) {
         const ids = Array.isArray(sessions) ? sessions : [];
         const state = usePlan({ ids });
@@ -236,7 +225,6 @@ export default function setup(pocket) {
         return html`<${RemoveConfirm} plans=${state.plans} close=${close} />`;
     }
 
-    /** Clean up archived sessions: those not used for a while, their worktrees, or the sessions themselves. */
     function CleanupSheet({ close }) {
         const [days, setDays] = useState(30);
         const [confirming, setConfirming] = useState(false);

@@ -986,10 +986,7 @@ export class Commands {
         return { submissionId: submission.id, requestId };
     }
 
-    /**
-     * Admit a person's input: with the notes extensions add (`turn-notes.ts`) in the same commit when the conversation
-     * places it at once, else as it is. A retry (`known`) asks no annotator again, and PiP's conversation gets no notes.
-     */
+    /** A retry (`known`) asks no annotator again, and PiP's conversation gets no notes. */
     async #submitInput(
         conversation: Conversation,
         draft: InputSubmissionDraft & { requestId: string },

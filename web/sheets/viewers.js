@@ -28,9 +28,7 @@ function themeQuery() {
 /** Whether this person may delete an artifact: anyone who steers the session, as the server checks. */
 const mayDelete = (me) => me?.role !== undefined && me.role !== "viewer";
 
-/**
- * Delete an artifact with all its versions, once the person confirms. Resolves true when it is gone.
- */
+/** Resolves true when it is gone. */
 export function deleteArtifact(conversationId, artifact) {
     const count = artifact.versions.length;
     const what =

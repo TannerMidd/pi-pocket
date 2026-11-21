@@ -2422,7 +2422,6 @@ const FIRST_POLL_MS = 60_000;
 /** A poll that hears nothing past its hold, and a margin for a slow link, hangs on a half-open connection. */
 const pollStallMs = (hold) => hold * 1.5 + 2000;
 
-/** Read a poll's answer, with `progress` called as each part of it comes. */
 async function readJson(response, progress) {
     const reader = response.body.getReader();
     const parts = [];

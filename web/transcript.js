@@ -2678,10 +2678,7 @@ function NoteEntry({ entry }) {
     </div>`;
 }
 
-/**
- * A note an extension added for Pi after a person's message (`host.annotateTurns`): never the person's words. Three
- * lines at first; a tap shows it all.
- */
+/** An extension's note for Pi (`host.annotateTurns`), never the person's words. */
 function TurnNoteEntry({ entry }) {
     const [open, setOpen] = useState(false);
 
