@@ -446,6 +446,12 @@ export interface AppEvents {
      */
     "session.archived": { conversationId: number; archived: boolean };
     /**
+     * The owner removed an archived session from the app. Its id is not shown again.
+     * @since 0.30.0
+     * @experimental
+     */
+    "session.removed": { conversationId: number };
+    /**
      * A person sent Pi a message: its words as stored, attachments left out. `via` names what sent it for them.
      * @since 0.22.0
      * @experimental

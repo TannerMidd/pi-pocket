@@ -710,6 +710,7 @@ interface AppEvents {
     };
     "session.renamed": { conversationId: number; title: string };
     "session.archived": { conversationId: number; archived: boolean };
+    "session.removed": { conversationId: number };
     "message.sent": {
         conversationId: number;
         by: string;
@@ -733,6 +734,7 @@ What each event's listener gets.
 
 - `session.created`: a session in the list was made, by a person, a fork (`forkedFrom`), a linked start (`linkedFrom`), or a resend. `createdBy` is a person's id. Subagents are not sessions in the list, and send none.
 - `session.renamed`, `session.archived`: its new title, or whether it is archived now.
+- `session.removed` (since 0.30.0): the owner removed an archived session from the app (Session cleanup). Its id is not shown again: drop what your module keeps for it.
 - `message.sent`: a person's message to Pi, a steer or a queued one too. `by` is their id. `text` is the words as stored, with values that extensions hide already hidden and attachments left out. `via` names what sent it for them, such as PiP or a schedule.
 - `run.started`, `run.ended`: Pi started or stopped working in a conversation. `conversationId` is that conversation, a session's or a subagent's; `session` is the session it belongs to. Since 0.28.0, `run.ended` also says how the run stopped: `outcome` is `done` when it finished, `failed` when it gave up, or `aborted` when it was stopped. `failure` is why it gave up, the same short line the session list shows, and only when `outcome` is `failed`. A session's failure stands until a later run starts.
 
@@ -744,7 +746,7 @@ type AppEventName = keyof AppEvents;
 
 Since 0.22.0 · Experimental
 
-The name of an event: `"session.created"`, `"session.renamed"`, `"session.archived"`, `"message.sent"`, `"run.started"`, or `"run.ended"`.
+The name of an event: `"session.created"`, `"session.renamed"`, `"session.archived"`, `"session.removed"`, `"message.sent"`, `"run.started"`, or `"run.ended"`.
 
 ## Types for asking, hiding, and the browser
 
@@ -986,6 +988,7 @@ The host has more members, for Pi Pocket's built-in modules only. They are not i
 - `pip`: what the tools of PiP, the owner's assistant, do.
 - `pipCompaction`: PiP's own summaries when its context is compacted.
 - `gallery`: the extension gallery, for its own routes.
+- `sessionCleanup` (since 0.30.0): archived sessions' plans, worktrees cleaned up, and sessions removed from the app, for the Session cleanup module.
 - `toolNames`: the names of the tools that the modules that are on give now (built-in and drop-in), for codemode's Only mode.
 - `stopToolCall`, `waitsForLimit`, `alertOwner` (since 0.29.0): for the stall watches of Subagents and Agent Teams. They stop one running call, say whether a run waits for a provider's limit, and tell the owner (a notice and a push).
 - `linkedSessions.activity`, `linkedSessions.stopCall`, `linkedSessions.onLedRun` (since 0.29.0): for the stall watch of Agent Teams. They give the led sessions at work, stop a stuck call of a led session, and call back when a led session starts a run.

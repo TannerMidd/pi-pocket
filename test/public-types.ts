@@ -77,6 +77,7 @@ type Internal =
     | "approvals"
     | "guard"
     | "schedules"
+    | "sessionCleanup"
     | "background"
     | "goals"
     | "browsers"

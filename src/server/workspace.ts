@@ -360,18 +360,16 @@ export class Workspace {
     #lineage(id: ConversationId): ConversationId[] {
         const lineage = [id];
 
-        for (
-            let meta = this.#app.sessionMeta(id);
-            meta?.forkedFrom !== undefined && lineage.length < 64;
-        ) {
-            const parent = meta.forkedFrom.id as unknown as ConversationId;
+        // A removed session in between still links its fork to the sessions before it (`session-cleanup.ts`).
+        for (let from = this.#app.forkedFrom(id); from !== undefined && lineage.length < 64;) {
+            const parent = from.id as unknown as ConversationId;
 
             if (lineage.includes(parent)) {
                 break;
             }
 
             lineage.push(parent);
-            meta = this.#app.sessionMeta(parent);
+            from = this.#app.forkedFrom(parent);
         }
 
         return lineage;
