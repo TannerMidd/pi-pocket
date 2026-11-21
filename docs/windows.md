@@ -9,7 +9,7 @@ The installer holds everything: Node.js, the `pi-pocket` package of its release 
 The installer is not code-signed yet, so Windows SmartScreen says "Windows protected your PC" the first time. To run it, select **More info**, then **Run anyway**. Download it only from the release page, and compare its SHA256 with the `.sha256` file if you want to be sure that it is the same file:
 
 ```powershell
-Get-FileHash .\Pi-Pocket-Setup-0.29.0.exe -Algorithm SHA256
+Get-FileHash .\Pi-Pocket-Setup-0.30.0.exe -Algorithm SHA256
 ```
 
 ## What it installs, and where
@@ -60,12 +60,12 @@ The desktop app checks the package before it starts it: when `app\` holds an old
 
 ## Uninstall
 
-Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits the app, stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` (with the window's Edge profile) and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
+Settings → Apps → Installed apps → **Pi Pocket** → Uninstall. It quits the app, stops a running Pi Pocket, with each command that its agents run, and removes `%LOCALAPPDATA%\Pi Pocket` (with the window's Edge profile) and the shortcuts. Then it asks whether to delete your data in `%USERPROFILE%\.pi-pocket`. The default is No: your sessions and settings stay for the next install. A silent uninstall (`unins000.exe /VERYSILENT /SUPPRESSMSGBOXES`) always keeps them. Only the default data folder is offered: one chosen with `PI_POCKET_DIR` or `--data` stays, and so does a `.pi-pocket` that another Pi Pocket install on the same account uses.
 
 ## Silent install
 
 ```powershell
-.\Pi-Pocket-Setup-0.29.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=startup
+.\Pi-Pocket-Setup-0.30.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=startup
 ```
 
 Leave out `/TASKS=startup` for no sign-in shortcut.

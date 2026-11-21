@@ -697,10 +697,10 @@ namespace PiPocket
                 Request("POST", url + "/api/restart", OwnerToken());
                 tray.ShowBalloonTip(3000, "Pi Pocket", "The server restarts. Running work continues.", ToolTipIcon.Info);
             }
-            catch (Exception error)
+            catch (Exception)
             {
-                tray.ShowBalloonTip(5000, "Pi Pocket", "Could not restart the server: " + error.Message,
-                    ToolTipIcon.Warning);
+                // No error text: a malformed config.json can put its content, the owner token, in the message.
+                tray.ShowBalloonTip(5000, "Pi Pocket", "Could not restart the server.", ToolTipIcon.Warning);
             }
         }
 
@@ -779,10 +779,11 @@ namespace PiPocket
             {
                 target = url + SignInPath();
             }
-            catch (Exception error)
+            catch (Exception)
             {
-                // The window opens on the sign-in page instead.
-                Log("No one-time sign-in link: " + error.Message);
+                // The window opens on the sign-in page instead. No error text: a malformed config.json can put its
+                // content, the owner token, in the message.
+                Log("No one-time sign-in link.");
             }
 
             string msedge = FindEdge();
