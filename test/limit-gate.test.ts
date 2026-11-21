@@ -196,7 +196,7 @@ test("a conversation failure frees the shared canary without declaring the model
         rt.calls[2]!.end();
         assert.equal((await b).stopReason, "stop");
         assert.equal(g.waitFor(1)?.scope, "request");
-        assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 1, gates: [] });
+        assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 2, gates: [] });
     } finally {
         stop.abort();
         await a;
@@ -292,6 +292,43 @@ test("a limit that covers the account holds every model of the provider, with on
     await sleep(20);
     assert.equal(rt.calls.length, 1, "the other model of the provider is held too");
     assert.deepEqual(await stops(a, b), ["stop", "stop"]);
+});
+
+test("an ambiguous Fable wait does not block Opus, but a separate Opus limit can hold the account", async () => {
+    const now = Date.parse("2026-11-21T11:38:35Z");
+    const g = gate({ now: () => now });
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": String(now / 1000 + 3 * 3_600),
+    };
+    const fail = "429 This request would exceed your account's rate limit. Please try again later.";
+    const rt = fake([{ fail, headers }, { ok: true }, { fail, headers }]);
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const options = {
+        signal: stop.signal,
+        fetch: async () => new Response("", { status: 429, headers }),
+    };
+    const requests = [ask(rt, "claude-fable-5-2", "anthropic", options)];
+
+    try {
+        await until(() => g.gates().length === 1);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+        assert.equal((await ask(rt, "claude-opus-5-5", "anthropic", options)).stopReason, "stop");
+        assert.equal(rt.calls.length, 2);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+
+        requests.push(ask(rt, "claude-opus-5-5", "anthropic", options));
+        await until(() => g.gates().some((gate) => gate.key === "anthropic"));
+        requests.push(ask(rt, "claude-haiku-4-5", "anthropic", options));
+        assert.equal(rt.calls.length, 3, "the account gate holds the next model");
+    } finally {
+        stop.abort();
+        await stops(...requests);
+        g.close();
+    }
 });
 
 test("the gate opens at the canary's first content, not when its whole stream ends", async () => {
@@ -632,6 +669,26 @@ test("a missing or damaged file means no limit is known", () => {
         writeFileSync(file, text);
         assert.equal(gate({ file }).gates().length, 0, text);
     }
+});
+
+test("an Anthropic account gate that 0.30.0 kept is dropped once; other gates stay", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "limit-gate-")), "provider-limits.json");
+    const now = Date.now();
+    const kept = (provider: string) => ({
+        ...{ state: "waiting", key: provider, scope: "account", provider, kind: "reset" },
+        ...{ since: now, until: now + 3_600_000, subscription: true, reason: "429", tries: 1 },
+    });
+    const gates = [kept("anthropic"), kept("openai")];
+
+    writeFileSync(file, JSON.stringify({ version: 1, gates }));
+    assert.deepEqual(
+        gate({ file })
+            .gates()
+            .map((each) => each.provider),
+        ["openai"],
+    );
+    writeFileSync(file, JSON.stringify({ version: 2, gates }));
+    assert.equal(gate({ file }).gates().length, 2);
 });
 
 test("an adapter that refuses a custom fetch (Google) gets none", async () => {

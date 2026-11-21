@@ -64,6 +64,7 @@ export type Classified =
 
 export type LimitInput = {
     provider: string;
+    modelId?: string;
     /** `AssistantMessage.errorMessage`. */
     message: string;
     facts?: ResponseFacts | undefined;
@@ -281,10 +282,14 @@ function retryAfter(headers: Record<string, string>, now: number): number | unde
 function fromHeaders(
     headers: Record<string, string>,
     now: number,
+    fable429: boolean,
 ): { resetAt?: number; account: boolean; model: boolean; long?: true } {
-    // Claude subscription: windows that cover the sign-in. A claim for one model's cap (seven_day_opus) is the model's.
+    // Fable has its own pool. An ambiguous subscription 429 from it should not stop a request to another model.
+    // Keep explicit shared claims account-wide, and leave API-key limits and other models unchanged.
     const unified = headers["anthropic-ratelimit-unified-status"];
-    const claim = headers["anthropic-ratelimit-unified-representative-claim"] ?? "";
+    const claim = headers["anthropic-ratelimit-unified-representative-claim"]?.trim() ?? "";
+    const sharedClaim = /^(five_hour|seven_day)$/i.test(claim);
+    const modelLimit = /opus|sonnet|haiku|fable/i.test(claim) || (fable429 && !sharedClaim);
 
     // The windows by name: a rejected 5-hour window waits for its reset; a rejected 7-day window is days away.
     const week = headers["anthropic-ratelimit-unified-7d-status"] === "rejected";
@@ -299,8 +304,8 @@ function fromHeaders(
 
         return {
             ...(reset === undefined ? {} : { resetAt: reset }),
-            account: !/opus|sonnet|haiku/i.test(claim),
-            model: /opus|sonnet|haiku/i.test(claim),
+            account: !modelLimit,
+            model: modelLimit,
             ...(week ? { long: true as const } : {}),
         };
     }
@@ -313,8 +318,8 @@ function fromHeaders(
         if (rejected) {
             return {
                 ...(reset === undefined ? {} : { resetAt: reset }),
-                account: !/opus|sonnet|haiku/i.test(claim),
-                model: /opus|sonnet|haiku/i.test(claim),
+                account: !modelLimit,
+                model: modelLimit,
             };
         }
     }
@@ -508,7 +513,11 @@ export function classify(input: LimitInput): Classified {
     }
 
     const headers = facts?.headers ?? {};
-    const fromHeader = fromHeaders(headers, now);
+    const fable429 =
+        status === 429 &&
+        input.provider === "anthropic" &&
+        /^claude-fable(?:-|$)/i.test(input.modelId ?? "");
+    const fromHeader = fromHeaders(headers, now, fable429);
 
     // A conflict is a refusal of this request, not of load: it waits only when the response itself says when to try
     // again (a header). Pi Durable's own short retries still cover a conflict that clears at once.
