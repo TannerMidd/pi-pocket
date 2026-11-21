@@ -92,6 +92,7 @@ const emptyView = () => ({
     viewers: [],
     approvals: [],
     artifacts: [],
+    artifactsEnded: {},
     subagents: [],
     authors: {},
     linkedPeers: {},
@@ -1718,6 +1719,7 @@ function mergeView(current, data) {
         // The server sends these again only when they change: a missing one keeps its last value.
         inbox: data.inbox ?? base.inbox,
         artifacts: data.artifacts ?? base.artifacts,
+        artifactsEnded: data.artifactsEnded ?? base.artifactsEnded,
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
         linkedPeers: data.linkedPeers ?? base.linkedPeers,

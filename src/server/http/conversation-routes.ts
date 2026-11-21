@@ -6,6 +6,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
+import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
@@ -582,6 +583,16 @@ export async function conversationRoutes(
                 await writeState(app, id, user, fourth, await readJson(request)),
             );
         }
+    }
+
+    // Deleting an artifact with all its versions (`artifacts.ts`): anyone who sees the session and steers.
+    if (
+        third === "artifacts" &&
+        fourth !== undefined &&
+        parts.length === 4 &&
+        method === "DELETE"
+    ) {
+        return json(response, 200, await deleteArtifact(app, id, user, fourth));
     }
 
     // An artifact published to anyone with its address: the shares of this session, and ending one.

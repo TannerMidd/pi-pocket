@@ -372,6 +372,8 @@ export class Room {
     readonly #queued = new Map<number, { text: string; reports: string[] | undefined }>();
     authors: Record<string, string> = {};
     artifacts: Record<string, ArtifactMeta> = {};
+    /** The last version number of each deleted artifact: cards that name one say it was deleted. */
+    artifactsEnded: Record<string, number> = {};
     subagents: Record<string, SubagentRecord> = {};
     /** The subagents whose reports are on their way to this conversation: waiting, or sent and still queued. */
     #reporting = new Set<string>();
@@ -433,9 +435,10 @@ export class Room {
         this.authors = {
             ...((await harness.snapshot(AuthorsDoc, this.id, context))?.entries ?? {}),
         };
-        this.artifacts = {
-            ...((await harness.snapshot(ArtifactsDoc, this.id, context))?.items ?? {}),
-        } as Record<string, ArtifactMeta>;
+        const artifacts = await harness.snapshot(ArtifactsDoc, this.id, context);
+
+        this.artifacts = { ...(artifacts?.items ?? {}) } as Record<string, ArtifactMeta>;
+        this.artifactsEnded = { ...(artifacts?.ended ?? {}) };
         const subagents = await harness.snapshot(SubagentsDoc, this.id, context);
 
         this.subagents = { ...(subagents?.agents ?? {}) } as Record<string, SubagentRecord>;
@@ -572,6 +575,7 @@ export class Room {
             }
         } else if (kind === ArtifactsDoc.definition.kind) {
             this.artifacts = { ...((value?.items as Record<string, ArtifactMeta>) ?? {}) };
+            this.artifactsEnded = { ...((value?.ended as Record<string, number>) ?? {}) };
         } else if (kind === SubagentsDoc.definition.kind) {
             this.subagents = { ...((value?.agents as Record<string, SubagentRecord>) ?? {}) };
             this.#reporting = reportingOf(value as Parameters<typeof reportingOf>[0]);
@@ -830,6 +834,7 @@ export class Room {
                     createdAt: version.createdAt,
                 })),
             })),
+            artifactsEnded: this.artifactsEnded,
             subagents: Object.entries(this.subagents).map(([name, record]) =>
                 subagentView(
                     name,

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { DiffBlock } from "./diff.js";
 import { highlight, langOf } from "./highlight.js";
 import { RunFrame, useFitHeight } from "./run-frame.js";
-import { notify, openSheet } from "./store.js";
+import { notify, openSheet, store } from "./store.js";
 import { COLOR_LIMIT, copyText, html, setRichBlock } from "./ui.js";
 
 // ─── A page, previewed ──────────────────────────────────────────────────────────────
@@ -341,12 +341,35 @@ function pageOf(conversationId, id, version) {
  * session may see the card; later versions never change it. Until it comes the card says so.
  */
 export function InlineArtifact({ conversationId, id, title, version }) {
+    // A version the session no longer has, at or under the last number of a deleted artifact: someone deleted it.
+    const { view } = store.state;
+    const ended =
+        view.conversation?.id === conversationId && Object.hasOwn(view.artifactsEnded ?? {}, id)
+            ? view.artifactsEnded[id]
+            : undefined;
+    const deleted =
+        ended !== undefined &&
+        version <= ended &&
+        !(view.artifacts ?? []).some(
+            (each) => each.id === id && each.versions.some((one) => one.version === version),
+        );
+
+    useEffect(() => {
+        if (deleted) {
+            pages.delete(addressOf(conversationId, id, version));
+        }
+    }, [deleted, conversationId, id, version]);
+
     const [page, setPage] = useState({
         source: recent(addressOf(conversationId, id, version))?.text ?? null,
         failed: false,
     });
 
     useEffect(() => {
+        if (deleted) {
+            return undefined;
+        }
+
         let current = true;
 
         setPage({
@@ -361,9 +384,18 @@ export function InlineArtifact({ conversationId, id, title, version }) {
         return () => {
             current = false;
         };
-    }, [conversationId, id, version]);
+    }, [conversationId, id, version, deleted]);
 
     const artifact = { id, title, version };
+
+    if (deleted) {
+        return html`<div class="code rich html inline-artifact">
+            <div class="code-head">
+                <span class="code-lang">${title} · v${version}</span>
+            </div>
+            <p class="muted small rich-note">This artifact was deleted.</p>
+        </div>`;
+    }
 
     if (page.source !== null) {
         return html`<${RichBlock} kind="html" source=${page.source} artifact=${artifact} />`;
