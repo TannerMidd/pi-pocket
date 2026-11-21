@@ -13,6 +13,7 @@ import {
     ArtifactStateDoc,
     DesignCommentsDoc,
 } from "../src/server/docs.ts";
+import * as artifacts from "../src/server/artifacts.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
 import { root } from "./helpers.ts";
@@ -176,6 +177,7 @@ test("an asset's bytes go once no artifact uses them, and no stored revision kee
         .versions[0]!.assets!["shared.txt"]!.hash;
 
     assert.equal((await call(me, "DELETE", `/api/c/${first}/artifacts/demo`)).status, 200);
+    await artifacts.sweeping;
     assert.equal(await app.harness.snapshot(ArtifactAssetDoc, own, context), undefined);
     assert.ok(
         await app.harness.snapshot(ArtifactAssetDoc, both, context),
@@ -184,6 +186,7 @@ test("an asset's bytes go once no artifact uses them, and no stored revision kee
     assert.ok(await app.artifactAsset(second, "demo", 1, "shared.txt"));
 
     assert.equal((await call(me, "DELETE", `/api/c/${second}/artifacts/demo`)).status, 200);
+    await artifacts.sweeping;
     assert.equal(await app.harness.snapshot(ArtifactAssetDoc, both, context), undefined);
 
     await app.close();
@@ -234,6 +237,7 @@ test("bytes stored again while the sweep reads stay", async () => {
             (await call(app.config.ownerToken, "DELETE", `/api/c/${late}/artifacts/demo`)).status,
             200,
         );
+        await artifacts.sweeping;
     } finally {
         app.harness.snapshot = snapshot;
     }

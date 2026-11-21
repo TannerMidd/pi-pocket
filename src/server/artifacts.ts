@@ -58,6 +58,9 @@ export async function keepAssets(tx: Tx, hashes: Iterable<string>): Promise<void
     }
 }
 
+/** The asset sweep that the last delete started, which ends after the delete answers. */
+export let sweeping: Promise<unknown> = Promise.resolve();
+
 /**
  * Delete one artifact of a conversation with all its versions. Anyone who sees the session and steers may; the API
  * checked the seeing. Its share links stop at once.
@@ -125,7 +128,8 @@ export async function deleteArtifact(
         return count;
     }, context);
 
-    await sweepAssets(app).catch((error: unknown) => {
+    // After the answer: it reads every conversation's index, and it runs again at start if cut off.
+    sweeping = sweepAssets(app).catch((error: unknown) => {
         console.error("Unused artifact assets could not be removed:", error);
     });
 
