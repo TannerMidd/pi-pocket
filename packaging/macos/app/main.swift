@@ -240,6 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 {
     var window: NSWindow?
     var webView: WKWebView?
+    // Windows that pages opened (an artifact's "Open tab"), each kept until it closes, with its close observer.
+    var popups: [NSWindow: NSObjectProtocol] = [:]
     var statusItem: NSStatusItem?
     var openItem: NSMenuItem?
     var restartItem: NSMenuItem?
@@ -809,13 +811,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     ) -> WKWebView? {
         if let url = action.request.url {
             if sameOrigin(url) {
-                webView.load(URLRequest(url: url))
+                return popup(configuration)
             } else if ["http", "https", "mailto"].contains(url.scheme ?? "") {
                 NSWorkspace.shared.open(url)
             }
         }
 
         return nil
+    }
+
+    // A window of its own for a same-origin page: WebKit loads the page in the view it gets back, with the same session.
+    func popup(_ configuration: WKWebViewConfiguration) -> WKWebView {
+        let view = WKWebView(frame: .zero, configuration: configuration)
+
+        view.navigationDelegate = self
+        view.uiDelegate = self
+        view.allowsBackForwardNavigationGestures = true
+        view.allowsMagnification = true
+
+        if #available(macOS 13.3, *) {
+            view.isInspectable = UserDefaults.standard.bool(forKey: "WebInspector")
+        }
+
+        let made = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
+
+        made.title = "Pi Pocket"
+        made.minSize = NSSize(width: 420, height: 400)
+        made.isReleasedWhenClosed = false
+        made.contentView = view
+        made.tabbingMode = .disallowed
+        made.center()
+        popups[made] = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: made, queue: .main
+        ) { [weak self] _ in
+            // After the close: the window is not let go while it closes.
+            DispatchQueue.main.async {
+                if let observer = self?.popups.removeValue(forKey: made) {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+            }
+        }
+        made.makeKeyAndOrderFront(nil)
+
+        return view
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        if webView !== self.webView {
+            webView.window?.close()
+        }
     }
 
     func webView(
