@@ -202,7 +202,7 @@ export function ArtifactViewer({ id, version }) {
                     <${Icon} name="trash" />
                 </button>`
             }
-            <button class="icon-button" onClick=${closeSheet} aria-label="Close">
+            <button class="icon-button viewer-close" onClick=${closeSheet} aria-label="Close">
                 <${Icon} name="close" />
             </button>
         </header>

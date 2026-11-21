@@ -9524,8 +9524,16 @@ div.group-head {
     .viewer-head {
         flex-wrap: wrap;
     }
-    .viewer-title {
+    /* The title and Close share the first row; the other buttons wrap below it. */
+    .viewer-head > * {
+        order: 2;
+    }
+    .viewer-head > .viewer-title {
         flex-basis: calc(100% - 50px);
+        order: 0;
+    }
+    .viewer-head > .viewer-close {
+        order: 1;
     }
     .artifact-grid {
         grid-template-columns: 1fr;
