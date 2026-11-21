@@ -107,7 +107,8 @@ async function sizeOf(path: string): Promise<number> {
 
 /**
  * Whether a worktree holds an env file (`.env`, `prod.env`) that git ignores, also inside an ignored folder:
- * `git worktree remove` deletes such files with no word. Other ignored files (`node_modules`, `dist`) do not count.
+ * `git worktree remove` deletes such files with no word. Other ignored files (`dist`) do not count, and `node_modules`
+ * folders are not read. A worktree with more ignored files than `MAX_COUNTED` counts as having one.
  */
 async function hasIgnoredEnv(path: string): Promise<boolean> {
     const listed = await git(path, ["status", "--porcelain", "-z", "--ignored"]);
@@ -123,15 +124,20 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
         }
 
         for await (const entry of dir) {
+            // Too many to read them all: one may still be there, so the worktree stays, as for a git error.
             if (++counted > MAX_COUNTED) {
-                return false;
+                return true;
             }
 
             if (isEnvFile(entry.name)) {
                 return true;
             }
 
-            if (entry.isDirectory() && (await walk(join(folder, entry.name)))) {
+            if (
+                entry.isDirectory() &&
+                entry.name !== "node_modules" &&
+                (await walk(join(folder, entry.name)))
+            ) {
                 return true;
             }
         }
@@ -145,6 +151,11 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
         }
 
         const name = entry.slice(3);
+
+        // A package's own files: an install puts them back, and they are most of the files.
+        if (name.endsWith("/") && basename(name) === "node_modules") {
+            continue;
+        }
 
         if (name.endsWith("/") ? await walk(join(path, name)) : isEnvFile(basename(name))) {
             return true;
