@@ -74,8 +74,8 @@ function LinkSteps({ made, onDone }) {
         </p>
         ${
             made.fingerprint &&
-            html`<p class="muted small">
-                This server's key, which ${made.name} keeps to know this server: <code>${made.fingerprint}</code>.
+            html`<p class="muted small runner-key">
+                This server's key, which ${made.name} keeps to know this server: <code>${made.fingerprint}</code>.${" "}
                 <code>pi-pocket runner status</code> there shows the same.
             </p>`
         }
@@ -718,7 +718,7 @@ function ComputerPage({ runner }) {
             </div>`
         }
         ${again && html`<${LinkSteps} made=${again} onDone=${() => setAgain(null)} />`}
-        ${runner.fingerprint && html`<div class="muted small">Key: <code>${runner.fingerprint}</code></div>`}
+        ${runner.fingerprint && html`<div class="muted small runner-key">Key: <code>${runner.fingerprint}</code></div>`}
         <div class="segmented runner-tabs" role="tablist" aria-label=${`${runner.name}: parts`}>
             ${TABS.map(
                 ([id, label]) => html`<button

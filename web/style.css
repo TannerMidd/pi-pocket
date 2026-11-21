@@ -7568,6 +7568,11 @@ div.group-head {
     margin: 0;
 }
 
+/* A key's fingerprint: one long word, broken anywhere so it stays inside its card on a phone. */
+.runner-key code {
+    word-break: break-all;
+}
+
 .runner-page > .group-title,
 .runner-pane > .group-title {
     margin: 8px 2px 0;
