@@ -19,6 +19,7 @@ import type { Memory } from "./memory.ts";
 import type { Pip } from "./pip.ts";
 import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
+import type { SessionCleanup } from "./session-cleanup.ts";
 import type { BackgroundTasks } from "./background.ts";
 import type { Updates } from "./updates.ts";
 import type { RepoWatches } from "./repo-watches.ts";
@@ -645,6 +646,8 @@ export interface PocketHost {
     cwdOf(conversationId: ConversationId): string;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
+    /** Archived sessions cleaned up and removed from the app: the session cleanup module's routes are the owner's way to it. */
+    readonly sessionCleanup: Pick<SessionCleanup, "plan" | "cleanUp" | "remove">;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
     readonly background: Pick<
         BackgroundTasks,

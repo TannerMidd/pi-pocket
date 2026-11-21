@@ -70,6 +70,7 @@ import {
     ChatDoc,
     type ChatMessage,
     DecisionsDoc,
+    DeletedDoc,
     FolderFavoritesDoc,
     MemoryDoc,
     RunFailureDoc,
@@ -139,6 +140,7 @@ import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
 import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
+import { SessionCleanup } from "./session-cleanup.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
 import { withQuietLimit } from "./deadline.ts";
@@ -441,6 +443,8 @@ export class PocketApp {
     readonly folderFavorites = new FolderFavorites(this);
     /** Artifacts published to anyone with their address (`share.ts`), which needs no sign-in. */
     readonly shares = new Shares(this);
+    /** Archived sessions' worktrees removed, and sessions taken out of the app (`session-cleanup.ts`). */
+    readonly sessionCleanup = new SessionCleanup(this);
     /** Extension modules' pages for anyone with the address (`public-links.ts`), which need no sign-in. */
     readonly publicLinks = new PublicLinks(this);
     /** What happens in the app, for extensions (`app-events.ts`, `host.on`). */
@@ -494,6 +498,8 @@ export class PocketApp {
     /** Each conversation's subagents, and those with a report on its way to it: for the board and the session list. */
     readonly #subagents = new Map<ConversationId, SubagentsOf>();
     #sessions: Record<string, SessionMeta> = {};
+    /** The sessions removed from the app (`DeletedDoc`): nobody sees them or their subagents again. */
+    #removed = new Set<string>();
     #sessionsTimer: NodeJS.Timeout | undefined;
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
@@ -949,6 +955,7 @@ export class PocketApp {
             sessions: this.extensionSessions,
             cwdOf: (conversationId) => this.cwdOf(conversationId),
             schedules: this.schedules,
+            sessionCleanup: this.sessionCleanup,
             background: this.background,
             goals: this.goals,
             browsers: this.browsers,
@@ -1103,6 +1110,7 @@ export class PocketApp {
         await this.pip.tuneAll((line) => this.#log(line));
         // Work a previous process left unfinished continues now.
         this.harness.resume();
+        void this.sessionCleanup.resume();
     }
 
     /**
@@ -1112,6 +1120,9 @@ export class PocketApp {
      */
     async #recover(storage: Storage): Promise<ConversationId[]> {
         this.#sessions = { ...((await this.harness.snapshot(SessionsDoc, context))?.items ?? {}) };
+        this.#removed = new Set(
+            Object.keys((await this.harness.snapshot(DeletedDoc, context))?.items ?? {}),
+        );
         const conversations: ConversationId[] = [];
         const unrecorded = new Map<ConversationId, Missing[]>();
         let cursor: Cursor | undefined;
@@ -1420,6 +1431,26 @@ export class PocketApp {
                     () => {},
                 );
             }
+        } else if (kind === DeletedDoc.definition.kind) {
+            this.#removed = new Set(
+                Object.keys((value as { items?: Record<string, unknown> } | null)?.items ?? {}),
+            );
+
+            for (const client of [...this.#clients]) {
+                if (
+                    client.conversationId !== undefined &&
+                    !this.canSee(client.user, client.conversationId)
+                ) {
+                    this.#evict(client, "This session was removed.");
+                }
+
+                for (const peek of client.peeks ?? []) {
+                    if (!this.canSee(client.user, peek)) {
+                        client.peeks?.delete(peek);
+                        this.#unpeek(client, peek);
+                    }
+                }
+            }
         } else if (kind === FolderFavoritesDoc.definition.kind) {
             this.folderFavorites.committed(value as { users: Record<string, string[]> } | null);
         } else if (kind === MemoryDoc.definition.kind) {
@@ -1532,6 +1563,12 @@ export class PocketApp {
 
     /** What changed in the session list, as events for extensions (`host.on`). PiP's conversations send none. */
     #sessionEvents(before: Record<string, SessionMeta>, after: Record<string, SessionMeta>): void {
+        for (const [key, meta] of Object.entries(before)) {
+            if (after[key] === undefined && meta.pip === undefined) {
+                this.events.emit("session.removed", { conversationId: Number(key) });
+            }
+        }
+
         for (const [key, meta] of Object.entries(after)) {
             const was = before[key];
             const conversationId = Number(key);
@@ -2382,6 +2419,11 @@ export class PocketApp {
      */
     canSee(user: User, id: ConversationId): boolean {
         const root = this.rootOf(id);
+
+        if (this.#removed.has(String(root))) {
+            return false;
+        }
+
         const pip = this.#sessions[String(root)]?.pip;
 
         if (pip !== undefined && pip !== user.id) {
@@ -2949,6 +2991,11 @@ export class PocketApp {
     /** The conversations with a run going. */
     busyConversations(): ConversationId[] {
         return [...this.#busy];
+    }
+
+    /** Every session's id, PiP's too. */
+    sessionIds(): ConversationId[] {
+        return Object.keys(this.#sessions).map((id) => Number(id) as unknown as ConversationId);
     }
 
     /** The catalogue entry of a session; undefined for subagents and other conversations. */

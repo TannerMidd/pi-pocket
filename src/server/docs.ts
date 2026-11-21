@@ -55,6 +55,36 @@ export type SessionMeta = {
     pip?: string;
 };
 
+/**
+ * A session the owner removed from the app (`session-cleanup.ts`): its catalogue entry went in the same commit that
+ * wrote this. Its transcript stays in storage until Pi Durable can purge a conversation; `conversations` are the ones
+ * such a purge takes. `done` is when Pocket's own files went: until then, each start goes on with them.
+ */
+export type RemovedSession = {
+    title?: string;
+    cwd: string;
+    /** The session and its subagents' conversations. */
+    conversations: number[];
+    /** Who removed it, and when. */
+    by: string;
+    at: number;
+    worktree?: Worktree;
+    /** Uploads folders a live fork still reads (`workspace.ts`), which stay. */
+    keepUploads?: number[];
+    done?: number;
+    /** What could not be removed, in words, for the log. */
+    left?: string[];
+};
+
+/** Sessions removed from the app, by id: the queue of a later purge. Stored data: never rename the kind. */
+export const DeletedDoc = defineDoc<{ items: Record<string, RemovedSession> }>({
+    kind: "pocket.deleted",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ items: {} }),
+});
+
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
 export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     kind: "pocket.sessions",
