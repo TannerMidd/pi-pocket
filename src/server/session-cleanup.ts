@@ -1,13 +1,14 @@
 /**
  * Archived sessions cleaned up by the owner (`extensions/session-cleanup.ts` is their way to it). Cleaning up removes
  * the worktrees of archived sessions; their transcripts stay. Removing takes a session out of the app: its work ends,
- * its webhooks, repository watches, shares, and lessons go, and Pocket's own files of it are removed (its worktree, its
+ * its webhooks, repository watches, shares, public links, and lessons go, and Pocket's own files of it are removed (its worktree, its
  * uploads, its background logs). The transcript stays in storage: Pi Durable cannot purge a conversation yet, and
  * Pocket never writes to its tables. `pocket.deleted` keeps each removed session, the queue for such a purge.
  *
  * A removal is one commit (the catalogue entry goes as the queue entry comes), then the files. A restart between them
  * goes on with the files (`resume`), so nothing is left half done.
  */
+import { existsSync } from "node:fs";
 import { lstat, opendir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -18,6 +19,7 @@ import {
     DeletedDoc,
     HooksDoc,
     MemoryDoc,
+    PublicLinksDoc,
     type RemovedSession,
     RepoWatchesDoc,
     SessionsDoc,
@@ -62,6 +64,7 @@ export type SessionPlan = {
         hooks: number;
         repoWatches: number;
         shares: number;
+        links: number;
         lessons: number;
     };
 };
@@ -156,11 +159,11 @@ export class SessionCleanup {
                 continue;
             }
 
-            let at = this.#app.sessionMeta(session.id as unknown as ConversationId)?.forkedFrom;
+            let at = this.#app.forkedFrom(session.id as unknown as ConversationId);
 
             for (let depth = 0; at !== undefined && depth < 64; depth++) {
                 read.add(at.id);
-                at = this.#app.sessionMeta(at.id as unknown as ConversationId)?.forkedFrom;
+                at = this.#app.forkedFrom(at.id as unknown as ConversationId);
             }
         }
 
@@ -214,6 +217,7 @@ export class SessionCleanup {
             hooks: { target: number }[];
             watches: { target: number }[];
             shares: { conversation: string }[];
+            links: { conversation?: number }[];
             lessons: { project?: string }[];
         },
     ): Promise<SessionPlan | undefined> {
@@ -272,6 +276,9 @@ export class SessionCleanup {
                 repoWatches: docs.watches.filter((watch) => numbers.has(watch.target)).length,
                 shares: docs.shares.filter((share) => numbers.has(Number(share.conversation)))
                     .length,
+                links: docs.links.filter(
+                    (link) => link.conversation !== undefined && numbers.has(link.conversation),
+                ).length,
                 lessons: docs.lessons.filter((lesson) => lesson.project === sessionKey(id)).length,
             },
         };
@@ -284,6 +291,7 @@ export class SessionCleanup {
             hooks: Object.values((await snapshot(HooksDoc, context))?.items ?? {}),
             watches: Object.values((await snapshot(RepoWatchesDoc, context))?.items ?? {}),
             shares: Object.values((await snapshot(ArtifactSharesDoc, context))?.items ?? {}),
+            links: Object.values((await snapshot(PublicLinksDoc, context))?.items ?? {}),
             lessons: Object.values((await snapshot(MemoryDoc, context))?.items ?? {}),
         };
     }
@@ -348,18 +356,40 @@ export class SessionCleanup {
      */
     async remove(userId: string, ids: readonly unknown[]): Promise<CleanupOutcome[]> {
         this.#requireOwner(userId);
-        const chosen = this.#ids(ids);
-        const outcomes: CleanupOutcome[] = [];
+
+        const depth = (id: ConversationId) => {
+            let count = 0;
+
+            for (let at = this.#app.forkedFrom(id); at !== undefined && count < 64; count++) {
+                at = this.#app.forkedFrom(at.id as unknown as ConversationId);
+            }
+
+            return count;
+        };
+
+        // Forks before the sessions they came from: a parent's uploads go only once no fork that stays reads them.
+        const named = this.#ids(ids);
+        const chosen = [...named].sort((a, b) => depth(b) - depth(a));
+        const removed = new Set<number>();
+        const outcomes = new Map<number, CleanupOutcome>();
 
         for (const id of chosen) {
+            let outcome: CleanupOutcome;
+
             try {
-                outcomes.push(await this.#removeOne(userId, id, new Set(chosen.map(Number))));
+                outcome = await this.#removeOne(userId, id, new Set([...removed, Number(id)]));
             } catch (error) {
-                outcomes.push({ id: Number(id), done: false, why: describe(error) });
+                outcome = { id: Number(id), done: false, why: describe(error) };
             }
+
+            if (outcome.done) {
+                removed.add(Number(id));
+            }
+
+            outcomes.set(Number(id), outcome);
         }
 
-        return outcomes;
+        return named.map((id) => outcomes.get(Number(id))!);
     }
 
     async #removeOne(
@@ -384,6 +414,11 @@ export class SessionCleanup {
             plan.worktree?.state === "clean" ? app.sessionMeta(id)?.worktree : undefined;
         const watchTasks: TaskId[] = [];
 
+        // The plan took a while (sizes): a run that started meanwhile keeps the session.
+        if (tree.some((each) => app.isBusy(each as unknown as ConversationId))) {
+            return { id: Number(id), done: false, why: "Pi is working in it. Stop it first." };
+        }
+
         await app.harness.commit(async (tx) => {
             const sessions = await tx.doc(SessionsDoc);
             const meta = sessions.items[String(id)];
@@ -396,6 +431,7 @@ export class SessionCleanup {
             const record: RemovedSession = {
                 ...(meta.title === undefined ? {} : { title: meta.title }),
                 cwd: meta.cwd,
+                ...(meta.forkedFrom === undefined ? {} : { forkedFrom: meta.forkedFrom }),
                 conversations: tree,
                 by: userId,
                 at: Date.now(),
@@ -429,6 +465,14 @@ export class SessionCleanup {
                 }
             }
 
+            const links = await tx.doc(PublicLinksDoc);
+
+            for (const [key, link] of Object.entries(links.items)) {
+                if (link.conversation !== undefined && numbers.has(link.conversation)) {
+                    delete links.items[key];
+                }
+            }
+
             const memory = await tx.doc(MemoryDoc);
 
             for (const [key, lesson] of Object.entries(memory.items)) {
@@ -448,11 +492,13 @@ export class SessionCleanup {
             await this.#finish(id, record);
         }
 
+        const worktreeGone = worktree !== undefined && !existsSync(worktree.path);
+
         return {
             id: Number(id),
             done: true,
             bytes:
-                (plan.worktree?.state === "clean" ? plan.worktree.bytes : 0) +
+                (worktreeGone ? plan.worktree!.bytes : 0) +
                 (plan.uploads.kept ? 0 : plan.uploads.bytes) +
                 plan.logs,
         };

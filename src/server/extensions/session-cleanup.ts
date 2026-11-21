@@ -3,6 +3,8 @@
 import type { ExtensionWeb, PocketHost, WebRequest } from "../host.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
+/** As many sessions as one request to core may name (`MAX_SESSIONS` in `session-cleanup.ts`). */
+const MAX_SESSIONS = 500;
 
 export default function createSessionCleanup(host: PocketHost, web?: ExtensionWeb) {
     // A server that runs older code, which loaded this file as its checkout changed, has no cleanup: nothing until a
@@ -46,9 +48,12 @@ export default function createSessionCleanup(host: PocketHost, web?: ExtensionWe
 
         const before = Date.now() - olderThanDays * DAY;
 
+        // The oldest first, as many as one request may name.
         return request
             .sessions()
             .filter((session) => session.archived && session.updatedAt <= before)
+            .sort((a, b) => a.updatedAt - b.updatedAt)
+            .slice(0, MAX_SESSIONS)
             .map((session) => session.id);
     };
 

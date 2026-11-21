@@ -57,6 +57,7 @@ export function endsLine(plans) {
         [sum("hooks"), "webhook"],
         [sum("repoWatches"), "repository watch", "repository watches"],
         [sum("shares"), "published artifact link"],
+        [sum("links"), "public page link"],
         [sum("lessons"), "session lesson"],
     ]
         .filter(([count]) => count > 0)

@@ -167,7 +167,7 @@ test("an archived session leaves the app with Pocket's own files; its transcript
     );
 });
 
-test("uncommitted changes in its worktree keep a session; a live fork keeps its parent's uploads", async () => {
+test("uncommitted changes in its worktree keep a session; a live fork keeps the uploads it reads", async () => {
     const dirty = await worktreeSession("Dirty");
 
     writeFileSync(join(app.sessionMeta(dirty)!.worktree!.path, "wip.ts"), "unsaved\n");
@@ -179,20 +179,38 @@ test("uncommitted changes in its worktree keep a session; a live fork keeps its 
     assert.match(kept.why, /uncommitted changes/);
     assert.ok(app.sessionMeta(dirty) !== undefined);
 
-    const parent = await newSession(app);
+    // A fork of a fork stays: removing its parent and grandparent together keeps the grandparent's uploads, which it
+    // still reads through the removed parent.
+    const grand = await newSession(app);
 
-    await say(app, parent, "hello");
-    const last = (await app.transcripts.allEntries(parent, false)).at(-1)!;
-    const fork = await app.commands.fork(parent, owner(app), { entryId: last.id });
-    const files = filesOf(parent);
+    await say(app, grand, "hello");
+    const forkOf = async (id: ConversationId) =>
+        (
+            await app.commands.fork(id, owner(app), {
+                entryId: (await app.transcripts.allEntries(id, false)).at(-1)!.id,
+            })
+        ).id;
+    const parent = await forkOf(grand);
+    const child = await forkOf(parent);
+    const grandFiles = filesOf(grand);
+    const parentFiles = filesOf(parent);
 
+    await archive(grand);
     await archive(parent);
-    const [gone] = (await call("/api/x/session-cleanup/remove", { ids: [parent] })).data.outcomes;
+    const outcomes = (await call("/api/x/session-cleanup/remove", { ids: [grand, parent] })).data
+        .outcomes;
 
-    assert.equal(gone.done, true);
-    assert.equal(existsSync(files.uploads), true, "the fork still shows them");
-    assert.equal(existsSync(files.logs), false);
-    assert.ok(app.sessionMeta(fork.id) !== undefined);
+    assert.deepEqual(
+        outcomes.map((outcome: { id: number; done: boolean }) => [outcome.id, outcome.done]),
+        [
+            [grand, true],
+            [parent, true],
+        ],
+    );
+    assert.equal(existsSync(grandFiles.uploads), true, "the fork still shows them");
+    assert.equal(existsSync(parentFiles.uploads), true);
+    assert.equal(existsSync(grandFiles.logs), false);
+    assert.ok(app.sessionMeta(child) !== undefined);
 });
 
 test("a removal that a restart cut short goes on at the next start", async () => {

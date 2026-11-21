@@ -69,6 +69,8 @@ export type RemovedSession = {
     by: string;
     at: number;
     worktree?: Worktree;
+    /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
+    forkedFrom?: { id: number; entryId?: number };
     /** Uploads folders a live fork still reads (`workspace.ts`), which stay. */
     keepUploads?: number[];
     done?: number;
