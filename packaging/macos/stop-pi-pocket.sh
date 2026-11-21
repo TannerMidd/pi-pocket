@@ -1,11 +1,8 @@
 # Stops a running Pi Pocket of this install. The package's preinstall and uninstall.sh source it, with APP set to the
 # install folder. Bash 3.2 (macOS's /bin/bash): no newer syntax.
 #
-# Pi Pocket is Pi Pocket.app and each process that runs this install's Node.js (the launcher, the server, and their
-# Node.js children), with every process that they started (the agents' commands), and the launcher's tunnel (cloudflared from the data
-# folder), which would run on without it. lsof finds them by the executable file that they run (its txt
-# descriptor), whatever their command line says. A program that only reads the file, such as a backup, has no txt
-# descriptor for it, so it stays.
+# It finds the processes by the executable file that they run (lsof, the txt descriptor), whatever their command line says:
+# a program that only reads the file, such as a backup, stays. It also stops what they started and the launcher's tunnel.
 
 pp_running_file() {
     if [ -e "$1" ]; then
@@ -17,8 +14,7 @@ pp_node_pids() {
     pp_running_file "$APP/node/bin/node"
 }
 
-# Pi Pocket.app, which starts a launcher of its own, where postinstall put it: by its executable, and by its command
-# line, which LaunchServices starts with the executable's path.
+# Pi Pocket.app starts a launcher of its own: found by its executable, and by its command line.
 pp_app_pids() {
     local each
 
@@ -28,7 +24,6 @@ pp_app_pids() {
     done | sort -un
 }
 
-# Each process given, with all of its descendants.
 pp_tree() {
     local pid child
 
@@ -64,9 +59,8 @@ pp_ancestors() {
     done
 }
 
-# The launchers first, with SIGTERM: each stops its tunnel and its server in order, as on q. Then SIGKILL for what is
-# left of the processes found before, as the launcher can start a new server. Again until none is left. Not 0 when
-# Pi Pocket still runs at the end, and 2, with nothing stopped, when this shell is one of Pi Pocket's processes.
+# The launchers first, with SIGTERM: each stops its tunnel and its server in order. Then SIGKILL for what is left, as the
+# launcher can start a new server. Not 0 when Pi Pocket still runs at the end, and 2 when this shell is one of its processes.
 stop_pi_pocket() {
     local _ pid nodes apps all before roots parent
 
@@ -89,7 +83,6 @@ stop_pi_pocket() {
 
         # shellcheck disable=SC2086
         before="$(pp_started $all)"
-        # The app quits as its Quit does on SIGTERM: it stops its launcher.
         roots="$(echo $apps)"
 
         for pid in $nodes; do

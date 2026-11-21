@@ -1,14 +1,12 @@
 #!/bin/bash
-# Builds Pi-Pocket-<version>.pkg on macOS (pkgbuild and productbuild, from Xcode's command line tools). It downloads
-# the pinned Node.js tarballs for arm64 and x64, checks each against the SHA256 below, and joins their two node
-# executables into one universal file with lipo: one package for both kinds of Mac, with the official code in each half.
-# It puts the pi-pocket package of a checkout in it, with its dependencies (packaging/bundle-app.mjs), so the install
-# needs no npm and no network. The workflows run it (.github/workflows/macos*.yml).
+# Builds Pi-Pocket-<version>.pkg on macOS: one package for both kinds of Mac, with the pinned official Node.js of each,
+# checked against the SHA256 below and joined with lipo, and the pi-pocket package (packaging/bundle-app.mjs), so the
+# install needs no npm and no network.
 #
 #   packaging/macos/build.sh <version> [out folder] [--source <checkout>]
 #
-# --source is the checkout to pack, with <version> in its package.json: by default the one this script is in (the release
-# workflow gives the release tag's). The package is unsigned: the workflow signs it when it has the secrets.
+# --source is the checkout to pack (default: the one this script is in), with <version> in its package.json.
+# The package is unsigned: the workflow signs it when it has the secrets.
 set -euo pipefail
 
 # To move to another Node.js, take the darwin-arm64.tar.xz and darwin-x64.tar.xz lines of
@@ -117,7 +115,6 @@ mv -f "$work/node-universal" "$node_dir/bin/node"
 chmod 755 "$node_dir/bin/node"
 lipo -info "$node_dir/bin/node"
 
-# The payload: the folder ~/Library/Application Support/Pi Pocket.
 root="$work/root"
 mkdir -p "$root"
 mv "$node_dir" "$root/node"
@@ -125,12 +122,10 @@ cp "$here/pi-pocket" "$here/Pi Pocket.command" "$here/place-app.mjs" "$here/stop
     "$here/login-item.sh" "$here/uninstall.sh" "$root/"
 chmod 755 "$root/pi-pocket" "$root/Pi Pocket.command" "$root/login-item.sh" "$root/uninstall.sh"
 
-# The app folder, as app.new: postinstall (place-app.mjs) puts it in place of app/, unless app/ holds a newer pi-pocket
-# that the app already updated to. This Node.js and its npm make it, as they make an in-app update later.
+# app.new: postinstall (place-app.mjs) puts it in place of app/, unless app/ holds a newer pi-pocket.
 "$root/node/bin/node" "$repo/packaging/bundle-app.mjs" "$checkout" "$root/app.new" "$version"
 
-# Notarization needs each Mach-O file signed with the Developer ID and the hardened runtime: the prebuilt native modules
-# of the packages. Without the identity they stay as npm delivers them.
+# Notarization needs each Mach-O file signed with the Developer ID and the hardened runtime.
 if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
     while IFS= read -r -d '' file; do
         case "$(file -b "$file")" in
@@ -142,7 +137,6 @@ if [ -n "${APP_SIGN_IDENTITY:-}" ]; then
     done < <(find "$root/app.new" -type f \( -name '*.node' -o -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print0)
 fi
 
-# The app's icon, made from the web app's.
 iconset="$work/pi-pocket.iconset"
 mkdir "$iconset"
 
@@ -157,9 +151,7 @@ done
 
 iconutil --convert icns --output "$work/pi-pocket.icns" "$iconset"
 
-# Pi Pocket.app: the desktop app (app/main.swift), for arm64 and x86_64 in one file. Signed ad hoc, as Apple silicon
-# needs, or with APP_SIGN_IDENTITY (a "Developer ID Application" identity in the keychain search list) and the hardened
-# runtime, which notarization needs.
+# Signed ad hoc, as Apple silicon needs, or with APP_SIGN_IDENTITY and the hardened runtime, which notarization needs.
 bundle="$root/Pi Pocket.app/Contents"
 mkdir -p "$bundle/MacOS" "$bundle/Resources"
 sed -e "s/@VERSION@/$version/g" -e "s/@BUNDLE_VERSION@/${version%%-*}/g" "$here/Info.plist" > "$bundle/Info.plist"
@@ -184,8 +176,7 @@ fi
 
 codesign --verify --strict --all-architectures --verbose=2 "$root/Pi Pocket.app"
 
-# Pi Pocket (console).app: a shell script that opens the launcher in Terminal, for access modes, tunnels, and the
-# sign-in QR code.
+# A shell script that opens the launcher in Terminal, for access modes, tunnels, and the sign-in QR code.
 console="$root/Pi Pocket (console).app/Contents"
 mkdir -p "$console/MacOS" "$console/Resources"
 cp "$bundle/Info.plist" "$console/Info.plist"
@@ -200,7 +191,6 @@ cp "$here/app-executable" "$console/MacOS/Pi Pocket (console)"
 chmod 755 "$console/MacOS/Pi Pocket (console)"
 cp "$work/pi-pocket.icns" "$console/Resources/pi-pocket.icns"
 
-# The package scripts, with the version in place.
 scripts="$work/scripts"
 cp -R "$here/scripts" "$scripts"
 cp "$here/stop-pi-pocket.sh" "$scripts/app/"

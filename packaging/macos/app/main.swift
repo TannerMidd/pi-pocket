@@ -1,20 +1,8 @@
-// Pi Pocket.app: the macOS desktop app. It shows the web app in a window of its own (WKWebView), signed in, with an
-// item in the menu bar (Open, Restart Server, Quit), and runs Pi Pocket with no Terminal window.
+// Pi Pocket.app: the macOS desktop app. A WKWebView window and a menu bar item around a `pi-pocket --desktop` launcher.
 //
-// build.sh compiles it with swiftc for arm64 and x86_64 and joins the two with lipo. It needs only Apple's frameworks.
-//
-// - One per user: a second start (Finder, Spotlight, the Dock, or `Pi Pocket --quit`) asks the first one to show its
-//   window, or to quit, then exits. `--hidden` (the sign-in item) starts it in the menu bar only.
-// - It uses a launcher that already runs (launcher-running.json in the data folder, src/launcher/desktop.ts), such as
-//   "Pi Pocket (console)". Otherwise it starts one, `pi-pocket --desktop`, which listens on this Mac only, through the
-//   user's login shell, so that the PATH of ~/.zprofile (Homebrew) reaches the sessions, as in Terminal. It holds the
-//   launcher's standard input: Quit, or the end of this app, also a crash, closes it, and the launcher stops.
-// - The window signs in with a one-time link (POST /api/sign-in-link, with the owner's token from config.json as a
-//   bearer token): the token is never on a command line, in a title, or in the log.
-// - It gives the page the app bridge (docs/embedders.md): the Dock badge, notifications, and the window's visibility.
-//
-// The app is not updated from Pi Pocket's menu; a newer package replaces it. It must keep working with newer pi-pocket
-// packages: it uses only --desktop, launcher-running.json, /api/pocket/info, /api/sign-in-link, and /api/restart.
+// The owner token goes only in a header of a request to this Mac: never on a command line, in a title, or in the log.
+// A newer pi-pocket package replaces nothing here, so this app uses only --desktop, launcher-running.json,
+// /api/pocket/info, /api/sign-in-link, and /api/restart.
 import Cocoa
 import UserNotifications
 import WebKit
@@ -34,7 +22,6 @@ let dataFolder: URL = {
 let logFolder = home.appendingPathComponent("Library/Logs/Pi Pocket")
 let logFile = logFolder.appendingPathComponent("launcher.log")
 
-/// What the page gets as `window.pocketHost`, in the top frame of the server's origin only (docs/embedders.md).
 func bridgeScript(origin: String) -> String {
     return """
         (() => {
@@ -74,8 +61,7 @@ func jsString(_ text: String) -> String {
     return String(array.dropFirst().dropLast())
 }
 
-/// -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release (place-app.mjs's
-/// compareVersions).
+/// Same order as compareVersions in place-app.mjs.
 func compareVersions(_ a: String, _ b: String) -> Int {
     func parse(_ text: String) -> (core: [Int], pre: [String]) {
         let plain = String(text.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0])
@@ -129,9 +115,7 @@ func compareVersions(_ a: String, _ b: String) -> Int {
     return 0
 }
 
-/// What is wrong with the pi-pocket package that the installer put in app/, as a title and what to do; nil when
-/// nothing is. A package older than this app is one that the install did not replace: an older launcher refuses
-/// --desktop, so it must not start. A newer one is an in-app update, and stays.
+/// An older package than this app is one the install did not replace: an older launcher refuses --desktop.
 func packageProblem() -> (title: String, advice: String)? {
     let folder = appFolder.appendingPathComponent("app/lib/node_modules/pi-pocket")
     let again = "Install Pi Pocket \(appVersion) again: open its .pkg file. Your sessions and settings stay."
@@ -154,7 +138,6 @@ func packageProblem() -> (title: String, advice: String)? {
     return nil
 }
 
-/// The launcher that runs, from launcher-running.json, if its server answers; for pid nil, any launcher's.
 func runningServer(pid: Int32?) -> URL? {
     guard let data = try? Data(contentsOf: dataFolder.appendingPathComponent("launcher-running.json")),
         let running = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -180,7 +163,6 @@ func runningServer(pid: Int32?) -> URL? {
     return String(data: info, encoding: .utf8)?.contains("\"pi-pocket\"") == true ? url : nil
 }
 
-/// The owner's token, from config.json in the data folder, which only this user can read.
 func ownerToken() throws -> String {
     let data = try Data(contentsOf: dataFolder.appendingPathComponent("config.json"))
 
@@ -193,7 +175,6 @@ func ownerToken() throws -> String {
     return token
 }
 
-/// A request to the server on this Mac, with no proxy, no cache, and no cookies. The token goes in a header only.
 func request(_ method: String, _ url: URL, token: String?) throws -> Data {
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
 
@@ -234,7 +215,7 @@ func request(_ method: String, _ url: URL, token: String?) throws -> Data {
     return try result.get()
 }
 
-/// The log, opened to append: this app and its launcher write to it at once, and neither overwrites the other.
+/// Opened to append: this app and its launcher write to the log at once.
 func appendHandle() throws -> FileHandle {
     try FileManager.default.createDirectory(at: logFolder, withIntermediateDirectories: true)
     let descriptor = open(logFile.path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o600)
@@ -303,7 +284,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         NSApp.mainMenu = mainMenu()
         makeStatusItem()
         UNUserNotificationCenter.current().delegate = self
-        // A SIGTERM (a logout, or the installer stopping Pi Pocket) quits as Quit does.
         signal(SIGTERM, SIG_IGN)
         let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 
@@ -327,8 +307,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
-
-    // MARK: The server
 
     func start() {
         if let running = runningServer(pid: nil) {
@@ -497,8 +475,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
-    /// Quit: stop the launcher this app started, then quit. One that another launcher started keeps running. It waits
-    /// here, on the main thread, for at most 20 seconds: the launcher usually stops in one or two.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         quitting = true
 
@@ -507,7 +483,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
 
         log("Quit: stopping the launcher.")
-        // Its input closes, and it gets SIGTERM: either way the launcher stops its server and its tunnel, as on q.
         try? lifeline?.fileHandleForWriting.close()
         kill(process.processIdentifier, SIGTERM)
         let started = Date()
@@ -532,8 +507,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
         return .terminateNow
     }
-
-    // MARK: Menus
 
     func mainMenu() -> NSMenu {
         let bar = NSMenu()
@@ -635,8 +608,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         webView?.pageZoom = max(0.5, (webView?.pageZoom ?? 1) - 0.1)
     }
 
-    // MARK: The window
-
     func openWindow() {
         guard ready, let server = server else {
             openWhenReady = true
@@ -698,7 +669,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         signIn(server)
     }
 
-    /// Open the server's page with a one-time sign-in link; without one, its sign-in page.
     func signIn(_ server: URL) {
         DispatchQueue.global().async {
             var target = server.appendingPathComponent("/")
@@ -721,7 +691,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
 
     func windowWillClose(_ notification: Notification) {
-        // The menu bar item stays; the Dock icon goes with the window, and comes back when it opens again.
         NSApp.setActivationPolicy(.accessory)
         visibilityChanged(visible: false)
     }
@@ -758,8 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             return
         }
 
-        // The window shows only the server: a link elsewhere opens in the default browser. Frames (artifacts) may
-        // load what they load.
+// Frames (artifacts) may load what they load.
         let url = action.request.url
         let local = sameOrigin(url) || ["about", "blob", "data"].contains(url?.scheme ?? "")
 
@@ -819,7 +787,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         visibilityChanged()
 
-        // Once, for the log: whether the window signed in. It names no token and no link.
         if !checkedSignIn {
             checkedSignIn = true
             webView.callAsyncJavaScript(
@@ -840,7 +807,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for action: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        // A new window of the server opens in this one; anything else in the default browser.
         if let url = action.request.url {
             if sameOrigin(url) {
                 webView.load(URLRequest(url: url))
@@ -903,8 +869,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         alert.addButton(withTitle: "Cancel")
         completionHandler(alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil)
     }
-
-    // MARK: The app bridge
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         // Only the top frame of the server's own origin: never an artifact's frame, never another site.

@@ -1,11 +1,8 @@
 #!/bin/bash
-# Turns the start of Pi Pocket at sign-in on or off: a LaunchAgent in ~/Library/LaunchAgents that opens Pi Pocket.app
-# in the menu bar only (--hidden, no window) when the user signs in, from the next sign-in.
+# Turns the start of Pi Pocket at sign-in on or off: a LaunchAgent that opens Pi Pocket.app in the menu bar only
+# (--hidden) from the next sign-in.
 #
 #   login-item.sh on | off | status
-#
-# The package's "Start Pi Pocket when I sign in" choice runs it with on (off by default), each install runs it with off
-# first, and uninstall.sh runs it with off.
 set -u
 
 LABEL="io.github.tannermidd.pi-pocket"

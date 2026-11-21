@@ -1,28 +1,21 @@
 // Makes the app folder that the Windows and macOS installers ship: the pi-pocket package of a checkout, with its
-// production dependencies, in a private npm prefix. build.ps1 and build.sh run it on the release runner with the
-// installer's own Node.js and its npm, so the installer needs no npm when it runs, and Menu → Update Pi Pocket finds the
-// same prefix layout as after `npm install --global`.
+// production dependencies, in a private npm prefix with the layout of `npm install --global`, so Menu → Update Pi Pocket
+// finds it. Usage: node bundle-app.mjs <checkout> <prefix> <version>
 //
-//   node bundle-app.mjs <checkout> <prefix> <version>
-//
-// It packs the checkout (npm pack, whose prepack script puts npm-shrinkwrap.json in, as for the npm release), installs
-// that tarball globally into the prefix without install scripts, and checks the result: the version, the start script,
-// the shrinkwrap, and no package for one platform only. The tree must be the same on every platform: the macOS package
-// is one for both kinds of Mac.
+// The tree must be the same on every platform (the macOS package is one for both kinds of Mac): the check fails on a
+// package for one platform only.
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The folder of the pi-pocket package in an npm prefix, in npm's layout for the platform. */
 export function packageFolder(prefix, platform = process.platform) {
     return platform === "win32"
         ? join(prefix, "node_modules", "pi-pocket")
         : join(prefix, "lib", "node_modules", "pi-pocket");
 }
 
-/** What is wrong with the app folder in prefix for pi-pocket <version>: an empty list when nothing is. */
 export function checkApp(prefix, version, platform = process.platform) {
     const folder = packageFolder(prefix, platform);
     const problems = [];
@@ -78,7 +71,6 @@ export function checkApp(prefix, version, platform = process.platform) {
     return problems;
 }
 
-/** The number of files and their bytes in a folder. Links count as files. */
 export function measure(folder) {
     let files = 0;
     let bytes = 0;
