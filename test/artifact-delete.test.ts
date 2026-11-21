@@ -144,6 +144,9 @@ test("a delete takes every version, link, saved state, and comment at once; view
         assert.equal(await body(id, 1), undefined);
         assert.equal(await body(id, 2), undefined);
         assert.equal((await call(me, "DELETE", `/api/c/${id}/artifacts/demo`)).status, 404);
+        // Its link went too: a new `demo` does not bring it back.
+        await publish(id, "<h1>three</h1>");
+        assert.equal(await app.shares.open(share.token), undefined, "the old link shows the page");
 
         // The fork is another session: its artifact and its pages stay.
         assert.equal((await app.artifactBody(fork.id, "demo", 1)).content, "<h1>one</h1>");
