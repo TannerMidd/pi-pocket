@@ -25,8 +25,38 @@ function themeQuery() {
     })}`;
 }
 
+/** Whether this person may delete an artifact: anyone who steers the session, as the server checks. */
+const mayDelete = (me) => me?.role !== undefined && me.role !== "viewer";
+
+/**
+ * Delete an artifact with all its versions, once the person confirms. Resolves true when it is gone.
+ */
+export function deleteArtifact(conversationId, artifact) {
+    const count = artifact.versions.length;
+    const what =
+        count > 1 ? `“${artifact.title}” and all ${count} versions` : `“${artifact.title}”`;
+
+    if (
+        !confirm(
+            `Delete ${what}? Its links and its cards in replies stop working. Pi's own messages that made it still hold the text Pi sent. This cannot be undone.`,
+        )
+    ) {
+        return Promise.resolve(false);
+    }
+
+    return attempt(async () => {
+        await api(`c/${conversationId}/artifacts/${encodeURIComponent(artifact.id)}`, undefined, {
+            method: "DELETE",
+        });
+        notify("info", `Deleted ${artifact.title}.`);
+
+        return true;
+    }).then((done) => done === true);
+}
+
 export function ArtifactsSheet() {
-    const { artifacts } = store.state.view;
+    const { artifacts, conversation } = store.state.view;
+    const canDelete = mayDelete(store.state.me);
     const items = [...artifacts].sort(
         (a, b) => (b.versions.at(-1)?.createdAt ?? 0) - (a.versions.at(-1)?.createdAt ?? 0),
     );
@@ -41,22 +71,35 @@ export function ArtifactsSheet() {
         <div class="artifact-grid">
             ${items.map((artifact) =>
                 [...artifact.versions].reverse().map(
-                    (version) => html`<button
-                        class="artifact-card"
-                        onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
-                    >
-                        <span class="artifact-cover" aria-hidden="true">
-                            <${Icon} name="file" size=${28} />
-                            <span>${artifact.type}</span>
-                        </span>
-                        <span class="artifact-info">
-                            <span class="artifact-name">${artifact.title}</span>
-                            <span class="muted small mono">${artifact.id}</span>
-                            <span class="muted small mono">
-                                ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
+                    (version) => html`<div class="artifact-tile">
+                        <button
+                            class="artifact-card"
+                            onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
+                        >
+                            <span class="artifact-cover" aria-hidden="true">
+                                <${Icon} name="file" size=${28} />
+                                <span>${artifact.type}</span>
                             </span>
-                        </span>
-                    </button>`,
+                            <span class="artifact-info">
+                                <span class="artifact-name">${artifact.title}</span>
+                                <span class="muted small mono">${artifact.id}</span>
+                                <span class="muted small mono">
+                                    ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
+                                </span>
+                            </span>
+                        </button>
+                        ${
+                            canDelete &&
+                            html`<button
+                                class="icon-button artifact-delete"
+                                title="Delete this artifact"
+                                aria-label=${`Delete ${artifact.title}`}
+                                onClick=${() => deleteArtifact(conversation.id, artifact)}
+                            >
+                                <${Icon} name="trash" size=${16} />
+                            </button>`
+                        }
+                    </div>`,
                 ),
             )}
         </div>
@@ -85,6 +128,17 @@ export function ArtifactViewer({ id, version }) {
     // The Design canvas (a built-in module) shows an HTML page with its versions, comments, and tweaks.
     const designable =
         artifact?.type === "html" && browserModuleState("design")?.status === "ready";
+    // Gone after the viewer saw it: someone deleted it. Before the view has it, it may still be on its way.
+    const seen = useRef(false);
+
+    if (artifact !== undefined) {
+        seen.current = true;
+    }
+
+    const deleted = seen.current && artifact === undefined;
+
+    const remove = () =>
+        deleteArtifact(view.conversation.id, artifact).then((done) => done && closeSheet());
 
     const openInDesign = () => {
         dispatchEvent(
@@ -144,18 +198,34 @@ export function ArtifactViewer({ id, version }) {
                 </button>`
             }
             <a class="button small" href=${src} target="_blank" rel="noopener">Open tab</a>
+            ${
+                mayDelete(me) &&
+                artifact &&
+                html`<button
+                    class="icon-button danger"
+                    title="Delete this artifact"
+                    aria-label="Delete this artifact"
+                    onClick=${remove}
+                >
+                    <${Icon} name="trash" />
+                </button>`
+            }
             <button class="icon-button" onClick=${closeSheet} aria-label="Close">
                 <${Icon} name="close" />
             </button>
         </header>
-        <iframe
-            ref=${frame}
-            key=${`${src}#${nonce}`}
-            src=${src}
-            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads"
-            allow="fullscreen; clipboard-write; accelerometer; gyroscope"
-            title=${artifact?.title ?? id}
-        ></iframe>
+        ${
+            deleted
+                ? html`<p class="muted viewer-gone">This artifact was deleted.</p>`
+                : html`<iframe
+                      ref=${frame}
+                      key=${`${src}#${nonce}`}
+                      src=${src}
+                      sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads"
+                      allow="fullscreen; clipboard-write; accelerometer; gyroscope"
+                      title=${artifact?.title ?? id}
+                  ></iframe>`
+        }
     </div>`;
 }
 

@@ -9418,6 +9418,33 @@ div.group-head {
     gap: 10px;
 }
 
+/* A card with its delete button over the cover's corner: two buttons side by side, not one inside the other. */
+.artifact-tile {
+    position: relative;
+    display: flex;
+    min-width: 0;
+}
+
+.artifact-tile > .artifact-card {
+    flex: 1;
+}
+
+.artifact-delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    color: var(--muted);
+}
+
+.artifact-delete:hover,
+.viewer-head .icon-button.danger:hover {
+    color: var(--err);
+}
+
+.viewer-gone {
+    padding: 24px 20px;
+}
+
 .artifact-card {
     display: flex;
     flex-direction: column;

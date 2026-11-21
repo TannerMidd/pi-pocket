@@ -27,6 +27,7 @@ import {
     type ArtifactType,
     type ArtifactVersion,
 } from "../docs.ts";
+import { keepAssets, nextVersion } from "../artifacts.ts";
 import { APP_ROOT } from "../config.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { PocketHost } from "../host.ts";
@@ -452,6 +453,11 @@ async function publish(
                 return again.version;
             }
 
+            // Edits made on a version that was deleted while this call read it would bring its page back.
+            if (args.edits !== undefined && current === undefined) {
+                throw new Error(`Artifact ${id} was deleted; send content.`);
+            }
+
             if (inline && current !== undefined && current.type !== "html") {
                 throw notHtml(current.type);
             }
@@ -507,7 +513,14 @@ async function publish(
                 await tx.doc(ArtifactAssetDoc, asset.hash, { base64: bytes.toString("base64") });
             }
 
-            const next = (current?.versions.at(-1)?.version ?? 0) + 1;
+            if (prepared.size > 0) {
+                await keepAssets(
+                    tx,
+                    [...prepared.values()].map(({ asset }) => asset.hash),
+                );
+            }
+
+            const next = nextVersion(doc, id);
             const record: ArtifactVersion = {
                 version: next,
                 taskId: api.taskId,
