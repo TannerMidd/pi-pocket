@@ -389,6 +389,12 @@ export class SessionCleanup {
             outcomes.set(Number(id), outcome);
         }
 
+        if (removed.size > 0) {
+            await this.#releaseUploads().catch((error: unknown) =>
+                this.#app.log(`Kept uploads could not be checked: ${describe(error)}`),
+            );
+        }
+
         return named.map((id) => outcomes.get(Number(id))!);
     }
 
@@ -576,7 +582,40 @@ export class SessionCleanup {
         }, context);
     }
 
-    /** At start: go on with the removals a restart cut short. */
+    /** Remove the uploads that removed sessions kept for their forks, once no session that stays reads them. */
+    async #releaseUploads(): Promise<void> {
+        const items = (await this.#app.harness.snapshot(DeletedDoc, context))?.items ?? {};
+        const read = this.#readByForks(new Set());
+
+        for (const [key, record] of Object.entries(items)) {
+            const gone: number[] = [];
+
+            for (const each of record.keepUploads ?? []) {
+                if (!read.has(each)) {
+                    await rm(this.#uploads(each), { recursive: true, force: true }).then(
+                        () => gone.push(each),
+                        (error: unknown) =>
+                            this.#app.log(`Uploads ${each} could not go: ${describe(error)}`),
+                    );
+                }
+            }
+
+            if (gone.length > 0) {
+                await this.#app.harness.commit(async (tx) => {
+                    const item = (await tx.doc(DeletedDoc)).items[key];
+                    const kept = (item?.keepUploads ?? []).filter((each) => !gone.includes(each));
+
+                    if (item !== undefined && kept.length > 0) {
+                        item.keepUploads = kept;
+                    } else if (item !== undefined) {
+                        delete item.keepUploads;
+                    }
+                }, context);
+            }
+        }
+    }
+
+    /** At start: go on with the removals a restart cut short, and remove uploads that no fork reads any more. */
     async resume(): Promise<void> {
         const items = (await this.#app.harness.snapshot(DeletedDoc, context))?.items ?? {};
 
@@ -588,5 +627,9 @@ export class SessionCleanup {
                 );
             }
         }
+
+        await this.#releaseUploads().catch((error: unknown) =>
+            this.#app.log(`Kept uploads could not be checked: ${describe(error)}`),
+        );
     }
 }

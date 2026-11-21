@@ -211,6 +211,12 @@ test("uncommitted changes in its worktree keep a session; a live fork keeps the 
     assert.equal(existsSync(parentFiles.uploads), true);
     assert.equal(existsSync(grandFiles.logs), false);
     assert.ok(app.sessionMeta(child) !== undefined);
+
+    // The last fork that reads them goes: so do they.
+    await archive(child);
+    assert.equal((await call("/api/x/session-cleanup/remove", { ids: [child] })).status, 200);
+    assert.equal(existsSync(grandFiles.uploads), false);
+    assert.equal(existsSync(parentFiles.uploads), false);
 });
 
 test("a removal that a restart cut short goes on at the next start", async () => {
