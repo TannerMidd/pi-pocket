@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export function packageFolder(prefix, platform = process.platform) {
+function packageFolder(prefix, platform = process.platform) {
     return platform === "win32"
         ? join(prefix, "node_modules", "pi-pocket")
         : join(prefix, "lib", "node_modules", "pi-pocket");
