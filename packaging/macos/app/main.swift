@@ -594,20 +594,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         openWindow()
     }
 
+    // The view of the window in front: the main one, or a page's own window.
+    var frontView: WKWebView? {
+        (NSApp.keyWindow?.contentView as? WKWebView) ?? webView
+    }
+
     @objc func reload() {
-        webView?.reload()
+        frontView?.reload()
     }
 
     @objc func actualSize() {
-        webView?.pageZoom = 1
+        frontView?.pageZoom = 1
     }
 
     @objc func zoomIn() {
-        webView?.pageZoom = min(3, (webView?.pageZoom ?? 1) + 0.1)
+        frontView?.pageZoom = min(3, (frontView?.pageZoom ?? 1) + 0.1)
     }
 
     @objc func zoomOut() {
-        webView?.pageZoom = max(0.5, (webView?.pageZoom ?? 1) - 0.1)
+        frontView?.pageZoom = max(0.5, (frontView?.pageZoom ?? 1) - 0.1)
     }
 
     func openWindow() {
