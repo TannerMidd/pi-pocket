@@ -16226,14 +16226,26 @@ textarea.notes {
     color: var(--muted);
 }
 
-/* A turn note's text: kept to three lines, its line breaks kept. */
+/* A turn note's text: three lines until tapped, its line breaks kept. */
 .turn-note-text {
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.turn-note-text.open {
+    display: block;
 }
 
 .link.danger {

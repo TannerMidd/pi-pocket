@@ -2678,11 +2678,22 @@ function NoteEntry({ entry }) {
     </div>`;
 }
 
-/** A note an extension added for Pi after a person's message (`host.annotateTurns`): never the person's words. */
+/**
+ * A note an extension added for Pi after a person's message (`host.annotateTurns`): never the person's words. Three
+ * lines at first; a tap shows it all.
+ */
 function TurnNoteEntry({ entry }) {
+    const [open, setOpen] = useState(false);
+
     return html`<div class="note-line turn-note" id=${`entry-${entry.id}`}>
         <span class="muted">Note for Pi from ${entry.source}:</span>
-        <span class="turn-note-text">${entry.text}</span>
+        <button
+            class=${`turn-note-text${open ? " open" : ""}`}
+            aria-expanded=${open}
+            onClick=${() => setOpen(!open)}
+        >
+            ${entry.text}
+        </button>
     </div>`;
 }
 

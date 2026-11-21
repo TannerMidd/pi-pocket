@@ -786,7 +786,7 @@ export interface Turn {
      */
     readonly at: number;
     /**
-     * The newest time in the session's model context before this message: a message, an answer, or a tool result. Undefined in a new session.
+     * The newest time of a message, an answer, or a tool result among the session's last 32 entries, also from before a reset. Undefined when there is none.
      * @since 0.30.0
      * @experimental
      */

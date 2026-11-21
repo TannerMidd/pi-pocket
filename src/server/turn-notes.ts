@@ -31,7 +31,7 @@ export type Turn = {
     readonly text: string;
     /** When the message came, in milliseconds since 1970. */
     readonly at: number;
-    /** The newest time the conversation's model context has: a message, an answer, or a tool result. */
+    /** The newest time of a message, an answer, or a tool result among the conversation's last 32 entries. */
     readonly previousActivityAt?: number;
     /** Aborts when the time for annotators ends. */
     readonly signal: AbortSignal;
@@ -47,7 +47,10 @@ export const NOTE_MAX = 4000;
 const NAME = /^[A-Za-z0-9][\w.:-]{0,59}$/;
 
 /** What turn notes need of the app. */
-type TurnNotesApp = Pick<PocketApp, "harness" | "hidden" | "notice">;
+type TurnNotesApp = Pick<PocketApp, "harness" | "hidden" | "notice" | "now">;
+
+/** What the timer gives when the time for annotators ends: no string an annotator can return. */
+const LATE = Symbol("late");
 
 export class TurnNotes {
     readonly #annotators: { name: string; annotate: TurnAnnotator }[] = [];
@@ -123,6 +126,9 @@ export class TurnNotes {
             const submissionId = await conversation.submit(tx, draft);
 
             if (idle && (await tx.doc(LiveDoc, id)).run?.inputs.includes(submissionId) === true) {
+                // The time of this commit, as the input's own: Durable stamps it here too.
+                const timestamp = this.#app.now();
+
                 for (const note of notes) {
                     await tx.appendEntry(id, {
                         kind: TURN_NOTE_ENTRY,
@@ -131,7 +137,7 @@ export class TurnNotes {
                             {
                                 role: "user",
                                 content: [{ type: "text", text: note.text }],
-                                timestamp: turn.at,
+                                timestamp,
                             },
                         ],
                     });
@@ -167,10 +173,10 @@ export class TurnNotes {
         });
         const annotators = [...this.#annotators];
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const late = new Promise<"late">((resolve) => {
+        const late = new Promise<typeof LATE>((resolve) => {
             timer = setTimeout(() => {
                 controller.abort(new Error("Time for turn notes ended"));
-                resolve("late");
+                resolve(LATE);
             }, ANNOTATE_TIMEOUT_MS);
         });
         const results = await Promise.all(
@@ -181,7 +187,7 @@ export class TurnNotes {
                         late,
                     ]);
 
-                    if (text === "late") {
+                    if (text === LATE) {
                         throw new Error(`no note after ${ANNOTATE_TIMEOUT_MS} ms`);
                     }
 
@@ -205,20 +211,26 @@ export class TurnNotes {
 
                     return { source: name, text: this.#app.hidden.replace(trimmed, id) };
                 } catch (error) {
-                    this.#app.notice("warning", `Turn note from ${name}: ${describe(error)}`, id);
+                    try {
+                        this.#app.notice(
+                            "warning",
+                            `Turn note from ${name}: ${describe(error)}`,
+                            id,
+                        );
+                    } catch {
+                        // A notice that fails must not stop the message.
+                    }
 
                     return undefined;
                 }
             }),
-        );
-
-        clearTimeout(timer);
+        ).finally(() => clearTimeout(timer));
 
         return results.filter((note) => note !== undefined);
     }
 }
 
-/** The newest timestamp of a model message among the conversation's last entries. */
+/** The newest timestamp of a model message among the conversation's last 32 entries, a reset's or not. */
 async function lastActivity(
     conversation: Conversation,
     context: Context,

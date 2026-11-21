@@ -7,11 +7,11 @@ An extension can add a short note for the model to a person's message. For examp
 ## What a note is
 
 - A note is a separate entry in the transcript, right after the person's message. The person's message, its attachments, and its sender do not change.
-- Pi Pocket stores the note in the same commit as the message. A restart cannot lose it or write it two times. A retry of the same message does not ask the annotator again.
+- Pi Pocket stores the note in the same commit as the message. A restart cannot lose it or write it two times. A retry of a message that is already stored does not ask the annotators again. Two tries of one message at the same moment can both ask them, but only one note is stored.
 - The model reads the note as a user message, on this turn and on all later turns, until compaction or a reset removes it. Compaction treats it like any other entry.
 - A note never starts a run. The person's message starts the run, as usual.
 - Pi Pocket writes the text one time and does not compute it again. Nothing older in the transcript changes, so the provider's prompt cache stays valid for each earlier request.
-- The transcript shows the note as one line, "Note for Pi from `name`", with its text. It never shows as a person's words.
+- The transcript shows the note as "Note for Pi from `name`", with its first 3 lines of text. A tap shows all of it. It never shows as a person's words.
 
 ## Which messages get notes
 
@@ -19,12 +19,12 @@ Only a message that Pi Pocket can place at once gets notes. That is a message to
 
 - **A queued message gets no note.** Pi Durable puts a queued message in the context when it is its turn: at the end of the run for a follow-up, or after the tool round for a steer. A note could not go into the context at the same time, so Pi Pocket does not ask the annotators.
 - A message sent with **Interrupt** gets no note, because it stops a run first.
-- Notes come for every message that goes through Pi Pocket's message path: messages that people send in the app, and messages sent for a person by PiP, by a linked session, by `host.inbox` (webhooks, the relay), and by PR and repository watches. `turn.via` names what sent a message for a person.
-- Scheduled messages, reports of background tasks and subagents, and PiP's own conversation get no notes.
+- Notes come for every message that goes through Pi Pocket's message path: messages that people send in the app, a plan that a person approves, and messages sent for a person by PiP, by a linked session, by `host.sessions.start`, by `host.inbox` (webhooks, the relay), and by PR and repository watches. `turn.via` names what sent a message for a person.
+- Scheduled messages, a message sent again (Resend), reports of background tasks and subagents, and PiP's own conversation get no notes.
 
 ## The annotator
 
-`annotate(turn)` gets the session, the person, the message's text, when it came (`at`), and the newest time in the session's model context before it (`previousActivityAt`). It returns the note's text, or `undefined` for no note. It can be `async`.
+`annotate(turn)` gets the session, the person, the message's text, when it came (`at`), and the newest time of a message, an answer, or a tool result among the session's last 32 entries (`previousActivityAt`). These entries can come from before a reset. It returns the note's text, or `undefined` for no note. It can be `async`.
 
 - Keep it fast. The message waits for the annotators, for 2 seconds at most together. An annotator that is late, throws, or returns more than 4,000 characters adds nothing, and the session shows a warning. The message goes on.
 - `turn.signal` aborts when the 2 seconds end.

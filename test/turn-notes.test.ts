@@ -206,6 +206,8 @@ test("an annotator that throws or is late adds nothing, and the message still go
         }),
         app.turnNotes.add("x.slow", () => new Promise<undefined>(() => {})),
         app.turnNotes.add("x.fine", () => "fine note"),
+        // The word the timer once gave is a note like any other.
+        app.turnNotes.add("x.word", () => "late"),
     ];
 
     try {
@@ -214,7 +216,10 @@ test("an annotator that throws or is late adds nothing, and the message still go
         await say(app, id, "hello");
         assert.deepEqual(
             (await notes(id)).map((entry) => entry.data),
-            [{ source: "x.fine", text: "fine note" }],
+            [
+                { source: "x.fine", text: "fine note" },
+                { source: "x.word", text: "late" },
+            ],
         );
         assert.match(requests.at(-1)!, /fine note/);
     } finally {

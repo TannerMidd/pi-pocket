@@ -878,7 +878,7 @@ interface Turn {
 
 Since 0.30.0 · Experimental
 
-One person's message, before Pi answers it: its session, the person's id, what sent it for them (`via`, when it is not their own typing), their words as stored (hidden values hidden, attachments left out), and when it came. `previousActivityAt` is the newest time in the session's model context before it: a message, an answer, or a tool result. It is `undefined` in a new session. `signal` aborts when the time for annotators ends.
+One person's message, before Pi answers it: its session, the person's id, what sent it for them (`via`, when it is not their own typing), their words as stored (hidden values hidden, attachments left out), and when it came. `previousActivityAt` is the newest time of a message, an answer, or a tool result among the session's last 32 entries, also from before a reset. It is `undefined` when there is none. `signal` aborts when the time for annotators ends.
 
 ### `TurnAnnotator`
 
