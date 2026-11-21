@@ -29,7 +29,6 @@ function hold(): void {
     });
 }
 
-/** Wait for the gate, or for the request to be aborted (a restart closes the app). */
 async function held(signal: AbortSignal | undefined, answer: string) {
     const aborted = new Promise<"aborted">((resolve) =>
         signal?.addEventListener("abort", () => resolve("aborted"), { once: true }),

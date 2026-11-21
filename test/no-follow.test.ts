@@ -1,4 +1,3 @@
-// A file is opened never through a link as its last part, also on Windows, which has no `O_NOFOLLOW`.
 import assert from "node:assert/strict";
 import { closeSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

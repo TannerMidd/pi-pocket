@@ -1,12 +1,8 @@
-// The macOS package's postinstall runs this with the package's own Node.js, after the payload is in place. The payload
-// holds the app folder that build.sh made (packaging/bundle-app.mjs) as app.new/. This puts it in place of app/, the
-// private npm prefix that Menu → Update Pi Pocket updates, with two renames: no npm, and no network.
+// The macOS package's postinstall runs this with the package's own Node.js, to put the payload's app.new/ in place of
+// app/ with two renames: no npm, no network. Usage: node place-app.mjs <installer version>
 //
-//   node place-app.mjs <installer version>
-//
-// A newer pi-pocket that the app already updated to stays: the installer does not take it back to an older one. The
-// output goes to install.log beside this file. The exit code is not 0 when app/ does not hold pi-pocket <version> or
-// newer at the end: the desktop app then refuses to start it and says to install again.
+// A newer pi-pocket that the app already updated to stays. The exit code is not 0 when app/ does not hold pi-pocket
+// <version> or newer at the end: the desktop app then refuses to start it. The output goes to install.log.
 import {
     appendFileSync,
     existsSync,
@@ -18,7 +14,6 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release. */
 export function compareVersions(a, b) {
     const parse = (text) => {
         const [core, pre] = String(text).split("+")[0].split(/-(.*)/s);
@@ -60,7 +55,6 @@ export function compareVersions(a, b) {
     return 0;
 }
 
-/** The version of the pi-pocket package in an npm prefix, or undefined when it has none that can start. */
 export function versionIn(prefix) {
     const folder = join(prefix, "lib", "node_modules", "pi-pocket");
 
@@ -75,7 +69,6 @@ export function versionIn(prefix) {
     }
 }
 
-/** Puts here/app.new in place of here/app, unless app holds a newer pi-pocket. 0 when app is right at the end. */
 export function placeApp(here, version, log) {
     const fresh = join(here, "app.new");
     const live = join(here, "app");

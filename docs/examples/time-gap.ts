@@ -5,7 +5,6 @@ import type { Host, Turn, Web } from "../../types/pocket.d.ts";
 
 const HOUR = 3_600_000;
 
-/** "About 2 days" or "About 5 hours", or undefined for a gap shorter than 3 hours. */
 function gap(turn: Turn): string | undefined {
     if (turn.previousActivityAt === undefined) {
         return undefined;

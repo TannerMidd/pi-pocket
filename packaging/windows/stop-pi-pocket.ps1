@@ -3,14 +3,11 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File stop-pi-pocket.ps1 -App <install folder> [-Check]
 #
-# Pi Pocket is: the desktop app (Pi Pocket.exe), each node.exe of the install's Node.js (the launcher, the server, and
-# their Node.js children) with every process that they started (the agents' commands), Edge's processes for the app's
-# window (by its profile folder), and the launcher's tunnel (cloudflared from the data folder), which would run on
-# without it. Processes are found by their executable path, whatever their command line says.
+# Processes are found by their executable path, whatever their command line says: the desktop app, the install's node.exe
+# and what it started, Edge's processes for the app's window (by its profile folder), and the launcher's tunnel.
 #
-# -Check: exit 1 when Pi Pocket runs, 0 when not. Otherwise: ask the desktop app to quit as its Quit does, wait up to
-# 25 seconds, then end what is left, again until none is left, as the launcher can start a new server. Exit 0 when
-# nothing is left, 1 when something still runs.
+# -Check: exit 1 when Pi Pocket runs, 0 when not. Otherwise it asks the app to quit, waits up to 25 seconds, then ends what
+# is left, again until none is left, as the launcher can start a new server.
 param(
     [Parameter(Mandatory = $true)][string]$App,
     [switch]$Check
@@ -26,7 +23,6 @@ function Test-Under([string]$Path, [string]$Folder) {
     return $Path -and $Path.StartsWith($Folder, [StringComparison]::OrdinalIgnoreCase)
 }
 
-# The desktop app, and the rest.
 function Find-PiPocket {
     $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $desktop = @($all | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals($appExe, [StringComparison]::OrdinalIgnoreCase) })
@@ -52,7 +48,6 @@ if ($Check) {
     if ($found.Desktop.Count + $found.Rest.Count -gt 0) { exit 1 } else { exit 0 }
 }
 
-# The desktop app stops its launcher, which stops the server and the tunnel, as on Quit.
 if ($found.Desktop.Count -gt 0) {
     & $appExe --quit
     for ($wait = 0; $wait -lt 25 -and (Find-PiPocket).Desktop.Count -gt 0; $wait++) {

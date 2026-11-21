@@ -1,6 +1,3 @@
-// Background tasks on every platform (Linux, macOS, Windows): start, output, a stop of a tree, a pid that another
-// process took, the quiet limit, and a restart. Only what each platform shares: the Linux details are in
-// background.test.ts.
 import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -134,7 +131,6 @@ test("a stop never ends a process that took the task's pid", async () => {
     await wait(1500);
     assert.equal(running(decoy.pid!), true, "the decoy runs on");
 
-    // The task's own process, found by its marker (Linux, macOS) or its job and tree (Windows), is stopped all the same.
     await until(() => !running(real), "the task's own process to be ended", 15_000);
 });
 

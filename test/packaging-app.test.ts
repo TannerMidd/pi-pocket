@@ -1,5 +1,3 @@
-// The app folder of the Windows and macOS installers: bundle-app.mjs checks the folder that it makes at build time, and
-// the macOS postinstall (place-app.mjs) puts it in place with no network, keeping a newer in-app update.
 import assert from "node:assert/strict";
 import {
     existsSync,
@@ -33,7 +31,6 @@ const root = mkdtempSync(join(realpathSync(tmpdir()), "pp-packaging-"));
 
 after(() => rmSync(root, { recursive: true, force: true }));
 
-/** An npm prefix in the Unix layout with pi-pocket <version>, and a shrinkwrap with these packages. */
 function prefix(path: string, version: string, packages: Record<string, object> = {}) {
     const folder = join(path, "lib", "node_modules", "pi-pocket");
 

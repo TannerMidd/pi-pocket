@@ -1,11 +1,6 @@
-; Pi Pocket's Windows installer (Inno Setup). It installs for the current user only, without admin rights:
-; - a portable Node.js (the official win-x64 zip, checked by build.ps1) in {app}\node;
-; - the pi-pocket npm package with its dependencies, in a private npm prefix, {app}\app, which the user owns, so in-app
-;   updates work. build.ps1 made it (packaging/bundle-app.mjs): Setup needs no npm and no network. A newer pi-pocket that
-;   the app already updated to stays;
-; - Pi Pocket.exe, the desktop app (PiPocket.cs): an icon in the notification area and a window, with no console;
-; - pi-pocket.cmd, which starts the launcher with that Node.js and prefix in a console, and Start menu and sign-in
-;   shortcuts.
+; Pi Pocket's Windows installer (Inno Setup), for the current user only, without admin rights. It installs a portable
+; Node.js in {app}\node and the pi-pocket package in a private npm prefix, {app}\app, which the user owns, so in-app
+; updates work (a newer package that the app updated to stays), the desktop app, and pi-pocket.cmd.
 ; build.ps1 compiles it: ISCC /DAppVersion=0.30.0 /DNodeDir=<unpacked Node.js> /DDesktopDir=<Pi Pocket.exe's folder>
 ; /DAppDir=<the app folder> pi-pocket.iss
 
@@ -68,7 +63,6 @@ Type: files; Name: "{autostartup}\Pi Pocket.lnk"; Tasks: not startup
 ; The package goes in whole, unless a newer one that the app updated to stays. An install that stops after this leaves
 ; no package, never an older one: the app then says to run Setup again.
 Type: filesandordirs; Name: "{app}\app"; Check: ReplaceApp
-; What the installers that got the package from npm left.
 Type: files; Name: "{app}\install-app.mjs"
 Type: files; Name: "{app}\install.log"
 
@@ -81,8 +75,6 @@ Source: "pi-pocket.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stop-pi-pocket.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-; The app, and the console launcher for access modes, tunnels, and the sign-in QR code. The sign-in shortcut starts the
-; app with its icon only, without a window.
 Name: "{autoprograms}\Pi Pocket"; Filename: "{app}\Pi Pocket.exe"; WorkingDir: "{%USERPROFILE}"; Comment: "Open Pi Pocket"
 Name: "{autoprograms}\Pi Pocket (console)"; Filename: "{app}\pi-pocket.cmd"; WorkingDir: "{%USERPROFILE}"; IconFilename: "{app}\pi-pocket.ico"; Comment: "Start Pi Pocket in a console window, to choose how other devices reach it"
 Name: "{autostartup}\Pi Pocket"; Filename: "{app}\Pi Pocket.exe"; Parameters: "--hidden"; WorkingDir: "{%USERPROFILE}"; Tasks: startup
@@ -98,7 +90,6 @@ Type: filesandordirs; Name: "{app}\node"
 Type: files; Name: "{app}\install.log"
 Type: files; Name: "{app}\launcher.log"
 Type: files; Name: "{app}\launcher.old.log"
-; The app window's Edge profile, with its sign-in cookie.
 Type: filesandordirs; Name: "{app}\Edge profile"
 Type: dirifempty; Name: "{app}"
 
@@ -106,7 +97,6 @@ Type: dirifempty; Name: "{app}"
 var
   KeepApp: Boolean;
 
-{ The next identifier of a dotted version part, which loses it and its dot. }
 function NextPart(var Text: String): String;
 var
   Dot: Integer;
@@ -144,8 +134,7 @@ begin
     Result := 0;
 end;
 
-{ -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release (the same order as
-  CompareVersions in PiPocket.cs). }
+{ Same order as CompareVersions in PiPocket.cs. }
 function CompareVersions(A, B: String): Integer;
 var
   PreA, PreB, X, Y: String;
@@ -211,7 +200,6 @@ begin
   end;
 end;
 
-{ The version of the pi-pocket package in the app folder, or an empty string when it has none that can start. }
 function InstalledAppVersion: String;
 var
   Folder: String;
@@ -240,15 +228,12 @@ begin
   Result := Copy(Rest, 1, At - 1);
 end;
 
-{ Setup's package replaces the one in the app folder, unless that one is newer: an in-app update stays. }
 function ReplaceApp: Boolean;
 begin
   Result := not KeepApp;
 end;
 
-{ stop-pi-pocket.ps1 with Windows PowerShell, for this install: what it prints goes to Setup's or the uninstaller's
-  log. Setup runs its own copy from its temporary folder; the uninstaller the one in the install folder, which it
-  deletes after. }
+{ Setup runs its own copy from its temporary folder; the uninstaller the one in the install folder, which it deletes after. }
 function RunStopScript(const Arguments: String): Integer;
 var
   Script: String;
@@ -317,7 +302,6 @@ begin
   end;
 end;
 
-{ Ask, then stop it. Silent setup takes the default answer: stop it. }
 function MayStopPiPocket(const Action: String): Boolean;
 begin
   Result := True;
@@ -384,9 +368,7 @@ begin
       'Pi''s bash tool needs Git for Windows (https://git-scm.com/download/win), unless bash.exe is on your PATH.';
 end;
 
-{ After the user said yes to the uninstall: stop Pi Pocket, whose files are in use. At the end, the data folder holds
-  sessions, sign-ins, and settings: keep it unless the user says yes. A silent uninstall keeps it. Only the default data
-  folder: one chosen with PI_POCKET_DIR or --data stays. }
+{ The data folder holds sessions, sign-ins, and settings: keep it unless the user says yes. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Data: String;

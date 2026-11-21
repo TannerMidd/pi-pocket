@@ -1,5 +1,3 @@
-// Session cleanup (`session-cleanup.ts`, `extensions/session-cleanup.ts`) over HTTP: an archived session leaves the app
-// with Pocket's own files while its transcript stays in storage, what must stay stays, and a restart cut short goes on.
 import {
     cleanUp,
     context,
@@ -93,7 +91,6 @@ async function worktreeSession(title: string): Promise<ConversationId> {
     return id;
 }
 
-/** A file in a session's uploads and in its background logs, as Pi Pocket keeps them. */
 function filesOf(id: ConversationId): { uploads: string; logs: string } {
     const uploads = join(dataDir, "uploads", String(id));
     const logs = join(dataDir, "background", String(id));
@@ -120,14 +117,12 @@ test("an archived session leaves the app with Pocket's own files; its transcript
     await say(app, id, "hello");
     await app.schedules.add(id, { when: "in 30m", text: "later" });
 
-    // Not archived: it stays.
     const early = await call("/api/x/session-cleanup/remove", { ids: [id] });
 
     assert.equal(early.data.outcomes[0].done, false);
     assert.match(early.data.outcomes[0].why, /Archive it first/);
 
     await archive(id);
-    // Guests do not have the module's routes at all.
     assert.equal((await call("/api/x/session-cleanup/plan", { ids: [id] }, guest)).status, 404);
     assert.equal((await call("/api/x/session-cleanup/remove", { ids: [id] }, guest)).status, 404);
 
@@ -212,7 +207,6 @@ test("uncommitted changes in its worktree keep a session; a live fork keeps the 
     assert.equal(existsSync(grandFiles.logs), false);
     assert.ok(app.sessionMeta(child) !== undefined);
 
-    // The last fork that reads them goes: so do they.
     await archive(child);
     assert.equal((await call("/api/x/session-cleanup/remove", { ids: [child] })).status, 200);
     assert.equal(existsSync(grandFiles.uploads), false);

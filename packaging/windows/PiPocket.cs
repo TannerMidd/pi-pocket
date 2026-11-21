@@ -1,24 +1,9 @@
-// Pi Pocket.exe: the Windows desktop app. It runs Pi Pocket with no console window, puts an icon in the notification
-// area (Open, Restart server, Quit), and shows the web app in its own window with Edge's app mode, signed in.
+// Pi Pocket.exe: the Windows desktop app. A notification area icon and an Edge app-mode window around a `pi-pocket.js --desktop` launcher.
 //
-// build.ps1 compiles it with the C# compiler of the .NET Framework 4.x that every Windows 10 and 11 has, so it needs
-// nothing from the internet. It is C# 5, the language that compiler knows. The Start menu entry and the sign-in
-// shortcut (with --hidden: the icon only, no window) run it. `Pi Pocket.exe --quit` quits the one that runs, as its
-// Quit does.
-//
-// - One per Windows session: a second start asks the first to open its window, then exits.
-// - It uses a launcher that already runs (launcher-running.json in the data folder, src/launcher/desktop.ts), such as
-//   "Pi Pocket (console)". Otherwise it starts one, `pi-pocket.js --desktop`, which listens on this PC only, and holds
-//   its standard input: Quit, or the end of this app, closes it, and the launcher stops. The launcher and everything
-//   it starts are in a job object that ends with this app, so nothing runs on after it.
-// - The window signs in with a one-time link (POST /api/sign-in-link, with the owner's token from config.json as a
-//   bearer token): the token is never on a command line, in a title, or in the log.
-// - The window is Edge (msedge --app) with a profile of its own, in "Edge profile" beside this file. Without Edge, the
-//   default browser opens the one-time link.
-//
-// The app is not updated from Pi Pocket's menu; a newer installer replaces it. It must keep working with newer
-// pi-pocket packages: it uses only --desktop, launcher-running.json, /api/pocket/info, /api/sign-in-link, and
-// /api/restart.
+// build.ps1 compiles it with the .NET Framework 4.x compiler that every Windows 10 and 11 has, so this is C# 5.
+// The owner token goes only in a header of a request to this PC: never on a command line, in a title, or in the log.
+// A newer pi-pocket package replaces nothing here, so this app uses only --desktop, launcher-running.json,
+// /api/pocket/info, /api/sign-in-link, and /api/restart.
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -163,8 +148,7 @@ namespace PiPocket
             }
         }
 
-        /// -1, 0, or 1, as SemVer orders the two versions; a pre-release comes before its release (the same order as
-        /// CompareVersions in pi-pocket.iss).
+/// Same order as CompareVersions in pi-pocket.iss.
         public static int CompareVersions(string a, string b)
         {
             string[] left = a.Split('+')[0].Split(new char[] { '-' }, 2);
@@ -365,8 +349,6 @@ namespace PiPocket
             }
         }
 
-        // ─── The server ─────────────────────────────────────────────────
-
         void Start()
         {
             try
@@ -424,8 +406,6 @@ namespace PiPocket
             }
         }
 
-        /// The address of a running launcher's server that answers, from launcher-running.json; for pid -1, any
-        /// launcher's.
         string RunningUrl(int pid)
         {
             string file = Path.Combine(dataDir, "launcher-running.json");
@@ -483,7 +463,6 @@ namespace PiPocket
             }
         }
 
-        /// launcher.log beside this file, with the last run's in launcher.old.log. It has no token or sign-in link.
         void OpenLog()
         {
             try
@@ -509,10 +488,8 @@ namespace PiPocket
             Log("Pi Pocket desktop app " + Program.Version + ", " + DateTime.Now.ToString("u"));
         }
 
-        /// What is wrong with the pi-pocket package that Setup put in app\, as a title and what to do; null when nothing
-        /// is. Setup writes app\setup-finished.txt after it copied the package: without it, the copy stopped. A package
-        /// older than this app is one that Setup did not replace: an older launcher refuses --desktop, so it
-        /// must not start. A newer one is an in-app update, and stays.
+/// Setup writes app\setup-finished.txt after it copied the package: without it, the copy stopped. An older package
+/// than this app is one Setup did not replace: an older launcher refuses --desktop.
         string[] PackageProblem()
         {
             string folder = Path.Combine(appDir, @"app\node_modules\pi-pocket");
@@ -567,7 +544,6 @@ namespace PiPocket
                 throw new FileNotFoundException("Pi Pocket is not fully installed. Run Setup again.", script);
             }
 
-            // What pi-pocket.cmd sets, for the console entry.
             ProcessStartInfo start = new ProcessStartInfo(node, Quote(script) + " --desktop --data " + Quote(dataDir));
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
@@ -609,8 +585,7 @@ namespace PiPocket
             launcher.BeginErrorReadLine();
         }
 
-        /// A job that ends every process in it when this app ends, also when it crashes or is killed. This app is not in
-        /// it, so the default browser that it may open stays.
+/// Ends every process in it when this app ends, also when it crashes. This app is not in it: the default browser stays.
         void AddToJob(Process process)
         {
             if (job == IntPtr.Zero)
@@ -716,7 +691,6 @@ namespace PiPocket
             Stop();
         }
 
-        /// Close the launcher's input, so that it stops its server and its tunnel; then end the job with this app.
         void Stop()
         {
             Thread stop = new Thread(delegate ()
@@ -757,8 +731,6 @@ namespace PiPocket
             ExitThread();
         }
 
-        // ─── The window ─────────────────────────────────────────────────
-
         void OpenWindow()
         {
             if (!ready)
@@ -781,8 +753,7 @@ namespace PiPocket
             }
             catch (Exception)
             {
-                // The window opens on the sign-in page instead. No error text: a malformed config.json can put its
-                // content, the owner token, in the message.
+// No error text: a malformed config.json can put the owner token in the message.
                 Log("No one-time sign-in link.");
             }
 
@@ -799,7 +770,6 @@ namespace PiPocket
                 {
                     Process started = Process.Start(start);
 
-                    // The window closes on Quit, with the server that it shows.
                     if (edge == null || edge.HasExited)
                     {
                         edge = started;
@@ -817,7 +787,6 @@ namespace PiPocket
             OpenInDefaultBrowser(target);
         }
 
-        /// Bring the Edge window that this app opened to the front, if it is still there.
         bool FocusEdge()
         {
             if (edge == null || edge.HasExited)
@@ -892,7 +861,6 @@ namespace PiPocket
             return null;
         }
 
-        /// The default browser, which is not in the job: it stays when Pi Pocket quits.
         void OpenInDefaultBrowser(string target)
         {
             try
@@ -905,9 +873,6 @@ namespace PiPocket
             }
         }
 
-        // ─── Sign-in and HTTP ───────────────────────────────────────────
-
-        /// The owner's token, from config.json in the data folder, which only this Windows account can read.
         string OwnerToken()
         {
             Dictionary<string, object> config = new JavaScriptSerializer()
@@ -936,7 +901,7 @@ namespace PiPocket
             return (string)path;
         }
 
-        /// A request to the server on this PC, never through a proxy. The token goes in a header, never in the log.
+/// Never through a proxy.
         static string Request(string method, string address, string token)
         {
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(address);
@@ -971,7 +936,6 @@ namespace PiPocket
             }
         }
 
-        /// One argument for a Windows command line, as CommandLineToArgvW reads it.
         static string Quote(string argument)
         {
             StringBuilder quoted = new StringBuilder("\"");

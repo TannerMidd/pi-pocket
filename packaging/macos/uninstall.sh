@@ -1,12 +1,11 @@
 #!/bin/bash
-# Removes what the macOS package installed: it stops a running Pi Pocket (with the commands that its agents run),
-# removes Pi Pocket.app and Pi Pocket (console).app from ~/Applications, the sign-in item, the package receipts, and
-# this folder. Then it asks whether to delete the data in ~/.pi-pocket. The default is No.
+# Removes what the macOS package installed: Pi Pocket stops, then Pi Pocket.app, Pi Pocket (console).app, the sign-in item,
+# the package receipts, and this folder go. Then it asks whether to delete the data in ~/.pi-pocket (default: No).
 #
 #   "$HOME/Library/Application Support/Pi Pocket/uninstall.sh" [--yes] [--keep-data | --delete-data]
 #
-# --yes does not ask before the uninstall. Without a terminal it asks nothing and keeps the data, unless --delete-data
-# says otherwise. Only the default data folder: one chosen with PI_POCKET_DIR or --data stays.
+# Without a terminal it asks nothing and keeps the data, unless --delete-data says otherwise. A data folder chosen with
+# PI_POCKET_DIR or --data stays.
 set -u
 
 APP="$HOME/Library/Application Support/Pi Pocket"
@@ -90,7 +89,6 @@ for pair in "Pi Pocket.app:io.github.tannermidd.pi-pocket.launcher" \
     fi
 done
 
-# What macOS keeps for Pi Pocket.app: the window's website data (with its sign-in cookie), its settings, and the logs.
 ID=io.github.tannermidd.pi-pocket.launcher
 rm -rf "$HOME/Library/WebKit/$ID" "$HOME/Library/HTTPStorages/$ID" "$HOME/Library/HTTPStorages/$ID.binarycookies" \
     "$HOME/Library/Caches/$ID" "$HOME/Library/Saved Application State/$ID.savedState" \
