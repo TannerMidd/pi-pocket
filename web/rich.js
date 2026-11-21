@@ -341,20 +341,18 @@ function pageOf(conversationId, id, version) {
  * session may see the card; later versions never change it. Until it comes the card says so.
  */
 export function InlineArtifact({ conversationId, id, title, version }) {
-    // Gone after this card saw it in the session: someone deleted it. Before the view has it, it may be on its way.
+    // A version the session no longer has, at or under the last number of a deleted artifact: someone deleted it.
     const { view } = store.state;
-    const present =
-        view.conversation?.id === conversationId &&
-        (view.artifacts ?? []).some(
+    const ended =
+        view.conversation?.id === conversationId && Object.hasOwn(view.artifactsEnded ?? {}, id)
+            ? view.artifactsEnded[id]
+            : undefined;
+    const deleted =
+        ended !== undefined &&
+        version <= ended &&
+        !(view.artifacts ?? []).some(
             (each) => each.id === id && each.versions.some((one) => one.version === version),
         );
-    const seen = useRef(false);
-
-    if (present) {
-        seen.current = true;
-    }
-
-    const deleted = seen.current && !present && view.conversation?.id === conversationId;
 
     useEffect(() => {
         if (deleted) {
@@ -368,6 +366,10 @@ export function InlineArtifact({ conversationId, id, title, version }) {
     });
 
     useEffect(() => {
+        if (deleted) {
+            return undefined;
+        }
+
         let current = true;
 
         setPage({
@@ -382,7 +384,7 @@ export function InlineArtifact({ conversationId, id, title, version }) {
         return () => {
             current = false;
         };
-    }, [conversationId, id, version]);
+    }, [conversationId, id, version, deleted]);
 
     const artifact = { id, title, version };
 

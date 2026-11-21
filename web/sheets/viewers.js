@@ -128,14 +128,8 @@ export function ArtifactViewer({ id, version }) {
     // The Design canvas (a built-in module) shows an HTML page with its versions, comments, and tweaks.
     const designable =
         artifact?.type === "html" && browserModuleState("design")?.status === "ready";
-    // Gone after the viewer saw it: someone deleted it. Before the view has it, it may still be on its way.
-    const seen = useRef(false);
-
-    if (artifact !== undefined) {
-        seen.current = true;
-    }
-
-    const deleted = seen.current && artifact === undefined;
+    // Not in the session, and listed as deleted: someone deleted it.
+    const deleted = artifact === undefined && Object.hasOwn(view.artifactsEnded ?? {}, id);
 
     const remove = () =>
         deleteArtifact(view.conversation.id, artifact).then((done) => done && closeSheet());

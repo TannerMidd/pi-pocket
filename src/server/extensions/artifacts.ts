@@ -291,6 +291,8 @@ async function publish(
         }
 
         let content: string;
+        // The version that edits apply to: it must still be there when they commit.
+        let base: number | undefined;
         let type: ArtifactType = inline ? "html" : (args.type ?? previous?.type ?? "html");
 
         if (args.path !== undefined) {
@@ -328,6 +330,8 @@ async function publish(
             if (latest === undefined) {
                 throw new Error(`There is no artifact ${id} to edit yet; send content.`);
             }
+
+            base = latest.version;
 
             const body = await api.snapshot(
                 ArtifactBodyDoc,
@@ -453,8 +457,12 @@ async function publish(
                 return again.version;
             }
 
-            // Edits made on a version that was deleted while this call read it would bring its page back.
-            if (args.edits !== undefined && current === undefined) {
+            // Edits made on a version that was deleted while this call read it would bring its page back, also
+            // under an artifact published again with the same id (its numbers never repeat a deleted one's).
+            if (
+                base !== undefined &&
+                (current === undefined || !current.versions.some((each) => each.version === base))
+            ) {
                 throw new Error(`Artifact ${id} was deleted; send content.`);
             }
 

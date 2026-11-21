@@ -113,6 +113,18 @@ test("a delete takes every version, link, saved state, and comment at once; view
         );
         assert.equal((await app.artifactBody(id, "demo")).content, "<h1>two</h1>");
 
+        const scoped = app.config.addUser("Sam", "guest", [String(fork.id)]);
+
+        try {
+            assert.equal(
+                (await call(scoped.token, "DELETE", `/api/c/${id}/artifacts/demo`)).status,
+                404,
+                "a guest of another session",
+            );
+        } finally {
+            app.config.removeUser(scoped.user.id);
+        }
+
         const done = await call(me, "DELETE", `/api/c/${id}/artifacts/demo`);
 
         assert.equal(done.status, 200, done.text);
@@ -193,6 +205,39 @@ test("an asset's bytes go once no artifact uses them, and no stored revision kee
         db.close();
         app = await openApp(scriptedModel(), dataDir);
     }
+});
+
+test("bytes stored again while the sweep reads stay", async () => {
+    const early = await session();
+    const late = await session();
+    const race = { name: "race.txt", content: "bytes-in-a-race" };
+
+    await publish(late, "<h1>late</h1>", { assets: [race] });
+
+    // While the sweep reads `late`, `early` (read already) stores the same bytes.
+    const snapshot = app.harness.snapshot;
+
+    app.harness.snapshot = (async (...args: unknown[]) => {
+        if (args[0] === ArtifactsDoc && args[1] === late) {
+            app.harness.snapshot = snapshot;
+            await publish(early, "<h1>early</h1>", { assets: [race] });
+        }
+
+        return (snapshot as (...all: unknown[]) => unknown).apply(app.harness, args);
+    }) as typeof snapshot;
+
+    try {
+        assert.equal(
+            (await call(app.config.ownerToken, "DELETE", `/api/c/${late}/artifacts/demo`)).status,
+            200,
+        );
+    } finally {
+        app.harness.snapshot = snapshot;
+    }
+
+    const stored = await app.artifactAsset(early, "demo", 1, "race.txt");
+
+    assert.ok(stored, "the new version keeps its bytes");
 });
 
 test("published again, a deleted artifact never reuses a version number, and its delete holds after a restart", async () => {
