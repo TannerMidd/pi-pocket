@@ -294,6 +294,43 @@ test("a limit that covers the account holds every model of the provider, with on
     assert.deepEqual(await stops(a, b), ["stop", "stop"]);
 });
 
+test("an ambiguous Fable wait does not block Opus, but a separate Opus limit can hold the account", async () => {
+    const now = Date.parse("2026-11-21T11:38:35Z");
+    const g = gate({ now: () => now });
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": String(now / 1000 + 3 * 3_600),
+    };
+    const fail = "429 This request would exceed your account's rate limit. Please try again later.";
+    const rt = fake([{ fail, headers }, { ok: true }, { fail, headers }]);
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const options = {
+        signal: stop.signal,
+        fetch: async () => new Response("", { status: 429, headers }),
+    };
+    const requests = [ask(rt, "claude-fable-5-2", "anthropic", options)];
+
+    try {
+        await until(() => g.gates().length === 1);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+        assert.equal((await ask(rt, "claude-opus-5-5", "anthropic", options)).stopReason, "stop");
+        assert.equal(rt.calls.length, 2);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+
+        requests.push(ask(rt, "claude-opus-5-5", "anthropic", options));
+        await until(() => g.gates().some((gate) => gate.key === "anthropic"));
+        requests.push(ask(rt, "claude-haiku-4-5", "anthropic", options));
+        assert.equal(rt.calls.length, 3, "the account gate holds the next model");
+    } finally {
+        stop.abort();
+        await stops(...requests);
+        g.close();
+    }
+});
+
 test("the gate opens at the canary's first content, not when its whole stream ends", async () => {
     const g = gate();
     const rt = fake();

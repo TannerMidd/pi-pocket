@@ -658,6 +658,7 @@ export class LimitGate {
                 // The attempt failed before any content, and the failure is not an abort.
                 const verdict = classify({
                     provider: model.provider,
+                    modelId: model.id,
                     message: attempt.message.errorMessage ?? "",
                     facts: attempt.facts,
                     now: this.#now(),
