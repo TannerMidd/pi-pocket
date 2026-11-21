@@ -142,6 +142,7 @@ import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
+import { TurnNotes } from "./turn-notes.ts";
 import { withQuietLimit } from "./deadline.ts";
 import { AppEventBus } from "./app-events.ts";
 import { changeSettings, shownSettings } from "./extension-settings.ts";
@@ -452,6 +453,8 @@ export class PocketApp {
     );
     /** What extensions add to the environment of each command (`hidden.ts`, `host.commandEnv`). */
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
+    /** What extensions add for the model after a person's message (`turn-notes.ts`, `host.annotateTurns`). */
+    readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
     /** Updates of Pi Pocket itself: the newest release, and updating to it (`updates.ts`). */
@@ -927,6 +930,7 @@ export class PocketApp {
             ask: (request, askContext) => ask(this.approvals, request, askContext),
             hide: (value) => this.hidden.add(value),
             commandEnv: (provider) => this.commandEnvs.add(provider),
+            annotateTurns: (name, annotate) => this.turnNotes.add(name, annotate),
             browser: (conversationId, options) =>
                 browserFor(
                     this.browsers,

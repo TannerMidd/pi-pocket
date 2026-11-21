@@ -129,6 +129,7 @@ test("the example extensions load as drop-ins, off until the owner turns them on
             ["quiet-note.ts", false],
             ["read-page.ts", false],
             ["server-status.ts", false],
+            ["time-gap.ts", false],
         ],
     );
 

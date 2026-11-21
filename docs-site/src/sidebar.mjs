@@ -21,6 +21,7 @@ export const SIDEBAR = [
             ["docs/extensions/linked-sessions.md", "Starting and messaging sessions"],
             ["docs/extensions/sessions.md", "Starting an ordinary session"],
             ["docs/extensions/inbox.md", "Delivering outside data"],
+            ["docs/extensions/turn-notes.md", "Turn notes"],
             ["docs/extensions/relay.md", "Relay connectors"],
             ["docs/extensions/workspaces.md", "Execution environments for workspaces"],
             ["docs/extensions/app.md", "Adding to the app"],

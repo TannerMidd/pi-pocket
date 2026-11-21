@@ -26,6 +26,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 | Start sessions, and send messages between them                  | [Starting and messaging sessions](extensions/linked-sessions.md)                                                |
 | Start an ordinary session, like New session                     | [Starting an ordinary session](extensions/sessions.md)                                                          |
 | Give a chat message or a feed's item to a session, as data      | [Delivering outside data](extensions/inbox.md)                                                                  |
+| Add a note for the model to a person's message                  | [Turn notes](extensions/turn-notes.md)                                                                          |
 | Add a kind of connection to the relay (a chat service, a feed)  | [Relay connectors](extensions/relay.md)                                                                         |
 | Add to the app: routes, a browser module, commands              | [Adding to the app](extensions/app.md)                                                                          |
 | Name how an input this module sends shows in the transcript     | [Adding to the app](extensions/app.md), [`web.presentEntry`](extensions/reference/web.md#presententry)          |

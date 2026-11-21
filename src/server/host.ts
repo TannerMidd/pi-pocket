@@ -26,6 +26,7 @@ import type { Watches } from "./watches.ts";
 import type { FetchPublic } from "./public-fetch.ts";
 import type { BrowserControl } from "./browser/page.ts";
 import type { CommandEnvProvider, HiddenValue } from "./hidden.ts";
+import type { TurnAnnotator } from "./turn-notes.ts";
 import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
@@ -587,6 +588,14 @@ export interface PocketHost {
      * @experimental In 0.22: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     commandEnv(provider: CommandEnvProvider): () => void;
+    /**
+     * Add a note for the model after a person's message, as a separate entry: `annotate` returns its text, or undefined
+     * for none. Only a message placed at once (an idle conversation with nothing queued) gets notes. Returns how to
+     * stop; pass that to `web.onDispose`.
+     *
+     * @experimental @since 0.30.0 (docs/extensions/policies/api-stability.md).
+     */
+    annotateTurns(name: string, annotate: TurnAnnotator): () => void;
     /**
      * A session's browser page, the one Pi and people use: opened when `open` is true, else only when it is open
      * already. Undefined while the Browser module is off, or with no page.

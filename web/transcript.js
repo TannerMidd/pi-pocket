@@ -2678,6 +2678,25 @@ function NoteEntry({ entry }) {
     </div>`;
 }
 
+/**
+ * A note an extension added for Pi after a person's message (`host.annotateTurns`): never the person's words. Three
+ * lines at first; a tap shows it all.
+ */
+function TurnNoteEntry({ entry }) {
+    const [open, setOpen] = useState(false);
+
+    return html`<div class="note-line turn-note" id=${`entry-${entry.id}`}>
+        <span class="muted">Note for Pi from ${entry.source}:</span>
+        <button
+            class=${`turn-note-text${open ? " open" : ""}`}
+            aria-expanded=${open}
+            onClick=${() => setOpen(!open)}
+        >
+            ${entry.text}
+        </button>
+    </div>`;
+}
+
 /** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
 const PENDING_MS = 11 * 60_000;
 
@@ -2752,6 +2771,10 @@ function EntryView({ entry }) {
 
     if (entry.kind === "note") {
         return html`<${NoteEntry} entry=${entry} />`;
+    }
+
+    if (entry.kind === "turnNote") {
+        return html`<${TurnNoteEntry} entry=${entry} />`;
     }
 
     if (entry.kind === "user") {

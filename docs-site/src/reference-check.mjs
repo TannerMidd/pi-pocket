@@ -49,6 +49,8 @@ export const PAGES = {
         "HiddenValue",
         "CommandRun",
         "CommandEnvProvider",
+        "Turn",
+        "TurnAnnotator",
         "BrowserTarget",
         "BrowserControl",
         "BrowserPageHandle",

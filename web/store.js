@@ -3091,6 +3091,7 @@ const ROW_KINDS = new Set([
     "shell",
     "command",
     "note",
+    "turnNote",
     "fromPi",
 ]);
 

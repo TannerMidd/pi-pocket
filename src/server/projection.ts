@@ -13,6 +13,8 @@ import {
     FROM_PREFIX,
     type FromPiData,
     NOTE_ENTRY,
+    TURN_NOTE_ENTRY,
+    type TurnNoteData,
     SHELL_ENTRY,
     type ShellData,
     splitAttachments,
@@ -86,6 +88,7 @@ export type ClientEntry =
     | ({ id: number; kind: "shell"; truncated?: number } & ShellData)
     | ({ id: number; kind: "command"; truncated?: number } & CommandData)
     | { id: number; kind: "note"; text: string; name: string }
+    | { id: number; kind: "turnNote"; text: string; source: string }
     | { id: number; kind: "fromPi"; title: string; file: string }
     | { id: number; kind: "other"; entryKind: string };
 
@@ -98,6 +101,7 @@ const ROW_KINDS = new Set([
     "shell",
     "command",
     "note",
+    "turnNote",
     "fromPi",
 ]);
 
@@ -640,6 +644,17 @@ export function projectEntry(
                 kind: "note",
                 text: String(data?.text ?? ""),
                 name: String(data?.name ?? "Someone"),
+            };
+        }
+
+        case TURN_NOTE_ENTRY: {
+            const data = entry.data as Partial<TurnNoteData> | undefined;
+
+            return {
+                id,
+                kind: "turnNote",
+                text: String(data?.text ?? ""),
+                source: String(data?.source ?? ""),
             };
         }
 
