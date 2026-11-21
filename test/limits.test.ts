@@ -134,6 +134,12 @@ test("an ambiguous Anthropic Fable 429 keeps its reset but does not block other 
 
         assert.equal(verdict.type === "limit" && verdict.scope, "account");
     }
+
+    // A named window with no claim stays on Fable too: only a claim makes it shared.
+    const window = { "anthropic-ratelimit-unified-5h-status": "rejected" };
+    const verdict = ask(message, 429, window, "anthropic", "claude-fable-5-2");
+
+    assert.equal(verdict.type === "limit" && verdict.scope, "model");
 });
 
 test("a person's problem, a refused request, or a monthly plan limit never waits", () => {
