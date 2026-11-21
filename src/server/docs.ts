@@ -34,7 +34,7 @@ const rebased = {
 const rebasedOnDelete = {
     checkpointWhen: (_value: unknown, ops: unknown, info: CheckpointInfo) =>
         info.deltasSinceBase >= 64 ||
-        (ops as readonly (readonly [string, readonly unknown[]?])[]).some(
+        (ops as readonly (readonly [string, (readonly unknown[])?])[]).some(
             (op) => op[0] === "d" && (op[1]?.length ?? 0) <= 2,
         ),
 };
