@@ -27,12 +27,19 @@ const chromium = findBrowser();
 const real = {
     skip: chromium === undefined ? "no Chromium-based browser on this machine" : false,
 } as const;
-const WIDE_TABLE = `A wide table, and a cell that cannot break:
+const WIDE_TABLES = `A table with prose in its cells:
 
-| Col one | Col two | Col three | Col four | Col five | Col six | Col seven | Col eight |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| words in the first cell | b | c | d | e | f | g | h |
-| one-unbreakable-run-of-characters-far-longer-than-any-cell-could-hold | x | y | z | 1 | 2 | 3 | 4 |`;
+| Opportunity | What it would add |
+| --- | --- |
+| Browser acceptance checks | After an update, check that the confirmation is visible, the loading state has ended, and the expected controls are enabled. Check that the content still fits on a phone and a wide desktop. |
+| Run outcomes | A completion notification can say what the assistant reported without changing whether the notification is sent. |
+
+A wide table, and a cell that cannot break:
+
+| Col one | Col two | Col three | Col four | Col five | Col six | Col seven | Col eight | Col nine | Col ten | Col eleven | Col twelve |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| words in the first cell | b | c | d | e | f | g | h | i | j | k | l |
+| one-unbreakable-run-of-characters-far-longer-than-any-cell-could-hold | x | y | z | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |`;
 
 let app: App;
 let server: Server;
@@ -48,22 +55,24 @@ async function inPage<T>(script: string): Promise<T> {
 /** Where the table sits against its reply's words and the pane, once the reply is drawn. */
 const bounds = () =>
     inPage<{
-        tableRight: number;
-        wordsRight: number;
-        tableScrollW: number;
-        tableClientW: number;
+        tables: {
+            tableRight: number;
+            wordsRight: number;
+            scrollWidth: number;
+            clientWidth: number;
+        }[];
         scrollerScrollW: number;
         scrollerClientW: number;
     }>(`
-        const table = document.querySelector('.md table');
-        const words = table.closest('.md');
         const scroller = document.querySelector('.scroller');
 
         return JSON.stringify({
-            tableRight: Math.round(table.getBoundingClientRect().right),
-            wordsRight: Math.round(words.getBoundingClientRect().right),
-            tableScrollW: table.scrollWidth,
-            tableClientW: table.clientWidth,
+            tables: Array.from(document.querySelectorAll('[data-part~="reply"] .md table'), (table) => ({
+                tableRight: Math.round(table.getBoundingClientRect().right),
+                wordsRight: Math.round(table.closest('.md').getBoundingClientRect().right),
+                scrollWidth: table.scrollWidth,
+                clientWidth: table.clientWidth,
+            })),
             scrollerScrollW: scroller.scrollWidth,
             scrollerClientW: scroller.clientWidth,
         });
@@ -76,8 +85,7 @@ before(async () => {
 
     app = await openApp(scriptedModel());
     one = await newSession(app);
-    // The scripted model echoes the message back, so the reply is Markdown with the wide table in it.
-    await say(app, one, WIDE_TABLE);
+    await say(app, one, WIDE_TABLES);
     const handler = createHandler({
         app,
         listen: { host: "127.0.0.1", port: 0 },
@@ -109,31 +117,40 @@ after(async () => {
     cleanUp();
 });
 
-for (const [name, viewport] of Object.entries(VIEWPORTS) as [string, Viewport][]) {
+const viewports: Record<string, Viewport> = {
+    ...VIEWPORTS,
+    "wide desktop": { width: 2560, height: 1440, scale: 1, mobile: false },
+};
+
+for (const [name, viewport] of Object.entries(viewports)) {
     test(`a reply's Markdown table stays in the column on ${name}`, real, async () => {
         await page.setViewport(viewport);
         await page.navigate(`${base}/s/${Number(one)}`);
         await until(
             async () =>
                 await inPage<boolean>(
-                    `return JSON.stringify(document.querySelector('.md table') !== null)`,
+                    `return JSON.stringify(document.querySelectorAll('[data-part~="reply"] .md table').length === 2)`,
                 ),
-            "the reply's table",
+            "both reply tables",
             20_000,
         );
 
         const b = await bounds();
 
-        // Inside the column: the table ends no further right than its own words, so it never runs past the reply and
-        // the composer below it.
-        assert.ok(
-            b.tableRight <= b.wordsRight + 1,
-            `table ends at ${b.tableRight}, words at ${b.wordsRight}`,
-        );
-        // Never widens the transcript: the scroller has no sideways overflow.
+        for (const [index, table] of b.tables.entries()) {
+            assert.ok(
+                table.tableRight <= table.wordsRight + 1,
+                `table ${index + 1} ends at ${table.tableRight}, words at ${table.wordsRight}`,
+            );
+            assert.ok(table.clientWidth > 0, "the table has a visible width");
+        }
+
         assert.equal(b.scrollerScrollW, b.scrollerClientW, "the transcript is not widened");
-        // Usable: a table wider than the column scrolls inside its own card.
-        assert.ok(b.tableScrollW > b.tableClientW, "the table keeps all of itself");
-        assert.ok(b.tableClientW > 0, "the table is not crushed to nothing");
+        const wide = b.tables[1]!;
+
+        assert.ok(
+            wide.scrollWidth > wide.clientWidth,
+            "the many-column table scrolls inside its box",
+        );
     });
 }
