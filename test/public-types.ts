@@ -82,6 +82,7 @@ type Internal =
     | "goals"
     | "browsers"
     | "memory"
+    | "surfaces"
     | "toolNames"
     | "stopToolCall"
     | "waitsForLimit"

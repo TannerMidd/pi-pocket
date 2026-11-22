@@ -32,6 +32,7 @@ import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 import type { ApprovalTransition, PendingApprovalsApi } from "./pending-approvals.ts";
+import type { SurfacesRelayApi } from "./surfaces/relay.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -700,6 +701,11 @@ export interface PocketHost {
     readonly repoWatches: Pick<RepoWatches, "task">;
     /** Lessons Pi keeps across sessions (`memory.ts`): the memory tool saves them, and its section lists them. */
     readonly memory: Pick<Memory, "project" | "applying" | "inForce" | "add" | "change">;
+    /**
+     * Surfaces in a chat (`surfaces/relay.ts`), for the relay: the numbered text of a card and where it went, and a
+     * message from a chat read as an action on it. Internal: the relay's module is the one caller.
+     */
+    readonly surfaces?: SurfacesRelayApi;
     /**
      * Text from elsewhere made safe for Pi to read (`fence.ts`): `quoted` gives one line, cut to `max`, without
      * invisible characters or any tag, in quotes it cannot close; `defang` keeps the lines, but no closing tag survives,

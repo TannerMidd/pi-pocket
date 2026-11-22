@@ -11,6 +11,8 @@ import { AuthorsDoc, ChatDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
 import { entryText, projectEntry, snippet } from "./projection.ts";
 import { span, type WaitView } from "./limit-gate.ts";
+import { controlsFor } from "./surfaces/bindings.ts";
+import type { Surface } from "./surfaces/types.ts";
 import { DEFAULT_PREFS, type EmbedderMessage, type PushMessage, type PushPrefs } from "./push.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -30,6 +32,8 @@ export class Alerts {
     readonly #doneTimers = new Map<ConversationId, NodeJS.Timeout>();
     /** Approvals already announced, so each one is pushed once. */
     #approvalIds = new Set<string>();
+    /** Cards already announced, by conversation and id. */
+    readonly #surfaceIds = new Set<string>();
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -299,6 +303,63 @@ export class Alerts {
                         text: call,
                         may,
                     });
+                }
+            })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
+        }
+    }
+
+    /**
+     * A card Pi shows and waits for (`surfaces/`): it goes to the people in the session who can act on at least one
+     * control (a viewer only when the card says `anyone`). Its title is all the notification says, never its values. Each
+     * card is announced once; one older than two minutes was shown before this server started, or long ago.
+     */
+    announceSurfaces(id: ConversationId, items: Record<string, Surface> | undefined): void {
+        const app = this.#app;
+
+        if (this.#quiet()) {
+            return;
+        }
+
+        for (const surface of Object.values(items ?? {})) {
+            const mark = `${String(id)}/${surface.id}`;
+
+            if (
+                surface.status !== "open" ||
+                surface.wait === undefined ||
+                this.#surfaceIds.has(mark) ||
+                Date.now() - surface.createdAt > 120_000
+            ) {
+                continue;
+            }
+
+            this.#surfaceIds.add(mark);
+
+            void (async () => {
+                const root = app.rootOf(id);
+                const title = await app.conversationTitle(root);
+
+                for (const userId of await this.participants(root)) {
+                    const user = app.config.userById(userId);
+
+                    if (
+                        user === undefined ||
+                        !Object.values(controlsFor(surface, user)).includes(true)
+                    ) {
+                        continue;
+                    }
+
+                    void this.push(
+                        userId,
+                        id,
+                        "approval",
+                        {
+                            title: `Pi needs you · ${title}`,
+                            body: snippet(surface.title, 120),
+                            url: `/s/${String(id)}`,
+                            tag: `surface-${String(id)}-${surface.id}`,
+                        },
+                        "high",
+                    );
                 }
             })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
         }

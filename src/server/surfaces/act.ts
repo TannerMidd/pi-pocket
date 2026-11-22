@@ -107,6 +107,9 @@ function answeredBy(app: PocketApp, surface: Surface): string {
     return by === undefined ? "" : ` by ${by}`;
 }
 
+/** Who acts: a person of the app, or a person of a chat the relay brings (`relay.ts`), who is a viewer at most. */
+export type Actor = Pick<User, "id" | "name" | "role">;
+
 /** The action of a surface for a person: see the file's comment. Throws `HttpError` for each refusal. */
 export async function actOnSurface(
     app: PocketApp,
@@ -116,6 +119,18 @@ export async function actOnSurface(
     raw: unknown,
 ): Promise<ActResult> {
     app.requireSee(user, id);
+
+    return actAs(app, id, user, sid, raw);
+}
+
+/** The same for an actor whose access to the conversation was checked by the caller. */
+export async function actAs(
+    app: PocketApp,
+    id: ConversationId,
+    user: Actor,
+    sid: string,
+    raw: unknown,
+): Promise<ActResult> {
     const body = readBody(raw);
     const now = Date.now();
     const key = `${id}\n${user.id}\n${sid}`;
