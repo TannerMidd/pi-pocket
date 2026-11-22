@@ -1,13 +1,17 @@
 /**
  * Memory gives Pi short lessons that last across sessions, for a project or for everywhere, or for the rest of one
  * session: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and
- * every later session in the same project (or that session alone) gets them in its system prompt.
+ * every later session in the same project (or that session alone) gets them in its system prompt. When the owner
+ * turns on Suggest lessons, a classifier call reads each person's message, and one that states a rule, a preference,
+ * or a correction gets a note that suggests the memory tool's add; the note writes nothing itself.
  */
 import { StringEnum } from "@earendil-works/pi-ai";
 import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { Lesson } from "../docs.ts";
-import type { PocketHost } from "../host.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { flat, MAX_LESSON, MEMORY_EXTENSION, type Project, scopeOf } from "../memory.ts";
 
 /** A reply naming the lesson it is about, so the app can offer approving it right under the call. */
@@ -47,7 +51,40 @@ function render(project: Project | undefined, lessons: Lesson[]): string | undef
     return `${head} Follow them unless someone here says otherwise:\n${lessons.map((lesson) => `- [${lesson.id}] (${where(lesson)}) ${flat(lesson.text)}`).join("\n")}`;
 }
 
-export default function createMemory(host: PocketHost) {
+/** How long one suggestion call may take: turn notes get 2000 ms in total, and a late note is dropped, so be back
+ *  before that, silently. */
+const SUGGEST_TIMEOUT_MS = 1_500;
+/** How sure the classifier must be, on its 0-to-1 scale, before a note suggests a save. */
+const SUGGEST_CONFIDENCE = 0.8;
+
+/** The note the model gets when the classifier is sure the message states something worth keeping: it suggests the
+ *  tool's add, which proposes a lesson the owner approves, and nothing is written by the note itself. */
+const SUGGEST_NOTE =
+    "The person's message states something worth keeping for later sessions (a rule, a preference, or a correction). " +
+    "When it clearly helps later sessions here, call the memory tool's add with one or two specific sentences for it. " +
+    "add only proposes the lesson; the owner approves it. When unsure, save nothing.";
+
+/** The one question the suggestion call asks. */
+const SUGGEST_QUESTIONS: ClassifyRequest["questions"] = {
+    remember: {
+        type: "choice",
+        instructions:
+            "Classify the message in state.message, which the person by state.from sent to the assistant in this conversation.",
+        criteria: {
+            yes: "The message states a standing rule, a preference, or a correction the owner would want remembered in later sessions.",
+            no: "It is ordinary work talk: a task, a question, a result, or a one-off thing.",
+        },
+    },
+};
+
+/** A choice answer's confidence, on its 0-to-1 scale; one an older provider leaves out reads as none. */
+function confidenceOf(answer: { confidence?: unknown }): number {
+    return typeof answer.confidence === "number" && Number.isFinite(answer.confidence)
+        ? answer.confidence
+        : 0;
+}
+
+export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
     // A server started before memory has no `host.memory`: the module installs nothing until it restarts.
     const memory = (host as Partial<PocketHost>).memory;
 
@@ -58,6 +95,72 @@ export default function createMemory(host: PocketHost) {
     // A server started before session lessons would save one for everywhere: refuse it until it restarts.
     const sessions =
         (memory as { scopes?: readonly string[] }).scopes?.includes("session") === true;
+
+    // Lesson suggestions, off by default: a classifier call reads each person's message, and one that states a rule, a
+    // preference, or a correction gets a note that points at the memory tool's add. The note saves nothing itself.
+    if (web !== undefined) {
+        web.settings([
+            {
+                name: "suggestLessons",
+                label: "Suggest lessons",
+                description:
+                    "A classifier call reads each person's message, and one that states a standing rule, a preference, or a correction gets a note that tells Pi to consider the memory tool's add. add only proposes a lesson; the owner approves it. Off by default.",
+                type: "boolean",
+                default: false,
+            },
+            {
+                name: "classifyModel",
+                label: "Classify model",
+                description:
+                    "The classifier that reads each person's message for a rule, a preference, or a correction, as provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                type: "text",
+                default: DEFAULT_CLASSIFY_MODEL,
+            },
+        ]);
+
+        // A server older than the turn-note hook (this module reloaded into it) keeps the tool and the section: no
+        // annotator until it restarts.
+        if (typeof host.annotateTurns === "function" && typeof host.classify === "function") {
+            const model = () => {
+                const value = web.setting("classifyModel");
+
+                return typeof value === "string" && value.trim() !== ""
+                    ? value.trim()
+                    : DEFAULT_CLASSIFY_MODEL;
+            };
+
+            const stop = host.annotateTurns("memory-suggest", async (turn) => {
+                if (web.setting("suggestLessons") !== true) {
+                    return undefined;
+                }
+
+                // A failed or late call gives undefined, so the message goes on with no note, silently.
+                const answers = await classifyFor(
+                    host.classify,
+                    "memory-suggestions",
+                    {
+                        model: model(),
+                        state: {
+                            from: turn.by,
+                            ...(turn.via === undefined ? {} : { via: turn.via }),
+                            message: turn.text,
+                        },
+                        questions: SUGGEST_QUESTIONS,
+                    },
+                    SUGGEST_TIMEOUT_MS,
+                );
+                const answer = answers?.remember;
+
+                if (answer?.type !== "choice" || answer.choice !== "yes") {
+                    return undefined;
+                }
+
+                return confidenceOf(answer) >= SUGGEST_CONFIDENCE ? SUGGEST_NOTE : undefined;
+            });
+
+            web.onDispose(stop);
+        }
+    }
 
     const tool = defineTool({
         name: "memory",

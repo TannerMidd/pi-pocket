@@ -483,7 +483,7 @@ export class ExtensionWebs {
                 }
 
                 // Only a version that is on: one still loading, or replaced, offers nothing.
-                return this.#parts.get(module)?.service;
+                return this.serviceOf(module);
             },
             onService: (module, listener) => {
                 if (typeof module !== "string" || typeof listener !== "function") {
@@ -924,6 +924,11 @@ export class ExtensionWebs {
                 this.#options.log?.(`${part!.file}: web.onSettings failed: ${safeDescribe(error)}`);
             }
         }
+    }
+
+    /** What an installed module offers, if it is on. */
+    serviceOf(module: string): unknown {
+        return this.#parts.get(module)?.service;
     }
 
     /** The settings a module that is on declares, for the owner's sheet and its browser module. */

@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord/context";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, ClassifierAnswer, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type {
     ConversationId,
     DocumentReader,
@@ -11,6 +11,7 @@ import type {
     Tx,
 } from "@earendil-works/pi-durable";
 import type { Browsers } from "./browser.ts";
+import type { ClassifyRequest } from "./classify.ts";
 import type { Gallery } from "./gallery.ts";
 import type { Role, User } from "./config.ts";
 import type { Goals } from "./goals.ts";
@@ -533,6 +534,15 @@ export interface PocketHost {
      * sign-in expired), or undefined when it may. `fresh` asks the provider's sign-in again first.
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model`
+     * names (`classify.ts`). It runs through Pi's model runtime with the owner's stored provider sign-ins and keys,
+     * exactly as a session's own model calls do. It throws when the model is not a classifier here, when its provider
+     * has no stored sign-in or key, or when the call fails; it never wakes a session.
+     *
+     * @experimental @since 0.31.0
+     */
+    classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
     /**
      * Register a model provider with Pi's model runtime, as a Pi extension does: `config` is Pi's own provider
      * configuration, including the models it starts with and how it refreshes them. The last registration of a name

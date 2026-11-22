@@ -1756,7 +1756,7 @@ kbd {
      * message box, when a session long enough to scroll opens. */
     scrollbar-gutter: stable both-edges;
     position: relative;
-    /* The room it gives, for what may run wider than the column (a reply's code blocks and tables, below): the
+    /* The room it gives, for what may run wider than the column (a reply's code blocks, below): the
      * browser's own measure as it lays out, inside the scroll bar's gutters, so no script restyles the conversation
      * after it is drawn. A fixed or sticky element in it keeps its place: inline-size containment makes neither a
      * containing block nor a stacking context. */
@@ -2426,10 +2426,10 @@ kbd {
 }
 
 /*
- * A reply's code blocks and tables may run wider than its words, up to the pane's room (the scroller's width, `cqi`)
- * less the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
- * column; a table as wide as its cells, from the column's start toward the pane's edge. On a phone, and in a pane no
- * wider than the column, the room is the column, so nothing changes.
+ * A reply's code blocks may run wider than its words, up to the pane's room (the scroller's width, `cqi`) less
+ * the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
+ * column. On a phone, and in a pane no wider than the column, the room is the column, so nothing changes. A reply's
+ * tables stay in the column instead: a wide one scrolls inside its own card, below, and never runs past the words.
  */
 .transcript {
     --wide-room: max(100%, calc(100cqi - 56px * var(--space-x) - var(--transcript-gutter)));
@@ -2478,12 +2478,9 @@ kbd {
     translate: none;
 }
 
-[data-part~="reply"] :is(.md, .md-part) > table:not(.dv-table) {
-    width: max-content;
-    max-width: calc(100% + (var(--wide-room) - 100%) / 2);
-}
-
-/* A reply's own tables, in a card; a diff it shows draws its table itself. */
+/* A reply's own tables, in a card; a diff it shows draws its table itself. The card is as wide as its cells, no
+ * wider than the column: a wide table, or a cell too long to break, scrolls inside the card rather than widening
+ * the reply or the transcript. */
 .md table:not(.dv-table) {
     display: block;
     max-width: fit-content;

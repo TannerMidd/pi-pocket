@@ -41,6 +41,7 @@ These members are public:
 - `dataDir`, `agentDir`, `pocketVersion` (running-server package version, since 0.16.0)
 - `notice(level, message, id?)`
 - `resolveModel(spec)`, `subagentModels()`, `modelProblem(ref, fresh?)`, `modelInfo(spec)` (exact local metadata, since 0.16.0)
+- [`classify(request)`](../reference/host.md#classify) and `ClassifyRequest`: one classifier-model call through the owner's stored provider sign-ins (experimental, since 0.31.0)
 - `requesterOf(conversationId)`
 - `cwdOf(conversationId)` (experimental, since 0.28.0)
 - `registerWorkspaceProvider(scheme, provider)` and `WorkspaceProvider` (experimental, since 0.28.0: [Execution environments for workspaces](../workspaces.md))
