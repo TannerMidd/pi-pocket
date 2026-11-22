@@ -9,6 +9,7 @@ import type {
     ClassifierContext,
     ClassifierModel,
     ClassifierQuestion,
+    ImageContent,
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
@@ -27,6 +28,8 @@ export interface ClassifyRequest {
     model: string;
     /** What the model judges. */
     state: Record<string, unknown>;
+    /** Images judged together with `state`. Only models whose input accepts images answer them. */
+    images?: ImageContent[];
     /** What it answers, by question id: a choice, a score, or yes/no. At least one. */
     questions: Record<string, ClassifierQuestion>;
 }
@@ -92,6 +95,12 @@ function checkRequest(request: ClassifyRequest): void {
         Array.isArray(request.state)
     ) {
         throw new Error(`host.classify: state is an object, got ${describe(request.state)}`);
+    }
+
+    if (request.images !== undefined && !Array.isArray(request.images)) {
+        throw new Error(
+            `host.classify: images is an array of images, got ${describe(request.images)}`,
+        );
     }
 
     if (
@@ -225,6 +234,7 @@ export async function classifyThrough(
 
     const context: ClassifierContext = {
         state: request.state as ClassifierContext["state"],
+        ...(request.images === undefined ? {} : { images: request.images }),
         questions: request.questions,
     };
     const result = await models.classify(model, context);
