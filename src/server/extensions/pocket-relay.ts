@@ -150,7 +150,7 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
         outbound: (hook: RelayOutbound) => relay.setOutbound(hook),
     });
 
-    web.provide({ ...service, RelayError });
+    web.provide(Object.freeze({ ...service, RelayError }));
 
     web.client(RELAY_MODULE, { access: "owner" });
 
