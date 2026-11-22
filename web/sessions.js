@@ -1395,6 +1395,7 @@ const ROW_KEYS = [
     "chatReads",
     "peekSeen",
     "extensionsRev",
+    "localeRevision",
 ];
 
 function AllSessions({ compact = false }) {
@@ -1460,6 +1461,8 @@ function AllSessions({ compact = false }) {
     // The rows down to `scrolled` draw at once: where the list was as it opens, where it is for another tab.
     const startFill = (scrolled) => ({ rows: firstRows() + Math.ceil(scrolled / ROW_FLOOR) });
     const reopened = opening && !compact ? listKept.scroll : 0;
+    const fullScroll = useRef(reopened);
+    const restoringFull = wasSearching.current && !searching;
 
     if (opening || fills.current.tab !== tab) {
         fills.current = {
@@ -1472,6 +1475,10 @@ function AllSessions({ compact = false }) {
     fills.current.matches = searching ? (fills.current.matches ?? startFill(reopened)) : null;
 
     const setQuery = (next) => {
+        if (!searching && next.trim() !== "") {
+            fullScroll.current = list.current.scrollTop;
+        }
+
         if (!compact) {
             listKept.query = next;
         }
@@ -1486,6 +1493,12 @@ function AllSessions({ compact = false }) {
             list.current.scrollTop = listKept.scroll;
         }
     }, [sessionsLoaded]);
+    // Search collapses the kept rows and clamps their scroller: restore only after the full rows return.
+    useLayoutEffect(() => {
+        if (restoringFull) {
+            list.current.scrollTop = fullScroll.current;
+        }
+    }, [searching]);
 
     const setSelected = (next) => {
         picked.current = next;
@@ -2516,8 +2529,8 @@ function AllSessions({ compact = false }) {
         <label class=${`search ${query ? "filled" : ""}`} data-part="session-search">
             <${Icon} name="search" size=${14} />
             <input
-                placeholder="Search sessions"
-                aria-label="Search sessions"
+                placeholder=${t("sessions.search", "Search sessions")}
+                aria-label=${t("sessions.search", "Search sessions")}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
                 onKeyDown=${(event) => {
@@ -2619,7 +2632,11 @@ function AllSessions({ compact = false }) {
             class="session-items"
             ref=${list}
             tabindex="-1"
-            onScroll=${(event) => !compact && (listKept.scroll = event.currentTarget.scrollTop)}
+            onScroll=${(event) => {
+                if (!compact && !searching) {
+                    listKept.scroll = event.currentTarget.scrollTop;
+                }
+            }}
         >
             ${!sessionsLoaded && html`<${LoadingSessions} />`}
             ${

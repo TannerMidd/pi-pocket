@@ -140,7 +140,7 @@ export function moduleSummary(module) {
         case "memory.ts":
             return t(
                 "builtin.module.memory.summary",
-                "Memory gives Pi short lessons that last across sessions, for a project or for everywhere: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project gets them in its system prompt.",
+                "Memory gives Pi short lessons that last across sessions, for a project or for everywhere, or for the rest of one session: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project (or that session alone) gets them in its system prompt.",
             );
         case "pocket-relay.ts":
             return t(

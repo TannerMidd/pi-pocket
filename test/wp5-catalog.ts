@@ -1,5 +1,7 @@
 // WP5 report proposals; live-key translations use the dictionary reference.
 export const WP5_WORDS = [
+    ["web.shortcuts.or", "or", "或"],
+    ["web.shortcuts.click", "Click", "点击"],
     ["web.sheets.branch.track.span.gone", "gone", "已删除"],
     [
         "web.sheets.branch.branch-picker.row-body.span.make-the-branch",

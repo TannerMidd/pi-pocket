@@ -232,19 +232,49 @@ test("on a phone while Pi works, the model stays and the mode menu picks Queue",
 
     assert.equal(await shown(".composer .model-chip"), true, "the model chip shows");
     assert.equal(await shown(".composer .mode-switch"), false, "one mode button, not three");
+    await page.evaluate(`document.querySelector(${JSON.stringify(BOX)}).focus()`);
     await page.click({ selector: ".mode-pick-button" });
     await until(() => shown(".mode-menu"), "the mode menu");
+    assert.equal(await boxFocused(), true, "opening the menu keeps focus in the box");
+    const options = await inPage<{ label: string; hint: string }[]>(`
+        return JSON.stringify([...document.querySelectorAll('.mode-menu [role="menuitemradio"]')]
+            .map((item) => ({ label: item.textContent.trim(), hint: item.title })));
+    `);
+
+    assert.deepEqual(
+        options.map(({ label }) => label),
+        ["Steer", "Queue", "Interrupt"],
+    );
+    assert.equal(options[1]?.hint, "Pi reads it when this run ends");
     // A tap right after a layer opens is let go (`back.js`, SETTLING_MS).
     await page.evaluate(`await new Promise((resolve) => setTimeout(resolve, 300))`);
     await page.click({ selector: '.mode-menu [role="menuitemradio"]:nth-child(2)' });
     await until(async () => !(await shown(".mode-menu")), "the menu closed");
+    assert.equal(await boxFocused(), true, "picking a mode keeps focus in the box");
     assert.equal(
         await inPage<string>(
             `return JSON.stringify(document.querySelector(".mode-pick-button").textContent.trim())`,
         ),
         "Queue",
     );
+    assert.equal(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".mode-pick-button").getAttribute("aria-label"))`,
+        ),
+        "Send as: Queue",
+    );
     assert.equal((await modes()).Queue, "true", "the same mode as the three buttons");
+
+    const focused = (selector: string) =>
+        inPage<boolean>(
+            `return JSON.stringify(document.activeElement?.matches(${JSON.stringify(selector)}) ?? false)`,
+        );
+
+    await page.evaluate(`document.querySelector(".mode-pick-button").focus()`);
+    await page.press("ArrowDown");
+    assert.equal(await focused('.mode-menu [aria-checked="true"]'), true);
+    await page.press("Escape");
+    assert.equal(await focused(".mode-pick-button"), true);
     await setBusy(false);
 });
 

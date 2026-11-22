@@ -3,6 +3,9 @@
 export const EN_LABEL = "English";
 
 export const EN = Object.freeze({
+    "web.composer.quote-count.remove": "Remove quote",
+    "web.composer.quote-count.clear": "Clear quotes",
+    "web.transcript.limit.waiting-to-retry": "Waiting to retry",
     "web.running-board.paused": "Paused",
     "web.running-board.schedule.paused":
         "Paused at {time}. It sends nothing until someone resumes it.",
@@ -3334,7 +3337,7 @@ export const EN = Object.freeze({
     "builtin.module.codemode.summary":
         "Codemode lets the agent write JavaScript that calls its other tools, to batch independent calls, chain them, or filter large output before it reaches the model.",
     "builtin.module.memory.summary":
-        "Memory gives Pi short lessons that last across sessions, for a project or for everywhere: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project gets them in its system prompt.",
+        "Memory gives Pi short lessons that last across sessions, for a project or for everywhere, or for the rest of one session: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project (or that session alone) gets them in its system prompt.",
     "builtin.module.pip.summary":
         "PiP, the owner's assistant over every screen: it finds out what sessions are doing, starts and messages them, stops and archives them, schedules messages, follows runs until they end, watches the owner's GitHub repositories and pull requests and acts on what happens there, and can deny (never allow) calls waiting for approval.",
     "builtin.module.triggers.summary":

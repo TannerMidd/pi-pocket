@@ -3170,13 +3170,55 @@ export const WP2_MAIN_0281_KEYS: readonly {
     },
 ];
 
+export const WP2_CURRENT_RETIRED_KEYS = ["web.transcript.live-line.text.waiting"] as const;
+
+export const WP2_CURRENT_KEYS = [
+    {
+        key: "web.composer.quote-count.remove",
+        english: "Remove quote",
+        zh: "移除引用",
+        source: "release",
+        existingEn: null,
+    },
+    {
+        key: "web.composer.quote-count.clear",
+        english: "Clear quotes",
+        zh: "清除引用",
+        source: "release",
+        existingEn: null,
+    },
+    {
+        key: "web.transcript.limit.waiting-to-retry",
+        english: "Waiting to retry",
+        zh: "等待重试",
+        source: "main-0.30.1",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.report.verb.stalled",
+        english: "stalled",
+        zh: "停滞",
+        source: "main-0.30.1",
+        existingEn: true,
+    },
+    {
+        key: "web.transcript.report.verb.stopped",
+        english: "stopped",
+        zh: "已停止",
+        source: "main-0.30.1",
+        existingEn: true,
+    },
+] as const;
+
 export const WP2_KEYS = [
     ...WP2_HISTORY.filter(
         (row) =>
+            !WP2_CURRENT_RETIRED_KEYS.some((key) => key === row.key) &&
             !([...WP2_RETIRED_KEYS, ...WP2_MAIN_0281_RETIRED_KEYS] as readonly string[]).includes(
                 row.key,
             ),
     ),
     ...WP2_RELEASE_KEYS,
     ...WP2_MAIN_0281_KEYS,
+    ...WP2_CURRENT_KEYS,
 ];

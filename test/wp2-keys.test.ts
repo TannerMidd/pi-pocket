@@ -4,6 +4,8 @@ import { test } from "node:test";
 import ts from "typescript";
 import { calls, DYNAMIC_COUNT_ARGS } from "./wp2-keys.mjs";
 import {
+    WP2_CURRENT_KEYS,
+    WP2_CURRENT_RETIRED_KEYS,
     WP2_HISTORY,
     WP2_KEYS,
     WP2_RELEASE_KEYS,
@@ -148,7 +150,7 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
         WP2_HISTORY.filter((row) => !actual.has(row.key))
             .map((row) => row.key)
             .sort(),
-        [...WP2_RETIRED_KEYS, ...WP2_MAIN_0281_RETIRED_KEYS].sort(),
+        [...WP2_RETIRED_KEYS, ...WP2_MAIN_0281_RETIRED_KEYS, ...WP2_CURRENT_RETIRED_KEYS].sort(),
         "every historical key is still live or explicitly retired",
     );
     assert.equal(
@@ -161,10 +163,17 @@ test("WP2 key manifest matches actual t calls, countedText tuples, and placehold
         2,
         "two superseded original keys leave the live AST",
     );
-    assert.equal(actual.size, 417 - 4 + 16 - 2 + 13);
+    assert.equal(WP2_CURRENT_KEYS.length, 5, "0.30.1 additions are separately accounted for");
+    assert.equal(WP2_CURRENT_RETIRED_KEYS.length, 1, "0.30.1 retires the old limit-wait key");
+    assert.equal(actual.size, 417 - 4 + 16 - 2 + 13 - 1 + 5);
     assert.ok(helperTuples >= 10, "singular and plural tuple keys are included");
 
-    for (const row of [...WP2_HISTORY, ...WP2_RELEASE_KEYS, ...WP2_MAIN_0281_KEYS]) {
+    for (const row of [
+        ...WP2_HISTORY,
+        ...WP2_RELEASE_KEYS,
+        ...WP2_MAIN_0281_KEYS,
+        ...WP2_CURRENT_KEYS,
+    ]) {
         assert.match(row.key, /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
         assert.ok(row.zh.trim(), `${row.key}: Chinese suggestion is not empty`);
         assert.deepEqual(

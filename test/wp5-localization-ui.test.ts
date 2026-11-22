@@ -17,7 +17,7 @@ const chinese = Object.fromEntries(WP5_WORDS.map(([key, , text]) => [key, text])
 const names = (text: string) =>
     [...new Set([...text.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map((each) => each[1]))].sort();
 
-assert.equal(WP5_WORDS.length, 514);
+assert.equal(WP5_WORDS.length, 516);
 assert.equal(Object.keys(english).length, WP5_WORDS.length);
 
 for (const [key, text, translated] of WP5_WORDS) {

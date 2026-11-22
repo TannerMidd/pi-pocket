@@ -82,10 +82,10 @@ test("only this PR's locale declarations are Unreleased Experimental in types an
     const pocket = readFileSync(new URL("docs/extensions/reference/pocket.md", root), "utf8");
 
     for (const reference of [web, pocket]) {
-        assert.match(reference, /not in the official 0\.28\.0 or 0\.28\.1 releases/);
+        assert.match(reference, /published upstream release does not provide/);
         assert.match(
             reference,
-            /first release is (?:not assigned|unassigned); the maintainers decide it/,
+            /first release (?:of this API and the request locales below )?is unassigned/,
         );
     }
 

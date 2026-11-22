@@ -441,7 +441,7 @@ function ModePick({ mode, onPick }) {
     const menu = useRef(null);
     // Opened from the keyboard: the focus goes to the chosen mode.
     const keyed = useRef(false);
-    const label = SEND_MODES.find(([value]) => value === mode)[1];
+    const label = modeLabel(mode);
 
     // Closed from inside the menu, the focus goes back to the button; from the box, it stays there.
     const close = () => {
@@ -546,14 +546,14 @@ function ModePick({ mode, onPick }) {
                         role="menuitemradio"
                         aria-checked=${mode === value ? "true" : "false"}
                         tabindex="-1"
-                        title=${tip}
+                        title=${tip()}
                         onMouseDown=${(event) => event.preventDefault()}
                         onClick=${() => {
                             onPick(value);
                             close();
                         }}
                     >
-                        <span>${name}</span>
+                        <span>${name()}</span>
                         ${mode === value && html`<${Icon} name="check" size=${14} />`}
                     </button>`,
                 )}
@@ -2682,7 +2682,7 @@ export function Composer() {
                                         <button
                                             type="button"
                                             class="icon-button small"
-                                            aria-label="Remove the quote"
+                                            aria-label=${t("web.composer.composer.aria-label.remove-quote", "Remove the quote")}
                                             disabled=${sending}
                                             onClick=${() => dropStrips(index)}
                                         >
@@ -2715,14 +2715,14 @@ export function Composer() {
                             <button
                                 type="button"
                                 class="icon-button small"
-                                aria-label=${t(
-                                    "web.composer.composer.aria-label.remove-quote",
-                                    "Remove the quote",
-                                )}
-                                disabled=${onItsWay(going && [going.quote], shownQuote)}
+                                disabled=${sending}
                                 onClick=${() => removeQuotes(quoted)}
                             >
-                                ${quoted.length === 1 ? "Remove quote" : "Clear quotes"}
+                                ${
+                                    quoted.length === 1
+                                        ? t("web.composer.quote-count.remove", "Remove quote")
+                                        : t("web.composer.quote-count.clear", "Clear quotes")
+                                }
                             </button>
                         </div>`
                     }

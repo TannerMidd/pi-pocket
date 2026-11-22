@@ -3683,9 +3683,7 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
               ? t("web.transcript.live-line.text.waiting-answer.waiting", "Waiting for an answer")
               : t("web.transcript.live-line.text.waiting-approval.waiting", "Waiting for approval");
     } else if (limit) {
-        state = t("web.transcript.live-line.text.waiting", "Waiting for {count}", {
-            count: limitWho(limit),
-        });
+        state = t("web.transcript.limit.waiting-to-retry", "Waiting to retry");
     } else if (retry) {
         state = t("web.transcript.live-line.text.retrying", "Retrying");
     } else if ((live.compactions ?? []).length > 0) {

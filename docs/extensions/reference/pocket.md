@@ -70,7 +70,7 @@ The module's title, as the Extensions sheet shows it.
 
 ## Language
 
-These experimental additions are not in the official 0.28.0 or 0.28.1 releases. Their first release is not assigned; the maintainers decide it. Check for the members at runtime.
+The published upstream release does not provide these experimental additions. Their first release is unassigned. Check for the members at runtime.
 
 ### `t`
 
