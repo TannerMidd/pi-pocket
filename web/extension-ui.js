@@ -135,7 +135,12 @@ setSurfaceComponents((type) => {
     for (const module of order) {
         const record = modules.get(module);
 
-        if (liveRecord(record) && record.adds.surfaceComponent.has(type)) {
+        // A type is its own module's: another module's registration of it is never drawn.
+        if (
+            liveRecord(record) &&
+            type.startsWith(`x.${module}.`) &&
+            record.adds.surfaceComponent.has(type)
+        ) {
             return record.adds.surfaceComponent.get(type);
         }
     }
@@ -663,20 +668,20 @@ onExtensionEvent(({ module, event, data }) => {
 // ─── pocket: the app's API for a browser module ──────────────────────────────
 
 /** A copy of what a module gives to add, once it holds: read once, so what is checked is what is kept. */
-function specOf(kind, spec) {
+function specOf(kind, spec, module) {
     if (typeof spec !== "object" || spec === null) {
         throw new Error(`pocket.${kind}: give it an object`);
     }
 
     const copy = { ...spec };
 
-    check(kind, copy);
+    check(kind, copy, module);
 
     return copy;
 }
 
 /** What each kind needs besides its `id`, and the one thing it does when used, if it is used. */
-function check(kind, spec) {
+function check(kind, spec, module) {
     const name = `pocket.${kind}`;
 
     if (!isId(spec.id)) {
@@ -704,6 +709,10 @@ function check(kind, spec) {
     if (kind === "surfaceComponent") {
         if (typeof spec.type !== "string" || !SURFACE_TYPE.test(spec.type)) {
             throw new Error(`${name}: type is x.<module>.<Name>, as the server registered it`);
+        }
+
+        if (!spec.type.startsWith(`x.${module}.`)) {
+            throw new Error(`${name}: type is x.${module}.<Name>: this module's name, then a name`);
         }
 
         if (typeof spec.render !== "function") {
@@ -937,7 +946,7 @@ function pocketFor(record) {
     const add = (kind, spec) => {
         tick(record);
 
-        let current = specOf(kind, spec);
+        let current = specOf(kind, spec, record.module);
         // A panel's top bar button has the panel's id: a top bar button of the same id would be a second item of it.
         const sharing = { panel: "topbar", topbar: "panel" }[kind];
 
@@ -989,7 +998,7 @@ function pocketFor(record) {
                     return;
                 }
 
-                check(kind, next);
+                check(kind, next, record.module);
                 current = next;
                 record.adds[kind].set(current.id, current);
 
