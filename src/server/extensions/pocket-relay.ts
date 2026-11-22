@@ -38,6 +38,7 @@ import {
     Relay,
     tooShort,
 } from "./pocket-relay/runtime.ts";
+import type { RelayOutbound, RelayService, RelayTriage } from "./pocket-relay/types.ts";
 import { type RelayConnector, RelayError, type RelayOutFile } from "./pocket-relay/types.ts";
 
 const RELAY_MODULE = "pocket-relay";
@@ -45,7 +46,7 @@ const REPLY_TOOL = "relay_reply";
 const FETCH_TOOL = "relay_fetch";
 const TOOLS = [REPLY_TOOL, FETCH_TOOL];
 
-const SERVICE_API = 1;
+const SERVICE_API = 3;
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
 
@@ -141,13 +142,14 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
     relay.start();
     web.onDispose(() => relay.stop());
 
-    web.provide(
-        Object.freeze({
-            api: SERVICE_API,
-            register: (connector: RelayConnector) => relay.register(connector),
-            RelayError,
-        }),
-    );
+    const service: RelayService = Object.freeze({
+        api: SERVICE_API,
+        register: (connector: RelayConnector) => relay.register(connector),
+        triage: (hook: RelayTriage) => relay.setTriage(hook),
+        outbound: (hook: RelayOutbound) => relay.setOutbound(hook),
+    });
+
+    web.provide({ ...service, RelayError });
 
     web.client(RELAY_MODULE, { access: "owner" });
 

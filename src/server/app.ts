@@ -102,6 +102,7 @@ import { type GuardStatus, LancetGuard } from "./lancet.ts";
 import { takeLock } from "./lock.ts";
 import { pendingApprovalsFor } from "./pending-approvals.ts";
 import { Memory } from "./memory.ts";
+import { classifyThrough } from "./classify.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
@@ -915,6 +916,7 @@ export class PocketApp {
             resolveModel: (spec) => resolveModel(this.models, spec, this.signInNeeded),
             subagentModels: () => this.config.subagentModels,
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
+            classify: (request) => classifyThrough(this.models, request),
             registerModelProvider: (provider, config) =>
                 this.#registerModelProvider(provider, config),
             registerWorkspaceProvider: (scheme, provider) =>

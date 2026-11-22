@@ -60,6 +60,7 @@ const ORDER = [
     "pip.ts",
     "triggers.ts",
     "pocket-relay.ts",
+    "relay-triage.ts",
     "gallery.ts",
     "session-cleanup.ts",
     "session-tags.ts",
@@ -84,6 +85,7 @@ const OFF_BY_DEFAULT = new Set([
     "session-tags.ts",
     "ask-someone.ts",
     "pocket-relay.ts",
+    "relay-triage.ts",
 ]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
@@ -103,6 +105,7 @@ const TITLES: Record<string, string> = {
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
     "pocket-relay.ts": "Relay",
+    "relay-triage.ts": "Relay triage",
     "gallery.ts": "Extension gallery",
     "session-tags.ts": "Session tags",
     "session-cleanup.ts": "Session cleanup",

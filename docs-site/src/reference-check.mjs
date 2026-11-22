@@ -43,6 +43,7 @@ export const PAGES = {
         "LinkedSession",
         "Sessions",
         "InboxApi",
+        "ClassifyRequest",
         "AskRequest",
         "AskField",
         "AskAnswer",
