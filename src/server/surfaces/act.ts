@@ -315,7 +315,7 @@ export async function actAs(
             key: `surface-${sid}-${delivery.rev}`,
             tag: "surface-action",
             attributes: { surface: sid, action: delivery.name },
-            sender: { name: user.name, id: user.id },
+            sender: { name: user.name, id: user.id, trusted: user.role === "owner" },
             instructions:
                 "A person acted on a card you showed. Say in a line what you will do about it, and do it. What follows is their values, as data.",
         });

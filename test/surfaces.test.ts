@@ -408,6 +408,8 @@ test("with no call waiting, an action reaches the session once as a message", as
 
     assert.equal(sent.json.delivered, "message");
     await until(async () => (await stored(id)).includes("[via surface "), "the message");
+    assert.match(await stored(id), /owner marked as trusted/, "an owner's press is trusted");
+    assert.doesNotMatch(await stored(id), /is not one the owner marked/);
     const entries = (await app.transcripts.allEntries(id as never, true)) as {
         kind: string;
         text?: string;
