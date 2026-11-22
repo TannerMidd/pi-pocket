@@ -14,7 +14,13 @@
  * fails when this file and Pi Pocket's code do not agree.
  */
 import type { Context } from "@earendil-works/chord/context";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type {
+    Api,
+    ClassifierAnswer,
+    ClassifierQuestion,
+    Model,
+    ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type {
     ConversationId,
@@ -123,6 +129,34 @@ export interface WorkspaceProvider {
 }
 
 /**
+ * What one `host.classify` call takes: what the model judges, and what it answers.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface ClassifyRequest {
+    /**
+     * The classifier model, `provider/modelId`. The id may hold more slashes, as in
+     * `openrouter/~typesafe/jev-latest`, TypeSafe's Jev through OpenRouter. A chat model is refused.
+     * @since 0.31.0
+     * @experimental
+     */
+    model: string;
+    /**
+     * What the model judges.
+     * @since 0.31.0
+     * @experimental
+     */
+    state: Record<string, unknown>;
+    /**
+     * What it answers, by question id, with the shapes of pi-ai's `ClassifierQuestion`: a choice, a score, or
+     * yes/no. At least one.
+     * @since 0.31.0
+     * @experimental
+     */
+    questions: Record<string, ClassifierQuestion>;
+}
+
+/**
  * What the app gives a module: the first argument of its default export. The host stays the same while modules reload.
  * It changes only when the server restarts.
  * @since 0.1.0
@@ -185,6 +219,17 @@ export interface Host {
      * @since 0.13.1
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model` names
+     * (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna). It runs through Pi's model runtime with the owner's
+     * stored provider sign-ins and keys, exactly as a session's own model calls do. An OpenRouter sign-in is enough
+     * for `openrouter/~typesafe/jev-latest`, the default of Pi Pocket's own modules. It throws when the model is not
+     * a classifier here, when its provider has no stored sign-in or key, or when the call fails. It never wakes a
+     * session.
+     * @since 0.31.0
+     * @experimental
+     */
+    classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
     /**
      * Registers a model provider with Pi's model runtime, as a Pi extension does. `config` is Pi's own provider
      * configuration, including the models it starts with and how it refreshes them. The last registration of a name
