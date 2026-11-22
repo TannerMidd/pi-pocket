@@ -734,11 +734,12 @@ function DraftText({
         "aria-label": label,
         autoComplete: "off",
         onFocus: () => {
-            seen.current = seenPv();
             sent.current = null;
 
-            // An unfit draft kept from the last blur stays for the person to fix.
+            // An unfit draft kept from the last blur stays for the person to fix, with the pv it began on: if Pi
+            // changed the card since, fixing it gets the "card changed" refusal, never overwrites Pi's new data.
             if (held.current === null) {
+                seen.current = seenPv();
                 change(value);
             }
         },

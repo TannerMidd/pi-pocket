@@ -125,6 +125,7 @@ const codeCard = {
         {
             type: "Column",
             children: [
+                { type: "Text", text: { "@path": "/marker" } },
                 { type: "TextField", label: "Code", bind: "/note", pattern: "^[0-9]+$" },
                 noteCard.components[0]!.children[2]!,
             ],
@@ -604,6 +605,32 @@ test(
 
         // The draft is gone: the field shows the stored text, and the blur does not send it again.
         assert.equal(await run(page, `return document.querySelector(".surf input").value`), "old");
+        assert.equal((await surfaceOf(id)).data.note, "old");
+    },
+);
+
+test(
+    "a kept unfit draft keeps its pv, so fixing it after Pi's change is refused",
+    real,
+    async () => {
+        const { id, page } = await shown("show the code", "Code");
+
+        await run(page, `${TYPE} document.activeElement.blur(); return null;`);
+        await waitFor(page, ".surf-why", /does not fit the form/, "the field's note");
+        // Pi changes the card while the unfit draft waits.
+        await app.harness.commit(async (tx) => {
+            const surface = Object.values((await tx.doc(SurfacesDoc, id)).items)[0]!;
+
+            surface.data.marker = "v2";
+            surface.rev += 1;
+            surface.pv += 1;
+        }, context);
+        await waitFor(page, ".surf .surf-text", /v2/, "Pi's change in the card");
+        await run(
+            page,
+            `const input = document.querySelector(".surf input[type=text]"); input.focus(); input.value = "1234"; input.dispatchEvent(new Event("input", { bubbles: true })); input.blur(); return null;`,
+        );
+        await waitFor(page, ".surf-error", /changed/i, "the refusal");
         assert.equal((await surfaceOf(id)).data.note, "old");
     },
 );
