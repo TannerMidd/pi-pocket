@@ -106,3 +106,33 @@ test("a ui call has a one-line description and a place in a group's summary", ()
         "Updated a card",
     );
 });
+
+test("a show with an id replaces a card: it is a step, and its row has no dead card of its own", () => {
+    const rows = [
+        user,
+        answer(2, [
+            call("card", "ui", { action: "show", title: "Cleanup" }),
+            call("again", "ui", { action: "show", id: "s1", title: "Cleanup" }),
+        ]),
+    ];
+    const items = turns.itemsOf(rows, null);
+
+    assert.deepEqual(
+        items.map((item) => item.type),
+        ["row", "inline", "activity"],
+    );
+    assert.equal(turns.isInlineCall(call("n", "ui", { action: "show", id: "s1" })), false);
+    assert.equal(
+        calls.describeCall({ name: "ui", args: { action: "show", id: "s1", title: "x" } }).label,
+        "Replaced card",
+    );
+});
+
+test("A2UI messages that create a surface show a card; the ones that change it are steps", () => {
+    const create = { action: "a2ui", messages: [{ createSurface: { surfaceId: "a" } }] };
+    const update = { action: "a2ui", messages: [{ updateDataModel: { surfaceId: "a" } }] };
+
+    assert.equal(turns.isInlineCall(call("c", "ui", create)), true);
+    assert.equal(turns.isInlineCall(call("u", "ui", update)), false);
+    assert.equal(turns.isInlineCall(call("e", "ui", { action: "a2ui" })), false);
+});

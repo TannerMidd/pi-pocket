@@ -60,17 +60,24 @@ export function describeCall(call) {
                 patch: "Updated card",
                 wait: "Waiting on card",
                 close: "Closed card",
+                a2ui: "Card (A2UI)",
             };
             const shows = args.action === undefined || args.action === "show";
+            const replaces = shows && typeof args.id === "string" && args.id !== "";
 
             return {
                 icon: "▦",
-                label: shows ? "Showed card" : (labels[args.action] ?? "Card"),
-                subject: shows
-                    ? typeof args.title === "string"
-                        ? `“${short(args.title, 60)}”`
-                        : ""
-                    : String(args.id ?? ""),
+                label: shows
+                    ? replaces
+                        ? "Replaced card"
+                        : "Showed card"
+                    : (labels[args.action] ?? "Card"),
+                subject:
+                    shows && !replaces
+                        ? typeof args.title === "string"
+                            ? `“${short(args.title, 60)}”`
+                            : ""
+                        : String(args.id ?? ""),
                 mono: false,
             };
         }
