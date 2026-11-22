@@ -103,6 +103,7 @@ import { takeLock } from "./lock.ts";
 import { pendingApprovalsFor } from "./pending-approvals.ts";
 import { Memory } from "./memory.ts";
 import { classifyThrough } from "./classify.ts";
+import type { RunOutcomes } from "./extensions/run-outcomes.ts";
 import { isThinkingLevel, modelInfo, modelList, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { Updates } from "./updates.ts";
 import { pocketPackage, pocketVersion } from "./versions.ts";
@@ -1385,7 +1386,7 @@ export class PocketApp {
                 }
 
                 sessionsChanged = true;
-                this.alerts.runChanged(id, busy, failure);
+                this.alerts.runChanged(id, busy, failure, outcome === "aborted");
 
                 if (!busy) {
                     this.spend.runEnded(id);
@@ -2287,10 +2288,13 @@ export class PocketApp {
         return sent;
     }
 
-    /** Whether any embedder that shows notifications is connected now. */
-    hasEmbedders(): boolean {
+    /** Whether an embedder that shows notifications is connected, optionally for one person. */
+    hasEmbedders(userId?: string): boolean {
         for (const client of this.#clients) {
-            if (client.embedder !== undefined) {
+            if (
+                client.embedder !== undefined &&
+                (userId === undefined || client.user.id === userId)
+            ) {
                 return true;
             }
         }
@@ -2996,6 +3000,23 @@ export class PocketApp {
      */
     runFailure(id: ConversationId): string | undefined {
         return this.#busy.has(id) ? undefined : this.#failed.get(id);
+    }
+
+    async classifyRunOutcome(id: ConversationId, answerId: number, answer: string) {
+        const service = this.webs.serviceOf("run-outcomes") as RunOutcomes | undefined;
+
+        if (service === undefined) {
+            return undefined;
+        }
+
+        try {
+            return await service.label(
+                `${String(id)}:${answerId}`,
+                this.hidden.replace(answer, id),
+            );
+        } catch {
+            return undefined;
+        }
     }
 
     /** The conversations with a run going. */

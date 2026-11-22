@@ -35,6 +35,18 @@ export class Alerts {
         this.#app = app;
     }
 
+    #wantsPush(userId: string, id: ConversationId, kind: keyof PushPrefs): boolean {
+        const app = this.#app;
+        const user = app.config.userById(userId);
+
+        return (
+            user !== undefined &&
+            app.canSee(user, id) &&
+            (app.pushStore?.prefs(userId) ?? DEFAULT_PREFS)[kind] &&
+            !app.watching(userId, id)
+        );
+    }
+
     /**
      * Push to one person about a conversation, unless they cannot see it, turned that kind off, or
      * are looking at it. `call` is an approval's whole call, for embedders, which show it as
@@ -50,13 +62,8 @@ export class Alerts {
     ): Promise<void> {
         const app = this.#app;
         const store = app.pushStore;
-        const user = app.config.userById(userId);
 
-        if (user === undefined || !app.canSee(user, id)) {
-            return;
-        }
-
-        if (!(store?.prefs(userId) ?? DEFAULT_PREFS)[kind] || app.watching(userId, id)) {
+        if (!this.#wantsPush(userId, id, kind)) {
             return;
         }
 
@@ -90,7 +97,7 @@ export class Alerts {
      * A run started or ended. "Pi finished" goes out once it has stayed finished for a moment. `failure`: the run failed
      * with this line (`app.ts` `failureText`), also when no answer of Pi's says so, as when its compaction failed.
      */
-    runChanged(id: ConversationId, busy: boolean, failure?: string): void {
+    runChanged(id: ConversationId, busy: boolean, failure?: string, aborted = false): void {
         clearTimeout(this.#doneTimers.get(id));
         this.#doneTimers.delete(id);
 
@@ -100,7 +107,7 @@ export class Alerts {
 
         const timer = setTimeout(() => {
             this.#doneTimers.delete(id);
-            void this.#pushDone(id, failure).catch((error: unknown) =>
+            void this.#pushDone(id, aborted, failure).catch((error: unknown) =>
                 this.#app.log(`push failed: ${describe(error)}`),
             );
         }, DONE_DELAY_MS);
@@ -109,7 +116,7 @@ export class Alerts {
         this.#doneTimers.set(id, timer);
     }
 
-    async #pushDone(id: ConversationId, failure?: string): Promise<void> {
+    async #pushDone(id: ConversationId, aborted: boolean, failure?: string): Promise<void> {
         const app = this.#app;
 
         if (app.isBusy(id)) {
@@ -141,12 +148,45 @@ export class Alerts {
         const answer = last?.kind === "assistant" ? last : undefined;
         // PiP's answers open its panel, over whatever the app shows, rather than a session.
         const pip = app.sessionMeta(id)?.pip !== undefined;
+        const recipients: string[] = [];
+
+        for (const userId of await this.participants(id)) {
+            // Their PiP follows this run and tells them what came of it: one notification, not two.
+            if (!pip && (await app.pip.reportsOn(id, userId).catch(() => false))) {
+                continue;
+            }
+
+            recipients.push(userId);
+        }
+
+        const outcome =
+            !failed &&
+            !aborted &&
+            answer?.error === undefined &&
+            answer?.stopReason === "stop" &&
+            recipients.some(
+                (userId) =>
+                    this.#wantsPush(userId, id, "done") &&
+                    (app.hasEmbedders(userId) ||
+                        (app.pushStore?.subscriptions(userId).length ?? 0) > 0),
+            )
+                ? await app.classifyRunOutcome(
+                      id,
+                      answer.id,
+                      answer.blocks
+                          .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                          .join("\n"),
+                  )
+                : undefined;
+
         const message: PushMessage = {
             title: pip
-                ? title
+                ? outcome === undefined
+                    ? title
+                    : `${outcome} · ${title}`
                 : failed
                   ? `Pi stopped with an error · ${title}`
-                  : `Pi finished · ${title}`,
+                  : `${outcome ?? "Pi finished"} · ${title}`,
             body: snippet(
                 failure ??
                     (failed
@@ -158,12 +198,7 @@ export class Alerts {
             tag: `done-${String(id)}`,
         };
 
-        for (const userId of await this.participants(id)) {
-            // Their PiP follows this run and tells them what came of it: one notification, not two.
-            if (!pip && (await app.pip.reportsOn(id, userId).catch(() => false))) {
-                continue;
-            }
-
+        for (const userId of recipients) {
             // A failure waits for a person: it goes out at once, also to a phone that saves its battery.
             void this.push(userId, id, "done", message, failed ? "high" : "normal");
         }

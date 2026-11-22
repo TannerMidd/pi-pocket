@@ -18,7 +18,8 @@ import {
     wrapTool,
 } from "@earendil-works/pi-durable";
 import type { PrWatch, RepoEvent, Schedule } from "../docs.ts";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { ClassifierScoreAnswer } from "@earendil-works/pi-ai";
 import { quoted } from "../fence.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
@@ -60,35 +61,36 @@ export async function rankSessions(
     }
 
     const shortlist = sessions.slice(0, RANKED);
-    const answers = await withDeadline(
-        () =>
-            classify({
-                model,
-                state: {
-                    query,
-                    sessions: shortlist.map((session) => ({
-                        id: session.id,
-                        title: session.title,
-                        state: session.state,
-                        folder: session.folder,
-                        ...(session.branch === undefined ? {} : { branch: session.branch }),
-                    })),
-                },
-                questions: Object.fromEntries(
-                    shortlist.map((session, at) => [
-                        `s${String(at)}`,
-                        {
-                            type: "score" as const,
-                            instructions: `How well does the session with id ${String(session.id)} in state.sessions match the words in state.query?`,
-                            criteria: [
-                                "It is not what the words are about.",
-                                "It is related to the words.",
-                                "It is what the words are about.",
-                            ],
-                        },
-                    ]),
-                ) as ClassifyRequest["questions"],
-            }),
+    const answers = await classifyFor(
+        classify,
+        "pip-search",
+        {
+            model,
+            state: {
+                query,
+                sessions: shortlist.map((session) => ({
+                    id: session.id,
+                    title: session.title,
+                    state: session.state,
+                    folder: session.folder,
+                    ...(session.branch === undefined ? {} : { branch: session.branch }),
+                })),
+            },
+            questions: Object.fromEntries(
+                shortlist.map((session, at) => [
+                    `s${String(at)}`,
+                    {
+                        type: "score" as const,
+                        instructions: `How well does the session with id ${String(session.id)} in state.sessions match the words in state.query?`,
+                        criteria: [
+                            "It is not what the words are about.",
+                            "It is related to the words.",
+                            "It is what the words are about.",
+                        ],
+                    },
+                ]),
+            ) as ClassifyRequest["questions"],
+        },
         RANK_TIMEOUT_MS,
     );
 

@@ -4,7 +4,8 @@
  * with a line that names what came, and a reply it is less sure about arrives named as possible spam. The same
  * classifier reads each reply before it leaves: one it is sure holds a secret, a key, or private data is held back.
  */
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import type {
     RelayOutbound,
@@ -153,21 +154,22 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
 
         counts.asked += 1;
 
-        const answers = await withDeadline(
-            () =>
-                host.classify({
-                    model: model(),
-                    state: {
-                        connector: event.connector,
-                        kind: event.kind,
-                        from: event.author.name,
-                        fromId: event.author.id,
-                        ...(event.channel === undefined ? {} : { channel: event.channel }),
-                        attachments: event.files.map((file) => `${file.name} (${file.type})`),
-                        message: event.text,
-                    },
-                    questions: QUESTIONS,
-                }),
+        const answers = await classifyFor(
+            host.classify,
+            "relay-inbound",
+            {
+                model: model(),
+                state: {
+                    connector: event.connector,
+                    kind: event.kind,
+                    from: event.author.name,
+                    fromId: event.author.id,
+                    ...(event.channel === undefined ? {} : { channel: event.channel }),
+                    attachments: event.files.map((file) => `${file.name} (${file.type})`),
+                    message: event.text,
+                },
+                questions: QUESTIONS,
+            },
             TIMEOUT_MS,
         );
 
@@ -216,19 +218,20 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
 
         counts.outbound.asked += 1;
 
-        const answers = await withDeadline(
-            () =>
-                host.classify({
-                    model: model(),
-                    state: {
-                        connector: event.connector,
-                        kind: event.kind,
-                        ...(event.channel === undefined ? {} : { channel: event.channel }),
-                        attachments: event.files.map((file) => file.name),
-                        reply: event.text,
-                    },
-                    questions: OUTBOUND_QUESTIONS,
-                }),
+        const answers = await classifyFor(
+            host.classify,
+            "relay-outbound",
+            {
+                model: model(),
+                state: {
+                    connector: event.connector,
+                    kind: event.kind,
+                    ...(event.channel === undefined ? {} : { channel: event.channel }),
+                    attachments: event.files.map((file) => file.name),
+                    reply: event.text,
+                },
+                questions: OUTBOUND_QUESTIONS,
+            },
             TIMEOUT_MS,
         );
 

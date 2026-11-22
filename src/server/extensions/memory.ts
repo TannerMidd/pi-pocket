@@ -8,7 +8,8 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { Lesson } from "../docs.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { flat, MAX_LESSON, MEMORY_EXTENSION, type Project, scopeOf } from "../memory.ts";
@@ -134,17 +135,18 @@ export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
                 }
 
                 // A failed or late call gives undefined, so the message goes on with no note, silently.
-                const answers = await withDeadline(
-                    () =>
-                        host.classify({
-                            model: model(),
-                            state: {
-                                from: turn.by,
-                                ...(turn.via === undefined ? {} : { via: turn.via }),
-                                message: turn.text,
-                            },
-                            questions: SUGGEST_QUESTIONS,
-                        }),
+                const answers = await classifyFor(
+                    host.classify,
+                    "memory-suggestions",
+                    {
+                        model: model(),
+                        state: {
+                            from: turn.by,
+                            ...(turn.via === undefined ? {} : { via: turn.via }),
+                            message: turn.text,
+                        },
+                        questions: SUGGEST_QUESTIONS,
+                    },
                     SUGGEST_TIMEOUT_MS,
                 );
                 const answer = answers?.remember;

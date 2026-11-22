@@ -11,7 +11,8 @@ import {
     type Tx,
 } from "@earendil-works/pi-durable";
 // At run time this module uses nothing of Pi Pocket's but the host and web, and pure helpers: model facts, stall facts.
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
@@ -465,8 +466,10 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             typeof value === "string" && value.trim() !== ""
                 ? value.trim()
                 : DEFAULT_CLASSIFY_MODEL;
-        const answers = await withDeadline(
-            () => call({ model, state, questions: VERDICT_QUESTIONS }),
+        const answers = await classifyFor(
+            call,
+            "agent-teams",
+            { model, state, questions: VERDICT_QUESTIONS },
             VERDICT_TIMEOUT_MS,
         );
         const answer = answers?.verdict;
