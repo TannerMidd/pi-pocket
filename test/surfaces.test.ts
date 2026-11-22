@@ -24,6 +24,7 @@ import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { SurfacesDoc } from "../src/server/docs.ts";
+import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
 import { applyOps } from "../src/server/surfaces/patch.ts";
 import { SurfaceActed } from "../src/server/surfaces/signal.ts";
 import { toText } from "../src/server/surfaces/text.ts";
@@ -531,4 +532,8 @@ test("a tab gets each surface projected for its person, with no task or wait key
     }
 
     assert.equal(work.length > 0, true);
+});
+
+test("plan mode lets a card be shown, as it does a question", () => {
+    assert.equal(blockedInPlanMode("ui", { action: "show", title: "x" }), undefined);
 });
