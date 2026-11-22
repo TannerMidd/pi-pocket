@@ -119,6 +119,7 @@ import { Hooks } from "./hooks.ts";
 import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
 import { setComponentSource } from "./surfaces/components.ts";
+import { PendingActions } from "./surfaces/pending.ts";
 import {
     fromRelay,
     prepareRelay,
@@ -419,6 +420,8 @@ export class PocketApp {
     readonly extensionSessions = new ExtensionSessions(this);
     readonly collab = new Collab(this);
     readonly alerts = new Alerts(this);
+    /** Surface actions recorded but not yet delivered to their session (`surfaces/pending.ts`). */
+    readonly surfacePending = new PendingActions(this);
     readonly providers = new Providers(this);
     /** OpenAI-compatible endpoints the owner adds in the Providers sheet, kept in Pi's `models.json`. */
     readonly customProviders = new CustomProviders(this);
@@ -990,8 +993,12 @@ export class PocketApp {
             surfaces: Object.freeze({
                 prepare: (id: ConversationId, surface: string, where: SurfaceWhere) =>
                     prepareRelay(this, id, surface, where),
-                sent: (id: ConversationId, surface: string, messageId: string | undefined) =>
-                    recordSent(this, id, surface, messageId),
+                sent: (
+                    id: ConversationId,
+                    surface: string,
+                    messageId: string | undefined,
+                    where?: { channel?: string; thread?: string },
+                ) => recordSent(this, id, surface, messageId, where),
                 fromRelay: (id: ConversationId, message: RelayMessage) =>
                     fromRelay(this, id, message),
             }),
@@ -1210,6 +1217,11 @@ export class PocketApp {
 
                 this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
                 this.#noteBackground(id, await this.harness.snapshot(BackgroundDoc, id, context));
+                // An action a restart cut off between its record and its delivery.
+                this.surfacePending.note(
+                    id,
+                    (await this.harness.snapshot(SurfacesDoc, id, context))?.items,
+                );
             }
 
             cursor = page.next;
@@ -1411,6 +1423,7 @@ export class PocketApp {
                 this.alerts.runChanged(id, busy, failure, outcome === "aborted");
 
                 if (!busy) {
+                    this.surfacePending.free(id);
                     this.spend.runEnded(id);
                     // No request follows the last tool call of a run that ended or was stopped (PiP's runs too).
                     this.cacheKeeper.runEnded(Number(id));
@@ -1495,6 +1508,10 @@ export class PocketApp {
                 }
             } else if (kind === SurfacesDoc.definition.kind) {
                 this.alerts.announceSurfaces(
+                    id,
+                    (value as { items?: Record<string, Surface> } | null)?.items,
+                );
+                this.surfacePending.note(
                     id,
                     (value as { items?: Record<string, Surface> } | null)?.items,
                 );
@@ -4434,6 +4451,7 @@ export class PocketApp {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
             this.alerts.close();
+            this.surfacePending.close();
             this.themes.close();
             await this.cacheKeeper.close();
             this.spend.close();

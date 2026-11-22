@@ -11,7 +11,7 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import { FUNCTIONS } from "../../../web/surfaces-expr.js";
 import type { Acted, Component, JsonObject } from "./types.ts";
-import { isObject } from "./validate.ts";
+import { cleanString, isObject } from "./validate.ts";
 
 /** A change to the data model, in order. */
 export type DataStep =
@@ -29,6 +29,8 @@ export type A2uiPlan = {
     /** Components by id, upserted; each has its `id`. */
     components: Record<string, Component & { id: string }>;
     data: DataStep[];
+    /** The A2UI components as sent, earlier ones included: an update by id needs the ones it does not repeat. */
+    raws: Record<string, Record<string, unknown>>;
 };
 
 export type A2uiResult = { plan?: A2uiPlan; refused: string[] };
@@ -359,16 +361,29 @@ function convert(
     }
 }
 
-/** The plan for the messages of one surface, or the reasons it was refused. */
-export function fromA2ui(messages: unknown): A2uiResult {
+/**
+ * The plan for the messages of one surface, or the reasons it was refused. `earlier` gives the A2UI components kept
+ * for a surface (by A2UI's id): an update that repeats only some of them is read with the rest.
+ */
+export function fromA2ui(
+    messages: unknown,
+    earlier?: (surface: string) => Record<string, Record<string, unknown>> | undefined,
+): A2uiResult {
     const why: string[] = [];
 
     if (!Array.isArray(messages) || messages.length === 0 || messages.length > 50) {
         return { refused: ["messages must be a list of 1 to 50 A2UI messages"] };
     }
 
-    const raws: Record<string, Record<string, unknown>> = {};
-    const plan: A2uiPlan = { surface: "", create: false, remove: false, components: {}, data: [] };
+    const sent: Record<string, Record<string, unknown>> = {};
+    const plan: A2uiPlan = {
+        surface: "",
+        create: false,
+        remove: false,
+        components: {},
+        data: [],
+        raws: {},
+    };
 
     const takeSurface = (message: Record<string, unknown>, body: Record<string, unknown>) => {
         const surface = typeof body.surfaceId === "string" ? body.surfaceId : undefined;
@@ -437,7 +452,7 @@ export function fromA2ui(messages: unknown): A2uiResult {
             if (Array.isArray(create.components)) {
                 for (const each of create.components) {
                     if (isObject(each) && typeof each.id === "string") {
-                        raws[each.id] = each;
+                        sent[each.id] = each;
                     }
                 }
             }
@@ -448,7 +463,7 @@ export function fromA2ui(messages: unknown): A2uiResult {
         } else if (update !== undefined) {
             for (const each of Array.isArray(update.components) ? update.components : []) {
                 if (isObject(each) && typeof each.id === "string") {
-                    raws[each.id] = each;
+                    sent[each.id] = each;
                 } else {
                     why.push("each component needs an id");
                 }
@@ -473,6 +488,12 @@ export function fromA2ui(messages: unknown): A2uiResult {
     }
 
     const consumed = new Set<string>();
+    const raws = {
+        ...(plan.create || plan.surface === "" ? {} : earlier?.(plan.surface)),
+        ...sent,
+    };
+
+    plan.raws = raws;
 
     for (const raw of Object.values(raws)) {
         const made = convert(raw, raws, why, consumed);
@@ -525,7 +546,7 @@ export function dataFromSteps(base: JsonObject, steps: readonly DataStep[]): Jso
             .split("/")
             .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
 
-        if (parts.some((part) => part === "" || FORBIDDEN.has(part))) {
+        if (parts.some((part) => part === "" || FORBIDDEN.has(cleanString(part)))) {
             throw new Error(`data path ${JSON.stringify(step.path)} is not allowed`);
         }
 

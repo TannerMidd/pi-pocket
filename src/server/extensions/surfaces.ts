@@ -5,6 +5,7 @@ import type { JsonValue } from "@earendil-works/chord/json";
 import { arr, bool, num, obj, oneOf, opt, str, union } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { PocketHost } from "../host.ts";
+import { keepFallbacks } from "../surfaces/components.ts";
 import { SurfacesDoc } from "../docs.ts";
 import { SurfaceActed } from "../surfaces/signal.ts";
 import {
@@ -14,10 +15,11 @@ import {
     endSurface,
     findByCall,
     replaceParts,
+    startWait,
 } from "../surfaces/store.ts";
 import { dataFromSteps, fromA2ui, toA2uiAction } from "../surfaces/a2ui.ts";
 import { applyOps } from "../surfaces/patch.ts";
-import type { Acted, Surface, SurfacesState } from "../surfaces/types.ts";
+import type { Acted, JsonObject, Surface, SurfacesState } from "../surfaces/types.ts";
 import {
     checkComputed,
     checkData,
@@ -159,6 +161,7 @@ export default function createSurfaces(host: PocketHost) {
         async execute(given, api, context) {
             let args = given;
             let a2ui: string | undefined;
+            let a2uiRaw: Record<string, JsonObject> | undefined;
             const agent = await api.agent(context);
 
             if (agent.instructions?.startsWith('You are the subagent "')) {
@@ -233,7 +236,12 @@ export default function createSurfaces(host: PocketHost) {
 
                 // A2UI messages are read into a normal show, or close, which then go through the same checks.
                 if (args.action === "a2ui") {
-                    const result = fromA2ui(args.messages);
+                    const kept = (await read()).items;
+                    const result = fromA2ui(
+                        args.messages,
+                        (surface) =>
+                            Object.values(kept).find((each) => each.a2ui === surface)?.a2uiRaw,
+                    );
 
                     if (result.plan === undefined) {
                         throw new SurfaceError(
@@ -259,12 +267,15 @@ export default function createSurfaces(host: PocketHost) {
                             );
                         }
 
-                        const known = Object.fromEntries(
-                            Object.entries(old?.components ?? {}).map(([id, component]) => [
-                                id,
-                                { id, ...component },
-                            ]),
-                        );
+                        // With the earlier A2UI components kept, the plan holds every component; without, the stored ones.
+                        const known =
+                            old?.a2uiRaw !== undefined || plan.create
+                                ? {}
+                                : Object.fromEntries(
+                                      Object.entries(old?.components ?? {}).map(
+                                          ([id, component]) => [id, { id, ...component }],
+                                      ),
+                                  );
                         const merged = { ...known, ...plan.components };
 
                         if (Object.keys(merged).length === 0) {
@@ -280,6 +291,7 @@ export default function createSurfaces(host: PocketHost) {
                         }
 
                         a2ui = plan.surface;
+                        a2uiRaw = plan.raws as Record<string, JsonObject>;
                         args = {
                             ...args,
                             action: "show",
@@ -338,14 +350,20 @@ export default function createSurfaces(host: PocketHost) {
                                 );
                             }
 
-                            if (existing.wait !== undefined) {
+                            // An A2UI update changes a card that waits and leaves the wait, and the call that made it, alone.
+                            const keepWait = a2ui !== undefined && existing.wait !== undefined;
+
+                            if (existing.wait !== undefined && !keepWait) {
                                 throw new SurfaceError(REPLACED);
                             }
 
                             replaceParts(existing, parts!, now);
                             existing.title = title;
-                            existing.taskId = taskId;
-                            existing.callId = api.callId;
+
+                            if (!keepWait) {
+                                existing.taskId = taskId;
+                                existing.callId = api.callId;
+                            }
                         }
 
                         const made =
@@ -361,13 +379,12 @@ export default function createSurfaces(host: PocketHost) {
                                 ...(a2ui === undefined ? {} : { a2ui }),
                             });
 
-                        if (minutes !== undefined) {
-                            made.wait = {
-                                taskId,
-                                key: `${made.id}.1`,
-                                gen: 1,
-                                until: now + minutes * 60_000,
-                            };
+                        if (a2uiRaw !== undefined) {
+                            made.a2uiRaw = a2uiRaw;
+                        }
+
+                        if (minutes !== undefined && made.wait === undefined) {
+                            startWait(made, taskId, now + minutes * 60_000);
                         }
 
                         return JSON.parse(JSON.stringify(made)) as Surface;
@@ -419,6 +436,15 @@ export default function createSurfaces(host: PocketHost) {
 
                     patched.set(`${cid}/${id}`, [...recent, now]);
 
+                    // Only the last second counts: older entries of other cards go.
+                    if (patched.size > 200) {
+                        for (const [key, times] of patched) {
+                            if (times.at(-1)! <= now - 1000) {
+                                patched.delete(key);
+                            }
+                        }
+                    }
+
                     const next = await api.commit(async (tx) => {
                         const doc = await tx.doc(SurfacesDoc, cid);
                         const surface = doc.items[id];
@@ -432,8 +458,14 @@ export default function createSurfaces(host: PocketHost) {
                         surface.root = result.parts.root;
                         surface.components = result.parts.components;
                         surface.data = result.parts.data;
+                        keepFallbacks(surface);
                         surface.rev += 1;
-                        surface.pv += 1;
+
+                        // A change that touches no layout and no input leaves `pv`: a person typing can still act.
+                        if (result.layout || result.inputs) {
+                            surface.pv += 1;
+                        }
+
                         surface.updatedAt = api.now();
 
                         return JSON.parse(JSON.stringify(surface)) as Surface;
@@ -470,12 +502,7 @@ export default function createSurfaces(host: PocketHost) {
 
                         const now = api.now();
 
-                        surface.wait = {
-                            taskId,
-                            key: `${id}.${(surface.wait?.gen ?? 0) + 1}`,
-                            gen: (surface.wait?.gen ?? 0) + 1,
-                            until: now + minutes! * 60_000,
-                        };
+                        startWait(surface, taskId, now + minutes! * 60_000);
                         surface.rev += 1;
 
                         return JSON.parse(JSON.stringify(surface.wait)) as NonNullable<

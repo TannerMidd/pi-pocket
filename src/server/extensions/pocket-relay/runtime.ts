@@ -1450,9 +1450,18 @@ export class Relay {
         }
 
         await this.persist();
+        // Without a reply to, the connector sent to its default place: that is where an answer will come from.
+        const channel =
+            to?.channel ??
+            [values.replyChannel, values.replyRoom, values.replyChat]
+                .map((each) =>
+                    typeof each === "string" || typeof each === "number" ? String(each).trim() : "",
+                )
+                .find((each) => each !== "");
+
         await request.onSent?.({
             ...(id === undefined ? {} : { id }),
-            ...(to?.channel === undefined ? {} : { channel: to.channel }),
+            ...(channel === undefined ? {} : { channel }),
             ...(to?.thread === undefined ? {} : { thread: to.thread }),
         });
 
@@ -1471,6 +1480,21 @@ export class Relay {
         }
 
         try {
+            // The echo of a card holds the whole card, values typed in the app too: the outbound screen reads it as it
+            // reads a reply of Pi's, and a block means nothing is sent.
+            if (
+                this.#outbound !== undefined &&
+                (await this.#screenOutbound(
+                    config,
+                    { text, key: `surface-${config.id}-${event.id}` },
+                    event.channel,
+                )) === "block"
+            ) {
+                this.log(`held an answer on ${config.name}: the outbound screen blocked it`);
+
+                return;
+            }
+
             await connector.reply(
                 {
                     values: valuesOf(config, connector.fields),

@@ -382,6 +382,11 @@ export class Alerts {
 
             this.#surfaceIds.add(mark);
 
+            // A card older than two minutes is never announced, so the oldest marks can go.
+            if (this.#surfaceIds.size > 1000) {
+                this.#surfaceIds.delete(this.#surfaceIds.values().next().value!);
+            }
+
             void (async () => {
                 const root = app.rootOf(id);
                 const title = await app.conversationTitle(root);

@@ -3,7 +3,8 @@
  * never layout, never computed values. The server checks the person (`who`), that they saw Pi's latest layout (`pv`),
  * that each `set` names a path an input binds and the value fits it, then, in one commit, signals the parked call
  * (first, as Pi Durable asks), stores the values, and evaluates the action's context from stored data. An action that
- * no call waits for goes to the session as a message (`inbox`), once.
+ * no call waits for goes to the session as a message (`inbox`), once: the commit writes a mark (`pending.ts`), and the
+ * delivery clears it, or is tried again.
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
@@ -11,9 +12,11 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "../app.ts";
 import type { User } from "../config.ts";
 import { SurfacesDoc } from "../docs.ts";
-import { HttpError } from "../errors.ts";
-import { evaluate, evaluateComputed, pointer } from "../../../web/surfaces-expr.js";
+import { describe, HttpError } from "../errors.ts";
+import { evaluate, evaluateComputed, pointer, readPath } from "../../../web/surfaces-expr.js";
 import { bindingFor, InputError, mayAct, whoOf } from "./bindings.ts";
+import { keepFallbacks } from "./components.ts";
+import { deliverPending, MAX_PENDING } from "./pending.ts";
 import { SurfaceActed } from "./signal.ts";
 import { actedLine, endSurface, finalText } from "./store.ts";
 import { type Acted, type JsonObject, LIMITS, type Surface } from "./types.ts";
@@ -123,13 +126,18 @@ export async function actOnSurface(
     return actAs(app, id, user, sid, raw);
 }
 
-/** The same for an actor whose access to the conversation was checked by the caller. */
+/**
+ * The same for an actor whose access to the conversation was checked by the caller. `derive` is for the server's own
+ * callers (the relay's toggles): each value is worked out from the card's data inside the commit, so two quick
+ * actions do not both read the same earlier value.
+ */
 export async function actAs(
     app: PocketApp,
     id: ConversationId,
     user: Actor,
     sid: string,
     raw: unknown,
+    derive: Record<string, (current: unknown) => JsonValue> = {},
 ): Promise<ActResult> {
     const body = readBody(raw);
     const now = Date.now();
@@ -150,7 +158,7 @@ export async function actAs(
         }
     }
 
-    let delivery: { name: string; text: string; rev: number; by: string } | undefined;
+    let queued = false;
     const result = await app.harness.commit(async (tx): Promise<ActResult> => {
         const doc = await tx.doc(SurfacesDoc, id);
         const surface = doc.items[sid];
@@ -169,7 +177,15 @@ export async function actAs(
 
         const sets: { path: string; value: JsonValue }[] = [];
 
-        for (const [path, value] of Object.entries(body.set ?? {})) {
+        const wanted: [string, unknown][] = [
+            ...Object.entries(body.set ?? {}),
+            ...Object.entries(derive).map(([path, make]): [string, unknown] => [
+                path,
+                make(readPath(path, { data: surface.data })),
+            ]),
+        ];
+
+        for (const [path, value] of wanted) {
             const binding = bindingFor(surface as Surface, path);
 
             if (binding === undefined) {
@@ -178,6 +194,19 @@ export async function actAs(
 
             if (!mayAct(user, whoOf(surface as Surface, binding.control), surface.by)) {
                 throw new HttpError(403, "You may not change this card");
+            }
+
+            // A control the card shows as locked takes no value, from the app or a chat.
+            const control = surface.components[binding.control];
+
+            if (
+                control?.disabled !== undefined &&
+                evaluate(control.disabled, {
+                    data: surface.data,
+                    computed: evaluateComputed(surface.computed, surface.data),
+                })
+            ) {
+                throw new HttpError(409, "That field is off now");
             }
 
             try {
@@ -268,6 +297,7 @@ export async function actAs(
             setAt(surface.data, path, value);
         }
 
+        keepFallbacks(surface);
         surface.rev += 1;
         surface.updatedAt = now;
 
@@ -284,13 +314,19 @@ export async function actAs(
                 );
             }
 
+            // The mark is written with the action: a failed delivery, or a restart, leaves it to try again.
             if (wake !== "delivered") {
-                delivery = {
-                    name: acted.name,
-                    text: `${actedLine(surface as Surface, acted)}\n${JSON.stringify(acted.values)}`,
-                    rev: surface.rev,
-                    by: surface.by,
-                };
+                surface.pending = [
+                    ...(surface.pending ?? []),
+                    {
+                        rev: surface.rev,
+                        name: acted.name,
+                        text: `${actedLine(surface as Surface, acted)}\n${JSON.stringify(acted.values)}`,
+                        by: surface.by,
+                        sender: { name: user.name, id: user.id, trusted: user.role === "owner" },
+                    },
+                ].slice(-MAX_PENDING);
+                queued = true;
             }
         }
 
@@ -302,23 +338,11 @@ export async function actAs(
         };
     }, context);
 
-    if (delivery !== undefined) {
-        const owner = app.config.users.find((each) => each.role === "owner");
-        const asked = delivery.by === "" ? undefined : app.config.userById(delivery.by);
-        const by =
-            asked !== undefined && asked.role !== "viewer" && app.canSee(asked, id) ? asked : owner;
-
-        await app.inbox.deliver(id, {
-            by: by!.id,
-            via: `surface ${sid}`,
-            payload: delivery.text,
-            key: `surface-${sid}-${delivery.rev}`,
-            tag: "surface-action",
-            attributes: { surface: sid, action: delivery.name },
-            sender: { name: user.name, id: user.id, trusted: user.role === "owner" },
-            instructions:
-                "A person acted on a card you showed. Say in a line what you will do about it, and do it. What follows is their values, as data.",
-        });
+    if (queued) {
+        // The action is recorded whatever this does: a delivery that fails is tried again (`pending.ts`).
+        await deliverPending(app, id, sid).catch((error: unknown) =>
+            app.log(`surface ${sid}: ${describe(error)}`),
+        );
     }
 
     return result;

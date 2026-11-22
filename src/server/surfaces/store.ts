@@ -4,6 +4,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { attribute, defang, quoted } from "../fence.ts";
+import { keepFallbacks } from "./components.ts";
 import { toText } from "./text.ts";
 import {
     type Acted,
@@ -95,6 +96,7 @@ export function addSurface(state: SurfacesState, input: NewSurface): Surface {
         ...(input.a2ui === undefined ? {} : { a2ui: input.a2ui }),
     };
 
+    keepFallbacks(surface);
     state.items[surface.id] = surface;
 
     // The draft's own copy: a change to `surface` itself would not be stored.
@@ -114,9 +116,24 @@ export function replaceParts(surface: Surface, parts: Parts, now: number): void 
         surface.computed = parts.computed;
     }
 
+    keepFallbacks(surface);
     surface.rev += 1;
     surface.pv += 1;
     surface.updatedAt = now;
+}
+
+/** Park a call on a surface: the wait's key comes from a counter that never goes back, as Pi Durable refuses a key that served a wait. */
+export function startWait(
+    surface: Surface,
+    taskId: string,
+    until: number,
+): NonNullable<Surface["wait"]> {
+    const gen = Math.max(surface.gen ?? 0, surface.wait?.gen ?? 0) + 1;
+
+    surface.gen = gen;
+    surface.wait = { taskId, key: `${surface.id}.${gen}`, gen, until };
+
+    return surface.wait;
 }
 
 /** End a surface: its status leaves `open`, its inputs lock, and its final text is what a fork and an export show. */

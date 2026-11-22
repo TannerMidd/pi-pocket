@@ -1,7 +1,8 @@
 /**
  * What a person may change on a surface and who may do it. A person's `set` must name a path that an input control
  * binds (a text field, a check box, a choice, a table's selection or editable column), and the value must fit that
- * control. `mayAct` decides by role. Pure functions: the `act` route and the room's per-person projection use them.
+ * control. A `pattern` is never run here: it comes from Pi, and a regular expression that Pi chose could stall the
+ * server on what a person typed; the browser tests it in the form. `mayAct` decides by role. Pure functions: the `act` route and the room's per-person projection use them.
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { pointer, readPath } from "../../../web/surfaces-expr.js";
@@ -47,20 +48,6 @@ function text(component: Component, value: unknown): string {
 
     if (component.multiline !== true && /[\r\n]/.test(cleaned)) {
         throw new InputError("One line only");
-    }
-
-    if (typeof component.pattern === "string" && cleaned !== "") {
-        let ok = false;
-
-        try {
-            ok = new RegExp(component.pattern, "u").test(cleaned);
-        } catch {
-            ok = false;
-        }
-
-        if (!ok) {
-            throw new InputError("That does not fit the form this field asks for");
-        }
     }
 
     return cleaned;

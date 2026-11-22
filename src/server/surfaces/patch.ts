@@ -10,6 +10,7 @@ import {
     checkSurface,
     childrenOf,
     clean,
+    cleanString,
     flatten,
     isObject,
     type Parts,
@@ -19,7 +20,7 @@ import {
 const FORBIDDEN = new Set(["__proto__", "constructor", "prototype"]);
 
 /** A data path as its parts, never a computed one, never a prototype's. */
-function parts(path: unknown, where: string): string[] {
+function pathOf(path: unknown, where: string): string[] {
     const found = typeof path === "string" && path.startsWith("/") ? pointer(path) : undefined;
 
     if (
@@ -33,7 +34,7 @@ function parts(path: unknown, where: string): string[] {
         );
     }
 
-    if (found.some((part) => FORBIDDEN.has(part))) {
+    if (found.some((part) => FORBIDDEN.has(cleanString(part)))) {
         throw new SurfaceError(`${where}: path is not allowed`);
     }
 
@@ -78,7 +79,7 @@ function index(list: JsonValue[], part: string, where: string, append = false): 
 }
 
 function dataOp(data: JsonObject, op: Record<string, unknown>, where: string): void {
-    const found = parts(op.path, where);
+    const found = pathOf(op.path, where);
     const parent = parentOf(data, found, where);
     const last = found.at(-1)!;
 
@@ -158,7 +159,7 @@ function layoutOp(state: Parts, op: Record<string, unknown>, where: string): voi
                 );
             }
 
-            if (FORBIDDEN.has(key)) {
+            if (FORBIDDEN.has(cleanString(key))) {
                 throw new SurfaceError(`${where}: the prop ${key} is not allowed`);
             }
 
@@ -229,8 +230,33 @@ function layoutOp(state: Parts, op: Record<string, unknown>, where: string): voi
     drop(id);
 }
 
-/** What a patch changed: layout ops make `layout` true (its `pv` rises either way). */
-export type Patched = { parts: Parts; layout: boolean };
+/** The paths an input control binds, and the rows of a table, as their parts. */
+function boundPaths(components: Record<string, Component>): string[][] {
+    const out: string[][] = [];
+
+    for (const component of Object.values(components)) {
+        const path =
+            component.type === "Table"
+                ? component.rows
+                : component.type !== "Button" && component.type !== "Status"
+                  ? component.bind
+                  : undefined;
+        const found = typeof path === "string" ? pointer(path) : undefined;
+
+        if (found !== undefined) {
+            out.push(found);
+        }
+    }
+
+    return out;
+}
+
+/**
+ * What a patch changed: layout ops make `layout` true; a data op on a path that an input binds (or on its parent or
+ * child, such as a table's rows) makes `inputs` true. Either changes what a person's open edit means, so `pv` rises;
+ * a patch that does neither (a status line, a count) keeps `pv`, and a person typing in a field can still act.
+ */
+export type Patched = { parts: Parts; layout: boolean; inputs: boolean };
 
 /**
  * The surface after `ops`, or an error naming the op that failed and nothing else changed: the ops run on a copy, and
@@ -242,7 +268,9 @@ export function applyOps(parts: Parts, ops: unknown): Patched {
     }
 
     const state: Parts = JSON.parse(JSON.stringify(parts));
+    const bound = boundPaths(parts.components);
     let layout = false;
+    let inputs = false;
 
     for (const [at, op] of ops.entries()) {
         const where = `ops[${at}]`;
@@ -253,6 +281,14 @@ export function applyOps(parts: Parts, ops: unknown): Patched {
 
         if (op.op === "set" || op.op === "push" || op.op === "remove") {
             dataOp(state.data, op, where);
+
+            const changed = pathOf(op.path, where);
+
+            inputs ||= bound.some(
+                (each) =>
+                    each.slice(0, changed.length).every((part, index) => part === changed[index]) ||
+                    changed.slice(0, each.length).every((part, index) => part === each[index]),
+            );
         } else if (op.op === "props" || op.op === "add" || op.op === "drop") {
             layoutOp(state, op, where);
             layout = true;
@@ -268,5 +304,5 @@ export function applyOps(parts: Parts, ops: unknown): Patched {
         new Set(Object.values(parts.components).map((component) => component.type)),
     );
 
-    return { parts: state, layout };
+    return { parts: state, layout, inputs };
 }

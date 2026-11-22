@@ -50,14 +50,22 @@ export type Surface = {
     components: Record<string, Component>;
     data: JsonObject;
     computed?: Record<string, Expr>;
-    /** The wait a `ui` call is parked in: a signal under `key` wakes it. `gen` counts waits. */
+    /** How many waits this surface has had: never reset, so a signal key (`<id>.<gen>`) serves one wait only. */
+    gen?: number;
+    /** The wait a `ui` call is parked in: a signal under `key` wakes it. `gen` is this wait's number. */
     wait?: { taskId: string; key: string; gen: number; until?: number };
+    /** The plain text of each extension component, kept while its module is on: it still shows when the module is off. */
+    fallbacks?: Record<string, string>;
+    /** Actions waiting to reach the session as a message: written with the action, cleared when delivered. */
+    pending?: PendingDelivery[];
     /** The latest action delivered. */
     last?: { name: string; by: string; at: number };
     /** Set when the status leaves `open`: the text the transcript, an export, and a fork show. */
     final?: { text: string; values?: JsonValue };
     /** The id A2UI messages call this surface by (`a2ui.ts`), when it came from them. */
     a2ui?: string;
+    /** The A2UI components as sent, by id: an update that repeats only some of them is read with the others. */
+    a2uiRaw?: Record<string, JsonObject>;
     relay?: {
         connector: string;
         channel: string;
@@ -66,6 +74,16 @@ export type Surface = {
         pv: number;
         map: Record<string, Target>;
     };
+};
+
+/** An action for the session that is recorded but not yet delivered (`pending.ts`). */
+export type PendingDelivery = {
+    rev: number;
+    name: string;
+    text: string;
+    /** The user id Pi worked for when the card was made: who the message is from, when they can still reach the session. */
+    by: string;
+    sender: { name: string; id: string; trusted: boolean };
 };
 
 export type SurfacesState = { seq: number; items: Record<string, Surface> };

@@ -25,6 +25,7 @@ import { SurfacesDoc } from "../src/server/docs.ts";
 import type { Client } from "../src/server/room.ts";
 import type { EmbedderMessage } from "../src/server/push.ts";
 import { createHandler } from "../src/server/http.ts";
+import { prepareRelay } from "../src/server/surfaces/relay.ts";
 
 const dataDir = join(root, "data");
 const card = {
@@ -91,6 +92,7 @@ export default (_host, web) => {
     let stop = () => {};
     const sent = [];
     globalThis.relayMock = { sent, push: (events) => { queue.push(events); wake(); } };
+    globalThis.relayService = web.use("pocket-relay");
     const connector = {
         kind: "mock",
         label: "Mock",
@@ -134,8 +136,9 @@ after(async () => {
     cleanUp();
 });
 
-const surface = async () =>
-    Object.values((await app.harness.snapshot(SurfacesDoc, session, context))?.items ?? {})[0];
+const surfaces = async () =>
+    Object.values((await app.harness.snapshot(SurfacesDoc, session, context))?.items ?? {});
+const surface = async () => (await surfaces())[0];
 
 const event = (id: string, author: string, text: string, more: object = {}) => ({
     id,
@@ -202,7 +205,7 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     await until(async () => (await surface())!.data.note === "hi there", "the stranger's text");
     mock().push([event("e5", "stranger", "1")]);
     await until(
-        () => mock().sent.some((each) => /You may not use card s1/.test(each.text)),
+        () => mock().sent.some((each) => /That did not work on card s1\./.test(each.text)),
         "the refusal",
     );
     assert.equal((await surface())!.data.agree, true, "unchanged by a stranger");
@@ -236,6 +239,42 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
         async () => (await userTexts()).some((text) => text.includes("[via surface s1]")),
         "the action's message",
     );
+});
+
+test("the relay's own echo of a card goes through the outbound screen", async () => {
+    // The first test's card is done: a new one, sent to the same chat by hand.
+    await app.commands.submit(session, owner(app), { text: "show the card", requestId: "card-3" });
+    await until(async () => Object.keys(await surfaces()).length === 2, "the second card");
+
+    const second = Object.values(await surfaces()).find((each) => each.id === "s2")!;
+
+    await prepareRelay(app, session, second.id, { connector: "Chat", channel: "room-1" });
+
+    const holds: string[] = [];
+    const stop = (
+        globalThis as { relayService?: { outbound: (hook: never) => () => void } }
+    ).relayService!.outbound(((event: { text: string }) => {
+        holds.push(event.text);
+
+        return "block";
+    }) as never);
+    const sent = mock().sent.length;
+
+    try {
+        mock().push([event("e30", "owner-1", "1")]);
+        await until(
+            async () => (await surfaces()).find((each) => each.id === "s2")!.data.agree === true,
+            "the toggle",
+        );
+        await until(() => holds.length === 1, "the screen reading the echo");
+        assert.match(holds[0]!, /Agree/);
+        assert.equal(mock().sent.length, sent, "a blocked echo is not sent");
+    } finally {
+        stop();
+    }
+
+    mock().push([event("e31", "owner-1", "1")]);
+    await until(() => mock().sent.length === sent + 1, "the echo with no screen");
 });
 
 test("a card Pi waits for is pushed to the person who can act, by its title only", async () => {

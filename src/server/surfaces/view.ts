@@ -38,7 +38,7 @@ export function viewOf(
     person: { id: string; role: string },
     nameOf: (id: string) => string,
 ): SurfaceView {
-    const fallbacks: Record<string, string> = {};
+    const fallbacks: Record<string, string> = { ...surface.fallbacks };
 
     for (const [id, component] of Object.entries(surface.components)) {
         const registered = extensionComponent(component.type);

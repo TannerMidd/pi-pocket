@@ -724,7 +724,9 @@ export interface PocketHost {
     readonly memory: Pick<Memory, "project" | "applying" | "inForce" | "add" | "change">;
     /**
      * Surfaces in a chat (`surfaces/relay.ts`), for the relay: the numbered text of a card and where it went, and a
-     * message from a chat read as an action on it. Internal: the relay's module is the one caller.
+     * message from a chat read as an action on it. Internal: the relay's module is the one caller. `fromRelay` trusts the
+     * `ownerIds` its caller gives it, as `inbox.deliver` trusts a `trusted` sender: every module runs in the server with
+     * the owner's own rights, and the owner turns drop-ins on, so a module that lies here could do more by other ways.
      */
     readonly surfaces?: SurfacesRelayApi;
     /**

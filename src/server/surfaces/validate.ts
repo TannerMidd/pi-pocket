@@ -92,7 +92,7 @@ export function clean(value: unknown, where: string, depth = 0): JsonValue {
         const out: JsonObject = {};
 
         for (const [key, each] of Object.entries(value)) {
-            if (FORBIDDEN_KEYS.has(key)) {
+            if (FORBIDDEN_KEYS.has(cleanString(key))) {
                 throw new SurfaceError(
                     `${where} has the key ${JSON.stringify(key)}, which is not allowed`,
                 );
@@ -470,7 +470,14 @@ function checkComponent(id: string, component: Component, known: ReadonlySet<str
 
         case "Image": {
             need("url");
-            const url = str(prop("url"), at("url"), LIMITS.url, 1);
+            // The limit follows the kind: a link is short, a small data image is up to 64 KB.
+            const given = prop("url");
+            const url = str(
+                given,
+                at("url"),
+                typeof given === "string" && given.startsWith("data:") ? LIMITS.image : LIMITS.url,
+                1,
+            );
 
             if (url.startsWith("data:")) {
                 if (!RASTER.test(url) || url.length > LIMITS.image) {

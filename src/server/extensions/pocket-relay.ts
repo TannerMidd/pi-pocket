@@ -664,8 +664,19 @@ export default function createRelay(host: PocketHost, web?: ExtensionWeb) {
                         ...(card === undefined
                             ? {}
                             : {
-                                  onSent: (sent: { id?: string }) =>
-                                      host.surfaces!.sent(api.conversationId, card, sent.id),
+                                  onSent: (sent: {
+                                      id?: string;
+                                      channel?: string;
+                                      thread?: string;
+                                  }) =>
+                                      host.surfaces!.sent(api.conversationId, card, sent.id, {
+                                          ...(sent.channel === undefined
+                                              ? {}
+                                              : { channel: sent.channel }),
+                                          ...(sent.thread === undefined
+                                              ? {}
+                                              : { thread: sent.thread }),
+                                      }),
                               }),
                         ...(files.length === 0 ? {} : { files }),
                     },

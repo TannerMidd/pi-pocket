@@ -217,6 +217,11 @@ test("a component an extension added: checked on show, bound and checked on set,
 
     // With the module off, the stored card stays valid: Pi's patches to other parts still work, and it shows the text.
     await app.setExtensionEnabled(owner(app), "stars.ts", false);
+    assert.match(
+        toText((await surfaces(id)).s1!, "transcript"),
+        /Quality: 3 of 5/,
+        "the text kept while the module was on",
+    );
     await ui(id, {
         action: "patch",
         id: "s1",
@@ -310,6 +315,43 @@ test("A2UI messages become a card, change it, and close it; what the adapter can
             },
         },
     ]);
+
+    // An update that repeats only some components is read with the ones kept: only the label Text, or only the Button.
+    const kept = (surface: string) => (surface === "form" ? read.plan!.raws : undefined);
+    const text = fromA2ui(
+        [
+            {
+                updateComponents: {
+                    surfaceId: "form",
+                    components: [{ id: "go-label", component: "Text", text: "Later" }],
+                },
+            },
+        ],
+        kept,
+    );
+    const button = fromA2ui(
+        [
+            {
+                updateComponents: {
+                    surfaceId: "form",
+                    components: [
+                        {
+                            id: "go",
+                            component: "Button",
+                            child: "go-label",
+                            action: { event: { name: "later" } },
+                        },
+                    ],
+                },
+            },
+        ],
+        kept,
+    );
+
+    assert.deepEqual([text.refused, button.refused], [[], []]);
+    assert.equal(text.plan!.components.go!.label, "Later");
+    assert.equal(button.plan!.components.go!.label, "Send");
+    assert.equal(button.plan!.components.name!.type, "TextField", "the others come along");
 
     assert.equal(refused.plan, undefined);
     assert.equal(

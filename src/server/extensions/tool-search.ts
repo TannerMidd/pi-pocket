@@ -64,6 +64,12 @@ const DEFERRED: Record<string, { use: string; section?: string; note?: string; g
     },
 };
 
+/**
+ * Tools that are never sent through codemode: their card reads the call's own details, and a call that waits for a
+ * person cannot be parked in a script. Loading one adds it to the tool list, as on a model that takes tool changes.
+ */
+const DIRECT = new Set(["ui"]);
+
 type Guide = { guide?: (model: Agent["model"]) => Promise<string> };
 
 const sections = new Map<string, string[]>();
@@ -188,7 +194,14 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                       );
             const loaded = (result.details as { loaded?: string[] } | undefined)?.loaded ?? [];
 
-            if (loaded.length === 0 || !(await throughCodemode(api as never, context))) {
+            const direct = loaded.filter((name) => DIRECT.has(name));
+            const scripted = loaded.filter((name) => !DIRECT.has(name));
+
+            if (
+                loaded.length === 0 ||
+                scripted.length === 0 ||
+                !(await throughCodemode(api as never, context))
+            ) {
                 return result;
             }
 
@@ -196,11 +209,12 @@ export default function createToolSearch(_host: PocketHost, web?: ExtensionWeb) 
                 output: [
                     {
                         type: "text",
-                        text: `Use these through codemode:\n\n${await explain(loaded, api as never, context)}`,
+                        text: `${direct.length === 0 ? "" : `Loaded ${direct.join(", ")}. Use ${direct.length === 1 ? "it" : "them"} from your next call.\n\n`}Use these through codemode:\n\n${await explain(scripted, api as never, context)}`,
                     },
                 ],
-                details: { loaded: [] },
-            };
+                details: { loaded: direct },
+                ...(direct.length === 0 ? {} : { control: { addTools: direct } }),
+            } as Awaited<ReturnType<typeof search.execute>>;
         },
     } as ToolRegistration;
 
