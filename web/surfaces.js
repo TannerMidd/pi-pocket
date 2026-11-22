@@ -655,6 +655,10 @@ function DraftText({
     const held = useRef(null);
     const timer = useRef(0);
     const stored = useRef(value);
+    // The field's check as it is now: Pi can patch a pattern while the press reader stays registered.
+    const check = useRef(fits);
+
+    check.current = fits;
     const seen = useRef(null);
     const sent = useRef(null);
 
@@ -683,7 +687,7 @@ function DraftText({
             return;
         }
 
-        if (!fits(text)) {
+        if (!check.current(text)) {
             setUnfit(true);
 
             return;
@@ -706,7 +710,7 @@ function DraftText({
                     return undefined;
                 }
 
-                if (!fits(text)) {
+                if (!check.current(text)) {
                     setUnfit(true);
 
                     return { unfit: true };
@@ -732,7 +736,11 @@ function DraftText({
         onFocus: () => {
             seen.current = seenPv();
             sent.current = null;
-            change(value);
+
+            // An unfit draft kept from the last blur stays for the person to fix.
+            if (held.current === null) {
+                change(value);
+            }
         },
         onInput: (event) => {
             const text = event.currentTarget.value;
@@ -744,6 +752,13 @@ function DraftText({
             timer.current = setTimeout(() => send(text), TYPING_MS);
         },
         onBlur: () => {
+            // A draft that does not fit stays, so a press after this blur still finds it and stops.
+            if (held.current !== null && !check.current(held.current)) {
+                setUnfit(true);
+
+                return;
+            }
+
             if (held.current !== null) {
                 send(held.current);
             }

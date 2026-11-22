@@ -557,7 +557,8 @@ test(
     async () => {
         const { id, page } = await shown("show the code", "Code");
 
-        await run(page, `${TYPE} ${SEND}.click(); return null;`);
+        // A pointer press blurs the field before the click: the unfit draft must survive that blur.
+        await run(page, `${TYPE} document.activeElement.blur(); ${SEND}.click(); return null;`);
         await waitFor(page, ".surf-why", /does not fit the form/, "the field's note");
         assert.equal((await surfaceOf(id)).status, "open", "nothing was pressed");
 
