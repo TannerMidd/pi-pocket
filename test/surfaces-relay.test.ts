@@ -202,7 +202,7 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     await until(async () => (await surface())!.data.note === "hi there", "the stranger's text");
     mock().push([event("e5", "stranger", "1")]);
     await until(
-        () => mock().sent.some((each) => /You may not use card s1/.test(each.text)),
+        () => mock().sent.some((each) => /That did not work on card s1\./.test(each.text)),
         "the refusal",
     );
     assert.equal((await surface())!.data.agree, true, "unchanged by a stranger");

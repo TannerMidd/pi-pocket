@@ -92,7 +92,7 @@ export function clean(value: unknown, where: string, depth = 0): JsonValue {
         const out: JsonObject = {};
 
         for (const [key, each] of Object.entries(value)) {
-            if (FORBIDDEN_KEYS.has(key)) {
+            if (FORBIDDEN_KEYS.has(cleanString(key))) {
                 throw new SurfaceError(
                     `${where} has the key ${JSON.stringify(key)}, which is not allowed`,
                 );

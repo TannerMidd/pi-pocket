@@ -14,6 +14,7 @@ import {
     endSurface,
     findByCall,
     replaceParts,
+    startWait,
 } from "../surfaces/store.ts";
 import { dataFromSteps, fromA2ui, toA2uiAction } from "../surfaces/a2ui.ts";
 import { applyOps } from "../surfaces/patch.ts";
@@ -362,12 +363,7 @@ export default function createSurfaces(host: PocketHost) {
                             });
 
                         if (minutes !== undefined) {
-                            made.wait = {
-                                taskId,
-                                key: `${made.id}.1`,
-                                gen: 1,
-                                until: now + minutes * 60_000,
-                            };
+                            startWait(made, taskId, now + minutes * 60_000);
                         }
 
                         return JSON.parse(JSON.stringify(made)) as Surface;
@@ -419,6 +415,15 @@ export default function createSurfaces(host: PocketHost) {
 
                     patched.set(`${cid}/${id}`, [...recent, now]);
 
+                    // Only the last second counts: older entries of other cards go.
+                    if (patched.size > 200) {
+                        for (const [key, times] of patched) {
+                            if (times.at(-1)! <= now - 1000) {
+                                patched.delete(key);
+                            }
+                        }
+                    }
+
                     const next = await api.commit(async (tx) => {
                         const doc = await tx.doc(SurfacesDoc, cid);
                         const surface = doc.items[id];
@@ -433,7 +438,12 @@ export default function createSurfaces(host: PocketHost) {
                         surface.components = result.parts.components;
                         surface.data = result.parts.data;
                         surface.rev += 1;
-                        surface.pv += 1;
+
+                        // A change that touches no layout and no input leaves `pv`: a person typing can still act.
+                        if (result.layout || result.inputs) {
+                            surface.pv += 1;
+                        }
+
                         surface.updatedAt = api.now();
 
                         return JSON.parse(JSON.stringify(surface)) as Surface;
@@ -470,12 +480,7 @@ export default function createSurfaces(host: PocketHost) {
 
                         const now = api.now();
 
-                        surface.wait = {
-                            taskId,
-                            key: `${id}.${(surface.wait?.gen ?? 0) + 1}`,
-                            gen: (surface.wait?.gen ?? 0) + 1,
-                            until: now + minutes! * 60_000,
-                        };
+                        startWait(surface, taskId, now + minutes! * 60_000);
                         surface.rev += 1;
 
                         return JSON.parse(JSON.stringify(surface.wait)) as NonNullable<

@@ -119,6 +119,20 @@ export function replaceParts(surface: Surface, parts: Parts, now: number): void 
     surface.updatedAt = now;
 }
 
+/** Park a call on a surface: the wait's key comes from a counter that never goes back, as Pi Durable refuses a key that served a wait. */
+export function startWait(
+    surface: Surface,
+    taskId: string,
+    until: number,
+): NonNullable<Surface["wait"]> {
+    const gen = Math.max(surface.gen ?? 0, surface.wait?.gen ?? 0) + 1;
+
+    surface.gen = gen;
+    surface.wait = { taskId, key: `${surface.id}.${gen}`, gen, until };
+
+    return surface.wait;
+}
+
 /** End a surface: its status leaves `open`, its inputs lock, and its final text is what a fork and an export show. */
 export function endSurface(
     surface: Surface,

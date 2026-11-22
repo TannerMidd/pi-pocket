@@ -11,7 +11,7 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import { FUNCTIONS } from "../../../web/surfaces-expr.js";
 import type { Acted, Component, JsonObject } from "./types.ts";
-import { isObject } from "./validate.ts";
+import { cleanString, isObject } from "./validate.ts";
 
 /** A change to the data model, in order. */
 export type DataStep =
@@ -525,7 +525,7 @@ export function dataFromSteps(base: JsonObject, steps: readonly DataStep[]): Jso
             .split("/")
             .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
 
-        if (parts.some((part) => part === "" || FORBIDDEN.has(part))) {
+        if (parts.some((part) => part === "" || FORBIDDEN.has(cleanString(part)))) {
             throw new Error(`data path ${JSON.stringify(step.path)} is not allowed`);
         }
 

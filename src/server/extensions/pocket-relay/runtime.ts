@@ -1390,9 +1390,18 @@ export class Relay {
         }
 
         await this.persist();
+        // Without a reply to, the connector sent to its default place: that is where an answer will come from.
+        const channel =
+            to?.channel ??
+            [values.replyChannel, values.replyRoom, values.replyChat]
+                .map((each) =>
+                    typeof each === "string" || typeof each === "number" ? String(each).trim() : "",
+                )
+                .find((each) => each !== "");
+
         await request.onSent?.({
             ...(id === undefined ? {} : { id }),
-            ...(to?.channel === undefined ? {} : { channel: to.channel }),
+            ...(channel === undefined ? {} : { channel }),
             ...(to?.thread === undefined ? {} : { thread: to.thread }),
         });
 
