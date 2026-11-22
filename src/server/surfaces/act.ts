@@ -15,6 +15,7 @@ import { SurfacesDoc } from "../docs.ts";
 import { describe, HttpError } from "../errors.ts";
 import { evaluate, evaluateComputed, pointer, readPath } from "../../../web/surfaces-expr.js";
 import { bindingFor, InputError, mayAct, whoOf } from "./bindings.ts";
+import { keepFallbacks } from "./components.ts";
 import { deliverPending, MAX_PENDING } from "./pending.ts";
 import { SurfaceActed } from "./signal.ts";
 import { actedLine, endSurface, finalText } from "./store.ts";
@@ -195,6 +196,19 @@ export async function actAs(
                 throw new HttpError(403, "You may not change this card");
             }
 
+            // A control the card shows as locked takes no value, from the app or a chat.
+            const control = surface.components[binding.control];
+
+            if (
+                control?.disabled !== undefined &&
+                evaluate(control.disabled, {
+                    data: surface.data,
+                    computed: evaluateComputed(surface.computed, surface.data),
+                })
+            ) {
+                throw new HttpError(409, "That field is off now");
+            }
+
             try {
                 sets.push({ path, value: binding.check(value) });
             } catch (error) {
@@ -283,6 +297,7 @@ export async function actAs(
             setAt(surface.data, path, value);
         }
 
+        keepFallbacks(surface);
         surface.rev += 1;
         surface.updatedAt = now;
 

@@ -25,7 +25,7 @@ import { HttpError } from "../src/server/errors.ts";
 import { fromRelay, prepareRelay, recordSent } from "../src/server/surfaces/relay.ts";
 import { applyOps } from "../src/server/surfaces/patch.ts";
 import type { Surface } from "../src/server/surfaces/types.ts";
-import { checkData } from "../src/server/surfaces/validate.ts";
+import { checkData, checkSurface, flatten } from "../src/server/surfaces/validate.ts";
 
 const card = {
     action: "show",
@@ -68,7 +68,7 @@ const card = {
         },
     ],
 };
-const script = new Map<string, Record<string, unknown>>();
+const script = new Map<string, Record<string, unknown> | Record<string, unknown>[]>();
 const model = scriptedModel((request) => {
     const { role, text } = lastText(request as never);
 
@@ -85,7 +85,10 @@ const model = scriptedModel((request) => {
 
     return call === undefined
         ? fauxAssistantMessage([fauxText(`ok: ${text}`)])
-        : fauxAssistantMessage([fauxToolCall("ui", call as never)], { stopReason: "toolUse" });
+        : fauxAssistantMessage(
+              [call].flat().map((each) => fauxToolCall("ui", each as never)),
+              { stopReason: "toolUse" },
+          );
 });
 const dir = join(root, "surfaces-fixes");
 let app: App;
@@ -116,7 +119,9 @@ const surfaces = async (id: ConversationId) =>
 const stored = async (id: ConversationId) =>
     JSON.stringify(await app.transcripts.allEntries(id as never, true));
 
-async function show(args: Record<string, unknown>): Promise<{ id: ConversationId; card: Surface }> {
+async function show(
+    args: Record<string, unknown> | Record<string, unknown>[],
+): Promise<{ id: ConversationId; card: Surface }> {
     const id = await newSession(app);
     const text = `show card ${(counter += 1)}`;
 
@@ -192,6 +197,69 @@ test("a second wait on the same card in one task takes a new signal key", async 
     assert.equal(second.status, 200);
     assert.equal(second.json.delivered, "woke", "the second wait was woken, not refused");
     await until(async () => /got: Surface s1 “Form”: done/.test(await stored(id)), "the wake");
+});
+
+test("an A2UI update changes a card that waits, and leaves its wait alone", async () => {
+    const form = (name: string, label: string) => ({
+        action: "a2ui",
+        messages: [
+            { createSurface: { surfaceId: "form" } },
+            {
+                updateComponents: {
+                    surfaceId: "form",
+                    components: [
+                        { id: "root", component: "Column", children: ["go"] },
+                        { id: "go-label", component: "Text", text: label },
+                        {
+                            id: "go",
+                            component: "Button",
+                            child: "go-label",
+                            action: { event: { name } },
+                        },
+                    ],
+                },
+            },
+        ],
+    });
+    const first = await show(form("send", "Send"));
+    const { id } = first;
+
+    // Another call of Pi's holds a wait on the card (a call cannot update it while it is itself parked).
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(SurfacesDoc, id)).items[first.card.id]!.wait = {
+            taskId: "other",
+            key: `${first.card.id}.1`,
+            gen: 1,
+        };
+    }, context);
+
+    const made = (await surfaces(id))[first.card.id]!;
+
+    assert.ok(made.wait !== undefined && made.a2uiRaw !== undefined);
+
+    const text = "update the waiting card";
+
+    script.set(text, {
+        action: "a2ui",
+        messages: [
+            {
+                updateComponents: {
+                    surfaceId: "form",
+                    components: [{ id: "go-label", component: "Text", text: "Later" }],
+                },
+            },
+        ],
+    });
+    await app.commands.submit(id, owner(app), { text, requestId: "update-wait" });
+    await until(
+        async () => (await surfaces(id))[made.id]!.components.go!.label === "Later",
+        "update",
+    );
+
+    const after = (await surfaces(id))[made.id]!;
+
+    assert.deepEqual(after.wait, made.wait, "the wait is the same one");
+    assert.equal(after.callId, made.callId);
 });
 
 test("a recorded action that could not be delivered is delivered again", async () => {
@@ -306,4 +374,61 @@ test("a card answers only in the channel and thread it went to, and a toggle is 
     // Two numbers of a multiple picker in one message both stick.
     await fromRelay(app, id, message("3 4"));
     assert.deepEqual((await surfaces(id))[made.id]!.data.picks, ["x", "y"]);
+});
+
+test("a small data image is accepted, a link stays at 2,000 characters", () => {
+    const image = (url: string) =>
+        checkSurface({ ...flatten([{ type: "Image", url, alt: "x" }]), data: {} });
+    const png = `data:image/png;base64,${"A".repeat(10_000)}`;
+
+    assert.doesNotThrow(() => image(png));
+    assert.throws(() => image(`https://example.com/${"a".repeat(2000)}`), /2000|characters/);
+    assert.throws(() => image(`data:image/png;base64,${"A".repeat(70_000)}`), /65536 characters/);
+});
+
+test("a locked input takes no value from a person", async () => {
+    const { id, card: made } = await show({
+        action: "show",
+        title: "Locked",
+        data: { name: "", other: "", locked: true },
+        components: [
+            {
+                type: "Column",
+                children: [
+                    {
+                        type: "TextField",
+                        id: "name",
+                        label: "Name",
+                        bind: "/name",
+                        disabled: { "@path": "/locked" },
+                    },
+                    { type: "TextField", id: "other", label: "Other", bind: "/other" },
+                ],
+            },
+        ],
+    });
+
+    assert.equal((await act(id, made.id, { pv: made.pv, set: { "/name": "x" } })).status, 409);
+    assert.equal((await surfaces(id))[made.id]!.data.name, "");
+    assert.equal((await act(id, made.id, { pv: made.pv, set: { "/other": "x" } })).status, 200);
+});
+
+test("a thread card answers only in its thread", async () => {
+    const { id, card: made } = await show({ ...card, title: "Thread" });
+    const message = (more: object) => ({
+        connector: "Chat",
+        channel: "room-1",
+        text: "2",
+        author: { id: "me", name: "Me" },
+        ownerIds: ["me"],
+        by: owner(app).id,
+        ...more,
+    });
+
+    await prepareRelay(app, id, made.id, { connector: "Chat", channel: "room-1", thread: "t1" });
+    assert.deepEqual(await fromRelay(app, id, message({})), { handled: false }, "no thread");
+    assert.deepEqual(await fromRelay(app, id, message({ thread: "t2" })), { handled: false });
+    assert.equal((await surfaces(id))[made.id]!.data.agree, false);
+    assert.equal((await fromRelay(app, id, message({ thread: "t1" }))).handled, true);
+    assert.equal((await surfaces(id))[made.id]!.data.agree, true);
 });

@@ -125,3 +125,30 @@ export function propsOf(component: Record<string, JsonValue>): Record<string, Js
 
     return props;
 }
+
+/** Keep the plain text of each extension component on the surface, for the day its module is off. Call it where the data or layout changes. */
+export function keepFallbacks(surface: {
+    components: Record<string, Record<string, JsonValue>>;
+    data: Record<string, JsonValue>;
+    fallbacks?: Record<string, string>;
+}): void {
+    const kept: Record<string, string> = {};
+
+    for (const [id, component] of Object.entries(surface.components)) {
+        const registered = extensionComponent(String(component.type));
+        const text =
+            registered === undefined
+                ? surface.fallbacks?.[id]
+                : componentText(registered, propsOf(component), surface.data);
+
+        if (text !== undefined) {
+            kept[id] = text;
+        }
+    }
+
+    if (Object.keys(kept).length === 0) {
+        delete surface.fallbacks;
+    } else {
+        surface.fallbacks = kept;
+    }
+}

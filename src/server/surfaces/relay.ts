@@ -126,7 +126,7 @@ function cardFor(
             surface.relay !== undefined &&
             surface.relay.connector === message.connector &&
             (surface.relay.channel === "" || surface.relay.channel === message.channel) &&
-            (surface.relay.thread === undefined || surface.relay.thread === message.thread) &&
+            surface.relay.thread === message.thread &&
             (named === undefined || surface.id === `s${named}`),
     );
 

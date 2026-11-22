@@ -221,7 +221,11 @@ export function render(
                         ? undefined
                         : componentText(registered, propsOf(component), surface.data);
 
-                return [own ?? textOf(component.text ?? component.label ?? component.type)];
+                return [
+                    own ??
+                        surface.fallbacks?.[id] ??
+                        textOf(component.text ?? component.label ?? component.type),
+                ];
             }
         }
     };

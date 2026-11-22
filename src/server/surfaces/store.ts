@@ -4,6 +4,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { attribute, defang, quoted } from "../fence.ts";
+import { keepFallbacks } from "./components.ts";
 import { toText } from "./text.ts";
 import {
     type Acted,
@@ -95,6 +96,7 @@ export function addSurface(state: SurfacesState, input: NewSurface): Surface {
         ...(input.a2ui === undefined ? {} : { a2ui: input.a2ui }),
     };
 
+    keepFallbacks(surface);
     state.items[surface.id] = surface;
 
     // The draft's own copy: a change to `surface` itself would not be stored.
@@ -114,6 +116,7 @@ export function replaceParts(surface: Surface, parts: Parts, now: number): void 
         surface.computed = parts.computed;
     }
 
+    keepFallbacks(surface);
     surface.rev += 1;
     surface.pv += 1;
     surface.updatedAt = now;

@@ -54,6 +54,8 @@ export type Surface = {
     gen?: number;
     /** The wait a `ui` call is parked in: a signal under `key` wakes it. `gen` is this wait's number. */
     wait?: { taskId: string; key: string; gen: number; until?: number };
+    /** The plain text of each extension component, kept while its module is on: it still shows when the module is off. */
+    fallbacks?: Record<string, string>;
     /** Actions waiting to reach the session as a message: written with the action, cleared when delivered. */
     pending?: PendingDelivery[];
     /** The latest action delivered. */
@@ -62,6 +64,8 @@ export type Surface = {
     final?: { text: string; values?: JsonValue };
     /** The id A2UI messages call this surface by (`a2ui.ts`), when it came from them. */
     a2ui?: string;
+    /** The A2UI components as sent, by id: an update that repeats only some of them is read with the others. */
+    a2uiRaw?: Record<string, JsonObject>;
     relay?: {
         connector: string;
         channel: string;
