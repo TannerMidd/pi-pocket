@@ -5,7 +5,7 @@
 // browser, no network: the tool is driven directly, against a fake page and a scripted `host.classify`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ClassifyRequest, DEFAULT_CLASSIFY_MODEL } from "../src/server/classify.ts";
+import type { ClassifyRequest } from "../src/server/classify.ts";
 import createBrowser from "../src/server/extensions/browser.ts";
 import type { ExtensionWeb, PocketHost } from "../src/server/host.ts";
 
@@ -16,12 +16,16 @@ const JPEG =
 const JPEG_TWO = JPEG.slice(0, -10) + "AAAAAAAAAP/9k=";
 
 /** A fake page: it counts screenshots and answers each one in turn from `shots`, or the one JPEG. */
-function fakePage(shots: string[] = []) {
+function fakePage(
+    shots: string[] = [],
+    mimeType = "image/jpeg",
+    url = "https://example.test/page",
+) {
     let taken = 0;
     const page = {
         logSeq: 1,
         logs: () => [],
-        url: "https://example.test/page",
+        url,
         title: "Example page",
         viewport: { width: 390, height: 844 },
         screenshot: async () => {
@@ -29,7 +33,7 @@ function fakePage(shots: string[] = []) {
 
             taken += 1;
 
-            return { data, width: 390, height: 844, scale: 1 };
+            return { data, mimeType, width: 390, height: 844, scale: 1 };
         },
     };
 
@@ -37,10 +41,16 @@ function fakePage(shots: string[] = []) {
 }
 
 /** A fake host: its `classify` records each request and answers `answer`, or throws when `fail` says so. */
-function fakeHost(page: unknown, answer: () => string, fail: () => boolean = () => false) {
+function fakeHost(
+    page: unknown,
+    answer: () => string,
+    fail: () => boolean = () => false,
+    shared?: string,
+) {
     const asked: ClassifyRequest[] = [];
     const host = {
         browsers: { open: async () => page },
+        classifierModel: () => shared,
         classify: async (request: ClassifyRequest) => {
             asked.push(request);
 
@@ -63,7 +73,7 @@ function fakeHost(page: unknown, answer: () => string, fail: () => boolean = () 
 }
 
 /** A fake web: what `web.setting` answers comes from `values`, so a test can turn the setting on or off. */
-function fakeWeb(values: Record<string, unknown> = {}) {
+function fakeWeb(values: Record<string, unknown> = { classifyModel: "faux/jev" }) {
     const web = {
         settings: () => {},
         setting: (name: string) => values[name],
@@ -208,20 +218,70 @@ test("a host with no classify (an older server) attaches nothing", async () => {
     assert.equal(taken(), 1);
 });
 
-test("the classify model defaults when the owner set none, and a web part is optional", async () => {
+test("with no classifier chosen nothing is asked; the owner's shared choice is used when the setting is empty", async () => {
     const { page } = fakePage();
-    const { host, asked } = fakeHost(page, () => "content");
+    const none = fakeHost(page, () => "content");
+    const { web, values } = fakeWeb({ classifyModel: "" });
+
+    values.triageScreenshots = true;
+    const { text } = parts(await screenshot(none.host, web));
+
+    assert.doesNotMatch(text, /classifier reads/);
+    assert.equal(none.asked.length, 0, "no default classifier: nothing is sent");
+
+    const shared = fakeHost(
+        page,
+        () => "content",
+        () => false,
+        "faux/shared",
+    );
+
+    await screenshot(shared.host, web);
+    assert.equal(shared.asked[0]!.model, "faux/shared");
+
+    // The module's own setting wins over the shared choice.
+    values.classifyModel = "faux/own";
+    const own = fakeHost(
+        page,
+        () => "content",
+        () => false,
+        "faux/shared",
+    );
+
+    await screenshot(own.host, web);
+    assert.equal(own.asked[0]!.model, "faux/own");
+
+    // Without a web part there is no setting to read: the shot comes back with no line.
+    const second = fakeHost(
+        page,
+        () => "content",
+        () => false,
+        "faux/shared",
+    );
+    const result = parts(await screenshot(second.host, undefined));
+
+    assert.doesNotMatch(result.text, /classifier reads/);
+    assert.equal(second.asked.length, 0);
+});
+
+test("the image goes with the type the page says, and the address goes without its query and fragment", async () => {
+    const { page } = fakePage([JPEG], "image/png", "https://example.test/p?token=secret#frag");
+    const { host, asked } = fakeHost(
+        page,
+        () => "content",
+        () => false,
+        "faux/shared",
+    );
     const { web, values } = fakeWeb();
 
     values.triageScreenshots = true;
-    await screenshot(host, web);
+    const result = await screenshot(host, web);
+    const image = result.output.find((part) => part.type === "image") as unknown as {
+        mimeType: string;
+    };
 
-    assert.equal(asked[0]!.model, DEFAULT_CLASSIFY_MODEL);
-
-    // Without a web part there is no setting to read: the shot comes back with no line.
-    const second = fakeHost(page, () => "content");
-    const { text } = parts(await screenshot(second.host, undefined));
-
-    assert.doesNotMatch(text, /classifier reads/);
-    assert.equal(second.asked.length, 0);
+    assert.equal(asked[0]!.images![0]!.mimeType, "image/png");
+    assert.equal(image.mimeType, "image/png");
+    assert.equal(asked[0]!.state.url, "https://example.test/p");
+    assert.doesNotMatch(JSON.stringify(asked[0]!.state), /secret|frag/);
 });

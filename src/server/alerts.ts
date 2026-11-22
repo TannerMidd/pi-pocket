@@ -30,6 +30,8 @@ const DISGUISING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 export class Alerts {
     readonly #app: PocketApp;
     readonly #doneTimers = new Map<ConversationId, NodeJS.Timeout>();
+    /** How many runs began in each conversation: a notice checks it is still for the run it was made for. */
+    readonly #runsStarted = new Map<ConversationId, number>();
     /** Approvals already announced, so each one is pushed once. */
     #approvalIds = new Set<string>();
     /** Cards already announced, by conversation and id. */
@@ -105,6 +107,11 @@ export class Alerts {
         clearTimeout(this.#doneTimers.get(id));
         this.#doneTimers.delete(id);
 
+        // A run that started is a new one: a "finished" notice still waiting on its outcome label is for the one before.
+        if (busy) {
+            this.#runsStarted.set(id, (this.#runsStarted.get(id) ?? 0) + 1);
+        }
+
         if (busy || this.#app.sessionMeta(id) === undefined || this.#quiet()) {
             return;
         }
@@ -122,6 +129,7 @@ export class Alerts {
 
     async #pushDone(id: ConversationId, aborted: boolean, failure?: string): Promise<void> {
         const app = this.#app;
+        const run = this.#runsStarted.get(id) ?? 0;
 
         if (app.isBusy(id)) {
             return;
@@ -182,6 +190,11 @@ export class Alerts {
                           .join("\n"),
                   )
                 : undefined;
+
+        // The classifier took time: a run that began meanwhile (and maybe ended) is not the one this notice is for.
+        if (app.isBusy(id) || (this.#runsStarted.get(id) ?? 0) !== run) {
+            return;
+        }
 
         const message: PushMessage = {
             title: pip

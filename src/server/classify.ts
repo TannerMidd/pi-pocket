@@ -13,25 +13,64 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-/**
- * The classifier Pi Pocket's own modules name by default: OpenRouter's route of TypeSafe's Jev. The owner's OpenRouter
- * sign-in is enough for it.
- */
-export const DEFAULT_CLASSIFY_MODEL = "openrouter/~typesafe/jev-latest";
+/** What `host.classify` throws when no classifier model is named and the owner chose none. */
+export const NO_CLASSIFIER_MESSAGE =
+    "No classifier model is chosen: pick one in Providers (Menu → Providers).";
+
+/** The error `host.classify` throws when no classifier model is named and the owner chose none. */
+export class NoClassifierError extends Error {
+    readonly code = "no-classifier";
+
+    constructor() {
+        super(NO_CLASSIFIER_MESSAGE);
+    }
+}
+
+/** Whether an error says no classifier model is chosen: a module treats it as "the feature is off", not a failure. */
+export function isNoClassifier(error: unknown): boolean {
+    return (error as { code?: unknown } | null)?.code === "no-classifier";
+}
 
 /** One classifier call: what the model judges, and what it answers. `host.classify` takes this. */
 export interface ClassifyRequest {
     /**
-     * The classifier model, `provider/modelId`. The id may hold more slashes, as in
-     * `openrouter/~typesafe/jev-latest`, TypeSafe's Jev through OpenRouter. A chat model is refused.
+     * The classifier model, `provider/modelId`; the id may hold more slashes. A chat model is refused. Left out, or
+     * empty, the call uses the classifier model the owner chose in Providers, and throws when there is none.
      */
-    model: string;
+    model?: string;
     /** What the model judges. */
     state: Record<string, unknown>;
     /** Images judged together with `state`. Only models whose input accepts images answer them. */
     images?: ImageContent[];
     /** What it answers, by question id: a choice, a score, or yes/no. At least one. */
     questions: Record<string, ClassifierQuestion>;
+}
+
+/**
+ * The classifier a module uses: its own "Classify model" setting when that is set, else the owner's choice in
+ * Providers. Undefined when neither is: the module does nothing then, as when the classifier is down.
+ */
+export function classifierFor(
+    host: { classifierModel?: () => string | undefined },
+    own: unknown,
+): string | undefined {
+    if (typeof own === "string" && own.trim() !== "") {
+        return own.trim();
+    }
+
+    // A module reloads into a running server before its host changes: until a restart, no shared choice.
+    return (
+        (typeof host.classifierModel === "function" ? host.classifierModel() : undefined) ||
+        undefined
+    );
+}
+
+/** The text a module sends to a classifier is cut to this many characters: an outsider's text has no other bound. */
+export const MAX_CLASSIFY_TEXT = 6_000;
+
+/** `text` cut to `max` characters, with a mark where it was cut. */
+export function capText(text: string, max = MAX_CLASSIFY_TEXT): string {
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 /** The slice of Pi's model runtime a classifier call needs, so a test can fake it. */
@@ -62,7 +101,7 @@ export async function withDeadline<T>(
 }
 
 const SHAPE =
-    'Expected: { model: "provider/modelId", state: { ... }, questions: { <id>: { type: "choice" | "score" | "bool", instructions, criteria } } }.';
+    'Expected: { model?: "provider/modelId", state: { ... }, questions: { <id>: { type: "choice" | "score" | "bool", instructions, criteria } } }.';
 
 /** A value in an error message: itself when short, or its kind. */
 function describe(value: unknown): string {
@@ -85,7 +124,7 @@ function describe(value: unknown): string {
 
 /** Check a request, so a mistake fails with the expected shape instead of a provider error. */
 function checkRequest(request: ClassifyRequest): void {
-    if (typeof request.model !== "string" || request.model.trim() === "") {
+    if (request.model !== undefined && typeof request.model !== "string") {
         throw new Error(`host.classify: model is the spec of a classifier model. ${SHAPE}`);
     }
 
@@ -165,8 +204,7 @@ function checkRequest(request: ClassifyRequest): void {
 /** The classifier that `spec` names, or an error that says what to do. A chat model is refused. */
 function classifierOf(models: ClassifyRuntime, spec: string): ClassifierModel<ClassifierApi> {
     const trimmed = spec.trim();
-    const hint =
-        'Name a classifier model as "provider/modelId", for example "openrouter/~typesafe/jev-latest".';
+    const hint = 'Name a classifier model as "provider/modelId", as the Providers sheet lists it.';
     const slash = trimmed.indexOf("/");
 
     if (slash > 0) {
@@ -214,21 +252,29 @@ function classifierOf(models: ClassifyRuntime, spec: string): ClassifierModel<Cl
 }
 
 /**
- * One classifier call, through the model runtime: `answers` by question id. It throws when no such classifier
+ * One classifier call, through the model runtime: `answers` by question id. The request's model, or else `shared`
+ * (the owner's choice in Providers). It throws when neither names one (`NoClassifierError`), when no such classifier
  * exists, when the spec names a chat model, when the model's provider has no stored sign-in or key, and when the
  * call fails; nothing is sent without the owner's stored key.
  */
 export async function classifyThrough(
     models: ClassifyRuntime,
     request: ClassifyRequest,
+    shared?: string,
 ): Promise<Record<string, ClassifierAnswer>> {
     checkRequest(request);
 
-    const model = classifierOf(models, request.model);
+    const spec = request.model?.trim() || shared?.trim();
+
+    if (!spec) {
+        throw new NoClassifierError();
+    }
+
+    const model = classifierOf(models, spec);
 
     if (!models.hasConfiguredAuth(model.provider)) {
         throw new Error(
-            `host.classify: no sign-in or key is stored for ${model.provider}, the provider of "${request.model.trim()}". Sign in to it in Menu → Providers first.`,
+            `host.classify: no sign-in or key is stored for ${model.provider}, the provider of "${spec}". Sign in to it in Menu → Providers first.`,
         );
     }
 

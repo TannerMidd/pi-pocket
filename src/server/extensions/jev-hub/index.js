@@ -137,6 +137,16 @@ export default function setup(pocket) {
                 </button>
             </div>
             ${
+                activity.classifierModel === null &&
+                html`<div class="jev-card jev-empty" role="status">
+                    <div class="jev-source">No classifier model is chosen</div>
+                    <div class="muted small">
+                        Pick one in Menu → Providers. Until then the classifier features do nothing,
+                        except a module with a Classify model of its own.
+                    </div>
+                </div>`
+            }
+            ${
                 nothing
                     ? html`<div class="jev-card jev-empty">
                           <div class="jev-source">No classifier calls yet</div>

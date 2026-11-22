@@ -10,6 +10,17 @@ export default function createJevHub(host: PocketHost, web?: ExtensionWeb): void
     const activity = trackClassifier(host.classify);
 
     web.onDispose(activity.stop);
-    web.route("GET", "activity", activity.snapshot, { access: "owner" });
+    // The shared choice rides along, so the sheet can say when none is chosen (a server that is not restarted yet has none).
+    web.route(
+        "GET",
+        "activity",
+        () => ({
+            ...activity.snapshot(),
+            classifierModel:
+                (typeof host.classifierModel === "function" ? host.classifierModel() : undefined) ??
+                null,
+        }),
+        { access: "owner" },
+    );
     web.client("jev-hub", { access: "owner" });
 }

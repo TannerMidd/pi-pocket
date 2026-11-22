@@ -110,6 +110,35 @@ const HOUR = 3_600_000;
 const TIMER_MAX = 2_147_483_647;
 /** How long one triage hook call may take; past it, the delivery goes on unlabelled. */
 const TRIAGE_CAP_MS = 10_000;
+/** How many triage verdicts are kept by event id, so a delivery that retries is not triaged again. */
+const MAX_VERDICTS = 200;
+/** The longest triage label kept: it goes into the delivered message. */
+const MAX_LABEL = 200;
+
+/**
+ * What a triage hook answered, as the relay uses it: `"drop"`, a label as one plain line (no line breaks or control
+ * characters, so it cannot forge a line of the payload, and capped), or `"deliver"` for anything else.
+ */
+function cleanVerdict(verdict: unknown): RelayTriageVerdict {
+    if (verdict === "drop") {
+        return "drop";
+    }
+
+    const label = (verdict as { label?: unknown } | null | undefined)?.label;
+
+    if (typeof label !== "string") {
+        return "deliver";
+    }
+
+    const line = label
+        .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
+        .trim()
+        .slice(0, MAX_LABEL)
+        .trim();
+
+    return line === "" ? "deliver" : { label: line };
+}
+
 const RETRY_AFTER_MAX = 24 * HOUR;
 const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
@@ -571,6 +600,8 @@ export class Relay {
     #triage?: RelayTriage;
     /** The outbound hook a module set, or none: every reply passes it before it leaves. */
     #outbound?: RelayOutbound;
+    /** Triage verdicts by connector and event id, oldest first: a delivery that retries keeps its verdict. */
+    readonly #verdicts = new Map<string, RelayTriageVerdict>();
     /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
     readonly #ended: Promise<void>;
     #end: () => void = () => {};
@@ -1121,28 +1152,53 @@ export class Relay {
         event: RelayEvent,
         hook: RelayTriage,
     ): Promise<RelayTriageVerdict> {
+        const key = `${config.id}:${event.id}`;
+        const known = this.#verdicts.get(key);
+
+        if (known !== undefined) {
+            return known;
+        }
+
+        const verdict = await this.#askTriage(config, event, hook);
+
+        this.#verdicts.set(key, verdict);
+
+        if (this.#verdicts.size > MAX_VERDICTS) {
+            this.#verdicts.delete(this.#verdicts.keys().next().value!);
+        }
+
+        return verdict;
+    }
+
+    async #askTriage(
+        config: ConnectorConfig,
+        event: RelayEvent,
+        hook: RelayTriage,
+    ): Promise<RelayTriageVerdict> {
         let timer: NodeJS.Timeout | undefined;
 
         try {
-            return await Promise.race([
-                hook({
-                    connector: config.name,
-                    kind: config.kind,
-                    author: {
-                        name: String(event.author.name ?? event.author.id),
-                        id: event.author.id,
-                    },
-                    ...(event.channel === undefined ? {} : { channel: event.channel }),
-                    text: event.text,
-                    files: (event.files ?? []).map((file) => ({
-                        name: file.name,
-                        type: file.type ?? "file",
-                    })),
-                }),
-                new Promise<RelayTriageVerdict>((resolve) => {
-                    timer = setTimeout(() => resolve("deliver"), TRIAGE_CAP_MS);
-                }),
-            ]);
+            return cleanVerdict(
+                await Promise.race([
+                    hook({
+                        connector: config.name,
+                        kind: config.kind,
+                        author: {
+                            name: String(event.author.name ?? event.author.id),
+                            id: event.author.id,
+                        },
+                        ...(event.channel === undefined ? {} : { channel: event.channel }),
+                        text: event.text,
+                        files: (event.files ?? []).map((file) => ({
+                            name: file.name,
+                            type: file.type ?? "file",
+                        })),
+                    }),
+                    new Promise<RelayTriageVerdict>((resolve) => {
+                        timer = setTimeout(() => resolve("deliver"), TRIAGE_CAP_MS);
+                    }),
+                ]),
+            );
         } catch {
             return "deliver";
         } finally {
@@ -1311,8 +1367,12 @@ export class Relay {
         const values = valuesOf(config, connector.fields);
 
         // An outbound hook a module set screens the reply before it leaves. A block throws, so the caller hears that
-        // nothing was sent; a hook that fails or runs long sends as if no hook was set.
-        if (this.#outbound !== undefined) {
+        // nothing was sent; a hook that fails or runs long sends as if no hook was set. A reply to a message from an
+        // owner is not screened: the owner is who the reply is for.
+        if (
+            this.#outbound !== undefined &&
+            !(heard !== undefined && config.ownerIds.includes(heard.author))
+        ) {
             if ((await this.#screenOutbound(config, request, to?.channel)) === "block") {
                 this.log(
                     `held a reply on ${config.name}: its screen read it as holding something the owner would not want outside`,

@@ -1,12 +1,23 @@
 /** Run outcomes labels completion notifications and PiP follow reports from Pi's final answer. */
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
-import { clip } from "../fence.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 
 const TIMEOUT_MS = 1_500;
 const MAX_ANSWERS = 128;
 const CONFIDENCE = 0.8;
+/** How much of the final answer goes to the classifier: its start, and its end, where a question or a blocker sits. */
+const HEAD_CHARS = 1_000;
+const TAIL_CHARS = 3_000;
+
+/** The answer as the classifier reads it: all of it when short, else its head and its tail with a mark between. */
+export function excerpt(answer: string): string {
+    const text = answer.trim();
+
+    return text.length <= HEAD_CHARS + TAIL_CHARS
+        ? text
+        : `${text.slice(0, HEAD_CHARS)}\n[… ${text.length - HEAD_CHARS - TAIL_CHARS} characters left out …]\n${text.slice(-TAIL_CHARS)}`;
+}
 
 const labels = {
     completed: "Completed",
@@ -51,9 +62,9 @@ export default function createRunOutcomes(host: PocketHost, web?: ExtensionWeb):
             name: "classifyModel",
             label: "Classify model",
             description:
-                "Sends an excerpt of Pi's final answer to this classifier (provider/modelId) for an outcome label. Default: TypeSafe Jev via OpenRouter. Does not send tool output or the transcript separately.",
+                "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, pushes keep plain titles. Sends the start (1,000) and end (3,000 characters) of Pi's final answer to its provider and delays the push up to 1.5 s.",
             type: "text",
-            default: DEFAULT_CLASSIFY_MODEL,
+            default: "",
         },
     ]);
 
@@ -68,11 +79,12 @@ export default function createRunOutcomes(host: PocketHost, web?: ExtensionWeb):
                 return undefined;
             }
 
-            const value = web.setting("classifyModel");
-            const model =
-                typeof value === "string" && value.trim() !== ""
-                    ? value.trim()
-                    : DEFAULT_CLASSIFY_MODEL;
+            const model = classifierFor(host, web.setting("classifyModel"));
+
+            if (model === undefined) {
+                return undefined;
+            }
+
             const cacheKey = `${key}\n${model}`;
             let pending = answers.get(cacheKey);
 
@@ -80,7 +92,7 @@ export default function createRunOutcomes(host: PocketHost, web?: ExtensionWeb):
                 pending = classifyFor(
                     host.classify,
                     "run-outcomes",
-                    { model, state: { answer: clip(answer, 4_000) }, questions: QUESTIONS },
+                    { model, state: { answer: excerpt(answer) }, questions: QUESTIONS },
                     TIMEOUT_MS,
                 ).then((result) => {
                     const verdict = result?.outcome;

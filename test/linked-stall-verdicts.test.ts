@@ -8,6 +8,7 @@ import { createProvider, type ClassifierResult } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { PocketApp } from "../src/server/app.ts";
+import { type Held, verdictsFor } from "../src/server/extensions/agent-teams.ts";
 import { STALL_LOOK } from "../src/server/stall-facts.ts";
 import {
     cleanUp,
@@ -28,6 +29,8 @@ let offset = 0;
 let verdict: "progressing" | "looping" | "stuck" = "looping";
 let failClassify = false;
 let classifyCalls = 0;
+/** What the classifier read last: the state of the stall question. */
+let lastState: Record<string, unknown> = {};
 let app: App;
 
 before(async () => {
@@ -74,8 +77,9 @@ before(async () => {
         ],
         classifiers: {
             "typesafe-system-one": {
-                classify: async (_model, _context): Promise<ClassifierResult> => {
+                classify: async (_model, context): Promise<ClassifierResult> => {
                     classifyCalls += 1;
+                    lastState = context.state as Record<string, unknown>;
 
                     if (failClassify) {
                         return {
@@ -187,6 +191,12 @@ test("a looping verdict reports at once, with the verdict on the stall line", as
     );
     assert.equal(classifyCalls - before, 1, "one classification for the stall");
 
+    // The classifier reads real activity (the last calls and the output), not a fingerprint of counts.
+    assert.equal("activity" in lastState, false);
+    assert.deepEqual(lastState.recentCalls, [
+        { tool: "bash", arguments: "command: exec tail -f /dev/null" },
+    ]);
+
     // Several looks later, the spell is still classified: no second call and no second line.
     await new Promise((resolve) => setTimeout(resolve, 400));
     assert.equal(classifyCalls - before, 1, "no second classification");
@@ -196,7 +206,7 @@ test("a looping verdict reports at once, with the verdict on the stall line", as
     await app.commands.abort(target, owner(app));
 });
 
-test("a progressing verdict says nothing yet; the time rules stay the backstop", async () => {
+test("a progressing verdict says nothing yet; the stall line still comes at twice the soft limit", async () => {
     verdict = "progressing";
     failClassify = false;
     const [id, target] = await team();
@@ -209,11 +219,83 @@ test("a progressing verdict says nothing yet; the time rules stay the backstop",
     assert.equal((await told(id)).includes("stalled"), false, "nothing was said yet");
     assert.equal(classifyCalls - before, 1, "no second classification");
 
+    // At twice the soft limit the line comes, with no second classification and no verdict on it.
+    offset += 61_000;
+    await until(
+        async () => (await told(id)).includes("stalled: no progress for 2 min"),
+        "the line",
+    );
+    assert.equal(classifyCalls - before, 1, "the backstop does not classify again");
+    assert.doesNotMatch(await told(id), /classifier model reads/);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.equal(((await told(id)).match(/\[linked sessions\]/g) ?? []).length, 1, "said once");
+
     // The hard limit still stops the stuck call, and the lead still hears, as today.
     offset += 60 * 60_000;
     await until(async () => (await running(target)) === undefined, "the call stopped");
     await until(async () => (await told(id)).includes("stop 1 of 2"), "the stop, as today");
     assert.match(await told(id), /Pi Pocket stopped its bash call/);
+});
+
+test("with stopping off, a progressing verdict still ends in the stall line", async () => {
+    verdict = "progressing";
+    failClassify = false;
+    await app.setExtensionSettings(owner(app), "agent-teams", {
+        stalledMinutes: 1,
+        stopMinutes: 0,
+        classifyModel: "faux-jev/jev-test",
+    });
+
+    try {
+        const [id, target] = await team();
+
+        offset += 61_000;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.equal((await told(id)).includes("stalled"), false);
+        offset += 61_000;
+        await until(async () => (await told(id)).includes("stalled: no progress for"), "the line");
+        await app.commands.abort(target, owner(app));
+    } finally {
+        await app.setExtensionSettings(owner(app), "agent-teams", {
+            stalledMinutes: 1,
+            classifyModel: "faux-jev/jev-test",
+        });
+    }
+});
+
+test("verdicts are asked together, and a checkpoint from before them is no crash", async () => {
+    const held = (address: string): Held => ({
+        address,
+        since: 1,
+        line: `line ${address}`,
+        state: {},
+    });
+    let running = 0;
+    let most = 0;
+
+    const slow = async () => {
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        running -= 1;
+
+        return "stuck" as const;
+    };
+
+    // A checkpoint saved before the classifier feature has no `classify`: nothing to say.
+    assert.deepEqual(await verdictsFor(undefined, slow), { said: [], sent: [] });
+
+    const both = await verdictsFor([held("a"), held("b")], slow);
+
+    assert.equal(most, 2, "both verdicts ran at once");
+    assert.equal(both.said.length, 2);
+    assert.match(both.said[0]!, /line a .*as stuck/);
+
+    // Progressing says nothing and sends nothing; a failure says the plain line.
+    const mixed = await verdictsFor([held("a"), held("b")], async () => undefined);
+
+    assert.equal(mixed.said.length, 2);
+    assert.deepEqual((await verdictsFor([held("a")], async () => "progressing")).said, []);
 });
 
 test("a classifier that fails reports the stall as today, without a verdict", async () => {

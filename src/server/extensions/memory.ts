@@ -8,7 +8,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { obj, opt, str } from "@earendil-works/pi-schema";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { capText, classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { Lesson } from "../docs.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
@@ -104,7 +104,7 @@ export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
                 name: "suggestLessons",
                 label: "Suggest lessons",
                 description:
-                    "A classifier call reads each person's message, and one that states a standing rule, a preference, or a correction gets a note that tells Pi to consider the memory tool's add. add only proposes a lesson; the owner approves it. Off by default.",
+                    "A classifier reads each message; one that states a standing rule, preference, or correction gets a note telling Pi to consider the memory tool's add (the owner approves lessons). Sends every message (6,000 characters) and its sender to the classifier's provider. Off by default.",
                 type: "boolean",
                 default: false,
             },
@@ -112,25 +112,24 @@ export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
                 name: "classifyModel",
                 label: "Classify model",
                 description:
-                    "The classifier that reads each person's message for a rule, a preference, or a correction, as provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                    "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, nothing is suggested.",
                 type: "text",
-                default: DEFAULT_CLASSIFY_MODEL,
+                default: "",
             },
         ]);
 
         // A server older than the turn-note hook (this module reloaded into it) keeps the tool and the section: no
         // annotator until it restarts.
         if (typeof host.annotateTurns === "function" && typeof host.classify === "function") {
-            const model = () => {
-                const value = web.setting("classifyModel");
-
-                return typeof value === "string" && value.trim() !== ""
-                    ? value.trim()
-                    : DEFAULT_CLASSIFY_MODEL;
-            };
-
             const stop = host.annotateTurns("memory-suggest", async (turn) => {
                 if (web.setting("suggestLessons") !== true) {
+                    return undefined;
+                }
+
+                const model = classifierFor(host, web.setting("classifyModel"));
+
+                // No classifier chosen: nothing is suggested.
+                if (model === undefined) {
                     return undefined;
                 }
 
@@ -139,11 +138,11 @@ export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
                     host.classify,
                     "memory-suggestions",
                     {
-                        model: model(),
+                        model,
                         state: {
                             from: turn.by,
                             ...(turn.via === undefined ? {} : { via: turn.via }),
-                            message: turn.text,
+                            message: capText(turn.text),
                         },
                         questions: SUGGEST_QUESTIONS,
                     },

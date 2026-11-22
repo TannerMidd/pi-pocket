@@ -265,6 +265,7 @@ export class Providers {
                         ? null
                         : (auth.oauth.loginLabel ?? auth.oauth.name ?? "Subscription"),
                 models: models.getModels(provider.id).length,
+                classifiers: models.getModelsOfType("classifier", provider.id).length,
                 ...(expired === undefined
                     ? {}
                     : { needsSignIn: owner ? expired : "its provider would not renew it" }),

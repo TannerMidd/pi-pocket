@@ -929,7 +929,9 @@ export class PocketApp {
             resolveModel: (spec) => resolveModel(this.models, spec, this.signInNeeded),
             subagentModels: () => this.config.subagentModels,
             modelProblem: (ref, fresh) => this.providers.problem(ref, fresh),
-            classify: (request) => classifyThrough(this.models, request),
+            classifierModel: () => this.config.classifierModel,
+            classify: (request) =>
+                classifyThrough(this.models, request, this.config.classifierModel),
             registerModelProvider: (provider, config) =>
                 this.#registerModelProvider(provider, config),
             registerWorkspaceProvider: (scheme, provider) =>
@@ -2789,7 +2791,10 @@ export class PocketApp {
                 themeDefault: this.config.themeDefault ?? null,
                 // The models Pi may start subagents on: the owner's to see and change.
                 ...(user.role === "owner"
-                    ? { subagentModels: [...this.config.subagentModels] }
+                    ? {
+                          subagentModels: [...this.config.subagentModels],
+                          classifierModel: this.config.classifierModel ?? null,
+                      }
                     : {}),
                 // This person may have a PiP, the assistant over every screen (`pip.ts`).
                 pip: this.pip.available(user),
@@ -4243,6 +4248,75 @@ export class PocketApp {
         }
 
         await this.#saveSubagentModels(chosen);
+    }
+
+    /**
+     * The classifier models the owner may choose: those of providers with a stored sign-in or key, as
+     * `{ spec, name, provider }`. Pi Pocket names none itself.
+     */
+    classifierModels(user: User): { spec: string; name: string; provider: string }[] {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        return this.models
+            .getModelsOfType("classifier")
+            .filter((model) => this.models.hasConfiguredAuth(model.provider))
+            .map((model) => ({
+                spec: `${model.provider}/${model.id}`,
+                name: model.name,
+                provider: model.provider,
+            }));
+    }
+
+    /**
+     * The owner chooses the classifier model modules use when their own setting is empty (`provider/modelId`), or null
+     * for none. It must be a classifier of a provider the owner signed in to.
+     */
+    async setClassifierModel(user: User, spec: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (spec === null || spec === "") {
+            if (this.config.classifierModel !== undefined) {
+                this.config.classifierModel = undefined;
+                await this.#refreshClients();
+            }
+
+            return;
+        }
+
+        const slash = typeof spec === "string" ? spec.indexOf("/") : -1;
+        const model =
+            typeof spec === "string" && slash > 0
+                ? this.models.getModelOfType(
+                      "classifier",
+                      spec.slice(0, slash),
+                      spec.slice(slash + 1),
+                  )
+                : undefined;
+
+        if (model === undefined) {
+            throw new HttpError(
+                400,
+                "classifierModel must be null, or a classifier model as provider/modelId.",
+            );
+        }
+
+        if (!this.models.hasConfiguredAuth(model.provider)) {
+            throw new HttpError(
+                400,
+                `Sign in to ${model.provider} first: ${model.provider}/${model.id} is not available.`,
+            );
+        }
+
+        const key = `${model.provider}/${model.id}`;
+
+        if (this.config.classifierModel !== key) {
+            this.config.classifierModel = key;
+            await this.#refreshClients();
+        }
     }
 
     /**

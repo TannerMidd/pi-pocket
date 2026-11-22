@@ -116,6 +116,11 @@ interface PocketConfig {
      * Absent or empty: none, and subagents always run on their session's model.
      */
     subagentModels?: string[];
+    /**
+     * The classifier model (`provider/modelId`) modules use when their own setting is empty, as the owner chose it in
+     * Providers. Absent: none chosen, and the classifier features do nothing.
+     */
+    classifierModel?: string;
     /** The most hours a run waits for a model's limit to clear (`limit-gate.ts`); 0: it does not wait. Absent: 6. */
     limitWaitHours?: number;
     /**
@@ -287,6 +292,24 @@ export class ConfigStore {
             delete this.#config.subagentModels;
         } else {
             this.#config.subagentModels = [...models];
+        }
+
+        this.save();
+    }
+
+    /** The owner's shared classifier model (`provider/modelId`); undefined: none chosen. */
+    get classifierModel(): string | undefined {
+        const model = this.#config.classifierModel;
+
+        // Read from a file people may have edited: only a provider/modelId string counts.
+        return typeof model === "string" && model.indexOf("/") > 0 ? model.trim() : undefined;
+    }
+
+    set classifierModel(model: string | undefined) {
+        if (model === undefined) {
+            delete this.#config.classifierModel;
+        } else {
+            this.#config.classifierModel = model;
         }
 
         this.save();

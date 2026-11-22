@@ -18,7 +18,7 @@ import {
     wrapTool,
 } from "@earendil-works/pi-durable";
 import type { PrWatch, RepoEvent, Schedule } from "../docs.ts";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ClassifierScoreAnswer } from "@earendil-works/pi-ai";
 import { quoted } from "../fence.ts";
@@ -275,7 +275,7 @@ export default function createPip(host: PocketHost, web?: ExtensionWeb) {
                 name: "rankSessions",
                 label: "Rank query matches",
                 description:
-                    "With a search, one classifier-model call ranks the top matches of the sessions tool, so what the words are about comes first in what PiP reads. Off by default; any failure keeps today's order.",
+                    "With a search, one classifier-model call ranks the top matches of the sessions tool, so what the words are about comes first in what PiP reads. Off by default; any failure keeps today's order. Sends the words and up to 8 sessions' titles, folders, branches to the classifier's provider.",
                 type: "boolean",
                 default: false,
             },
@@ -283,9 +283,9 @@ export default function createPip(host: PocketHost, web?: ExtensionWeb) {
                 name: "classifyModel",
                 label: "Classify model",
                 description:
-                    "The classifier that ranks a query's session matches, as provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                    "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, matches keep today's order.",
                 type: "text",
-                default: DEFAULT_CLASSIFY_MODEL,
+                default: "",
             },
         ]);
     }
@@ -293,13 +293,7 @@ export default function createPip(host: PocketHost, web?: ExtensionWeb) {
     /** Whether one classifier call ranks a query's matches: the setting, off without a web part. */
     const rankingOn = () => web?.setting("rankSessions") === true;
 
-    const classifyModel = () => {
-        const value = web?.setting("classifyModel");
-
-        return typeof value === "string" && value.trim() !== ""
-            ? value.trim()
-            : DEFAULT_CLASSIFY_MODEL;
-    };
+    const classifyModel = () => classifierFor(host, web?.setting("classifyModel"));
 
     // A session's state after a tool acted on it, so PiP sees what it did; nothing on a server older than that.
     const now = async (api: { conversationId: ConversationId }, session: number) => {
@@ -345,9 +339,16 @@ export default function createPip(host: PocketHost, web?: ExtensionWeb) {
 
             // With a query, one classifier call (a setting, off by default) ranks the top matches, so what the words
             // are about comes first in what PiP reads. Any failure keeps today's newest-first order.
-            if (words !== "" && rankingOn() && typeof host.classify === "function") {
+            const model = classifyModel();
+
+            if (
+                words !== "" &&
+                rankingOn() &&
+                model !== undefined &&
+                typeof host.classify === "function"
+            ) {
                 try {
-                    listed = await rankSessions(host.classify, classifyModel(), words, listed);
+                    listed = await rankSessions(host.classify, model, words, listed);
                 } catch {
                     // A model spec that is wrong, or a provider that refused: today's order.
                 }

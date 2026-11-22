@@ -721,6 +721,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
                 limitWaitHours?: unknown;
+                classifierModel?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
@@ -731,6 +732,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     body.pipCompactAt,
                     body.subagentModels,
                     body.limitWaitHours,
+                    body.classifierModel,
                 ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
@@ -739,6 +741,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // The models subagents may run on: the owner's (checked in `app.ts`).
             if (body.subagentModels !== undefined) {
                 await app.setSubagentModels(user, body.subagentModels);
+            }
+
+            // The classifier model modules share: the owner's (checked in `app.ts`). Null: none.
+            if (body.classifierModel !== undefined) {
+                await app.setClassifierModel(user, body.classifierModel);
             }
 
             if (body.pipCompactAt !== undefined) {
@@ -760,6 +767,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             return json(response, 200, { ok: true });
+        }
+
+        // The classifier models the owner may choose, from providers they signed in to.
+        if (first === "classifier-models" && second === undefined && method === "GET") {
+            return json(response, 200, app.classifierModels(user));
         }
 
         // One model allowed for subagents, or no longer: the rest stay as they are. The owner's (checked in `app.ts`).

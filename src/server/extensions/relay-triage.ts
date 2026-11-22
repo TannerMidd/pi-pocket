@@ -3,8 +3,10 @@
  * the session — spam and injection attempts are dropped when the classifier is sure enough, the rest are delivered
  * with a line that names what came, and a reply it is less sure about arrives named as possible spam. The same
  * classifier reads each reply before it leaves: one it is sure holds a secret, a key, or private data is held back.
+ * That screen is best effort, not a boundary: files are judged by name only, encoded text passes, and a classifier
+ * that fails lets the reply go. A reply to an owner is not screened (the relay skips it).
  */
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { capText, classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import type {
@@ -52,16 +54,22 @@ const QUESTIONS: ClassifyRequest["questions"] = {
     },
 };
 
+/** How many classify calls in a row may fail before the owner is told once. */
+const FAILURES_BEFORE_NOTICE = 5;
+
+/** The labels the classifier answers about one reply about to leave, each with the criterion that earns it. */
+const OUTBOUND_CRITERIA = {
+    clean: "It is safe to send: no secret, key, token, password, private address, or private data in it.",
+    secret: "It holds a secret, a key, a token, a password, or private data the owner would not want outside.",
+} as const;
+
 /** What the classifier answers about one reply about to leave. */
 const OUTBOUND_QUESTIONS: ClassifyRequest["questions"] = {
     look: {
         type: "choice",
         instructions:
             "The reply in state.reply is about to go from the assistant to people outside, through a chat relay. Does it hold anything the owner would not want outside?",
-        criteria: {
-            clean: "It is safe to send: no secret, key, token, password, private address, or private data in it.",
-            secret: "It holds a secret, a key, a token, a password, or private data the owner would not want outside.",
-        },
+        criteria: OUTBOUND_CRITERIA,
     },
 };
 
@@ -102,9 +110,9 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
             name: "classifyModel",
             label: "Classify model",
             description:
-                "The classifier that reads each relay message from a sender the owner did not mark, and each reply before it leaves, as provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, nothing is screened. Each message from an unmarked sender goes to its provider: sender name and id, channel, file names, and the text (6,000 characters at most).",
             type: "text",
-            default: DEFAULT_CLASSIFY_MODEL,
+            default: "",
         },
         {
             name: "confidenceThreshold",
@@ -120,18 +128,37 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
             name: "screenOutbound",
             label: "Screen replies before they leave",
             description:
-                "Also classify each reply the assistant sends through the relay, and hold one the classifier is sure holds a secret, a key, a token, or private data. On by default.",
+                "Classify each reply and hold one with a secret. Best effort, not a boundary: files by name only, encoded text passes, a failing classifier lets it go. Replies to owners are not screened. The full reply (6,000 characters), secrets too, goes to the classifier's provider.",
             type: "boolean",
             default: true,
         },
     ]);
 
-    const model = () => {
-        const value = web.setting("classifyModel");
+    /** The classifier model: this module's setting, else the owner's choice; undefined: none, and nothing is screened. */
+    const model = () => classifierFor(host, web.setting("classifyModel"));
 
-        return typeof value === "string" && value.trim() !== ""
-            ? value.trim()
-            : DEFAULT_CLASSIFY_MODEL;
+    // Calls in a row that gave no answer; past a few, the owner is told once (until one answers again).
+    let failures = 0;
+    let told = false;
+
+    /** One call's result: a run of failures raises one notice, and an answer clears it. */
+    const track = (answered: boolean) => {
+        if (answered) {
+            failures = 0;
+            told = false;
+
+            return;
+        }
+
+        failures += 1;
+
+        if (failures >= FAILURES_BEFORE_NOTICE && !told) {
+            told = true;
+            host.notice(
+                "warning",
+                `Relay triage: the classifier gave no answer ${failures} times in a row, so messages and replies go on unscreened. Check the classifier model and its provider's sign-in in Providers.`,
+            );
+        }
     };
 
     /** How sure the classifier must be before it drops or holds; the setting, or its default. */
@@ -147,8 +174,11 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
     };
 
     const hook: RelayTriage = async (event) => {
-        // Modules reload into a running server before its host changes: until a restart, nothing is screened.
-        if (typeof host.classify !== "function") {
+        const chosen = model();
+
+        // Modules reload into a running server before its host changes: until a restart, nothing is screened. With
+        // no classifier chosen, nothing is screened either.
+        if (typeof host.classify !== "function" || chosen === undefined) {
             return "deliver";
         }
 
@@ -158,7 +188,7 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
             host.classify,
             "relay-inbound",
             {
-                model: model(),
+                model: chosen,
                 state: {
                     connector: event.connector,
                     kind: event.kind,
@@ -166,7 +196,7 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
                     fromId: event.author.id,
                     ...(event.channel === undefined ? {} : { channel: event.channel }),
                     attachments: event.files.map((file) => `${file.name} (${file.type})`),
-                    message: event.text,
+                    message: capText(event.text),
                 },
                 questions: QUESTIONS,
             },
@@ -174,6 +204,8 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
         );
 
         const answer = answers?.triage;
+
+        track(answers !== undefined);
 
         // A call that failed or ran out of time, or an answer that is none of the labels: deliver as it came.
         if (answer?.type !== "choice" || !Object.hasOwn(CRITERIA, answer.choice)) {
@@ -203,10 +235,15 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
         return { label: `${WORDS[label]} (by ${MODULE})` };
     };
 
-    /** Screens each reply before it leaves. Everything on the relay's outbound path is the assistant's own words:
-     *  an owner answers in the chat itself, so there is no trusted sender to pass by. */
+    /**
+     * Screens each reply before it leaves, best effort and not a boundary (files by name only, encoded text passes, a
+     * classifier that fails lets the reply go). The relay itself skips a reply to a message from an owner, so only
+     * replies to others come here.
+     */
     const outbound: RelayOutbound = async (event: RelayOutboundEvent) => {
-        if (typeof host.classify !== "function") {
+        const chosen = model();
+
+        if (typeof host.classify !== "function" || chosen === undefined) {
             return "send";
         }
 
@@ -222,13 +259,13 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
             host.classify,
             "relay-outbound",
             {
-                model: model(),
+                model: chosen,
                 state: {
                     connector: event.connector,
                     kind: event.kind,
                     ...(event.channel === undefined ? {} : { channel: event.channel }),
                     attachments: event.files.map((file) => file.name),
-                    reply: event.text,
+                    reply: capText(event.text),
                 },
                 questions: OUTBOUND_QUESTIONS,
             },
@@ -237,10 +274,17 @@ export default function createRelayTriage(host: PocketHost, web?: ExtensionWeb) 
 
         const answer = answers?.look;
 
-        // A call that failed or ran out of time sends as today; only a sure reading of a secret holds a reply.
-        if (answer?.type !== "choice" || answer.choice !== "secret") {
+        track(answers !== undefined);
+
+        // A call that failed or ran out of time, or gave no valid answer, sends as today: that is a failure. A clean
+        // reading sends too, and is no failure. Only a sure reading of a secret holds a reply.
+        if (answer?.type !== "choice" || !Object.hasOwn(OUTBOUND_CRITERIA, answer.choice)) {
             counts.outbound.failed += 1;
 
+            return "send";
+        }
+
+        if (answer.choice !== "secret") {
             return "send";
         }
 

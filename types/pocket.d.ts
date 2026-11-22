@@ -18,6 +18,7 @@ import type {
     Api,
     ClassifierAnswer,
     ClassifierQuestion,
+    ImageContent,
     Model,
     ModelThinkingLevel,
 } from "@earendil-works/pi-ai";
@@ -135,18 +136,24 @@ export interface WorkspaceProvider {
  */
 export interface ClassifyRequest {
     /**
-     * The classifier model, `provider/modelId`. The id may hold more slashes, as in
-     * `openrouter/~typesafe/jev-latest`, TypeSafe's Jev through OpenRouter. A chat model is refused.
+     * The classifier model, `provider/modelId`; the id may hold more slashes. A chat model is refused. Left out, or
+     * empty, the call uses the classifier model the owner chose in Providers, and throws when there is none.
      * @since 0.31.0
      * @experimental
      */
-    model: string;
+    model?: string;
     /**
      * What the model judges.
      * @since 0.31.0
      * @experimental
      */
     state: Record<string, unknown>;
+    /**
+     * Images judged together with `state`. Only classifier models whose input accepts images answer them.
+     * @since 0.31.0
+     * @experimental
+     */
+    images?: ImageContent[];
     /**
      * What it answers, by question id, with the shapes of pi-ai's `ClassifierQuestion`: a choice, a score, or
      * yes/no. At least one.
@@ -220,11 +227,18 @@ export interface Host {
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /**
+     * The classifier model the owner chose in Providers, as `provider/modelId`, or undefined when none is chosen. Pi
+     * Pocket names no classifier on its own.
+     * @since 0.31.0
+     * @experimental
+     */
+    classifierModel(): string | undefined;
+    /**
      * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model` names
-     * (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna). It runs through Pi's model runtime with the owner's
-     * stored provider sign-ins and keys, exactly as a session's own model calls do. An OpenRouter sign-in is enough
-     * for `openrouter/~typesafe/jev-latest`, the default of Pi Pocket's own modules. It throws when the model is not
-     * a classifier here, when its provider has no stored sign-in or key, or when the call fails. It never wakes a
+     * (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna), or by the owner's chosen classifier when it names
+     * none. It runs through Pi's model runtime with the owner's stored provider sign-ins and keys, exactly as a
+     * session's own model calls do. It throws when no classifier is named or chosen, when the model is not a
+     * classifier here, when its provider has no stored sign-in or key, or when the call fails. It never wakes a
      * session.
      * @since 0.31.0
      * @experimental

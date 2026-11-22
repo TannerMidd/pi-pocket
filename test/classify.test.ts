@@ -10,6 +10,9 @@ import type {
     ClassifierResult,
 } from "@earendil-works/pi-ai";
 import {
+    capText,
+    classifierFor,
+    isNoClassifier,
     type ClassifyRequest,
     type ClassifyRuntime,
     classifyThrough,
@@ -146,4 +149,44 @@ test("a failed call surfaces its error", async () => {
         classifyThrough(runtime, request),
         /faux-router\/~typesafe\/jev-latest failed: the provider refused/,
     );
+});
+
+test("no default classifier: with no model named and none chosen, the call throws and sends nothing", async () => {
+    const { runtime, calls } = fakeRuntime();
+    const { model: _model, ...bareRequest } = request;
+
+    await assert.rejects(
+        classifyThrough(runtime, bareRequest),
+        (error: unknown) =>
+            isNoClassifier(error) &&
+            /No classifier model is chosen: pick one in Providers/.test((error as Error).message),
+    );
+    await assert.rejects(classifyThrough(runtime, { ...bareRequest, model: "  " }, "  "), /chosen/);
+    assert.equal(calls.length, 0, "nothing was sent");
+});
+
+test("the owner's shared choice answers a call that names no model; a named model wins", async () => {
+    const { runtime, calls } = fakeRuntime();
+    const { model: _model, ...bareRequest } = request;
+
+    await classifyThrough(runtime, bareRequest, "faux-router/~typesafe/jev-latest");
+    assert.equal(calls[0]!.spec, "faux-router/~typesafe/jev-latest");
+
+    await classifyThrough(
+        runtime,
+        { ...bareRequest, model: "faux-router/jev-latest" },
+        "faux-router/~typesafe/jev-latest",
+    );
+    assert.equal(calls[1]!.spec, "faux-router/jev-latest");
+});
+
+test("a module's own setting wins over the shared choice, and neither means none", () => {
+    const host = { classifierModel: () => "a/shared" };
+
+    assert.equal(classifierFor(host, " a/own "), "a/own");
+    assert.equal(classifierFor(host, ""), "a/shared");
+    assert.equal(classifierFor({ classifierModel: () => undefined }, ""), undefined);
+    assert.equal(classifierFor({}, undefined), undefined, "a host with no such member: none");
+    assert.equal(capText("x".repeat(10_000)).length, 6_000);
+    assert.equal(capText("short"), "short");
 });
