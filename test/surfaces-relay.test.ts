@@ -199,6 +199,22 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     await until(() => mock().sent.length === 2, "the confirmation");
     assert.match(mock().sent[1]!.text, /1 \[x\] Agree/);
 
+    // The confirmation (m2) is a copy of the card: a reply to it acts on the card too, as one to the card's message.
+    await until(async () => (await surface())!.relay?.echoes?.includes("m2") === true, "the echo");
+    mock().push([event("e2b", "owner-1", "1", { replyTo: "m2" })]);
+    await until(
+        async () => (await surface())!.data.agree === false,
+        "the toggle back, by the echo",
+    );
+    await until(() => mock().sent.length === 3, "the second confirmation");
+    // A reply in a thread (Slack's way of answering) is in another thread than the card: the reply decides, not it.
+    mock().push([event("e2c", "owner-1", "1", { replyTo: "m3", thread: "thread-9" })]);
+    await until(
+        async () => (await surface())!.data.agree === true,
+        "the toggle, by the second echo",
+    );
+    await until(() => mock().sent.length === 4, "the third confirmation");
+
     // A stranger may use only what says `anyone`: 2 and 3 yes, 1 and 4 no; the refusal goes to Pi as data too.
     mock().push([event("e3", "stranger", "2", { replyTo: "m1" })]);
     await until(async () => (await surface())!.data.pub === true, "the stranger's toggle");

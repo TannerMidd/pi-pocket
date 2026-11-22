@@ -42,7 +42,11 @@ export type RelayMessage = {
     by: string;
 };
 
-export type RelayOutcome = { handled: true; reply: string } | { handled: false; refusal?: string };
+export type RelayOutcome =
+    { handled: true; reply: string; surface?: string } | { handled: false; refusal?: string };
+
+/** How many answers of the relay are kept for each card, for the replies that name them. */
+const ECHOES = 5;
 
 /**
  * The relay's text of an open card, and a record of where it goes: its connector, channel and thread, the card's `pv`,
@@ -116,37 +120,68 @@ export async function recordSent(
     }, context);
 }
 
+/**
+ * The id of a message the relay sent to say what a card is now (the echo of an action): a reply to it acts on the card
+ * as a reply to the card's own message does. Only the last few are kept.
+ */
+export async function recordEcho(
+    app: PocketApp,
+    id: ConversationId,
+    sid: string,
+    msgId: string,
+): Promise<void> {
+    await app.harness.commit(async (tx) => {
+        const surface = (await tx.doc(SurfacesDoc, id)).items[sid];
+
+        if (surface?.relay === undefined || surface.relay.msgId === msgId) {
+            return;
+        }
+
+        const kept = (surface.relay.echoes ?? []).filter((each) => each !== msgId);
+
+        surface.relay.echoes = [...kept, msgId].slice(-ECHOES);
+    }, context);
+}
+
 /** What a reply to an ended card is told: one text, for every sender. */
 const ENDED = "That card has ended. Look at the newest one.";
 
 /**
- * The card an incoming message is about: open, for this connector, channel and thread. A message that replies to a card
- * of Pi's is about that card: when it has ended, the answer is `"ended"`, never another card.
+ * The card an incoming message is about. A message that replies to a card of Pi's (its message, or an answer of the
+ * relay about it) is about that card, in whatever thread the service puts the reply: when it has ended, the answer is
+ * `"ended"`, never another card. Any other is about a card only by its name (`s3 1`), open, in the thread it went to.
  */
 function cardFor(
     items: Record<string, Surface>,
     message: RelayMessage,
     named: string | undefined,
 ): Surface | "ended" | undefined {
-    const here = Object.values(items).filter(
+    const there = Object.values(items).filter(
         (surface) =>
             surface.relay !== undefined &&
             surface.relay.connector === message.connector &&
             (surface.relay.channel === "" || surface.relay.channel === message.channel) &&
-            surface.relay.thread === message.thread &&
             (named === undefined || surface.id === `s${named}`),
     );
     const replied =
         message.replyTo === undefined
             ? undefined
-            : here.find((surface) => surface.relay!.msgId === message.replyTo);
+            : there.find(
+                  (surface) =>
+                      surface.relay!.msgId === message.replyTo ||
+                      surface.relay!.echoes?.includes(message.replyTo!) === true,
+              );
 
     if (replied !== undefined) {
         return replied.status === "open" ? replied : "ended";
     }
 
     // A bare number is only a card's when it names the card (`s5 1`): otherwise it is a message for Pi, as any other.
-    return named === undefined ? undefined : here.find((surface) => surface.status === "open");
+    return named === undefined
+        ? undefined
+        : there.find(
+              (surface) => surface.status === "open" && surface.relay!.thread === message.thread,
+          );
 }
 
 /** What the numbers of a message do: the body of an act, and the values worked out from the card as it is then. */
@@ -291,6 +326,7 @@ export async function fromRelay(
         if (made.label !== undefined) {
             return {
                 handled: true,
+                surface: surface.id,
                 reply: `${surface.id}: ${made.label} pressed${result.status === "done" ? ", and the card is done" : ""}.`,
             };
         }
@@ -299,6 +335,7 @@ export async function fromRelay(
 
         return {
             handled: true,
+            surface: surface.id,
             reply:
                 after === undefined
                     ? `${surface.id}: done.`
@@ -333,5 +370,7 @@ export interface SurfacesRelayApi {
         messageId: string | undefined,
         where?: { channel?: string; thread?: string },
     ): Promise<void>;
+    /** The relay answered an action on a card with a message of this id: a reply to it acts on the card too. */
+    echoed(conversationId: ConversationId, surface: string, messageId: string): Promise<void>;
     fromRelay(conversationId: ConversationId, message: RelayMessage): Promise<RelayOutcome>;
 }

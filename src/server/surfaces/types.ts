@@ -75,6 +75,8 @@ export type Surface = {
         channel: string;
         thread?: string;
         msgId?: string;
+        /** The ids of the last messages the relay answered with the card as it then was (newest last): a reply to one acts on the card too. */
+        echoes?: string[];
         pv: number;
         map: Record<string, Target>;
     };

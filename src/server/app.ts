@@ -123,6 +123,7 @@ import { PendingActions } from "./surfaces/pending.ts";
 import {
     fromRelay,
     prepareRelay,
+    recordEcho,
     recordSent,
     type RelayMessage,
     type SurfaceWhere,
@@ -999,6 +1000,8 @@ export class PocketApp {
                     messageId: string | undefined,
                     where?: { channel?: string; thread?: string },
                 ) => recordSent(this, id, surface, messageId, where),
+                echoed: (id: ConversationId, surface: string, messageId: string) =>
+                    recordEcho(this, id, surface, messageId),
                 fromRelay: (id: ConversationId, message: RelayMessage) =>
                     fromRelay(this, id, message),
             }),
