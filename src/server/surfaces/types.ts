@@ -1,0 +1,98 @@
+/**
+ * The shapes of Pocket Surfaces: a surface Pi shows in the transcript (`docs/design/surfaces.md`), stored in
+ * `SurfacesDoc` (`../docs.ts`). Stored data: a surface's `v` is its vocabulary's version, and the code never drops a
+ * component type that stored surfaces use.
+ */
+import type { JsonValue } from "@earendil-works/chord/json";
+
+export type JsonObject = { [key: string]: JsonValue };
+
+/** Who may act on a control: the owner always; `requester` also the person Pi worked for; `steer` also guests; `anyone` also viewers. */
+export type Who = "owner" | "requester" | "steer" | "anyone";
+
+export const WHO: readonly Who[] = ["owner", "requester", "steer", "anyone"];
+
+/** An expression (`web/surfaces-expr.js`) or a literal. */
+export type Expr = JsonValue;
+
+/** A stored component: its type and props; its id is its key in `Surface.components`. */
+export type Component = { type: string } & { [prop: string]: JsonValue };
+
+/** What one number of the relay's text form does (`relay`, slice 2). */
+export type Target =
+    | { kind: "toggle"; path: string }
+    | { kind: "pick"; path: string; value: string; multiple?: boolean }
+    | { kind: "press"; control: string }
+    | { kind: "text"; path: string };
+
+export type SurfaceStatus = "open" | "done" | "closed" | "expired" | "cancelled";
+
+export type Surface = {
+    /** The surface format version (the vocabulary of components). */
+    v: 1;
+    id: string;
+    title: string;
+    status: SurfaceStatus;
+    /** The default permission for its controls. */
+    who: Who;
+    /** The user id Pi worked for when it was made. */
+    by: string;
+    taskId: string;
+    /** The `ui` call that made it: the transcript card finds the surface by it. */
+    callId: string;
+    createdAt: number;
+    updatedAt: number;
+    /** Every change. */
+    rev: number;
+    /** Pi's changes (layout, patches) only: an action must name the one the person saw. */
+    pv: number;
+    root: string;
+    components: Record<string, Component>;
+    data: JsonObject;
+    computed?: Record<string, Expr>;
+    /** The wait a `ui` call is parked in: a signal under `key` wakes it. `gen` counts waits. */
+    wait?: { taskId: string; key: string; gen: number; until?: number };
+    /** The latest action delivered. */
+    last?: { name: string; by: string; at: number };
+    /** Set when the status leaves `open`: the text the transcript, an export, and a fork show. */
+    final?: { text: string; values?: JsonValue };
+    relay?: {
+        connector: string;
+        channel: string;
+        thread?: string;
+        msgId?: string;
+        pv: number;
+        map: Record<string, Target>;
+    };
+};
+
+export type SurfacesState = { seq: number; items: Record<string, Surface> };
+
+/** What an action delivers to the parked tool, and what the session reads. */
+export type Acted = {
+    name: string;
+    by: string;
+    at: number;
+    values: JsonValue;
+};
+
+/** The limits of a surface. */
+export const LIMITS = {
+    surfaces: 40,
+    open: 12,
+    bytes: 48 * 1024,
+    components: 200,
+    depth: 8,
+    actions: 20,
+    items: 500,
+    string: 2000,
+    text: 4000,
+    title: 80,
+    label: 40,
+    fieldLabel: 120,
+    ops: 50,
+    url: 2000,
+    image: 64 * 1024,
+    context: 16 * 1024,
+    rowsKeys: 40,
+} as const;

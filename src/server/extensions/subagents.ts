@@ -76,6 +76,8 @@ export interface ToolOptions {
 const AgentTeams = defineExtension({ name: "pocket-agent-teams" });
 // Nor does a subagent ask the person (`ask.ts`): it works for another agent, and nobody reads its chat.
 const Ask = defineExtension({ name: "pocket-ask" });
+// Nor does it show a card (`surfaces.ts`): nobody reads its chat to tap one.
+const Surfaces = defineExtension({ name: "pocket-surfaces" });
 
 function textOf(message: AssistantMessage | undefined): string {
     return (message?.content ?? [])
@@ -1688,7 +1690,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                           ).values(),
                       ]
                     : [];
-            const removed = [SubagentTools, AgentTeams, Ask];
+            const removed = [SubagentTools, AgentTeams, Ask, Surfaces];
             // Marked tools this session enables, of the extensions a subagent keeps: a tool it disabled stays out.
             const kept = new Set(
                 parent.extensions

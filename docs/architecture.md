@@ -338,6 +338,17 @@ What a browser shows is its person's choice of theme (`look`) and colors (`theme
 - Extensions' API: `web` on the server and `pocket` in the browser, at `POCKET_API`. Modules outside this repository depend on them: add to them freely, and change what they do only with a new version.
 - `ATTACHMENTS_HEADING` and `splitAttachments` (which also reads the form sent before 0.14.0), which `ui.js` repeats from `entry-format.ts`.
 
+## Surfaces
+
+A surface is Pi's interactive card ([design/surfaces.md](design/surfaces.md)): a flat layout of components, data, and expressions, stored in the singleton `pocket.surfaces` document (conversation scope, `latest`, `fork: "initial"`: a fork starts with none, because a copy would name a task of another conversation). What the code relies on:
+
+- **One tool call parks.** `ui` with `wait` returns a Pi Durable park (`{ sleep: { signals: [key], until, checkpoint } }`): the call holds no invocation, survives a restart, and wakes on `SurfaceActed` under the key `<surface>.<gen>`, or at its stored, absolute deadline. The surface is found again by `taskId` and `callId`, so a run again makes no second one. `cancel` (Stop) ends the card it made as `cancelled`.
+- **The signal comes first.** An action is one `harness.commit` in `surfaces/act.ts`: it reads the document and checks everything, then `tx.signal` (which reads the task, so it comes before the first write), then stores the values. A `closed`, `duplicate`, or `not_found` result means no call waits: the action is stored, and after the commit the session gets it through `app.inbox` (key `surface-<id>-<rev>`), once.
+- **Two counters.** `rev` rises on every change, `pv` only on Pi's changes (layout, patches). An action names the `pv` the person saw; another `pv` is a 409. The browser sends only `{ pv, set?, event? }`: a `set` must name a path an input control binds (`bindings.ts`) with a value that fits; the action's context is worked out on the server from the stored data.
+- **The document is the truth, the room is a copy.** `ROOM_DOCS` has the kind; each tab gets the `surfaces` field of the view projected for its person (`view.ts`: no task, no wait key; a `can` map), only the surfaces whose revision it has not got, and `surfacesGone`. The route is core because extension routes are closed to session-invited guests.
+- **The same expressions in both places.** `web/surfaces-expr.js` (no DOM, no imports) runs in the browser for the live display and on the server for validation, an action's context, and the text form.
+- **No code from a card.** Every value is data: the validator refuses an unknown type or prop, text is plain, images never load from the network, and a link is an `https:` button only.
+
 ## Updates of Pi Pocket itself
 
 `Updates` (`updates.ts`, `app.updates`) works out `installKind` from where the server's files are: a git checkout (`git`), the global package folder of the Node.js that runs it, as `npm root -g` gives it (`npm-global`), another `node_modules` folder (`npm-local`), the npx cache (`npx`), or none of these (`unknown`; `npm-install.ts` does the npm kinds). Every kind shares one status (`UpdateStatus`), one set of checks (the launcher runs the server, no sessions busy, the warning tick), the two settings of the `updates` extension, and the outcome format in `update-state.ts`. What differs is where the newest version comes from and how it goes in:

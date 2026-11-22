@@ -43,6 +43,7 @@ import {
     type SubagentRecord,
     STOPPED,
     SubagentsDoc,
+    SurfacesDoc,
     type Turns,
     TurnsDoc,
     WatchDoc,
@@ -69,6 +70,8 @@ import {
     turnStart,
 } from "./projection.ts";
 import { describeRepeat } from "./when.ts";
+import type { Surface } from "./surfaces/types.ts";
+import { viewOf } from "./surfaces/view.ts";
 import { fingerprint } from "../../web/text-hash.js";
 
 const context = BACKGROUND_CONTEXT;
@@ -91,6 +94,7 @@ export const ROOM_DOCS = new Set(
         WatchDoc,
         LinkedSessionPeersDoc,
         HeldDoc,
+        SurfacesDoc,
     ].map((doc) => doc.definition.kind),
 );
 /** A typing indicator lasts this long unless the browser renews it. */
@@ -375,6 +379,8 @@ export class Room {
     /** The last version number of each deleted artifact: cards that name one say it was deleted. */
     artifactsEnded: Record<string, number> = {};
     subagents: Record<string, SubagentRecord> = {};
+    /** The conversation's surfaces (`surfaces/`): each tab gets them projected for its person. */
+    surfaces: Record<string, Surface> = {};
     /** The subagents whose reports are on their way to this conversation: waiting, or sent and still queued. */
     #reporting = new Set<string>();
     /** Why their reports wait, while a spend limit holds them back. */
@@ -439,6 +445,9 @@ export class Room {
 
         this.artifacts = { ...(artifacts?.items ?? {}) } as Record<string, ArtifactMeta>;
         this.artifactsEnded = { ...(artifacts?.ended ?? {}) };
+        this.surfaces = {
+            ...((await harness.snapshot(SurfacesDoc, this.id, context))?.items ?? {}),
+        };
         const subagents = await harness.snapshot(SubagentsDoc, this.id, context);
 
         this.subagents = { ...(subagents?.agents ?? {}) } as Record<string, SubagentRecord>;
@@ -551,6 +560,8 @@ export class Room {
             this.watch = (value?.watch as PrWatch | undefined) ?? undefined;
         } else if (kind === LinkedSessionPeersDoc.definition.kind) {
             this.peers = { ...((value?.peers as Record<string, number>) ?? {}) };
+        } else if (kind === SurfacesDoc.definition.kind) {
+            this.surfaces = { ...((value?.items as Record<string, Surface>) ?? {}) };
         }
 
         if (kind === AuthorsDoc.definition.kind) {
@@ -944,6 +955,18 @@ export class Room {
             }
         }
 
+        // Surfaces go one by one, each when its revision is new to this tab (a person's typing changes one), and
+        // `surfacesGone` names the ones that left: a full view clears what was sent, so it has them all.
+        const surfaceChanges = this.#surfaceChanges(client, sentFields);
+
+        if (surfaceChanges.changed !== undefined) {
+            fields.surfaces = surfaceChanges.changed;
+        }
+
+        if (surfaceChanges.gone !== undefined) {
+            fields.surfacesGone = surfaceChanges.gone;
+        }
+
         // Older browser code drops a queue that an update leaves out: it gets the queue with each update, as before.
         if ((client.protocol ?? 1) < 2) {
             fields.inbox = queue;
@@ -968,6 +991,38 @@ export class Room {
             approvals: this.#app.approvals.forConversation(this.id),
             ...fields,
         });
+    }
+
+    /** The surfaces this tab has not got at their revision, as its person sees them, and the ones that went since. */
+    #surfaceChanges(
+        client: Client,
+        sent: Map<string, string>,
+    ): { changed?: Record<string, ReturnType<typeof viewOf>>; gone?: string[] } {
+        const nameOf = (id: string) => this.#app.config.userById(id)?.name ?? "";
+        let changed: Record<string, ReturnType<typeof viewOf>> | undefined;
+        let gone: string[] | undefined;
+
+        for (const surface of Object.values(this.surfaces)) {
+            const shown = viewOf(surface, client.user, nameOf);
+            const mark = `${shown.rev}:${JSON.stringify(shown.can)}:${shown.by}`;
+
+            if (sent.get(`surface/${surface.id}`) !== mark) {
+                sent.set(`surface/${surface.id}`, mark);
+                (changed ??= {})[surface.id] = shown;
+            }
+        }
+
+        for (const key of sent.keys()) {
+            if (key.startsWith("surface/") && !Object.hasOwn(this.surfaces, key.slice(8))) {
+                sent.delete(key);
+                (gone ??= []).push(key.slice(8));
+            }
+        }
+
+        return {
+            ...(changed === undefined ? {} : { changed }),
+            ...(gone === undefined ? {} : { gone }),
+        };
     }
 
     /**

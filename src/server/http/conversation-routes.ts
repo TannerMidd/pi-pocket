@@ -14,6 +14,7 @@ import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
 import { prepareModelImage } from "../model-images.ts";
 import { reveal } from "../reveal.ts";
+import { actOnSurface } from "../surfaces/act.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
 
@@ -583,6 +584,21 @@ export async function conversationRoutes(
                 await writeState(app, id, user, fourth, await readJson(request)),
             );
         }
+    }
+
+    // A person's action on a surface Pi showed (`surfaces/act.ts`): core, so that session-invited guests can act too.
+    if (
+        third === "surfaces" &&
+        fourth !== undefined &&
+        parts[4] === "act" &&
+        parts.length === 5 &&
+        method === "POST"
+    ) {
+        return json(
+            response,
+            200,
+            await actOnSurface(app, id, user, fourth, await readJson(request)),
+        );
     }
 
     // Deleting an artifact with all its versions (`artifacts.ts`): anyone who sees the session and steers.
