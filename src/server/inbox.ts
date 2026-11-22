@@ -12,7 +12,7 @@ const context = BACKGROUND_CONTEXT;
 const DEFAULT_INSTRUCTIONS =
     "Something happened that you were set up to hear about. Say in a line what it is, and whether anything needs doing.";
 
-const MAX_PAYLOAD = 8000;
+export const MAX_PAYLOAD = 8000;
 const MAX_INSTRUCTIONS = 4000;
 const TAG = /^[a-z][a-z0-9-]{0,39}$/;
 const MAX_ATTRIBUTES = 8;

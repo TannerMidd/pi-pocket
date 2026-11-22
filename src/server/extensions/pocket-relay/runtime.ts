@@ -1053,6 +1053,7 @@ export class Relay {
                         ...(event.channel === undefined ? {} : { channel: event.channel }),
                         ...(event.thread === undefined ? {} : { thread: event.thread }),
                         ...(event.replyTo === undefined ? {} : { replyTo: event.replyTo }),
+                        eventId: `${config.id}/${event.id}`,
                         text: event.text,
                         author: {
                             id: event.author.id,

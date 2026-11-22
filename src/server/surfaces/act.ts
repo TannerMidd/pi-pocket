@@ -16,10 +16,11 @@ import { describe, HttpError } from "../errors.ts";
 import { evaluate, evaluateComputed, pointer, readPath } from "../../../web/surfaces-expr.js";
 import { bindingFor, InputError, mayAct, whoOf } from "./bindings.ts";
 import { keepFallbacks } from "./components.ts";
+import { MAX_PAYLOAD } from "../inbox.ts";
 import { deliverPending, MAX_PENDING } from "./pending.ts";
 import { SurfaceActed } from "./signal.ts";
 import { actedLine, endSurface, finalText } from "./store.ts";
-import { type Acted, type JsonObject, LIMITS, type Surface } from "./types.ts";
+import { type Acted, type ActResult, type JsonObject, LIMITS, type Surface } from "./types.ts";
 import { isObject } from "./validate.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -32,13 +33,10 @@ const recent = new Map<string, number[]>();
 
 export type ActBody = { pv: number; set?: Record<string, unknown>; event?: string };
 
-export type ActResult = {
-    ok: true;
-    status: Surface["status"];
-    rev: number;
-    /** `woke`: a waiting call took it; `message`: it went to the session; `none`: only values were set. */
-    delivered: "woke" | "message" | "none";
-};
+export type { ActResult };
+
+/** The chat messages a card remembers, to answer one that is tried again. */
+const MAX_SEEN = 50;
 
 function readBody(raw: unknown): ActBody {
     if (!isObject(raw) || JSON.stringify(raw).length > BODY_BYTES) {
@@ -129,7 +127,8 @@ export async function actOnSurface(
 /**
  * The same for an actor whose access to the conversation was checked by the caller. `derive` is for the server's own
  * callers (the relay's toggles): each value is worked out from the card's data inside the commit, so two quick
- * actions do not both read the same earlier value.
+ * actions do not both read the same earlier value. `once` is the id of the chat message behind the action: the card
+ * keeps its result, so the same message tried again (after a restart cut the relay off) returns it and acts no more.
  */
 export async function actAs(
     app: PocketApp,
@@ -138,6 +137,7 @@ export async function actAs(
     sid: string,
     raw: unknown,
     derive: Record<string, (current: unknown) => JsonValue> = {},
+    once?: string,
 ): Promise<ActResult> {
     const body = readBody(raw);
     const now = Date.now();
@@ -165,6 +165,13 @@ export async function actAs(
 
         if (surface === undefined) {
             throw new HttpError(404, "No such card");
+        }
+
+        const seen =
+            once === undefined ? undefined : surface.seen?.find((each) => each.key === once);
+
+        if (seen !== undefined) {
+            return seen.result;
         }
 
         if (surface.status !== "open") {
@@ -260,6 +267,18 @@ export async function actAs(
             }
         }
 
+        // Filled in, the card must still fit its limit: else every patch of Pi's would fail on its size.
+        if (
+            sets.length > 0 &&
+            JSON.stringify({
+                components: surface.components,
+                data: next,
+                computed: surface.computed,
+            }).length > LIMITS.bytes
+        ) {
+            throw new HttpError(413, "That would make the card too large: shorten the values");
+        }
+
         let acted: Acted | undefined;
 
         if (event !== undefined) {
@@ -293,6 +312,28 @@ export async function actAs(
             }
         }
 
+        // An action for the session is kept until delivered: a full queue refuses a new one, and so does a text the
+        // inbox would clip. Both refuse before the card changes.
+        let said: string | undefined;
+
+        if (acted !== undefined && wake !== "delivered") {
+            if ((surface.pending?.length ?? 0) >= MAX_PENDING) {
+                throw new HttpError(
+                    429,
+                    "Too many answers on this card wait to reach Pi: try again in a moment",
+                );
+            }
+
+            said = `${actedLine(surface as Surface, acted)}\n${JSON.stringify(acted.values)}`;
+
+            if (said.trim().length > MAX_PAYLOAD) {
+                throw new HttpError(
+                    413,
+                    `The values of this action are too long to send to Pi (${MAX_PAYLOAD} characters at most)`,
+                );
+            }
+        }
+
         for (const { path, value } of sets) {
             setAt(surface.data, path, value);
         }
@@ -315,27 +356,35 @@ export async function actAs(
             }
 
             // The mark is written with the action: a failed delivery, or a restart, leaves it to try again.
-            if (wake !== "delivered") {
+            if (said !== undefined) {
                 surface.pending = [
                     ...(surface.pending ?? []),
                     {
                         rev: surface.rev,
                         name: acted.name,
-                        text: `${actedLine(surface as Surface, acted)}\n${JSON.stringify(acted.values)}`,
+                        text: said,
                         by: surface.by,
                         sender: { name: user.name, id: user.id, trusted: user.role === "owner" },
                     },
-                ].slice(-MAX_PENDING);
+                ];
                 queued = true;
             }
         }
 
-        return {
+        const answer: ActResult = {
             ok: true,
             status: surface.status,
             rev: surface.rev,
             delivered: acted === undefined ? "none" : wake === "delivered" ? "woke" : "message",
         };
+
+        if (once !== undefined) {
+            surface.seen = [...(surface.seen ?? []), { key: once, result: answer }].slice(
+                -MAX_SEEN,
+            );
+        }
+
+        return answer;
     }, context);
 
     if (queued) {

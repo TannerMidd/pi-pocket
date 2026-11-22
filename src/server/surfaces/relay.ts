@@ -32,6 +32,8 @@ export type RelayMessage = {
     thread?: string;
     /** The id of the message it answers, when the service tells. */
     replyTo?: string;
+    /** The relay's id of this message: one that is tried again after a restart acts once. */
+    eventId?: string;
     text: string;
     author: { id: string; name?: string };
     /** The ids of the owner's own accounts on the service. */
@@ -114,27 +116,38 @@ export async function recordSent(
     }, context);
 }
 
-/** The card an incoming message is about: open, for this connector, channel and thread. */
+/** What a reply to an ended card is told: one text, for every sender. */
+const ENDED = "That card has ended. Look at the newest one.";
+
+/**
+ * The card an incoming message is about: open, for this connector, channel and thread. A message that replies to a card
+ * of Pi's is about that card: when it has ended, the answer is `"ended"`, never another card.
+ */
 function cardFor(
     items: Record<string, Surface>,
     message: RelayMessage,
     named: string | undefined,
-): Surface | undefined {
-    const open = Object.values(items).filter(
+): Surface | "ended" | undefined {
+    const here = Object.values(items).filter(
         (surface) =>
-            surface.status === "open" &&
             surface.relay !== undefined &&
             surface.relay.connector === message.connector &&
             (surface.relay.channel === "" || surface.relay.channel === message.channel) &&
             surface.relay.thread === message.thread &&
             (named === undefined || surface.id === `s${named}`),
     );
+    const replied =
+        message.replyTo === undefined
+            ? undefined
+            : here.find((surface) => surface.relay!.msgId === message.replyTo);
 
-    return (
-        open.find(
-            (surface) => message.replyTo !== undefined && surface.relay!.msgId === message.replyTo,
-        ) ?? open.sort((a, b) => b.createdAt - a.createdAt)[0]
-    );
+    if (replied !== undefined) {
+        return replied.status === "open" ? replied : "ended";
+    }
+
+    return here
+        .filter((surface) => surface.status === "open")
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
 /** What the numbers of a message do: the body of an act, and the values worked out from the card as it is then. */
@@ -230,6 +243,10 @@ export async function fromRelay(
         return { handled: false };
     }
 
+    if (surface === "ended") {
+        return { handled: false, refusal: ENDED };
+    }
+
     const owner = message.ownerIds.includes(message.author.id)
         ? app.config.userById(message.by)
         : undefined;
@@ -262,7 +279,15 @@ export async function fromRelay(
     }
 
     try {
-        const result = await actAs(app, id, actor, surface.id, made.body, made.derive);
+        const result = await actAs(
+            app,
+            id,
+            actor,
+            surface.id,
+            made.body,
+            made.derive,
+            message.eventId,
+        );
 
         if (made.label !== undefined) {
             return {
