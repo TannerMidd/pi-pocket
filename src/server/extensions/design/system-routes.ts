@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
+import { keepAssets, nextVersion } from "../../artifacts.ts";
 import { readBundle } from "../../design/bundle.ts";
 import { localFolder, REMOTE_DESIGN, writeExport } from "../../design/files.ts";
 import { applyExactFixes } from "../../design/fix.ts";
@@ -547,6 +548,7 @@ function prepare(name: string, text: string): Prepared {
 
 async function storeAsset(tx: Tx, { asset, bytes }: Prepared): Promise<void> {
     await tx.doc(ArtifactAssetDoc, asset.hash, { base64: bytes.toString("base64") });
+    await keepAssets(tx, [asset.hash]);
 }
 
 async function storeBody(tx: Tx, conversation: ConversationId, name: string, content: string) {
@@ -939,7 +941,7 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
                     await storeAsset(tx, each);
                 }
 
-                const next = (current?.versions.at(-1)?.version ?? 0) + 1;
+                const next = nextVersion(index, DOCS_ID);
                 const assets = Object.fromEntries(
                     [...prepared].map(([name, each]) => [name, each.asset]),
                 );

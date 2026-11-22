@@ -1,6 +1,6 @@
 // The limit gate with fake model streams: waiting, the single canary, deadlines, and what a restart keeps.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -33,9 +33,14 @@ const gate = (extra: Partial<ConstructorParameters<typeof LimitGate>[0]> = {}) =
 type Step = { fail: string; headers?: Record<string, string> } | { ok: true };
 
 /** A model runtime. A request follows the next step (or `repeat`); with none, the test ends it: `end("529")`, `end()`. */
-function fake(steps: Step[] = [], repeat?: Step) {
-    const calls: { at: number; fetch?: unknown; end: (e?: string) => void; content: () => void }[] =
-        [];
+function fake(steps: Step[] = [], repeat?: Step | ((sessionId: string | undefined) => Step)) {
+    const calls: {
+        at: number;
+        fetch?: unknown;
+        sessionId: string | undefined;
+        end: (e?: string) => void;
+        content: () => void;
+    }[] = [];
     const models = {
         streamSimple(m: Model<Api>, _context: unknown, options?: SimpleStreamOptions) {
             const stream = createAssistantMessageEventStream();
@@ -61,12 +66,14 @@ function fake(steps: Step[] = [], repeat?: Step) {
                 stream.end(message);
             };
 
-            const step = steps.shift() ?? repeat;
+            const sessionId = options?.sessionId;
+            const step =
+                steps.shift() ?? (typeof repeat === "function" ? repeat(sessionId) : repeat);
 
             const content = () =>
                 stream.push({ type: "text_start", contentIndex: 0, partial: reply() });
 
-            calls.push({ at: Date.now(), fetch: options?.fetch, end, content });
+            calls.push({ at: Date.now(), fetch: options?.fetch, sessionId, end, content });
 
             if (step !== undefined) {
                 queueMicrotask(async () => {
@@ -104,6 +111,139 @@ const until = async (check: () => boolean) => {
 };
 
 const overloaded = { fail: "529 overloaded_error" };
+const httpError = (status: number, body: string) => ({
+    fetch: async () => new Response(body, { status }),
+});
+
+test("a conversation's 502s back off and give up without holding other sessions on its model", async () => {
+    const g = gate({
+        conversationOf: (id) => Number(id),
+        tuning: { ...TUNING, backoffMs: [150], maxTries: 2 },
+    });
+    // The adapter can drop the code and keep only the error's message.
+    const local = { fail: "Private response ID: r123", headers: {} };
+    const body = JSON.stringify({
+        error: { code: "previous_response_owner_unavailable", message: local.fail },
+    });
+    const rt = fake([], (id) => (id === "1" ? local : { ok: true }));
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const first = ask(rt, "m", "p", {
+        ...httpError(502, body),
+        sessionId: "1",
+        signal: stop.signal,
+    });
+
+    try {
+        await until(() => g.waitFor(1) !== undefined);
+
+        const second = ask(rt, "m", "p", { sessionId: "2", signal: stop.signal });
+
+        assert.deepEqual(
+            rt.calls.map((call) => call.sessionId),
+            ["1", "2"],
+            "the healthy session reaches the provider while session 1 is waiting",
+        );
+        assert.equal((await second).stopReason, "stop");
+        assert.equal(g.waitFor(1)?.reason, "p could not continue this conversation");
+        assert.equal(g.waitFor(1)?.scope, "request");
+        await until(() => rt.calls.length === 4);
+        assert.equal(
+            (await first).errorMessage,
+            "p could not continue this conversation. Not waiting: it did not clear after 2 tries.",
+        );
+        assert.ok(rt.calls[2]!.at - rt.calls[0]!.at >= 120, "the first session backs off");
+        assert.deepEqual(g.gates(), []);
+    } finally {
+        stop.abort();
+        await first;
+        g.close();
+    }
+});
+
+test("a conversation failure frees the shared canary without declaring the model recovered", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "limit-gate-")), "provider-limits.json");
+    const g = gate({
+        file,
+        conversationOf: (id) => Number(id),
+        tuning: { ...TUNING, backoffMs: [15_000] },
+    });
+    const rt = fake();
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const a = ask(rt, "m", "p", { sessionId: "1", signal: stop.signal });
+
+    rt.calls[0]!.end("529 overloaded_error");
+
+    try {
+        await until(() => g.waitFor(1) !== undefined);
+
+        const b = ask(rt, "m", "p", { sessionId: "2", signal: stop.signal });
+
+        await until(() => g.waitFor(2) !== undefined);
+        assert.equal(rt.calls.length, 1);
+        assert.equal(g.retryNow(1), true);
+        await until(() => rt.calls.length === 2);
+        rt.calls[1]!.end("502 Previous response owner account is unavailable; retry later.");
+        await until(() => rt.calls.length === 3);
+        assert.equal(g.waitFor(1)?.scope, "request");
+        assert.equal(g.waitFor(2)?.scope, "model");
+        assert.equal(g.waitFor(2)?.probing, true, "only a real success opens the shared gate");
+        rt.calls[2]!.end();
+        assert.equal((await b).stopReason, "stop");
+        assert.equal(g.waitFor(1)?.scope, "request");
+        assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { version: 2, gates: [] });
+    } finally {
+        stop.abort();
+        await a;
+        g.close();
+    }
+});
+
+test("waiting and giving up distinguish overload, restart, and server errors without provider text", async () => {
+    for (const [status, body, expected] of [
+        [502, "Bad Gateway: private detail", "p returned server errors (502)"],
+        [503, "Server is draining: private detail", "p is restarting"],
+        [503, '{"error":{"type":"overloaded_error"}}', "p is overloaded"],
+        [529, "private detail", "p is overloaded"],
+        [429, "private detail", "p's rate limit"],
+    ] as const) {
+        const g = gate({
+            conversationOf: () => 1,
+            tuning: { ...TUNING, backoffMs: [80], maxTries: 1 },
+        });
+        const rt = fake([], { fail: "private detail", headers: {} });
+        const stop = new AbortController();
+        const options = { ...httpError(status, body), sessionId: "1", signal: stop.signal };
+
+        g.install(rt.models);
+
+        const first = ask(rt, "m", "p", options);
+
+        try {
+            await until(() => g.waitFor(1) !== undefined);
+            assert.equal(g.waitFor(1)?.reason, expected);
+            await until(() => rt.calls.length === 2);
+
+            const failed = await first;
+            const behind = await ask(rt, "m", "p", options);
+
+            assert.equal(
+                failed.errorMessage,
+                `${expected}. Not waiting: it did not clear after 1 try.`,
+            );
+            assert.equal(behind.errorMessage, failed.errorMessage);
+            assert.equal(rt.calls.length, 2);
+        } finally {
+            stop.abort();
+            g.close();
+        }
+    }
+});
 
 test("one canary goes when the gate may clear, and the rest wait for it and leave one by one", async () => {
     const g = gate({ tuning: { ...TUNING, backoffMs: [150] } });
@@ -152,6 +292,43 @@ test("a limit that covers the account holds every model of the provider, with on
     await sleep(20);
     assert.equal(rt.calls.length, 1, "the other model of the provider is held too");
     assert.deepEqual(await stops(a, b), ["stop", "stop"]);
+});
+
+test("an ambiguous Fable wait does not block Opus, but a separate Opus limit can hold the account", async () => {
+    const now = Date.parse("2026-11-21T11:38:35Z");
+    const g = gate({ now: () => now });
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": String(now / 1000 + 3 * 3_600),
+    };
+    const fail = "429 This request would exceed your account's rate limit. Please try again later.";
+    const rt = fake([{ fail, headers }, { ok: true }, { fail, headers }]);
+    const stop = new AbortController();
+
+    g.install(rt.models);
+
+    const options = {
+        signal: stop.signal,
+        fetch: async () => new Response("", { status: 429, headers }),
+    };
+    const requests = [ask(rt, "claude-fable-5-2", "anthropic", options)];
+
+    try {
+        await until(() => g.gates().length === 1);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+        assert.equal((await ask(rt, "claude-opus-5-5", "anthropic", options)).stopReason, "stop");
+        assert.equal(rt.calls.length, 2);
+        assert.equal(g.gates()[0]!.key, "anthropic/claude-fable-5-2");
+
+        requests.push(ask(rt, "claude-opus-5-5", "anthropic", options));
+        await until(() => g.gates().some((gate) => gate.key === "anthropic"));
+        requests.push(ask(rt, "claude-haiku-4-5", "anthropic", options));
+        assert.equal(rt.calls.length, 3, "the account gate holds the next model");
+    } finally {
+        stop.abort();
+        await stops(...requests);
+        g.close();
+    }
 });
 
 test("the gate opens at the canary's first content, not when its whole stream ends", async () => {
@@ -492,6 +669,26 @@ test("a missing or damaged file means no limit is known", () => {
         writeFileSync(file, text);
         assert.equal(gate({ file }).gates().length, 0, text);
     }
+});
+
+test("an Anthropic account gate that 0.30.0 kept is dropped once; other gates stay", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "limit-gate-")), "provider-limits.json");
+    const now = Date.now();
+    const kept = (provider: string) => ({
+        ...{ state: "waiting", key: provider, scope: "account", provider, kind: "reset" },
+        ...{ since: now, until: now + 3_600_000, subscription: true, reason: "429", tries: 1 },
+    });
+    const gates = [kept("anthropic"), kept("openai")];
+
+    writeFileSync(file, JSON.stringify({ version: 1, gates }));
+    assert.deepEqual(
+        gate({ file })
+            .gates()
+            .map((each) => each.provider),
+        ["openai"],
+    );
+    writeFileSync(file, JSON.stringify({ version: 2, gates }));
+    assert.equal(gate({ file }).gates().length, 2);
 });
 
 test("an adapter that refuses a custom fetch (Google) gets none", async () => {

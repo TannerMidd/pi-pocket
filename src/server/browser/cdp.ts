@@ -2,6 +2,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
+import { brandName } from "./identity.ts";
 
 export class BrowserError extends Error {}
 
@@ -178,6 +179,9 @@ export class Chromium {
     readonly #child: ChildProcess;
     readonly exited: Promise<void>;
     userAgent = "";
+    /** The browser's name and full version, for its client hints. */
+    brand = "Chromium";
+    version = "";
 
     private constructor(child: ChildProcess, connection: Connection) {
         this.#child = child;
@@ -249,6 +253,8 @@ export class Chromium {
                 "HeadlessChrome/",
                 "Chrome/",
             );
+            chromium.brand = brandName(String(version.product ?? ""), executable);
+            chromium.version = /\/([\d.]+)/.exec(String(version.product ?? ""))?.[1] ?? "";
             await connection.send("Target.setDiscoverTargets", { discover: true });
         } catch (error) {
             chromium.kill();

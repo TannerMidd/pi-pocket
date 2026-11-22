@@ -3,6 +3,30 @@
 export const EN_LABEL = "English";
 
 export const EN = Object.freeze({
+    "web.running-board.paused": "Paused",
+    "web.running-board.schedule.paused":
+        "Paused at {time}. It sends nothing until someone resumes it.",
+    "web.running-board.schedule.paused-short": "paused",
+    "web.running-board.pause": "Pause",
+    "web.running-board.resume": "Resume",
+    "web.sheets.schedules.next-when": "Next {when}",
+    "web.sheets.schedules.next-in": "Next in",
+    "web.sheets.menu.menu-sheet.text.paused": "{count} paused",
+    "builtin.module.pocket-relay.title": "Relay",
+    "builtin.module.pocket-relay.summary":
+        "Relay connects chat services and feeds (Discord, Telegram, Slack, Matrix, RSS, any HTTP API, or a drop-in's own connector) to a session: what comes is delivered there as fenced data, and Pi answers with the relay_reply tool.",
+    "builtin.module.session-cleanup.title": "Session cleanup",
+    "builtin.module.session-cleanup.summary":
+        "Session cleanup: the owner removes the worktrees of archived sessions, or takes archived sessions out of the app with Pocket's own files.",
+    "web.transcript.report.verb.stalled": "stalled",
+    "web.transcript.report.verb.stopped": "stopped",
+    "web.running-board.filter.paused": "Paused",
+    "extensions.background.command-quiet": "Stop a command quiet for (minutes)",
+    "extensions.background.command-quiet.detail":
+        "A bash command of Pi's that prints nothing for this long is stopped, with the processes it started, and Pi gets what it printed. One that keeps printing (a long build) runs on, and Pi can give a call its own timeout. 0: no limit.",
+    "extensions.background.task-quiet": "Stop a background task quiet for (minutes)",
+    "extensions.background.task-quiet.detail":
+        "The same for a background task, unless Pi starts it with its own limit (0 for a server). Pi gets a message when one is stopped. 0: no limit.",
     "web.composer.release0281.interrupt-hint":
         "Stops the run right now (also its tool call), then sends it. The queued messages stay queued",
     "web.composer.release0281.stop-title":
@@ -33,6 +57,8 @@ export const EN = Object.freeze({
     "signin.link-expired":
         "That login link is not valid. Use the link Pi Pocket prints when it starts, or ask someone signed in for a new invite.",
     "signin.link-expired-title": "Link expired",
+    "signin.one-time-link-expired":
+        "This one-time sign-in link was used already, or it is more than a minute old. Open Pi Pocket again from its icon in the menu bar or the notification area.",
     "signin.name-label": "Your name",
     "signin.name-placeholder": "e.g. Alex",
     "signin.owner-body":
@@ -3284,7 +3310,6 @@ export const EN = Object.freeze({
     "builtin.module.guard.title": "Lancet Guard",
     "builtin.module.codemode.title": "Codemode",
     "builtin.module.pip.title": "PiP",
-    "builtin.module.zh-cn.title": "Zh cn",
     "builtin.module.prompt.summary":
         "Who the agent is, how to behave on a phone-sized screen, where Pi Pocket's documentation is, the project's AGENTS.md files, Pi's skills, and the working directory.",
     "builtin.module.artifacts.summary":
@@ -3327,8 +3352,6 @@ export const EN = Object.freeze({
     "builtin.module.design.summary": "A canvas beside the chat for interactive designs.",
     "builtin.module.tool-search.summary":
         "Tool search keeps tools that few conversations use out of every request until Pi asks for them.",
-    "builtin.module.zh-cn.summary":
-        "Simplified Chinese UI text, selected in Appearance and removed when this module is off.",
     "builtin.command.copy-0": "Summarize older messages to free up context",
     "builtin.command.copy-1": "[what to keep]",
     "builtin.command.copy-2": "Start a new context: Pi starts fresh, history stays",

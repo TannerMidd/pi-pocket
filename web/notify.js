@@ -145,6 +145,13 @@ const KINDS = [
         "when a run waits more than ten minutes for a provider's limit to clear",
     ],
     [
+        "stalled",
+        "web.notify.kinds.stalled.title",
+        "Stalled work",
+        "web.notify.kinds.stalled.hint",
+        "when a subagent or linked session makes no progress past its hard limit",
+    ],
+    [
         "mention",
         "web.notify.kinds.mention.title",
         "Mentions",

@@ -1,4 +1,4 @@
-// Reproduce the independent review's actual display paths with the built-in pack and isolated desktop data.
+// Reproduce the independent review's display paths with the external pack and isolated desktop data.
 import {
     type App,
     cleanUp,
@@ -21,6 +21,11 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import {
+    chinesePackOptions,
+    chinesePackPath,
+    enableExternalChinese,
+} from "./external-chinese-pack.ts";
 
 const evidence = process.env.PI_POCKET_LOCALE_RESIDUAL_EVIDENCE_DIR;
 const previousHome = process.env.HOME;
@@ -35,6 +40,10 @@ let guestToken = "";
 let nextPage = 0;
 
 before(async () => {
+    if (chinesePackPath === undefined) {
+        return;
+    }
+
     assert.ok(findBrowser(), "Chromium is required for the residual display regressions");
     // Only this test process reads the temporary desktop fixture. No actual desktop settings are changed.
     process.env.HOME = home;
@@ -54,6 +63,7 @@ before(async () => {
         { reasoning: true },
     );
     app = await openApp(model, join(root, "locale-residuals"));
+    await enableExternalChinese(app);
     session = await newSession(app);
     await app.commands.configure(session, owner(app), { thinkingLevel: "high" });
     guestToken = app.config.addUser("Owner", "guest").token;
@@ -126,7 +136,7 @@ async function open(viewport: "mobile" | "desktop") {
     await see(
         page,
         `(await import('/ui-locale.js')).languages().some(each=>each.id==='zh-CN')`,
-        "the default Chinese pack",
+        "the external Chinese pack",
     );
     await language(page, "zh-CN");
     assert.equal(
@@ -189,176 +199,194 @@ async function desktopItem(page: BrowserPage) {
 }
 
 for (const viewport of ["mobile", "desktop"] as const) {
-    test(`residual ${viewport}: launcher translates the desktop category but keeps the theme name`, async () => {
-        const page = await open(viewport);
+    test(
+        `residual ${viewport}: launcher translates the desktop category but keeps the theme name`,
+        chinesePackOptions,
+        async () => {
+            const page = await open(viewport);
 
-        try {
-            const actual = await desktopItem(page);
+            try {
+                const actual = await desktopItem(page);
 
-            await capture(page, `${viewport}-desktop-name`, actual);
-            assert.ok(actual.includes("桌面 · nyxuri"), actual);
-            assert.ok(!actual.includes("Desktop ·"), actual);
-            await language(page, "en");
-            await see(
-                page,
-                `document.querySelector('.launcher')?.textContent.includes('Desktop · nyxuri')`,
-                "English launcher fallback",
-            );
-            await language(page, "zh-CN");
-            await see(
-                page,
-                `document.querySelector('.launcher')?.textContent.includes('桌面 · nyxuri')`,
-                "launcher updates without refresh",
-            );
-            await page.navigate(`${base}/s/${session}`);
-            await see(
-                page,
-                `document.querySelector('.composer textarea') && document.documentElement.lang==='zh-CN'`,
-                "Chinese preference survives refresh",
-            );
-            assert.ok((await desktopItem(page)).includes("桌面 · nyxuri"));
-        } finally {
-            page.close();
-        }
-    });
-
-    test(`residual ${viewport}: session notice uses the visible thinking-level label`, async () => {
-        const page = await open(viewport);
-
-        try {
-            await page.evaluate(
-                `const parsed=(await import('/commands.js')).parseCommand('/session'); parsed.command.run(parsed.arg);`,
-            );
-            await see(
-                page,
-                `document.querySelector('.notice-text')?.textContent.includes('faux-1')`,
-                "the real session notice",
-            );
-            const actual = await value<string>(
-                page,
-                "return document.querySelector('.notice-text').textContent",
-            );
-
-            await capture(page, `${viewport}-session-level`, actual);
-            assert.ok(actual.includes("faux-1 (高)"), actual);
-            assert.ok(!actual.includes("(high)"), actual);
-            assert.ok(actual.includes("上下文"), actual);
-            assert.equal(
-                await value<string>(
+                await capture(page, `${viewport}-desktop-name`, actual);
+                assert.ok(actual.includes("桌面 · nyxuri"), actual);
+                assert.ok(!actual.includes("Desktop ·"), actual);
+                await language(page, "en");
+                await see(
                     page,
-                    "return (await import('/store.js')).store.state.view.agent.thinkingLevel",
-                ),
-                "high",
-                "the saved level identifier does not change",
-            );
-            await language(page, "en");
-            await page.evaluate(
-                `const parsed=(await import('/commands.js')).parseCommand('/session'); parsed.command.run(parsed.arg);`,
-            );
-            await see(
-                page,
-                `[...document.querySelectorAll('.notice-text')].some(e=>e.textContent.includes('faux-1 (high)'))`,
-                "English session fallback",
-            );
-        } finally {
-            page.close();
-        }
-    });
+                    `document.querySelector('.launcher')?.textContent.includes('Desktop · nyxuri')`,
+                    "English launcher fallback",
+                );
+                await language(page, "zh-CN");
+                await see(
+                    page,
+                    `document.querySelector('.launcher')?.textContent.includes('桌面 · nyxuri')`,
+                    "launcher updates without refresh",
+                );
+                await page.navigate(`${base}/s/${session}`);
+                await see(
+                    page,
+                    `document.querySelector('.composer textarea') && document.documentElement.lang==='zh-CN'`,
+                    "Chinese preference survives refresh",
+                );
+                assert.ok((await desktopItem(page)).includes("桌面 · nyxuri"));
+            } finally {
+                page.close();
+            }
+        },
+    );
+
+    test(
+        `residual ${viewport}: session notice uses the visible thinking-level label`,
+        chinesePackOptions,
+        async () => {
+            const page = await open(viewport);
+
+            try {
+                await page.evaluate(
+                    `const parsed=(await import('/commands.js')).parseCommand('/session'); parsed.command.run(parsed.arg);`,
+                );
+                await see(
+                    page,
+                    `document.querySelector('.notice-text')?.textContent.includes('faux-1')`,
+                    "the real session notice",
+                );
+                const actual = await value<string>(
+                    page,
+                    "return document.querySelector('.notice-text').textContent",
+                );
+
+                await capture(page, `${viewport}-session-level`, actual);
+                assert.ok(actual.includes("faux-1 (高)"), actual);
+                assert.ok(!actual.includes("(high)"), actual);
+                assert.ok(actual.includes("上下文"), actual);
+                assert.equal(
+                    await value<string>(
+                        page,
+                        "return (await import('/store.js')).store.state.view.agent.thinkingLevel",
+                    ),
+                    "high",
+                    "the saved level identifier does not change",
+                );
+                await language(page, "en");
+                await page.evaluate(
+                    `const parsed=(await import('/commands.js')).parseCommand('/session'); parsed.command.run(parsed.arg);`,
+                );
+                await see(
+                    page,
+                    `[...document.querySelectorAll('.notice-text')].some(e=>e.textContent.includes('faux-1 (high)'))`,
+                    "English session fallback",
+                );
+            } finally {
+                page.close();
+            }
+        },
+    );
 
     for (const [file, title] of [
         ["memory.ts", "记忆"],
         ["updates.ts", "Pi Pocket 更新"],
     ] as const) {
-        test(`residual ${viewport}: ${file} summary translates its fixed owner role`, async () => {
-            const page = await open(viewport);
+        test(
+            `residual ${viewport}: ${file} summary translates its fixed owner role`,
+            chinesePackOptions,
+            async () => {
+                const page = await open(viewport);
+
+                try {
+                    await page.evaluate(
+                        `(await import('/store.js')).openSheet({type:'extensions'})`,
+                    );
+                    await see(
+                        page,
+                        `document.querySelector('.ext-row-title')`,
+                        "actual built-in metadata rows",
+                    );
+                    const actual = await value<string>(
+                        page,
+                        `const row=[...document.querySelectorAll('.ext-row')].find(e=>e.querySelector('.ext-row-title')?.textContent.trim()===${JSON.stringify(title)}); if(!row)throw new Error('No module row'); row.scrollIntoView({block:'center'}); return row.querySelector('.ext-row-desc').textContent;`,
+                    );
+
+                    await capture(page, `${viewport}-${file}-summary`, actual);
+                    assert.ok(actual.includes("所有者"), actual);
+                    assert.ok(!actual.includes("Owner"), actual);
+                    assert.equal(
+                        await value<string>(
+                            page,
+                            "return (await import('/store.js')).store.state.me.name",
+                        ),
+                        "Owner",
+                    );
+                    const module = (
+                        await app.extensions(app.config.userByToken(guestToken)!)
+                    ).modules.find((each) => each.file === file)!;
+
+                    assert.equal(module.file, file, "module identifiers do not change");
+                    await language(page, "en");
+                    await see(
+                        page,
+                        `[...document.querySelectorAll('.ext-row')].some(e=>e.querySelector('.ext-row-desc')?.textContent===${JSON.stringify(module.summary)})`,
+                        "original English module summary",
+                    );
+                } finally {
+                    page.close();
+                }
+            },
+        );
+    }
+
+    test(
+        `residual ${viewport}: PiP uses the same visible thinking-level label`,
+        chinesePackOptions,
+        async () => {
+            const pip = await app.pip.ensure(owner(app));
+
+            await app.commands.configure(pip, owner(app), {
+                model: { provider: "faux", modelId: "faux-1" },
+                thinkingLevel: "high",
+            });
+            const page = await browsers.open(++nextPage);
 
             try {
-                await page.evaluate(`(await import('/store.js')).openSheet({type:'extensions'})`);
+                await page.setViewport(VIEWPORTS[viewport]);
+                await page.navigate(
+                    `${base}/login?token=${encodeURIComponent(app.config.ownerToken)}&next=/s/${session}`,
+                );
                 await see(
                     page,
-                    `document.querySelector('.ext-row-title')`,
-                    "actual built-in metadata rows",
+                    `(await import('/store.js')).store.state.me?.role==='owner' && document.querySelector('.composer textarea')`,
+                    "the isolated owner session",
+                );
+                await language(page, "zh-CN");
+                await page.evaluate(`(await import('/pip.js')).openPip()`);
+                await see(
+                    page,
+                    `document.querySelector('.pip-model .model-level')?.textContent === '高'`,
+                    "PiP translated level",
                 );
                 const actual = await value<string>(
                     page,
-                    `const row=[...document.querySelectorAll('.ext-row')].find(e=>e.querySelector('.ext-row-title')?.textContent.trim()===${JSON.stringify(title)}); if(!row)throw new Error('No module row'); row.scrollIntoView({block:'center'}); return row.querySelector('.ext-row-desc').textContent;`,
+                    "return document.querySelector('.pip-model').textContent.replace(/\\s+/g,' ').trim()",
                 );
 
-                await capture(page, `${viewport}-${file}-summary`, actual);
-                assert.ok(actual.includes("所有者"), actual);
-                assert.ok(!actual.includes("Owner"), actual);
+                await capture(page, `${viewport}-pip-level`, actual);
+                assert.ok(actual.includes("高"), actual);
                 assert.equal(
                     await value<string>(
                         page,
-                        "return (await import('/store.js')).store.state.me.name",
+                        "return (await import('/store.js')).store.state.pipView.agent.thinkingLevel",
                     ),
-                    "Owner",
+                    "high",
                 );
-                const module = (
-                    await app.extensions(app.config.userByToken(guestToken)!)
-                ).modules.find((each) => each.file === file)!;
-
-                assert.equal(module.file, file, "module identifiers do not change");
                 await language(page, "en");
                 await see(
                     page,
-                    `[...document.querySelectorAll('.ext-row')].some(e=>e.querySelector('.ext-row-desc')?.textContent===${JSON.stringify(module.summary)})`,
-                    "original English module summary",
+                    `document.querySelector('.pip-model .model-level')?.textContent === 'high'`,
+                    "PiP English fallback",
                 );
             } finally {
                 page.close();
             }
-        });
-    }
-
-    test(`residual ${viewport}: PiP uses the same visible thinking-level label`, async () => {
-        const pip = await app.pip.ensure(owner(app));
-
-        await app.commands.configure(pip, owner(app), {
-            model: { provider: "faux", modelId: "faux-1" },
-            thinkingLevel: "high",
-        });
-        const page = await browsers.open(++nextPage);
-
-        try {
-            await page.setViewport(VIEWPORTS[viewport]);
-            await page.navigate(
-                `${base}/login?token=${encodeURIComponent(app.config.ownerToken)}&next=/s/${session}`,
-            );
-            await see(
-                page,
-                `(await import('/store.js')).store.state.me?.role==='owner' && document.querySelector('.composer textarea')`,
-                "the isolated owner session",
-            );
-            await language(page, "zh-CN");
-            await page.evaluate(`(await import('/pip.js')).openPip()`);
-            await see(
-                page,
-                `document.querySelector('.pip-model .model-level')?.textContent === '高'`,
-                "PiP translated level",
-            );
-            const actual = await value<string>(
-                page,
-                "return document.querySelector('.pip-model').textContent.replace(/\\s+/g,' ').trim()",
-            );
-
-            await capture(page, `${viewport}-pip-level`, actual);
-            assert.ok(actual.includes("高"), actual);
-            assert.equal(
-                await value<string>(
-                    page,
-                    "return (await import('/store.js')).store.state.pipView.agent.thinkingLevel",
-                ),
-                "high",
-            );
-            await language(page, "en");
-            await see(
-                page,
-                `document.querySelector('.pip-model .model-level')?.textContent === 'high'`,
-                "PiP English fallback",
-            );
-        } finally {
-            page.close();
-        }
-    });
+        },
+    );
 }

@@ -78,6 +78,15 @@ export interface ToolJudgement {
 const SHELL_TOOLS = new Set(["bash", "background"]);
 const FILE_TOOLS = new Set(["write", "edit"]);
 
+/** What a call is about, for the block's message: its command, or its tool and path. */
+function subjectOf(tool: string, args: Record<string, unknown>): string {
+    if (typeof args.command === "string") {
+        return args.command;
+    }
+
+    return typeof args.path === "string" ? `${tool} ${args.path}` : tool;
+}
+
 export class LancetGuard {
     readonly directory: string | undefined;
     readonly settingsFile = join(homedir(), ".pi", "lancet-guard.json");
@@ -89,6 +98,15 @@ export class LancetGuard {
     #failure: string | undefined;
     readonly #abort = new AbortController();
     readonly #verdicts = new Map<string, Awaited<ReturnType<Scorer>>>();
+
+    /**
+     * Core's rule, judged before the guard's own (`secrets.ts`): why a call would read a file that holds Pi Pocket's
+     * secrets, or undefined. It needs neither the guard's package nor its model, so it blocks while the Lancet Guard
+     * module is on, whatever the package, its settings file, or PI_POCKET_GUARD say.
+     */
+    protect:
+        | ((tool: string, args: Record<string, unknown>, cwd: string) => string | undefined)
+        | undefined;
 
     /** True when PI_POCKET_GUARD=off turned the guard off for this process. */
     readonly disabled = process.env.PI_POCKET_GUARD === "off";
@@ -350,6 +368,20 @@ export class LancetGuard {
         // A background task's command is judged as bash's is; reading or stopping one runs nothing.
         if (tool === "background" && args.action !== "start") {
             return undefined;
+        }
+
+        const secret = this.protect?.(tool, args, cwd);
+
+        if (secret !== undefined) {
+            return {
+                subject: subjectOf(tool, args),
+                decision: {
+                    action: "block",
+                    source: "secret-files",
+                    reason: `it would read a file Pi Pocket keeps secrets in (${secret})`,
+                    terminate: false,
+                },
+            };
         }
 
         if (!SHELL_TOOLS.has(tool) && !FILE_TOOLS.has(tool)) {

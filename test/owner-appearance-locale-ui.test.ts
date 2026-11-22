@@ -1,4 +1,4 @@
-// Owner-only appearance hints use the default language pack; all settings and themes are temporary.
+// Owner-only appearance hints use the external language pack; all settings and themes are temporary.
 import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -11,6 +11,11 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import {
+    chinesePackOptions,
+    chinesePackPath,
+    enableExternalChinese,
+} from "./external-chinese-pack.ts";
 
 const evidence = process.env.PI_POCKET_OWNER_HINTS_EVIDENCE_DIR;
 const results: unknown[] = [];
@@ -22,8 +27,13 @@ let session: ConversationId;
 let nextPage = 0;
 
 before(async () => {
+    if (chinesePackPath === undefined) {
+        return;
+    }
+
     assert.ok(findBrowser(), "Chromium is required for owner appearance acceptance");
     app = await openApp(scriptedModel(), join(root, "owner-hints"));
+    await enableExternalChinese(app);
     session = await newSession(app);
     const theme = join(app.dataDir, "themes", "owner-example");
 
@@ -137,208 +147,223 @@ async function capture(page: BrowserPage, name: string, selector: string) {
 
 for (const viewport of ["mobile", "desktop"] as const) {
     for (const theme of ["Pocket", "Lantern"]) {
-        test(`owner ${viewport}: ${theme} built-in font hint uses Chinese and survives switch and refresh`, async () => {
+        test(
+            `owner ${viewport}: ${theme} built-in font hint uses Chinese and survives switch and refresh`,
+            chinesePackOptions,
+            async () => {
+                const page = await open(viewport);
+
+                try {
+                    await choose(page, theme);
+                    const actual = await capture(page, `${viewport}-${theme}-fonts`, ".font-tools");
+
+                    assert.ok(
+                        actual.text.includes(`${theme} 随应用提供，字体保持原样。`),
+                        actual.text,
+                    );
+                    assert.ok(!actual.text.includes("comes with the app"), actual.text);
+
+                    for (const label of ["正文字体", "代码字体", "连字"]) {
+                        assert.ok(actual.text.includes(label), label);
+                    }
+
+                    assert.ok(actual.aria.includes(`${theme} 的字体`));
+                    await page.evaluate(`document.querySelector('.font-duplicate button').click()`);
+                    await see(
+                        page,
+                        `document.querySelector('.font-duplicate .look-duplicate input')`,
+                        "font-copy naming branch",
+                    );
+                    assert.equal(
+                        await value<string>(
+                            page,
+                            "return document.querySelector('.font-duplicate .look-duplicate input').value",
+                        ),
+                        `我的 ${theme}`,
+                    );
+                    await capture(page, `${viewport}-${theme}-font-duplicate`, ".font-duplicate");
+                    await page.evaluate(
+                        `document.querySelector('.font-duplicate .look-duplicate button[type=button]').click()`,
+                    );
+                    await see(
+                        page,
+                        `!document.querySelector('.font-duplicate input')`,
+                        "font-copy hint restored",
+                    );
+                    await page.evaluate(`(await import('/ui-locale.js')).setLocale('en')`);
+                    await see(
+                        page,
+                        `document.querySelector('.font-tools')?.textContent.includes(${JSON.stringify(`${theme} comes with the app: its fonts stay as they are.`)})`,
+                        "English hint fallback",
+                    );
+                    await page.evaluate(`(await import('/ui-locale.js')).setLocale('zh-CN')`);
+                    await see(
+                        page,
+                        `document.querySelector('.font-tools')?.textContent.includes('字体保持原样')`,
+                        "live language switch",
+                    );
+                    await page.navigate(`${base}/s/${session}`);
+                    await see(
+                        page,
+                        `document.documentElement.lang==='zh-CN'&&document.querySelector('.composer textarea')`,
+                        "refresh retains language",
+                    );
+                    await page.evaluate(
+                        `(await import('/store.js')).openSheet({type:'appearance'})`,
+                    );
+                    await see(
+                        page,
+                        `document.querySelector('.font-tools')?.textContent.includes(${JSON.stringify(`${theme} 随应用提供，字体保持原样。`)})`,
+                        "same theme branch after refresh",
+                    );
+                } finally {
+                    page.close();
+                }
+            },
+        );
+    }
+
+    test(
+        `owner ${viewport}: custom fonts, copy controls and default hints use Chinese without changing theme data`,
+        chinesePackOptions,
+        async () => {
             const page = await open(viewport);
 
             try {
-                await choose(page, theme);
-                const actual = await capture(page, `${viewport}-${theme}-fonts`, ".font-tools");
+                await choose(page, "Owner example");
+                const custom = await capture(page, `${viewport}-custom-fonts`, ".font-tools");
 
-                assert.ok(actual.text.includes(`${theme} 随应用提供，字体保持原样。`), actual.text);
-                assert.ok(!actual.text.includes("comes with the app"), actual.text);
+                assert.ok(custom.text.includes("正文字体") && custom.text.includes("代码字体"));
+                assert.ok(
+                    !custom.text.includes("随应用提供"),
+                    "custom themes do not show the built-in-only hint",
+                );
+                assert.ok(
+                    (
+                        await value<string>(
+                            page,
+                            "return document.querySelector('[data-sheet=appearance]').textContent",
+                        )
+                    ).includes("My theme description stays literal"),
+                );
+                await page.evaluate(
+                    `const select=document.querySelector('.font-tools select');select.value='system-ui';select.dispatchEvent(new Event('change',{bubbles:true}));`,
+                );
+                await see(
+                    page,
+                    `document.querySelector('.font-tools select')?.value==='system-ui'`,
+                    "the real saved font value",
+                );
+                assert.ok(
+                    (
+                        await value<string>(
+                            page,
+                            "return document.querySelector('.font-tools').textContent",
+                        )
+                    ).includes("系统无衬线字体"),
+                );
+                await page.evaluate(
+                    `document.querySelector('.font-ligatures [role=switch]').click()`,
+                );
+                await page.evaluate(
+                    `document.querySelector('.font-ligatures button:not([role=switch])').click()`,
+                );
+                const all = await capture(
+                    page,
+                    `${viewport}-custom-appearance`,
+                    "[data-sheet=appearance]",
+                );
 
-                for (const label of ["正文字体", "代码字体", "连字"]) {
-                    assert.ok(actual.text.includes(label), label);
+                for (const text of [
+                    "Edit with Pi",
+                    "Remove",
+                    "For new browsers:",
+                    "New browsers start with",
+                ]) {
+                    assert.ok(!all.text.includes(text), text);
                 }
 
-                assert.ok(actual.aria.includes(`${theme} 的字体`));
-                await page.evaluate(`document.querySelector('.font-duplicate button').click()`);
+                await value(
+                    page,
+                    `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.includes('用于新浏览器')||e.textContent.includes('供新浏览器')||e.textContent.includes('新浏览器'));button.click();return true;`,
+                );
                 await see(
                     page,
-                    `document.querySelector('.font-duplicate .look-duplicate input')`,
-                    "font-copy naming branch",
+                    `document.querySelector('[data-sheet=appearance]')?.textContent.includes('新浏览器使用：')`,
+                    "explicit default branch",
                 );
-                assert.equal(
-                    await value<string>(
-                        page,
-                        "return document.querySelector('.font-duplicate .look-duplicate input').value",
-                    ),
-                    `我的 ${theme}`,
+                await capture(page, `${viewport}-default-current`, "[data-sheet=appearance]");
+                await value(
+                    page,
+                    `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='重置');button.click();return true;`,
                 );
-                await capture(page, `${viewport}-${theme}-font-duplicate`, ".font-duplicate");
+                await see(
+                    page,
+                    `!([...document.querySelectorAll('.look-tools button')].some(e=>e.textContent.trim()==='重置'))`,
+                    "default reset branch",
+                );
+                await choose(page, "Pocket");
+                await value(
+                    page,
+                    `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='创建副本');button.click();return true;`,
+                );
+                await see(
+                    page,
+                    `document.querySelector('form.look-duplicate')`,
+                    "theme-copy naming branch",
+                );
+                await capture(page, `${viewport}-theme-copy`, "form.look-duplicate");
+                const madeName = `Copied ${viewport} Pocket`;
+
                 await page.evaluate(
-                    `document.querySelector('.font-duplicate .look-duplicate button[type=button]').click()`,
+                    `const input=document.querySelector('form.look-duplicate input');input.value=${JSON.stringify(madeName)};input.dispatchEvent(new Event('input',{bubbles:true}));`,
+                );
+                await page.evaluate(
+                    `document.querySelector('form.look-duplicate button[type=submit], form.look-duplicate button:not([type])').click()`,
                 );
                 await see(
                     page,
-                    `!document.querySelector('.font-duplicate input')`,
-                    "font-copy hint restored",
+                    `document.querySelector('.font-title')?.textContent.includes(${JSON.stringify(madeName)})`,
+                    "a real theme copy is selected",
                 );
-                await page.evaluate(`(await import('/ui-locale.js')).setLocale('en')`);
                 await see(
                     page,
-                    `document.querySelector('.font-tools')?.textContent.includes(${JSON.stringify(`${theme} comes with the app: its fonts stay as they are.`)})`,
-                    "English hint fallback",
+                    `document.querySelector('.notice-text')?.textContent.includes('已创建')`,
+                    "translated creation notice",
                 );
-                await page.evaluate(`(await import('/ui-locale.js')).setLocale('zh-CN')`);
+                await capture(page, `${viewport}-copy-created`, "[data-sheet=appearance]");
+                await value(
+                    page,
+                    `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='移除');button.click();return true;`,
+                );
                 await see(
                     page,
-                    `document.querySelector('.font-tools')?.textContent.includes('字体保持原样')`,
-                    "live language switch",
+                    `document.querySelector('.font-title')?.textContent.includes('Pocket') && !document.querySelector('.font-title')?.textContent.includes('Copied')`,
+                    "temporary copied theme removed",
                 );
-                await page.navigate(`${base}/s/${session}`);
+                assert.ok(
+                    page
+                        .logs()
+                        .some(
+                            (entry) =>
+                                entry.level === "dialog" &&
+                                entry.text.includes(`移除主题“${madeName}”`),
+                        ),
+                    "the actual removal confirmation is Chinese",
+                );
+                await value(
+                    page,
+                    `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.includes('创建配色副本'));button.click();return true;`,
+                );
                 await see(
                     page,
-                    `document.documentElement.lang==='zh-CN'&&document.querySelector('.composer textarea')`,
-                    "refresh retains language",
+                    `document.querySelector('form.look-duplicate')`,
+                    "color-copy naming branch",
                 );
-                await page.evaluate(`(await import('/store.js')).openSheet({type:'appearance'})`);
-                await see(
-                    page,
-                    `document.querySelector('.font-tools')?.textContent.includes(${JSON.stringify(`${theme} 随应用提供，字体保持原样。`)})`,
-                    "same theme branch after refresh",
-                );
+                await capture(page, `${viewport}-colors-copy`, "form.look-duplicate");
             } finally {
                 page.close();
             }
-        });
-    }
-
-    test(`owner ${viewport}: custom fonts, copy controls and default hints use Chinese without changing theme data`, async () => {
-        const page = await open(viewport);
-
-        try {
-            await choose(page, "Owner example");
-            const custom = await capture(page, `${viewport}-custom-fonts`, ".font-tools");
-
-            assert.ok(custom.text.includes("正文字体") && custom.text.includes("代码字体"));
-            assert.ok(
-                !custom.text.includes("随应用提供"),
-                "custom themes do not show the built-in-only hint",
-            );
-            assert.ok(
-                (
-                    await value<string>(
-                        page,
-                        "return document.querySelector('[data-sheet=appearance]').textContent",
-                    )
-                ).includes("My theme description stays literal"),
-            );
-            await page.evaluate(
-                `const select=document.querySelector('.font-tools select');select.value='system-ui';select.dispatchEvent(new Event('change',{bubbles:true}));`,
-            );
-            await see(
-                page,
-                `document.querySelector('.font-tools select')?.value==='system-ui'`,
-                "the real saved font value",
-            );
-            assert.ok(
-                (
-                    await value<string>(
-                        page,
-                        "return document.querySelector('.font-tools').textContent",
-                    )
-                ).includes("系统无衬线字体"),
-            );
-            await page.evaluate(`document.querySelector('.font-ligatures [role=switch]').click()`);
-            await page.evaluate(
-                `document.querySelector('.font-ligatures button:not([role=switch])').click()`,
-            );
-            const all = await capture(
-                page,
-                `${viewport}-custom-appearance`,
-                "[data-sheet=appearance]",
-            );
-
-            for (const text of [
-                "Edit with Pi",
-                "Remove",
-                "For new browsers:",
-                "New browsers start with",
-            ]) {
-                assert.ok(!all.text.includes(text), text);
-            }
-
-            await value(
-                page,
-                `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.includes('用于新浏览器')||e.textContent.includes('供新浏览器')||e.textContent.includes('新浏览器'));button.click();return true;`,
-            );
-            await see(
-                page,
-                `document.querySelector('[data-sheet=appearance]')?.textContent.includes('新浏览器使用：')`,
-                "explicit default branch",
-            );
-            await capture(page, `${viewport}-default-current`, "[data-sheet=appearance]");
-            await value(
-                page,
-                `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='重置');button.click();return true;`,
-            );
-            await see(
-                page,
-                `!([...document.querySelectorAll('.look-tools button')].some(e=>e.textContent.trim()==='重置'))`,
-                "default reset branch",
-            );
-            await choose(page, "Pocket");
-            await value(
-                page,
-                `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='创建副本');button.click();return true;`,
-            );
-            await see(
-                page,
-                `document.querySelector('form.look-duplicate')`,
-                "theme-copy naming branch",
-            );
-            await capture(page, `${viewport}-theme-copy`, "form.look-duplicate");
-            const madeName = `Copied ${viewport} Pocket`;
-
-            await page.evaluate(
-                `const input=document.querySelector('form.look-duplicate input');input.value=${JSON.stringify(madeName)};input.dispatchEvent(new Event('input',{bubbles:true}));`,
-            );
-            await page.evaluate(
-                `document.querySelector('form.look-duplicate button[type=submit], form.look-duplicate button:not([type])').click()`,
-            );
-            await see(
-                page,
-                `document.querySelector('.font-title')?.textContent.includes(${JSON.stringify(madeName)})`,
-                "a real theme copy is selected",
-            );
-            await see(
-                page,
-                `document.querySelector('.notice-text')?.textContent.includes('已创建')`,
-                "translated creation notice",
-            );
-            await capture(page, `${viewport}-copy-created`, "[data-sheet=appearance]");
-            await value(
-                page,
-                `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.trim()==='移除');button.click();return true;`,
-            );
-            await see(
-                page,
-                `document.querySelector('.font-title')?.textContent.includes('Pocket') && !document.querySelector('.font-title')?.textContent.includes('Copied')`,
-                "temporary copied theme removed",
-            );
-            assert.ok(
-                page
-                    .logs()
-                    .some(
-                        (entry) =>
-                            entry.level === "dialog" &&
-                            entry.text.includes(`移除主题“${madeName}”`),
-                    ),
-                "the actual removal confirmation is Chinese",
-            );
-            await value(
-                page,
-                `const button=[...document.querySelectorAll('.look-tools button')].find(e=>e.textContent.includes('创建配色副本'));button.click();return true;`,
-            );
-            await see(
-                page,
-                `document.querySelector('form.look-duplicate')`,
-                "color-copy naming branch",
-            );
-            await capture(page, `${viewport}-colors-copy`, "form.look-duplicate");
-        } finally {
-            page.close();
-        }
-    });
+        },
+    );
 }

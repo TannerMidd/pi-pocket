@@ -1,0 +1,123 @@
+# Builds the Windows installer (packaging/windows) for each published release, and attaches
+# Pi-Pocket-Setup-<version>.exe and its SHA256 to the release. It runs beside publish.yml and does not wait for it: a
+# failure here does not stop or change the npm publish. Setup holds the package of the release tag with its dependencies
+# (packaging/bundle-app.mjs packs the tag here), so it needs neither npm nor the npm release when it runs.
+#
+# A run by hand builds the installer for an existing tag (gh workflow run windows-installer.yml -f tag=v0.29.0) from
+# the branch it runs on, as a workflow artifact only: it attaches nothing to the release.
+#
+# Signing is optional, and only for a release. Without the secrets the installer is unsigned, and Windows SmartScreen
+# warns about it. With them, Setup and its uninstaller are signed. Keep them as secrets of the windows-signing
+# environment (Settings → Environments), with deployment tags limited to v* and a required reviewer, not as
+# repository secrets, which any branch's workflow can read:
+# - WINDOWS_SIGNING_CERTIFICATE: the code-signing certificate as a base64 PFX file;
+# - WINDOWS_SIGNING_PASSWORD: its password.
+name: Windows installer
+
+on:
+    release:
+        types: [published]
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Release tag to build the installer for, such as v0.29.0"
+                required: true
+
+permissions:
+    contents: read
+
+concurrency:
+    group: windows-installer-${{ github.event.release.tag_name || inputs.tag }}
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: windows-latest
+        timeout-minutes: 30
+        # A release build uses the environment's signing secrets: limit it to v* tags and give it a reviewer.
+        environment: ${{ github.event_name == 'release' && 'windows-signing' || '' }}
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Read the version from the tag
+              id: version
+              shell: bash
+              env:
+                  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+              run: |
+                  if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                      echo "Tag $TAG is not a version tag such as v0.29.0"
+                      exit 1
+                  fi
+                  git fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+                  version="$(git show "refs/tags/$TAG:package.json" | node -e 'let t="";process.stdin.on("data",c=>t+=c).on("end",()=>console.log(JSON.parse(t).version))')"
+                  if [ "v$version" != "$TAG" ]; then
+                      echo "Tag $TAG does not match its package.json version $version"
+                      exit 1
+                  fi
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  # The package to bundle is the tag's, also for a run by hand on another branch.
+                  git worktree add --detach "$RUNNER_TEMP/source" "refs/tags/$TAG"
+
+            # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
+            - name: Build the installer
+              shell: pwsh
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+                  CERTIFICATE: ${{ github.event_name == 'release' && secrets.WINDOWS_SIGNING_CERTIFICATE || '' }}
+                  PASSWORD: ${{ github.event_name == 'release' && secrets.WINDOWS_SIGNING_PASSWORD || '' }}
+              run: |
+                  $out = Join-Path $env:RUNNER_TEMP "setup"
+                  $thumbprint = ""
+                  try {
+                      if ($env:CERTIFICATE) {
+                          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+                          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE))
+                          try {
+                              $password = ConvertTo-SecureString $env:PASSWORD -AsPlainText -Force
+                              $thumbprint = (Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password).Thumbprint
+                          } finally {
+                              Remove-Item -Force $pfx
+                          }
+                      } else {
+                          Write-Host "No signing secrets: the installer is unsigned."
+                      }
+                      ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir $out -Source (Join-Path $env:RUNNER_TEMP "source") -SignThumbprint $thumbprint
+                  } finally {
+                      if ($thumbprint) {
+                          Remove-Item -Force -DeleteKey "Cert:\CurrentUser\My\$thumbprint"
+                      }
+                  }
+                  $setup = Join-Path $out "Pi-Pocket-Setup-$env:VERSION.exe"
+                  $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+                  "$hash  Pi-Pocket-Setup-$env:VERSION.exe" | Set-Content -NoNewline -Encoding ascii "$setup.sha256"
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: Pi-Pocket-Setup-${{ steps.version.outputs.version }}
+                  path: ${{ runner.temp }}/setup/Pi-Pocket-Setup-*
+                  if-no-files-found: error
+                  retention-days: 14
+
+    attach:
+        needs: build
+        if: github.event_name == 'release'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: Pi-Pocket-Setup-${{ needs.build.outputs.version }}
+                  path: setup
+
+            - name: Attach the installer to the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ github.event.release.tag_name }}
+              run: gh release upload "$TAG" setup/Pi-Pocket-Setup-* --repo "$GITHUB_REPOSITORY" --clobber

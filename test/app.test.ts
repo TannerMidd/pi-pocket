@@ -89,6 +89,10 @@ const route: FauxResponseStep = (context, options) => {
         });
     }
 
+    if (text.startsWith("read the image ")) {
+        return call("read", { path: text.slice("read the image ".length) });
+    }
+
     if (text.includes("say hi please")) {
         return fauxAssistantMessage([fauxText("hi from helper")]);
     }
@@ -450,6 +454,27 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
     // Pi 1.5 sends the smaller of PNG and JPEG.
     assert.ok(["image/png", "image/jpeg"].includes(image.mimeType));
     assert.equal(heightOf(image.data), 2000, "its height, from the image's header");
+});
+
+test("read shrinks an image larger than 2000 pixels a side, not refuses it", async () => {
+    const id = await newSession();
+
+    await app.commands.configure(id, owner(), {
+        model: { provider: "faux", modelId: "faux-vision" },
+    });
+    const path = join(work, "wide-screenshot.png");
+
+    writeFileSync(path, greyPng(1198, 2626));
+    await say(id, `read the image ${path}`);
+    const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
+    const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
+    const { messages } = await conversation.context(BACKGROUND_CONTEXT);
+    const result = messages.findLast((message) => message.role === "toolResult")!;
+    const parts = result.content as { type: string; text?: string; data?: string }[];
+    const image = parts.find((part) => part.type === "image");
+
+    assert.ok(image, `an image, not ${JSON.stringify(parts.map((part) => part.text))}`);
+    assert.equal(heightOf(Buffer.from(image.data!, "base64")), 2000);
 });
 
 /** An image's height in pixels: from a PNG's header, or a JPEG's first frame header. */
@@ -2070,6 +2095,56 @@ test("a held message is withdrawn by its sender or the driver, and edited by its
     } finally {
         app.config.removeUser(guest.id);
     }
+});
+
+test("a held message withdrawn while the held ones are sent does not go", async () => {
+    const id = await newSession();
+
+    await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "hw-1" });
+    await until(() => app.isBusy(id), "the run to start");
+    await app.commands.submit(id, owner(), { text: "sent while held", requestId: "hw-2" });
+    await app.commands.submit(id, owner(), { text: "withdrawn while held", requestId: "hw-3" });
+    await app.commands.abort(id, owner());
+    await until(() => !app.isBusy(id), "the run to stop");
+    const [, withdrawn] = (await app.harness.snapshot(HeldDoc, id, context))!.items;
+    const snapshot = app.harness.snapshot.bind(app.harness) as (...args: unknown[]) => unknown;
+
+    let release = () => {};
+
+    const paused = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let read = false;
+    // Send reads the held list, then waits, while someone withdraws the second message.
+    const held = mock.method(app.harness, "snapshot", async (...args: unknown[]) => {
+        const found = await snapshot(...args);
+
+        if (args[0] === HeldDoc && !read) {
+            read = true;
+            await paused;
+        }
+
+        return found;
+    });
+
+    try {
+        const sending = app.commands.sendHeld(id, owner());
+
+        await until(() => read, "the held list to be read");
+        await app.commands.dropHeld(id, owner(), withdrawn!.key);
+        release();
+        assert.equal(await sending, 1);
+        await until(() => !app.isBusy(id), "its answer");
+    } finally {
+        release();
+        held.mock.restore();
+    }
+
+    const texts = (await modelTexts(app, id)).join("\n");
+
+    assert.match(texts, /sent while held/);
+    assert.doesNotMatch(texts, /withdrawn while held/);
+    assert.deepEqual((await app.harness.snapshot(HeldDoc, id, context))!.items, []);
 });
 
 test("the held messages show in the room, with who wrote them", async () => {

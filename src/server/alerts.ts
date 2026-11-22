@@ -170,7 +170,7 @@ export class Alerts {
     }
 
     /**
-     * A run began to wait a long while for its provider's limit to clear: one push to the people in its session, who may
+     * A run began a long wait before a retry: one push to the people in its session, who may
      * want to come back at the time, or stop it. When the run ends, "Pi finished" goes as always.
      */
     limitWait(conversationId: number, view: WaitView): void {
@@ -186,7 +186,7 @@ export class Alerts {
             const title = await app.conversationTitle(root);
             const who = app.sessionMeta(root)?.pip === undefined ? "" : "PiP: ";
             const message: PushMessage = {
-                title: `Waiting for a usage limit · ${who}${title}`,
+                title: `Waiting to retry · ${who}${title}`,
                 body: snippet(
                     `${view.reason}. Pi tries again in ${span(view.until - Date.now())} and goes on by itself. Open the session to try now or stop.`,
                     400,
@@ -202,6 +202,30 @@ export class Alerts {
                     void this.push(userId, root, "limit", message);
                 }
             }
+        })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
+    }
+
+    /** Work passed a hard limit: a notice in the owner's tabs, and one push to the owner, who decides what follows. */
+    ownerAlert(conversationId: ConversationId, title: string, body: string): void {
+        const app = this.#app;
+        const root = app.rootOf(conversationId);
+        const ownerId = app.config.users.find((user) => user.role === "owner")?.id;
+
+        app.ownerNotice("warning", `${title}: ${body}`);
+
+        if (ownerId === undefined || this.#quiet() || app.sessionMeta(root) === undefined) {
+            return;
+        }
+
+        void (async () => {
+            const message: PushMessage = {
+                title: `${title} · ${await app.conversationTitle(root)}`,
+                body: snippet(body, 400),
+                url: `/s/${String(root)}`,
+                tag: `stalled-${String(root)}`,
+            };
+
+            await this.push(ownerId, root, "stalled", message);
         })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
     }
 

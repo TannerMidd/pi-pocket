@@ -35,6 +35,7 @@ import { arranged, move, resetSlot, setShown, SLOTS } from "../slots.js";
 import { html, Icon, Sheet, Switch } from "../ui.js";
 import { languages, localeId, setLocale, t } from "../ui-locale.js";
 import { pipAvailable } from "../pip.js";
+import { QUOTE_STYLES, quoteStyleOf } from "../quote-box.js";
 import { galleryAvailable } from "./gallery.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
@@ -955,6 +956,26 @@ export function AppearanceSheet() {
                     onChange=${() => setPrefs({ quoteReply: !p.quoteReply })}
                 />
             <//>
+            ${
+                p.quoteReply &&
+                html`<${SettingRow}
+                    title="Quotes in the message box"
+                    detail="How a passage you reply to shows. In the box, with your words: Fade, a tint that fades out to the right; Tint, a soft block; Ghost, faded words only. Separate: each in a strip over the box, sent first"
+                >
+                    <div class="segmented">
+                        ${QUOTE_STYLES.map(
+                            ([value, label]) =>
+                                html`<button
+                                    class=${quoteStyleOf(p) === value ? "on" : ""}
+                                    aria-pressed=${quoteStyleOf(p) === value}
+                                    onClick=${() => setPrefs({ quoteStyle: value })}
+                                >
+                                    ${label}
+                                </button>`,
+                        )}
+                    </div>
+                <//>`
+            }
             ${
                 pipAvailable() &&
                 html`<${SettingRow}

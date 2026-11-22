@@ -11,6 +11,8 @@ let app: App;
 let server: Server;
 let port = 0;
 let id: ConversationId;
+/** Windows allows no quote or line break in a file name. */
+const odd = process.platform === "win32" ? undefined : 'exports/odd "name"\n.png';
 
 before(async () => {
     app = await openApp(scriptedModel());
@@ -25,7 +27,10 @@ before(async () => {
     id = await newSession(app);
     mkdirSync(join(work, "exports"), { recursive: true });
     writeFileSync(join(work, "exports", "deck-v2.pptx"), Buffer.from([0x50, 0x4b, 3, 4, 0, 255]));
-    writeFileSync(join(work, "exports", 'odd "name"\n.png'), "png");
+
+    if (odd !== undefined) {
+        writeFileSync(join(work, odd), "png");
+    }
 });
 
 after(async () => {
@@ -57,13 +62,15 @@ test("a session file downloads as it is, as an attachment that no browser runs",
     );
 
     // No quote or line break of a name gets into the header.
-    const odd = await download('exports/odd "name"\n.png');
+    if (odd !== undefined) {
+        const answer = await download(odd);
 
-    assert.equal(odd.status, 200);
-    assert.doesNotMatch(odd.headers.get("content-disposition")!, /\n|"name"/);
+        assert.equal(answer.status, 200);
+        assert.doesNotMatch(answer.headers.get("content-disposition")!, /\n|"name"/);
+    }
 });
 
-test("a download needs a sign-in, a file, and, for a viewer, a file in the session's folder", async () => {
+test("a download needs a sign-in, a file, and the right to steer", async () => {
     const anonymous = await fetch(
         `http://127.0.0.1:${port}/api/c/${id}/download?path=exports/deck-v2.pptx`,
     );
@@ -83,6 +90,6 @@ test("a download needs a sign-in, a file, and, for a viewer, a file in the sessi
 
     const viewer = app.config.addUser("Viewer", "viewer").token;
 
-    assert.equal((await download("exports/deck-v2.pptx", viewer)).status, 200);
-    assert.equal((await download(outside, viewer)).status, 404);
+    assert.equal((await download("exports/deck-v2.pptx", viewer)).status, 403);
+    assert.equal((await download(outside, viewer)).status, 403);
 });

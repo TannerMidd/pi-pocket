@@ -5,6 +5,7 @@
  *
  *   pi-pocket [--access local|lan|cloudflare|tailscale|tailscale-serve] [-y] [--port 8787] [--cwd DIR] [--data DIR]
  *   [--rotate-token]
+ *   pi-pocket --socket PATH [--cwd DIR] [--data DIR] [--rotate-token]   (behind a reverse proxy, no access mode)
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -30,6 +31,7 @@ import {
     TAILSCALE_MISSING_MESSAGE,
     tailscaleAddress,
 } from "./access.ts";
+import { RUNNING_FILE, removeRunning, writeRunning } from "./desktop.ts";
 import { fail, parseArgs } from "./options.ts";
 import { removeStaleServe, TailscaleServe } from "./serve.ts";
 // The two server modules the launcher runs itself: both import only Node's own, so an update cannot break the launcher.
@@ -132,6 +134,11 @@ function loadSettings(): { access?: AccessMode } {
 }
 
 function saveSettings(access: AccessMode): void {
+    // The desktop app's own choice (this device only, unless it says otherwise) is not the console's last choice.
+    if (options.desktop) {
+        return;
+    }
+
     try {
         writeFileSync(settingsFile, `${JSON.stringify({ access }, null, "\t")}\n`, { mode: 0o600 });
     } catch (error) {
@@ -375,7 +382,7 @@ async function ensureCloudflared(): Promise<string | undefined> {
 
 // ─── State ──────────────────────────────────────────────────────────────
 
-type Mode = AccessMode | "custom";
+type Mode = AccessMode | "custom" | "socket";
 
 const state = {
     mode: "local" as Mode,
@@ -434,6 +441,10 @@ function localUrl(): string {
 }
 
 function modeLabel(): string {
+    if (state.mode === "socket") {
+        return "Reverse proxy (Unix socket)";
+    }
+
     if (state.mode === "custom") {
         return `Listening on ${state.host}`;
     }
@@ -456,6 +467,8 @@ function modeNote(): string {
             return "devices on your tailnet";
         case "tailscale-serve":
             return state.accessUrl === undefined ? "serve not up yet" : "https on your tailnet";
+        case "socket":
+            return options.socket!;
         default:
             return "";
     }
@@ -492,7 +505,10 @@ function sendAccess(): void {
 
 // ─── The panel ──────────────────────────────────────────────────────────
 
-const KEYS_HINT = "q quit · r restart server · a access · o open here · s sign-in QR";
+const KEYS_HINT =
+    options.socket === undefined
+        ? "q quit · r restart server · a access · o open here · s sign-in QR"
+        : "q quit · r restart server · s sign-in path";
 
 async function showPanel(withQr: boolean): Promise<void> {
     const width = columns();
@@ -500,7 +516,9 @@ async function showPanel(withQr: boolean): Promise<void> {
     const lines = ["", `  ${accent("π")} ${bold("Pi Pocket")}  ${green("● running")}`, ""];
 
     lines.push(row("Access", `${modeLabel()}${modeNote() ? dim(` · ${modeNote()}`) : ""}`));
-    lines.push(row("Open", cyan(appUrl())));
+    lines.push(
+        row("Open", state.mode === "socket" ? dim("your reverse proxy's address") : cyan(appUrl())),
+    );
 
     if (state.mode === "lan") {
         for (const address of lanAddresses().slice(1)) {
@@ -516,7 +534,11 @@ async function showPanel(withQr: boolean): Promise<void> {
     const base = (reachable() ? appUrl() : localUrl()).replace(/\/+$/, "");
     const login = state.loginPath === undefined ? undefined : `${base}${state.loginPath}`;
 
-    if (login !== undefined) {
+    // No http link reaches a Unix socket, so no QR code.
+    if (state.mode === "socket" && state.loginPath !== undefined) {
+        lines.push(row("Sign in", `${state.loginPath} ${dim("at your reverse proxy's address")}`));
+        lines.push("");
+    } else if (login !== undefined) {
         if (withQr && reachable()) {
             lines.push(
                 `  ${bold("Scan to sign in on your phone.")} ${dim("It is your owner link: keep it private.")}`,
@@ -560,6 +582,14 @@ function maybeShowPanel(): void {
     }
 
     state.panelPending = false;
+
+    // No sign-in link and no QR code: what the desktop app prints goes to a log file. Its window signs in by itself.
+    if (options.desktop) {
+        log(green(`  ✓ Pi Pocket is ready at ${localUrl()}.`));
+
+        return;
+    }
+
     void showPanel(true);
 }
 
@@ -575,10 +605,9 @@ function startServer(first: boolean): void {
 
     const args = [
         SERVER,
-        "--host",
-        state.host,
-        "--port",
-        String(options.port),
+        ...(state.mode === "socket"
+            ? ["--socket", options.socket!]
+            : ["--host", state.host, "--port", String(options.port)]),
         "--cwd",
         options.cwd,
         "--data",
@@ -600,6 +629,8 @@ function startServer(first: boolean): void {
             PI_POCKET_LAUNCHER: "1",
             PI_POCKET_ROLLBACK: "1",
             PI_POCKET_NPM_ROLLBACK: "1",
+            // The socket goes as `--socket` when it is used; `--desktop` drops the variable, so the server must too.
+            PI_POCKET_SOCKET: undefined,
         },
     });
     /** This start said it was ready: a stop after that is not a new version that cannot start. */
@@ -636,6 +667,7 @@ function startServer(first: boolean): void {
 
         state.everReady = true;
         sendAccess();
+        noteRunning();
 
         if (state.panelPending) {
             maybeShowPanel();
@@ -729,6 +761,20 @@ function startServer(first: boolean): void {
             exited(1, null);
         }
     });
+}
+
+/** Say in the data folder where this launcher's server answers, for the desktop app (`desktop.ts`). */
+function noteRunning(): void {
+    try {
+        writeRunning(options.data, {
+            version: 1,
+            pid: process.pid,
+            url: state.mode === "socket" ? null : localUrl(),
+            desktop: options.desktop,
+        });
+    } catch (error) {
+        log(yellow(`  Could not write ${RUNNING_FILE}: ${(error as Error).message}`));
+    }
 }
 
 function restartServer(): void {
@@ -1000,7 +1046,7 @@ async function changeAccess(): Promise<void> {
     log("");
 
     try {
-        const current = state.mode === "custom" ? undefined : state.mode;
+        const current = state.mode === "custom" || state.mode === "socket" ? undefined : state.mode;
         const next = await pickAccess(current);
 
         if (next === undefined || next === state.mode) {
@@ -1051,11 +1097,11 @@ function onRunKey(key: string): void {
         void quit(0);
     } else if (key === "r") {
         restartServer();
-    } else if (key === "o" && state.loginPath !== undefined) {
+    } else if (key === "o" && state.loginPath !== undefined && state.mode !== "socket") {
         openInBrowser(`${localUrl()}${state.loginPath}`);
     } else if (key === "s") {
         void showPanel(true);
-    } else if (key === "a") {
+    } else if (key === "a" && state.mode !== "socket") {
         busyWithKey = true;
         void changeAccess().finally(() => {
             busyWithKey = false;
@@ -1100,8 +1146,23 @@ if (process.platform !== "win32") {
 
 process.on("exit", () => {
     restoreTerminal();
+
+    try {
+        removeRunning(options.data, process.pid);
+    } catch {
+        // The desktop app checks that the launcher it names still runs.
+    }
+
     releaseLauncherLock();
 });
+
+// The desktop app holds the other end of standard input: when it quits, or crashes, the launcher stops with it.
+if (options.desktop) {
+    process.stdin.on("error", () => {});
+    process.stdin.on("end", () => void quit(0));
+    process.stdin.on("close", () => void quit(0));
+    process.stdin.resume();
+}
 
 // ─── Start ──────────────────────────────────────────────────────────────
 
@@ -1124,6 +1185,7 @@ async function main(): Promise<void> {
     // are problems to report when serve is prepared, not reasons to refuse to launch. `--host` alone never uses serve,
     // so a saved choice is not a reason to refuse to start there either.
     if (
+        options.socket === undefined &&
         serveBailOut({
             access: options.access,
             saved: settings.access,
@@ -1135,7 +1197,7 @@ async function main(): Promise<void> {
         fail(TAILSCALE_MISSING_MESSAGE);
     }
 
-    let mode: Mode | undefined = options.access;
+    let mode: Mode | undefined = options.socket === undefined ? options.access : "socket";
 
     if (mode === undefined && options.host !== undefined) {
         mode = loopback(options.host) ? "local" : wildcard(options.host) ? "lan" : "custom";
@@ -1152,7 +1214,7 @@ async function main(): Promise<void> {
     try {
         let binary: string | undefined;
 
-        if (mode !== "custom") {
+        if (mode !== "custom" && mode !== "socket") {
             const chosen = await chooseAccess({
                 given: mode,
                 saved: settings.access,
@@ -1179,9 +1241,9 @@ async function main(): Promise<void> {
         }
 
         state.mode = mode;
-        state.host = listenHost(mode, options.host);
+        state.host = mode === "socket" ? "127.0.0.1" : listenHost(mode, options.host);
 
-        if (mode !== "custom") {
+        if (mode !== "custom" && mode !== "socket") {
             saveSettings(mode);
         }
 
@@ -1189,7 +1251,9 @@ async function main(): Promise<void> {
         // answering 502. Clear it before this run needs the port, whichever mode it starts in. Only a mount with a
         // receipt is ours: a port alone proves nothing, since 0.27's docs had owners point `tailscale serve` at
         // `--access local` themselves. Never for `tailscale-serve` itself, whose mount prepareServe() made or adopted.
-        const stalePorts = staleServePorts(mode, savedServeMountPort());
+        // On a socket no `tailscale serve` runs, not even to clear a stale mount: the node's Serve route may now be the
+        // one that reaches this socket. The receipt stays for a later start on a port.
+        const stalePorts = mode === "socket" ? [] : staleServePorts(mode, savedServeMountPort());
 
         if (stalePorts.length > 0) {
             const tailscale = findTailscale();
@@ -1226,7 +1290,9 @@ async function main(): Promise<void> {
             startTunnel(binary);
         }
 
-        onKeys(onRunKey);
+        if (!options.desktop) {
+            onKeys(onRunKey);
+        }
     } catch (error) {
         stopServe();
 

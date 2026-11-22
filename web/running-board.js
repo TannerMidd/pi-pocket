@@ -159,10 +159,10 @@ function clock(at, zone, now, { day = "auto" } = {}) {
         formatter("en-CA", { timeZone: zone, dateStyle: "short" }).format(now);
 
     if (day === "never" || (day === "auto" && sameDay)) {
-        return formatter(localeId() === "en" ? "en-GB" : localeId(), options).format(at);
+        return formatter("en-GB", options).format(at);
     }
 
-    return formatter(localeId() === "en" ? "en-GB" : localeId(), {
+    return formatter("en-GB", {
         ...options,
         ...(at - now < 6 * DAY ? { weekday: "short" } : { day: "numeric", month: "short" }),
     })
@@ -188,134 +188,7 @@ const dollars = (amount) => (amount >= 100 ? `$${amount.toFixed(0)}` : `$${amoun
 const shortPath = (path) => path?.replace(/^\/home\/[^/]+/, "~").replace(/^\/root/, "~");
 
 /** Who set a schedule up, as its sheet says: you, a person, or Pi (for someone). */
-/** Fixed server descriptions only; names, commands, and unknown extension text stay literal. */
-function taskWords(task) {
-    switch (task.kind) {
-        case "pi.generation":
-            return task.label === "writing an answer"
-                ? t("web.running-board.task.answer", "writing an answer")
-                : task.label;
-        case "pi.compaction":
-            return task.label === "compacting the context"
-                ? t("web.running-board.task.compaction", "compacting the context")
-                : task.label;
-        case "pocket.subagent-reporter":
-            return task.label === "waiting for a subagent's answer"
-                ? t("web.running-board.task.reporter", "waiting for a subagent's answer")
-                : task.label;
-        case "pocket.follow-failure":
-            return task.label === "waiting for a failed subagent to answer a message"
-                ? t(
-                      "web.running-board.task.failure",
-                      "waiting for a failed subagent to answer a message",
-                  )
-                : task.label;
-        case "pi.tool":
-            return task.label === "running a tool"
-                ? t("web.running-board.task.tool", "running a tool")
-                : task.label.startsWith("running ")
-                  ? t("web.running-board.task.tool.named", "running {value}", {
-                        value: task.label.slice("running ".length),
-                    })
-                  : task.label;
-        case "pocket.extension-command":
-            return task.label === "running an extension command"
-                ? t("web.running-board.task.command", "running an extension command")
-                : task.label.startsWith("running /")
-                  ? t("web.running-board.task.command.named", "running /{value}", {
-                        value: task.label.slice("running /".length),
-                    })
-                  : task.label;
-        case "pocket.background":
-            return task.label === "running a command in the background"
-                ? t("web.running-board.task.background", "running a command in the background")
-                : task.label.startsWith("running in the background: ")
-                  ? t(
-                        "web.running-board.task.background.named",
-                        "running in the background: {value}",
-                        { value: task.label.slice("running in the background: ".length) },
-                    )
-                  : task.label;
-        case "pocket.shell":
-            return task.label === "running a command"
-                ? t("web.running-board.task.shell", "running a command")
-                : task.label.startsWith("running ")
-                  ? t("web.running-board.task.shell.named", "running {value}", {
-                        value: task.label.slice("running ".length),
-                    })
-                  : task.label;
-        case "pocket.subagent-courier":
-            return task.label === "taking subagents' reports to Pi at its next pause"
-                ? t(
-                      "web.running-board.task.courier",
-                      "taking subagents' reports to Pi at its next pause",
-                  )
-                : task.label.startsWith("holding subagents' reports: ")
-                  ? t(
-                        "web.running-board.task.courier-held",
-                        "holding subagents' reports: {reason}",
-                        {
-                            reason: heldWords(
-                                task.label.slice("holding subagents' reports: ".length),
-                            ),
-                        },
-                    )
-                  : task.label;
-
-        case "pocket.pip-follow": {
-            if (task.label === "following a session's run") {
-                return t("web.running-board.task.follow", "following a session's run");
-            }
-
-            const prefix = "following “";
-            const suffix = "” until its run ends";
-
-            return task.label.startsWith(prefix) && task.label.endsWith(suffix)
-                ? t(
-                      "web.running-board.task.follow-named",
-                      "following “{title}” until its run ends",
-                      { title: task.label.slice(prefix.length, -suffix.length) },
-                  )
-                : task.label;
-        }
-
-        case "pocket.pr-watch": {
-            if (task.label === "watching a pull request") {
-                return t("web.running-board.task.pr", "watching a pull request");
-            }
-
-            const match = /^watching PR #(\d+) until it is merged$/.exec(task.label);
-
-            return match
-                ? t(
-                      "web.running-board.task.pr-number",
-                      "watching PR #{number} until it is merged",
-                      { number: match[1] },
-                  )
-                : task.label;
-        }
-
-        case "pocket.repo-watch": {
-            if (task.label === "watching a repository") {
-                return t("web.running-board.task.repository", "watching a repository");
-            }
-
-            const match = /^watching (.+) for (.+)$/.exec(task.label);
-
-            return match
-                ? t("web.running-board.task.repository-named", "watching {repo} for {events}", {
-                      repo: match[1],
-                      events: match[2],
-                  })
-                : task.label;
-        }
-
-        default:
-            return task.label;
-    }
-}
-
-/** Exact server limit descriptions only: unrecognized reasons stay verbatim. */
+/** Translate known server phrases only; keep unknown extension text unchanged. */
 function heldWords(reason) {
     if (reason === "they can no longer steer here") {
         return t("web.running-board.held.no-steer", "they can no longer steer here");
@@ -357,13 +230,34 @@ function heldWords(reason) {
     });
 }
 
-const TASK_WORDS = {
-    pending: () => t("web.running-board.status.pending", "pending"),
-    running: () => t("web.running-board.status.running", "running"),
-    waiting: () => t("web.running-board.status.waiting", "waiting"),
-    sleeping: () => t("web.running-board.status.sleeping", "sleeping"),
-    completing: () => t("web.running-board.status.completing", "completing"),
-};
+function taskWords(task) {
+    if (task.kind === "pi.generation" && task.label === "writing an answer") {
+        return t("web.running-board.task.answer", "writing an answer");
+    }
+
+    if (task.kind === "pi.compaction" && task.label === "compacting the context") {
+        return t("web.running-board.task.compaction", "compacting the context");
+    }
+
+    if (
+        task.kind === "pocket.subagent-reporter" &&
+        task.label === "waiting for a subagent's answer"
+    ) {
+        return t("web.running-board.task.reporter", "waiting for a subagent's answer");
+    }
+
+    if (task.kind === "pi.tool" && task.label === "running a tool") {
+        return t("web.running-board.task.tool", "running a tool");
+    }
+
+    if (task.kind === "pi.tool" && task.label.startsWith("running ")) {
+        return t("web.running-board.task.tool.named", "running {value}", {
+            value: task.label.slice(8),
+        });
+    }
+
+    return task.label;
+}
 
 function repeatWords(schedule) {
     const repeat = schedule.every;
@@ -578,6 +472,11 @@ const FILTERS = [
         label: () => t("web.running-board.filter.held", "Held"),
         keep: (row) => row.schedules.some((each) => each.held),
     },
+    {
+        key: "paused",
+        label: () => t("web.running-board.filter.paused", "Paused"),
+        keep: (row) => row.schedules.some((each) => each.paused !== undefined),
+    },
 ];
 
 export function RunningBoard() {
@@ -677,7 +576,8 @@ export function RunningBoard() {
                 (b.run?.approvals ?? 0) - (a.run?.approvals ?? 0) ||
                 Number(b.run?.busy ?? false) - Number(a.run?.busy ?? false) ||
                 (b.run?.tasks.length ?? 0) - (a.run?.tasks.length ?? 0) ||
-                (a.schedules[0]?.next ?? Infinity) - (b.schedules[0]?.next ?? Infinity),
+                (a.schedules.find((each) => each.paused === undefined)?.next ?? Infinity) -
+                    (b.schedules.find((each) => each.paused === undefined)?.next ?? Infinity),
         );
     }, [board, cwds]);
 
@@ -733,6 +633,17 @@ export function RunningBoard() {
             await reload();
         });
 
+    const pause = (schedule) =>
+        attempt(async () => {
+            const paused = schedule.paused === undefined;
+
+            await api(`c/${schedule.session}/schedules/${encodeURIComponent(schedule.id)}/pause`, {
+                paused,
+            });
+            notify("info", paused ? "Schedule paused." : "Schedule resumed.");
+            await reload();
+        });
+
     const stopTask = (task) =>
         attempt(async () => {
             if (STOPPABLE[task.kind]) {
@@ -754,7 +665,7 @@ export function RunningBoard() {
         (sum, each) => sum + each.tasks.filter((task) => task.status === "running").length,
         0,
     );
-    const next = schedules.find((each) => !each.held);
+    const next = schedules.find((each) => !each.held && each.paused === undefined);
     const needs = [
         ...(board?.sessions ?? [])
             .filter((each) => each.approvals > 0)
@@ -795,7 +706,12 @@ export function RunningBoard() {
                     ${
                         board
                             ? html`
-                                  ${t("web.running-board.summary", "{sessions} at work · {active} running · {schedules} scheduled", { sessions: rows.filter((row) => row.run !== undefined).length, active, schedules: schedules.length })}
+                                  <b>${rows.filter((row) => row.run !== undefined).length}</b>
+                                  ${" at work · "}
+                                  <b>${active}</b>
+                                  ${" running · "}
+                                  <b>${schedules.filter((each) => each.paused === undefined).length}</b>
+                                  ${" scheduled"}
                                   ${next && html`${t("web.running-board.summary.next", " · next ")}<b>${span(next.next - now)}</b>`}
                               `
                             : t("web.running-board.looking", "Looking")
@@ -845,7 +761,11 @@ export function RunningBoard() {
                               setSelected(null);
                           }}
                       />
-                      <div class="board-legend rb-filters" role="group" aria-label=${t("web.running-board.filters", "Show only")}>
+                      <div
+                          class="board-legend rb-filters"
+                          role="group"
+                          aria-label=${t("web.running-board.filters", "Show only")}
+                      >
                           ${FILTERS.map(
                               (each) => html`<button
                                   class=${`board-filter ${filter === each.key ? "on" : ""}`}
@@ -864,7 +784,11 @@ export function RunningBoard() {
                           )}
                       </div>
                       <div class="rb-body">
-                          <div class="rb-matrix" role="table" aria-label=${t("web.running-board.sessions", "Sessions")}>
+                          <div
+                              class="rb-matrix"
+                              role="table"
+                              aria-label=${t("web.running-board.sessions", "Sessions")}
+                          >
                               <div class="rb-thead" role="row">
                                   <div role="columnheader">${t("web.running-board.column.session", "Session")}</div>
                                   <div role="columnheader">${t("web.running-board.column.now", "Now")}</div>
@@ -917,6 +841,7 @@ export function RunningBoard() {
                                               onClose=${() => setSelected(null)}
                                               onOpen=${open}
                                               onCancel=${cancel}
+                                              onPause=${pause}
                                           />
                                       </div>`
                                   }
@@ -961,6 +886,7 @@ export function RunningBoard() {
                     onClose=${() => setSelected(null)}
                     onOpen=${open}
                     onCancel=${cancel}
+                    onPause=${pause}
                 />
             </div>`
         }
@@ -1006,9 +932,6 @@ function Timeline({
     // the whole board out at once, then draw it again. The observer says when it differs, after the browser's layout.
     const [width, setWidth] = useState(lastWidth);
     const [tip, setTip] = useState(null);
-    const localeRevision = store.state.localeRevision;
-
-    useEffect(() => setTip(null), [localeRevision]);
     const r = RANGES[range];
 
     useEffect(() => {
@@ -1057,11 +980,11 @@ function Timeline({
             day: midnight,
             label:
                 midnight || range === "week"
-                    ? formatter(localeId() === "en" ? undefined : localeId(), {
+                    ? formatter(undefined, {
                           weekday: "short",
                           ...(range === "week" ? { day: "numeric" } : {}),
                       }).format(local)
-                    : formatter(localeId() === "en" ? "en-GB" : localeId(), {
+                    : formatter("en-GB", {
                           hour: "2-digit",
                           minute: "2-digit",
                       }).format(local),
@@ -1085,15 +1008,11 @@ function Timeline({
             const show = (event) => {
                 const box = event.currentTarget.getBoundingClientRect();
                 const who = prompt?.from ? `${prompt.from} · ` : "";
-                const sent = prompt?.at
-                    ? t("web.running-board.tip.sent", "sent {time} · ", {
-                          time: relative(prompt.at, now),
-                      })
-                    : "";
+                const sent = prompt?.at ? `sent ${relative(prompt.at, now)} · ` : "";
 
                 setTip({
                     text: prompt?.text ?? t("web.running-board.tip.no-message", "No message found"),
-                    when: `${who}${sent}${t("web.running-board.tip.working", "at work for {time}", { time: elapsed(now - start) })}`,
+                    when: `${who}${sent}at work for ${elapsed(now - start)}`,
                     x: Math.min(
                         box.right - 20,
                         Math.max(box.left, (event.clientX ?? box.left) - 20),
@@ -1108,7 +1027,7 @@ function Timeline({
                 key="run"
                 class="rb-runhit"
                 style=${`left:${Math.max(0, from - REACH)}px;width:${x(now) - Math.max(0, from - REACH)}px;--bar-from:${from - Math.max(0, from - REACH)}px`}
-                aria-label=${prompt ? t("web.running-board.run.label-message", "At work for {time}. Last message: {message}", { time: elapsed(now - start), message: prompt.text }) : t("web.running-board.run.label", "At work for {time}", { time: elapsed(now - start) })}
+                aria-label=${`At work for ${elapsed(now - start)}${prompt ? `. Last message: ${prompt.text}` : ""}`}
                 onPointerEnter=${(event) => event.pointerType === "mouse" && show(event)}
                 onPointerLeave=${(event) => event.pointerType === "mouse" && setTip(null)}
                 onClick=${(event) => (tip?.long ? setTip(null) : show(event))}
@@ -1135,18 +1054,18 @@ function Timeline({
                     key=${`${schedule.id}-tail`}
                     class=${`rb-pin-tail ${schedule.held ? "held" : ""}`}
                     style=${`left:${x(last)}px;width:${Math.max(0, full - x(last))}px`}
-                    title=${t("web.running-board.repeat.title", "Goes on {repeat}", { repeat: repeatWords(schedule) ?? "" })}
+                    title=${`Goes on ${schedule.repeat ?? ""}`}
                 ></span>`);
             }
 
             schedule.upcoming
                 .filter((t) => t <= t1)
-                .forEach((at, i) => {
-                    const left = x(at);
-                    const label = `${clock(at, schedule.zone, now)}${zoneName(schedule.zone, at) ? ` ${zoneName(schedule.zone, at)}` : ""}`;
+                .forEach((t, i) => {
+                    const left = x(t);
+                    const label = `${clock(t, schedule.zone, now)}${zoneName(schedule.zone, t) ? ` ${zoneName(schedule.zone, t)}` : ""}`;
 
                     marks.push(html`<button
-                        key=${`${schedule.id}-${at}`}
+                        key=${`${schedule.id}-${t}`}
                         class=${`rb-pin ${schedule.every ? "repeat" : ""} ${i > 0 ? "later" : ""} ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
                         style=${`left:${left}px`}
                         aria-label=${`${schedule.text}, ${label}`}
@@ -1157,7 +1076,7 @@ function Timeline({
 
                             setTip({
                                 text: schedule.text,
-                                when: `${label} · ${relative(at, now)}${schedule.held ? t("web.running-board.tip.held", " · held") : ""}`,
+                                when: `${label} · ${relative(t, now)}${schedule.held ? t("web.running-board.tip.held", " · held") : ""}`,
                                 x: box.left,
                                 y: box.bottom,
                             });
@@ -1176,7 +1095,7 @@ function Timeline({
                             class="rb-pin-label"
                             style=${`left:${left}px`}
                         >
-                            ${clock(at, HERE, now)}
+                            ${clock(t, HERE, now)}
                         </span>`);
                         labelled = true;
                     }
@@ -1193,7 +1112,10 @@ function Timeline({
     >
         <div class="rb-tl-head">
             <h3>${t("web.running-board.coming-up", "Coming up")}</h3>
-            <span class="rb-tl-next" title=${next ? t("web.running-board.next.title", "Next: {message}", { message: next.text }) : ""}>
+            <span
+                class="rb-tl-next"
+                title=${next ? t("web.running-board.next.title", "Next: {message}", { message: next.text }) : ""}
+            >
                 ${next ? next.text : t("web.running-board.nothing-scheduled", "Nothing scheduled")}
             </span>
             ${
@@ -1264,12 +1186,12 @@ function Timeline({
                     )}
                     <div class="rb-now" style=${`left:${x(now)}px`}>
                         <span>
-                            ${formatter(localeId() === "en" ? "en-GB" : localeId(), { hour: "2-digit", minute: "2-digit" }).format(now)}
+                            ${formatter("en-GB", { hour: "2-digit", minute: "2-digit" }).format(now)}
                         </span>
                     </div>
                     ${
                         lanes.length === 0 &&
-                        html`<div class="rb-tl-empty">${t("web.running-board.timeline.empty", "Nothing to show here.")}</div>`
+                        html`<div class="rb-tl-empty">Nothing to show here.</div>`
                     }
                 </div>
             </div>
@@ -1289,6 +1211,23 @@ function Timeline({
 
 /** How many of a session's tasks a phone's card shows before "more". */
 const FOLDED = 5;
+
+function statusWords(status) {
+    switch (status) {
+        case "pending":
+            return t("web.running-board.status.pending", "pending");
+        case "running":
+            return t("web.running-board.status.running", "running");
+        case "waiting":
+            return t("web.running-board.status.waiting", "waiting");
+        case "sleeping":
+            return t("web.running-board.status.sleeping", "sleeping");
+        case "completing":
+            return t("web.running-board.status.completing", "completing");
+        default:
+            return status;
+    }
+}
 
 function Row({
     row,
@@ -1374,9 +1313,14 @@ function Row({
                                   }${taskWords(task)}
                               </span>
                               <span
-                                  class=${`rb-status ${task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
+                                  class=${`rb-status ${task.stalled ? "warn" : task.status === "running" ? "ok" : waiting ? "warn" : ""} ${task.status}`}
+                                  title=${
+                                      task.stalled
+                                          ? `No progress since ${new Date(task.stalled).toLocaleTimeString()}`
+                                          : undefined
+                                  }
                               >
-                                  ${TASK_WORDS[task.status]?.() ?? task.status}
+                                  ${task.stalled ? "stalled" : statusWords(task.status)}
                               </span>
                               <span class="rb-elapsed">
                                   ${task.since ? elapsed(now - task.since) : ""}
@@ -1405,7 +1349,7 @@ function Row({
                           (run.model || run.spent > 0) &&
                           html`<div class="rb-foot">
                               ${run.model && html`<span>${run.model}</span>`}
-                              ${run.spent > 0 && html`<span>${t("web.running-board.spent", "{amount} spent", { amount: dollars(run.spent) })}</span>`}
+                              ${run.spent > 0 && html`<span>${dollars(run.spent)} spent</span>`}
                           </div>`
                       }`
                     : html`<div class="rb-idle">${t("web.running-board.nothing-running", "Nothing running")}</div>`
@@ -1418,24 +1362,28 @@ function Row({
                     ? row.schedules.map(
                           (schedule) => html`<button
                               key=${schedule.id}
-                              class=${`rb-sched ${schedule.held ? "held" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
+                              class=${`rb-sched ${schedule.held ? "held" : ""} ${schedule.paused !== undefined ? "paused" : ""} ${selected === scheduleKey(schedule) ? "on" : ""}`}
                               onClick=${() => onPick(schedule)}
                           >
                               <span class="rb-sched-text">${schedule.text}</span>
                               <span class="rb-sched-time" title=${schedule.zone}>
                                   ${
-                                      schedule.held
-                                          ? t("web.running-board.held", "Held")
-                                          : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
+                                      schedule.paused !== undefined
+                                          ? t("web.running-board.paused", "Paused")
+                                          : schedule.held
+                                            ? t("web.running-board.held", "Held")
+                                            : `${clock(schedule.next, schedule.zone, now)}${zoneName(schedule.zone, schedule.next) ? ` ${zoneName(schedule.zone, schedule.next)}` : ""}`
                                   }
                               </span>
                               <span class="rb-sched-rule rb-ellipsis">
                                   ${schedule.repeat ? `↻ ${repeatWords(schedule)}` : t("web.running-board.once", "once")}
                               </span>
                               <span class="rb-sched-rel">
-                                  ${relative(schedule.next, now)}
-                                  ${schedule.every ? ` · ${schedule.runs}×` : ""}
-                                  ${schedule.skipped > 0 ? t("web.running-board.release0281.skipped", " · skipped {count}×", { count: schedule.skipped }) : ""}
+                                  ${
+                                      schedule.paused === undefined
+                                          ? `${relative(schedule.next, now)}${schedule.every ? ` · ${schedule.runs}×` : ""}${schedule.skipped > 0 ? t("web.running-board.release0281.skipped", " · skipped {count}×", { count: schedule.skipped }) : ""}`
+                                          : ""
+                                  }
                               </span>
                           </button>`,
                       )
@@ -1445,7 +1393,7 @@ function Row({
     </div>`;
 }
 
-function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
+function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel, onPause }) {
     const zone = zoneName(schedule.zone, schedule.next);
 
     return html`<div class="rb-detail">
@@ -1459,56 +1407,71 @@ function Detail({ schedule, now, steer, color, onClose, onOpen, onCancel }) {
             </button>
         </div>
         ${
+            schedule.paused !== undefined &&
+            html`<div class="rb-held rb-paused">
+                ${t("web.running-board.schedule.paused", "Paused at {time}. It sends nothing until someone resumes it.", { time: clock(schedule.paused, schedule.zone, now, { day: "always" }) })}
+            </div>`
+        }
+        ${
             schedule.held &&
             html`<div class="rb-held">
                 ${t("web.running-board.details.held", "Held: {reason}. At its time it is cancelled, unless that changes first.", { reason: heldWords(schedule.held) })}
             </div>`
         }
-        <pre class="rb-message">${schedule.text}</pre>
-        <dl class="rb-facts">
-            <dt>${t("web.running-board.details.repeats", "Repeats")}</dt>
-            <dd>${repeatWords(schedule) ?? t("web.running-board.details.once", "no, once")}</dd>
-            <dt>${t("web.running-board.details.next", "Next")}</dt>
-            <dd>
-                ${clock(schedule.next, schedule.zone, now, { day: "always" })}
-                ${zone && ` ${zone}`}
-                ${" · "}
-                ${relative(schedule.next, now)}
-            </dd>
-            <dt>${t("web.running-board.details.zone", "Zone")}</dt>
-            <dd>${schedule.zone}</dd>
-            <dt>${t("web.running-board.details.set-by", "Set by")}</dt>
-            <dd>${setBy(schedule)}</dd>
-            <dt>${t("web.running-board.details.created", "Set up")}</dt>
-            <dd>${relative(schedule.createdAt, now)}</dd>
+        <div class="rb-detail-body">
+            <pre class="rb-message">${schedule.text}</pre>
+            <dl class="rb-facts">
+                <dt>${t("web.running-board.details.repeats", "Repeats")}</dt>
+                <dd>${repeatWords(schedule) ?? t("web.running-board.details.once", "no, once")}</dd>
+                <dt>${t("web.running-board.details.next", "Next")}</dt>
+                <dd>
+                    ${
+                        schedule.paused !== undefined
+                            ? t("web.running-board.schedule.paused-short", "paused")
+                            : html`${clock(schedule.next, schedule.zone, now, { day: "always" })}
+                                  ${zone && ` ${zone}`}
+                                  ${" · "}
+                                  ${relative(schedule.next, now)}`
+                    }
+                </dd>
+                <dt>${t("web.running-board.details.zone", "Zone")}</dt>
+                <dd>${schedule.zone}</dd>
+                <dt>${t("web.running-board.details.set-by", "Set by")}</dt>
+                <dd>${setBy(schedule)}</dd>
+                <dt>${t("web.running-board.details.created", "Set up")}</dt>
+                <dd>${relative(schedule.createdAt, now)}</dd>
+                ${
+                    schedule.every &&
+                    html`<dt>${t("web.running-board.details.sent", "Went out")}</dt>
+                        <dd>${schedule.runs === 1 ? t("web.running-board.details.one-run", "{count} time", { count: schedule.runs }) : t("web.running-board.details.runs", "{count} times", { count: schedule.runs })}</dd>`
+                }
+                <dt>${t("web.running-board.details.id", "Id")}</dt>
+                <dd class="mono">${schedule.id}</dd>
+            </dl>
             ${
-                schedule.every &&
-                html`<dt>${t("web.running-board.details.sent", "Went out")}</dt>
-                    <dd>${schedule.runs === 1 ? t("web.running-board.details.one-run", "{count} time", { count: schedule.runs }) : t("web.running-board.details.runs", "{count} times", { count: schedule.runs })}</dd>`
+                schedule.upcoming.length > 1 &&
+                html`<div class="rb-sub">${t("web.running-board.coming-up", "Coming up")}</div>
+                    <div class="rb-upcoming">
+                        ${schedule.upcoming.slice(0, 5).map(
+                            (t) =>
+                                html`<span key=${t}>
+                                        ${clock(t, schedule.zone, now, { day: "always" })}
+                                        ${zone && ` ${zone}`}
+                                    </span>`,
+                        )}
+                    </div>`
             }
-            <dt>${t("web.running-board.details.id", "Id")}</dt>
-            <dd class="mono">${schedule.id}</dd>
-        </dl>
-        ${
-            schedule.upcoming.length > 1 &&
-            html`<div class="rb-sub">${t("web.running-board.coming-up", "Coming up")}</div>
-                <div class="rb-upcoming">
-                    ${schedule.upcoming.slice(0, 5).map(
-                        (t) =>
-                            html`<span key=${t}>
-                                    ${clock(t, schedule.zone, now, { day: "always" })}
-                                    ${zone && ` ${zone}`}
-                                </span>`,
-                    )}
-                </div>`
-        }
+        </div>
         <div class="rb-actions">
             <button class="button" onClick=${() => onOpen(schedule.session)}>${t("web.running-board.open-session", "Open session")}</button>
             ${
                 steer &&
-                html`<button class="button danger" onClick=${() => onCancel(schedule)}>
-                    ${t("web.running-board.cancel", "Cancel")}
-                </button>`
+                html`<button class="button" onClick=${() => onPause(schedule)}>
+                        ${schedule.paused === undefined ? t("web.running-board.pause", "Pause") : t("web.running-board.resume", "Resume")}
+                    </button>
+                    <button class="button danger" onClick=${() => onCancel(schedule)}>
+                        ${t("web.running-board.cancel", "Cancel")}
+                    </button>`
             }
         </div>
     </div>`;

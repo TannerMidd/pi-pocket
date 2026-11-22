@@ -135,7 +135,7 @@ test("R23: the real catalog is public to every role without exposing private fie
     assert.deepEqual(Object.keys(catalog).sort(), ["locales", "revision"]);
     assert.deepEqual(
         catalog.locales.map((each) => each.id),
-        ["en", "fr", "zh-CN"],
+        ["en", "fr"],
     );
     assert.equal(catalog.locales[1]?.messages["ui.close"], "Fermer");
 
@@ -170,7 +170,7 @@ test("the public app bridge and locale catalog coexist without opening other API
     assert.equal(info.status, 200);
     assert.deepEqual(await info.json(), { name: "pi-pocket", bridge: 1 });
     assert.equal(catalog.status, 200);
-    assert.ok((await catalog.json()).locales.some((each: { id: string }) => each.id === "zh-CN"));
+    assert.ok((await catalog.json()).locales.some((each: { id: string }) => each.id === "fr"));
     assert.equal(me.status, 401);
     assert.equal(wrongMethod.status, 401);
     assert.equal(wrongPath.status, 401);

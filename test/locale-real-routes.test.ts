@@ -1,4 +1,4 @@
-// Actual export, sign-in and public-link routes use the built-in catalog, not a test rendering route.
+// Actual export, sign-in and public-link routes use the external catalog, not a test rendering route.
 import {
     type App,
     cleanUp,
@@ -23,6 +23,11 @@ import { endedText } from "../src/server/watches.ts";
 import { describeWatch } from "../src/server/extensions/triggers.ts";
 import { prWatchLine } from "../src/server/extensions/pip.ts";
 import type { PrWatch } from "../src/server/docs.ts";
+import {
+    chineseModule,
+    chinesePackOptions,
+    enableExternalChinese,
+} from "./external-chinese-pack.ts";
 
 let app: App;
 let server: Server;
@@ -69,30 +74,43 @@ function exportFile(cookie?: string, query = "") {
     });
 }
 
-test("the real guest export route isolates overlapping built-in Chinese and English requests", async () => {
-    const results = await Promise.all(
-        Array.from({ length: 20 }, async (_, index) => {
-            const chinese = index % 2 === 0;
-            const response = await exportFile(`pocket_locale=${chinese ? "zh-CN" : "en"}`);
+test(
+    "the real guest export route isolates overlapping external Chinese and English requests",
+    chinesePackOptions,
+    async () => {
+        await enableExternalChinese(app);
 
-            return { chinese, response, body: await response.text() };
-        }),
-    );
+        try {
+            const results = await Promise.all(
+                Array.from({ length: 20 }, async (_, index) => {
+                    const chinese = index % 2 === 0;
+                    const response = await exportFile(`pocket_locale=${chinese ? "zh-CN" : "en"}`);
 
-    for (const { chinese, response, body } of results) {
-        assert.equal(response.status, 200);
-        assert.match(response.headers.get("content-type") ?? "", /^text\/markdown/);
-        assert.ok(
-            body.includes(
-                chinese
-                    ? "<summary>上下文已压缩</summary>"
-                    : "<summary>Context compacted</summary>",
-            ),
-        );
-        assert.ok(body.includes(hostile), "the user's title and message remain literal Markdown");
-        assert.ok(body.includes("Keep the exact user words:"));
-    }
-});
+                    return { chinese, response, body: await response.text() };
+                }),
+            );
+
+            for (const { chinese, response, body } of results) {
+                assert.equal(response.status, 200);
+                assert.match(response.headers.get("content-type") ?? "", /^text\/markdown/);
+                assert.ok(
+                    body.includes(
+                        chinese
+                            ? "<summary>上下文已压缩</summary>"
+                            : "<summary>Context compacted</summary>",
+                    ),
+                );
+                assert.ok(
+                    body.includes(hostile),
+                    "the user's title and message remain literal Markdown",
+                );
+                assert.ok(body.includes("Keep the exact user words:"));
+            }
+        } finally {
+            await app.setExtensionEnabled(owner(app), chineseModule, false);
+        }
+    },
+);
 
 test("real exports fall back to English for missing, invalid, unavailable and wrong-name cookies", async () => {
     for (const cookie of [
@@ -212,27 +230,41 @@ export default (_host, web) => {
     }
 });
 
-test("the real public-link fallback and login use built-in Chinese with English fallback", async () => {
-    for (const [cookie, lang] of [
-        ["pocket_locale=zh-CN", "zh-CN"],
-        ["pi_locale=zh-CN", "en"],
-        ["pocket_locale=xx", "en"],
-    ]) {
-        const response = await fetch(`${base}/l/${"0".repeat(32)}`, {
-            headers: { cookie: cookie! },
-        });
-        const body = await response.text();
+test(
+    "the real public-link fallback and login use external Chinese with English fallback",
+    chinesePackOptions,
+    async () => {
+        await enableExternalChinese(app);
 
-        assert.equal(response.status, 404);
-        assert.ok(body.includes(`<html lang="${lang}">`));
-        assert.ok(body.includes(lang === "zh-CN" ? "此链接未开放" : "This link is not open"));
-        assert.ok(response.headers.get("content-security-policy")?.includes("sandbox"));
-        const login = await fetch(`${base}/login?token=invalid`, { headers: { cookie: cookie! } });
+        try {
+            for (const [cookie, lang] of [
+                ["pocket_locale=zh-CN", "zh-CN"],
+                ["pi_locale=zh-CN", "en"],
+                ["pocket_locale=xx", "en"],
+            ]) {
+                const response = await fetch(`${base}/l/${"0".repeat(32)}`, {
+                    headers: { cookie: cookie! },
+                });
+                const body = await response.text();
 
-        assert.equal(login.status, 401);
-        assert.ok((await login.text()).includes(`<html lang="${lang}">`));
-    }
-});
+                assert.equal(response.status, 404);
+                assert.ok(body.includes(`<html lang="${lang}">`));
+                assert.ok(
+                    body.includes(lang === "zh-CN" ? "此链接未开放" : "This link is not open"),
+                );
+                assert.ok(response.headers.get("content-security-policy")?.includes("sandbox"));
+                const login = await fetch(`${base}/login?token=invalid`, {
+                    headers: { cookie: cookie! },
+                });
+
+                assert.equal(login.status, 401);
+                assert.ok((await login.text()).includes(`<html lang="${lang}">`));
+            }
+        } finally {
+            await app.setExtensionEnabled(owner(app), chineseModule, false);
+        }
+    },
+);
 
 test("PR-watch text for background tasks and model tools remains English without a request", () => {
     const watch: PrWatch = {

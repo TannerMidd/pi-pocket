@@ -6,9 +6,10 @@
 // above them stay in order. This module knows nothing of the app's state: store.js asks for routes and hears when back
 // changes one, and components register their layers with `useBack` (or `addLayer` and `removeLayer`).
 //
-// Each entry this module writes says how many layers it stands for (`history.state.pocket.layers`), and how many steps
-// back the session list's entry is (`back`), when known. A home screen app keeps an entry of the list's under the list
-// itself: the system's swipe back there has no browser page to land on, and would otherwise leave the app blank.
+// Each entry this module writes says how many layers it stands for (`history.state.pocket.layers`), how many steps
+// back the session list's entry is (`back`), when known, and the route whose entry is under its route's (`from`), when
+// known. A home screen app keeps an entry of the list's under the list itself: the system's swipe back there has no
+// browser page to land on, and would otherwise leave the app blank.
 // The app is the truth and history follows it: a layer closed by a tap takes its entry back off; one opened adds an
 // entry. Going back (the person's own) closes the layers above the entry it lands on.
 
@@ -328,6 +329,13 @@ export const goBack = () => history.back();
 /** What `pushRoute` kept on the route's entry under `key`, or undefined. */
 export const routeState = (key) => history.state?.pocket?.[key];
 
+/**
+ * The route this one was opened over (a path), whose entry is under this route's, so `popRoute` goes back there.
+ * Undefined when not known, or while history has not caught up with the route the app shows.
+ */
+export const routeUnder = () =>
+    location.pathname === shown ? history.state?.pocket?.from : undefined;
+
 // ─── Routes ───────────────────────────────────────────────────────────────────────
 
 /** The session list's route. */
@@ -405,6 +413,9 @@ export function pushRoute(path, { replace = false, state: kept = {} } = {}) {
         return;
     }
 
+    // The route it opens over: history follows in order, so that route's entry is the one under the new entry.
+    const under = shown;
+
     homeRequest++;
     heading(path === HOME ? "back" : "forward");
     moved();
@@ -414,10 +425,20 @@ export function pushRoute(path, { replace = false, state: kept = {} } = {}) {
             await traverse(-depth());
         }
 
-        const here = history.state?.pocket?.back;
+        const here = history.state?.pocket;
         const back =
-            path === HOME ? 0 : replace ? here : typeof here === "number" ? here + 1 : undefined;
-        const state = { pocket: { ...kept, layers: 0, back } };
+            path === HOME
+                ? 0
+                : replace
+                  ? here?.back
+                  : typeof here?.back === "number"
+                    ? here.back + 1
+                    : undefined;
+        // In this route's place, it is over what this route was over.
+        const from = replace ? here?.from : under;
+        const state = {
+            pocket: { ...kept, layers: 0, back, ...(from === undefined ? {} : { from }) },
+        };
 
         shownBack = back;
 

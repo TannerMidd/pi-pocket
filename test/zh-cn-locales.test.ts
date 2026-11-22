@@ -1,26 +1,24 @@
-// The built-in Chinese pack, through the real catalog and extension loader.
-import { cleanUp, root } from "./helpers.ts";
+// The external Chinese entry, through the real catalog and an isolated app's drop-in loader.
+import { cleanUp, openApp, owner, root, scriptedModel } from "./helpers.ts";
+import {
+    chineseModule,
+    chinesePackOptions,
+    enableExternalChinese,
+    externalChinesePack,
+} from "./external-chinese-pack.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { pathToFileURL } from "node:url";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { ExtensionWebs } from "../src/server/extension-web.ts";
 import type { PocketHost } from "../src/server/host.ts";
 import { ExtensionLoader } from "../src/server/reload.ts";
-import {
-    checkUiLocales,
-    requestLocale,
-    UI_LOCALE_LIMITS,
-    type UiLocalePack,
-} from "../src/server/ui-locales.ts";
+import { createHandler } from "../src/server/http.ts";
+import { checkUiLocales, requestLocale, UI_LOCALE_LIMITS } from "../src/server/ui-locales.ts";
 import { placeholders } from "../web/locale.js";
 import { EN } from "../web/locales/en.js";
-
-const builtIn = join(import.meta.dirname, "../src/server/extensions");
-const moduleUrl = pathToFileURL(join(builtIn, "zh-cn.ts")).href;
-const dataUrl = pathToFileURL(join(builtIn, "zh-cn/messages.ts")).href;
 const samples = {
     "ui.close": "关闭",
     "app.menu": "菜单",
@@ -34,11 +32,141 @@ const samples = {
     "signin.name-label": "你的名字",
 };
 
-async function pack(): Promise<UiLocalePack> {
-    return (await import(dataUrl)).default;
-}
+after(cleanUp);
 
-function loaderAt(directory: string) {
+test("a fresh app publishes only English and falls back for an unavailable Chinese preference", async () => {
+    const app = await openApp(scriptedModel(), join(root, "english-only-app"));
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    try {
+        const modules = (await app.extensions(owner(app))).modules;
+
+        assert.ok(
+            !modules.some(
+                (each) => each.source === "built-in" && /^zh-cn(?:[.-]|$)/i.test(each.file),
+            ),
+            "the loader has no built-in Chinese module",
+        );
+        assert.deepEqual(
+            app.webs.locales.snapshot().locales.map((each) => each.id),
+            ["en"],
+        );
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+        const catalog = await fetch(`${base}/ui-locales.json`);
+
+        assert.equal(catalog.status, 200);
+        const body = (await catalog.json()) as { locales: { id: string }[] };
+
+        assert.deepEqual(
+            body.locales.map((each) => each.id),
+            ["en"],
+        );
+        const login = await fetch(`${base}/login?token=expired`, {
+            headers: { cookie: "pocket_locale=zh-CN" },
+        });
+        const html = await login.text();
+
+        assert.equal(login.status, 401);
+        assert.match(html, /<html lang="en">/);
+        assert.match(html, /Link expired/);
+    } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) =>
+            server.listening ? server.close(() => resolve()) : resolve(),
+        );
+        await app.close();
+    }
+});
+
+test(
+    "the Chinese data has valid keys, matching placeholders, and fits all locale limits",
+    chinesePackOptions,
+    async () => {
+        const chinese = await externalChinesePack();
+        const keys = Object.keys(chinese.messages);
+        const checked = checkUiLocales("zh-CN", [chinese]);
+
+        assert.equal(chinese.id, "zh-CN");
+        assert.equal(chinese.label, "简体中文");
+        assert.ok(keys.length > 0 && keys.length <= UI_LOCALE_LIMITS.messages);
+        const englishKeys = Object.keys(EN);
+
+        assert.deepEqual(
+            englishKeys.filter((key) => !Object.hasOwn(chinese.messages, key)),
+            [],
+            "the pack covers every live English key and retains keys for later batches",
+        );
+        assert.deepEqual(
+            Object.keys(checked[0]!.messages).sort(),
+            [...englishKeys].sort(),
+            "core publishes every live English key without publishing future keys",
+        );
+        assert.ok(Buffer.byteLength(JSON.stringify([chinese])) <= UI_LOCALE_LIMITS.declaration);
+        assert.ok(Buffer.byteLength(JSON.stringify([chinese])) <= UI_LOCALE_LIMITS.total);
+
+        for (const [key, value] of Object.entries(chinese.messages)) {
+            assert.match(key, /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
+            assert.ok(key.length <= UI_LOCALE_LIMITS.key, key);
+            assert.ok(
+                !key
+                    .split(/[._-]/)
+                    .some((part) => ["prototype", "constructor", "__proto__"].includes(part)),
+                key,
+            );
+            assert.equal(typeof value, "string", key);
+            assert.ok(value.trim().length > 0 && !value.includes("\0"), key);
+            assert.ok(Buffer.byteLength(value) <= UI_LOCALE_LIMITS.value, key);
+
+            if (Object.hasOwn(EN, key)) {
+                assert.deepEqual(
+                    [...new Set(placeholders(value))].sort(),
+                    [...new Set(placeholders(EN[key]!))].sort(),
+                    `${key} keeps the English placeholder names`,
+                );
+            }
+        }
+    },
+);
+
+test(
+    "the external drop-in registers Chinese and resolves 10 translated messages",
+    chinesePackOptions,
+    async () => {
+        const app = await openApp(scriptedModel(), join(root, "zh-cn-loader"));
+
+        try {
+            await enableExternalChinese(app);
+            const info = (await app.extensions(owner(app))).modules.find(
+                (each) => each.file === chineseModule,
+            );
+            const snapshot = app.webs.locales.snapshot();
+            const chinese = requestLocale(snapshot, "zh-CN");
+
+            assert.ok(info, "the loader lists the Chinese module");
+            assert.equal(info.source, "drop-in");
+            assert.equal(info.enabled, true);
+            assert.equal(info.error, undefined);
+            assert.deepEqual(info.web?.locales, ["zh-CN"]);
+            assert.equal(chinese.lang, "zh-CN");
+            assert.equal(snapshot.locales.filter((each) => each.id === "zh-CN").length, 1);
+
+            for (const [key, value] of Object.entries(samples)) {
+                assert.ok(Object.hasOwn(EN, key), `${key} is an English catalog key`);
+                assert.equal(chinese.t(key, EN[key]!), value, key);
+                assert.notEqual(value, EN[key], key);
+            }
+        } finally {
+            await app.close();
+        }
+    },
+);
+
+test("invalid locale updates are refused and keep the previously registered pack", async () => {
+    const directory = mkdtempSync(join(root, "locale-invalid-"));
+    const file = join(directory, "locale-fixture.ts");
     const webs = new ExtensionWebs();
     const loader = new ExtensionLoader(
         createRegistry(),
@@ -47,101 +175,15 @@ function loaderAt(directory: string) {
         undefined,
         { webs },
     );
-
-    return { webs, loader };
-}
-
-after(cleanUp);
-
-test("the Chinese data has valid keys, matching placeholders, and fits all locale limits", async () => {
-    const chinese = await pack();
-    const keys = Object.keys(chinese.messages);
-    const checked = checkUiLocales("zh-CN", [chinese]);
-
-    assert.equal(chinese.id, "zh-CN");
-    assert.equal(chinese.label, "简体中文");
-    assert.ok(keys.length > 0 && keys.length <= UI_LOCALE_LIMITS.messages);
-    const englishKeys = Object.keys(EN);
-
-    assert.deepEqual(
-        englishKeys.filter((key) => !Object.hasOwn(chinese.messages, key)),
-        [],
-        "the pack covers every live English key and retains keys for later batches",
-    );
-    assert.deepEqual(
-        Object.keys(checked[0]!.messages).sort(),
-        [...englishKeys].sort(),
-        "core publishes every live English key without publishing future keys",
-    );
-    assert.ok(Buffer.byteLength(JSON.stringify([chinese])) <= UI_LOCALE_LIMITS.declaration);
-    assert.ok(Buffer.byteLength(JSON.stringify([chinese])) <= UI_LOCALE_LIMITS.total);
-
-    for (const [key, value] of Object.entries(chinese.messages)) {
-        assert.match(key, /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
-        assert.ok(key.length <= UI_LOCALE_LIMITS.key, key);
-        assert.ok(
-            !key
-                .split(/[._-]/)
-                .some((part) => ["prototype", "constructor", "__proto__"].includes(part)),
-            key,
-        );
-        assert.equal(typeof value, "string", key);
-        assert.ok(value.trim().length > 0 && !value.includes("\0"), key);
-        assert.ok(Buffer.byteLength(value) <= UI_LOCALE_LIMITS.value, key);
-
-        if (Object.hasOwn(EN, key)) {
-            assert.deepEqual(
-                [...new Set(placeholders(value))].sort(),
-                [...new Set(placeholders(EN[key]!))].sort(),
-                `${key} keeps the English placeholder names`,
-            );
-        }
-    }
-});
-
-test("the real built-in module registers Chinese and resolves 10 translated messages", async () => {
-    const { webs, loader } = loaderAt(builtIn);
-
-    try {
-        assert.deepEqual(
-            await loader.reload("zh-cn.ts"),
-            [],
-            "a data-only module needs no synthetic extension",
-        );
-        const info = loader.list().find((each) => each.file === "zh-cn.ts");
-        const snapshot = webs.locales.snapshot();
-        const chinese = requestLocale(snapshot, "zh-CN");
-
-        assert.ok(info, "the loader lists the Chinese module");
-        assert.equal(info.source, "built-in");
-        assert.equal(info.enabled, true);
-        assert.equal(info.error, undefined);
-        assert.deepEqual(info.web?.locales, ["zh-CN"]);
-        assert.equal(chinese.lang, "zh-CN");
-        assert.equal(snapshot.locales.filter((each) => each.id === "zh-CN").length, 1);
-
-        for (const [key, value] of Object.entries(samples)) {
-            assert.ok(Object.hasOwn(EN, key), `${key} is an English catalog key`);
-            assert.equal(chinese.t(key, EN[key]!), value, key);
-            assert.notEqual(value, EN[key], key);
-        }
-    } finally {
-        await loader.close();
-    }
-});
-
-test("invalid Chinese updates are refused and keep the previously registered pack", async () => {
-    const directory = mkdtempSync(join(root, "zh-cn-loader-"));
-    const file = join(directory, "zh-cn.ts");
-    const { webs, loader } = loaderAt(directory);
+    const pack = { id: "zh-CN", label: "测试", messages: { "ui.close": "关闭" } };
 
     writeFileSync(
         file,
-        `/** The real Chinese module. */\nexport { default } from ${JSON.stringify(moduleUrl)};\n`,
+        `/** Initial locale fixture. */\nexport default (_host, web) => web.uiLocales([${JSON.stringify(pack)}]);\n`,
     );
 
     try {
-        await loader.reload("zh-cn.ts");
+        await loader.reload("locale-fixture.ts");
         const prior = webs.locales.snapshot();
 
         assert.equal(requestLocale(prior, "zh-CN").t("ui.close", "Close"), "关闭");
@@ -154,15 +196,15 @@ test("invalid Chinese updates are refused and keep the previously registered pac
         ] as const) {
             writeFileSync(
                 file,
-                `/** Invalid Chinese update. */\nimport pack from ${JSON.stringify(dataUrl)};\nexport default (_host, web) => web.uiLocales([{ ...pack, messages: ${messages} }]);\n`,
+                `/** Invalid locale update. */\nconst pack = ${JSON.stringify(pack)};\nexport default (_host, web) => web.uiLocales([{ ...pack, messages: ${messages} }]);\n`,
             );
-            await assert.rejects(loader.reload("zh-cn.ts"), error);
+            await assert.rejects(loader.reload("locale-fixture.ts"), error);
             assert.deepEqual(
                 webs.locales.snapshot(),
                 prior,
                 "an invalid update cannot publish any text",
             );
-            assert.ok(loader.list().find((each) => each.file === "zh-cn.ts")?.error);
+            assert.ok(loader.list().find((each) => each.file === "locale-fixture.ts")?.error);
         }
     } finally {
         await loader.close();

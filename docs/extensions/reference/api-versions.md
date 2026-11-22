@@ -16,6 +16,8 @@ Since 0.21.0, document definitions should name `checkpointWhen` in every `define
 
 Since 0.28.0 (Pi 1.5), the main entry of `@earendil-works/pi-ai` does not export TypeBox's `Type`. A drop-in that imports `Type` from it still gets it: Pi Pocket gives drop-ins pi-ai with TypeBox's `Type` added, so their tool schemas stay as they were. New code builds its schemas with `@earendil-works/pi-schema` ([Tools](../tools.md#define-a-tool)). Since then, a watch listener (`api.watchDoc`) gets one call: `watch.start(async (call, context) => …)`, with `call.value`, `call.ops`, and `call.retired` when `call.kind` is `"value"`. A document that is retired does not end its watch with a `null` value any more: the next call has `retired: true`.
 
+Since 0.30.0 (Pi 1.6), Pi Durable names `runEndTask` and `RunEndTask` `hookTask` and `HookTask`. A drop-in that imports the old names still gets them. A tool's `execute` can return a park in place of a result ([Tools](../tools.md#return-a-result)), and a sleeping task's `until` can be missing. The `durationMs` of a tool result is the time from the call's first run to its result, not the time of its last run.
+
 ## `pocketApi`
 
 A module can export `pocketApi`: the server module, the browser module, or both.
@@ -94,11 +96,13 @@ Each member in the reference has its own Since line. `Unreleased` marks an addit
 | Answers to pick on an ask's card: `header`, `choices`, `multiple`, and `other` in `AskField` (experimental)                                                       | 0.27.0     |
 | Read-only conversation and descendant usage: `ConversationWebRequest.conversationUsage` (experimental)                                                            | 0.28.0     |
 | How a run stopped: `outcome` and `failure` on `run.ended`, and `failed` on a linked session (experimental)                                                        | 0.28.0     |
-| `web.presentEntry`, `PresentEntry`, and `pocket.entryPresentation` (experimental)                                                                                 | 0.28.0     |
-| `host.registerWorkspaceProvider`, `WorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0     |
-| `pocket.fence`, `pocket.mathInline`, and their types (experimental)                                                                                               | 0.28.0     |
 | `host.sessions.start` (experimental)                                                                                                                              | 0.28.0     |
 | Workspace providers: `host.registerWorkspaceProvider`, `host.cwdOf`, and `WebRequest.createSession` (experimental)                                                | 0.28.0     |
 | Presented inputs: `web.presentEntry` and `pocket.entryPresentation` (experimental)                                                                                | 0.28.0     |
 | Fenced blocks and inline math: `pocket.fence` and `pocket.mathInline` (experimental)                                                                              | 0.28.0     |
 | `answers` from `linkedSessions.send` (experimental)                                                                                                               | 0.28.0     |
+| `linkedSessions.reports`: a lead turns off run-end answers (experimental)                                                                                         | 0.29.0     |
+| `options.artifact` and `options.version` in `pocket.openConversation`: open an artifact of that session (experimental)                                            | 0.29.0     |
+| `subagents: "always"` on a tool: the tool comes with every subagent that has a tool list (experimental)                                                           | 0.29.0     |
+| `host.pendingApprovals`: read-only approval snapshots and events (experimental)                                                                                   | 0.30.0     |
+| `host.annotateTurns`: notes for the model after a person's message (experimental)                                                                                 | 0.30.0     |

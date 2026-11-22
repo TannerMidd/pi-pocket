@@ -202,9 +202,9 @@ uiLocales(packs: readonly UiLocalePack[]): void;
 
 Since Unreleased · Experimental
 
-This addition and the request locales below are not in the official 0.28.0 or 0.28.1 releases. Their first release is unassigned; the maintainers decide it.
+The first release of this API and the request locales below is unassigned. The published upstream release does not provide the API.
 
-Declares the UI text of other languages, while it loads: each is a language tag, the language's own name, and its messages by key. Pi Pocket merges each language over its English, key by key, in the order that the modules load, and shows the merged text in the app and on the sign-in pages of this server. English stays the baseline: a module adds a language, and cannot change English.
+Declares the UI text of other languages, while it loads: each is a language tag, the language's own name, and its messages by key. Pi Pocket merges each language over its English, key by key, in the order that the modules load, and shows the merged text in the app and on the sign-in pages of this server. English stays the baseline: a module adds a language, and cannot change English. Pi Pocket ships no translated catalog. Install a language pack as a separate drop-in, enable it in Menu → Extensions, then select its language in Appearance. Disabling the drop-in removes its messages and restores English when no other enabled pack supplies that language.
 
 - A language's `id` is a tag that `Intl.getCanonicalLocales` takes: `zh-cn` becomes `zh-CN`. `en` is Pi Pocket's own, and two languages of one declaration with the same tag are refused.
 - A language has exactly `id`, `label`, and `messages`: another field on it throws, so nothing of a declaration is silently ignored.

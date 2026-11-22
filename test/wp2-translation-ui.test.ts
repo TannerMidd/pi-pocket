@@ -99,14 +99,6 @@ before(async () => {
     writeFileSync(ONE_FILE, "one\n");
     writeFileSync(TWO_FILE, "one\ntwo\n");
     app = await openApp(scriptedModel(route));
-    const module = (await app.extensions(owner(app))).modules.find(
-        (entry) => entry.file === "zh-cn.ts",
-    );
-
-    if (module?.enabled) {
-        await app.setExtensionEnabled(owner(app), "zh-cn.ts", false);
-    }
-
     await app.setExtensionEnabled(owner(app), "zz-wp2-adversarial.ts", true);
     session = await newSession(app);
     const handler = createHandler({
@@ -155,7 +147,7 @@ before(async () => {
     );
     await see(
         `(await import('/ui-locale.js')).languages().some((each) => each.id === 'zh-CN')`,
-        "the real Chinese catalog",
+        "the adversarial test catalog",
     );
 });
 

@@ -12,7 +12,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -77,7 +77,15 @@ before(async () => {
             return fauxAssistantMessage([fauxText(`ok: ${text.length}`)]);
         }),
     );
+    const extensions = join(root, "data", "extensions");
+
+    mkdirSync(extensions, { recursive: true });
+    writeFileSync(
+        join(extensions, "failure-locale.ts"),
+        '/** Minimal failure-line locale. */\nexport default (_host, web) => web.uiLocales([{id:"zh-CN",label:"测试",messages:{"web.sessions.session-row.text.run-failed-why":"运行失败：{failure}"}}]);\n',
+    );
     app = await openApp(faux as never);
+    await app.setExtensionEnabled(owner(app), "failure-locale.ts", true);
     app.settings.applyOverrides({ compaction: { enabled: true, keepRecentTokens: 50 } });
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
@@ -130,7 +138,7 @@ test(
             await page.evaluate("(await import('/ui-locale.js')).setLocale('zh-CN')");
             await until(
                 async () => /[\u4e00-\u9fff]/u.test((await failureLine()) ?? ""),
-                "the real Run failed shell follows Chinese",
+                "the real Run failed shell follows the test locale",
             );
             assert.ok(
                 (await failureLine())!.includes(failure()!),

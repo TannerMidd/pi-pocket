@@ -1,0 +1,175 @@
+# Builds the macOS package (packaging/macos) for each published release, and attaches Pi-Pocket-<version>.pkg and its
+# SHA256 to the release. It runs beside publish.yml and does not wait for it: a failure here does not stop or change
+# the npm publish. The package holds the package of the release tag with its dependencies (packaging/bundle-app.mjs
+# packs the tag here), so it needs neither npm nor the npm release when it installs.
+#
+# A run by hand builds the package for an existing tag (gh workflow run macos-installer.yml -f tag=v0.29.0) from the
+# branch it runs on, as a workflow artifact only: it attaches nothing to the release.
+#
+# Signing and notarization are optional, and only for a release. Without the secrets the package is unsigned, and
+# Gatekeeper blocks it until the user allows it (docs/macos.md). Keep them as secrets of the macos-signing environment
+# (Settings → Environments), with deployment tags limited to v* and a required reviewer, not as repository secrets,
+# which any branch's workflow can read:
+# - MACOS_INSTALLER_CERTIFICATE: the "Developer ID Installer" certificate with its key, as a base64 .p12 file;
+# - MACOS_INSTALLER_PASSWORD: the password of the .p12 file;
+# - MACOS_APPLICATION_CERTIFICATE, MACOS_APPLICATION_PASSWORD: the "Developer ID Application" certificate with its key,
+#   as a base64 .p12 file, and its password, to sign Pi Pocket.app. Without them the app is signed ad hoc, and the
+#   package is not notarized: notarization refuses code that is signed ad hoc.
+# - MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID, MACOS_NOTARY_PASSWORD (an app-specific password): for notarytool.
+#   Without them the package is signed but not notarized.
+name: macOS installer
+
+on:
+    release:
+        types: [published]
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Release tag to build the package for, such as v0.29.0"
+                required: true
+
+permissions:
+    contents: read
+
+concurrency:
+    group: macos-installer-${{ github.event.release.tag_name || inputs.tag }}
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: macos-latest
+        timeout-minutes: 30
+        # A release build uses the environment's signing secrets: limit it to v* tags and give it a reviewer.
+        environment: ${{ github.event_name == 'release' && 'macos-signing' || '' }}
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Read the version from the tag
+              id: version
+              env:
+                  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+              run: |
+                  if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                      echo "Tag $TAG is not a version tag such as v0.29.0"
+                      exit 1
+                  fi
+                  git fetch --no-tags --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+                  version="$(git show "refs/tags/$TAG:package.json" | node -e 'let t="";process.stdin.on("data",c=>t+=c).on("end",()=>console.log(JSON.parse(t).version))')"
+                  if [ "v$version" != "$TAG" ]; then
+                      echo "Tag $TAG does not match its package.json version $version"
+                      exit 1
+                  fi
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  # The package to bundle is the tag's, also for a run by hand on another branch.
+                  git worktree add --detach "$RUNNER_TEMP/source" "refs/tags/$TAG"
+
+            # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
+            - name: Build the package
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+                  CERTIFICATE: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_CERTIFICATE || '' }}
+                  PASSWORD: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_PASSWORD || '' }}
+              run: |
+                  if [ -n "$CERTIFICATE" ]; then
+                      keychain="$RUNNER_TEMP/app-signing.keychain-db"
+                      p12="$RUNNER_TEMP/app-signing.p12"
+                      keychain_password="$(uuidgen)"
+                      trap 'security delete-keychain "$keychain" 2> /dev/null; rm -f "$p12"' EXIT
+                      security create-keychain -p "$keychain_password" "$keychain"
+                      security set-keychain-settings -lut 3600 "$keychain"
+                      security unlock-keychain -p "$keychain_password" "$keychain"
+                      printf '%s' "$CERTIFICATE" | base64 --decode > "$p12"
+                      security import "$p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/codesign
+                      rm -f "$p12"
+                      security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+                      security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+                      APP_SIGN_IDENTITY="$(security find-identity -v -p codesigning "$keychain" | awk -F '"' '/Developer ID Application/ { print $2; exit }')"
+                      if [ -z "$APP_SIGN_IDENTITY" ]; then
+                          echo "The certificate holds no Developer ID Application identity"
+                          exit 1
+                      fi
+                      export APP_SIGN_IDENTITY
+                  else
+                      echo "No application certificate: Pi Pocket.app is signed ad hoc."
+                  fi
+                  packaging/macos/build.sh "$VERSION" "$RUNNER_TEMP/unsigned" --source "$RUNNER_TEMP/source"
+
+            # Only a release is signed. A run by hand can build any branch, so it gets no signing secrets.
+            - name: Sign and notarize the package
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+                  CERTIFICATE: ${{ github.event_name == 'release' && secrets.MACOS_INSTALLER_CERTIFICATE || '' }}
+                  PASSWORD: ${{ github.event_name == 'release' && secrets.MACOS_INSTALLER_PASSWORD || '' }}
+                  NOTARY_APPLE_ID: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+                  NOTARY_TEAM_ID: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_TEAM_ID || '' }}
+                  NOTARY_PASSWORD: ${{ github.event_name == 'release' && secrets.MACOS_NOTARY_PASSWORD || '' }}
+                  APP_SIGNED: ${{ github.event_name == 'release' && secrets.MACOS_APPLICATION_CERTIFICATE != '' }}
+              run: |
+                  name="Pi-Pocket-$VERSION.pkg"
+                  mkdir -p "$RUNNER_TEMP/package"
+                  final="$RUNNER_TEMP/package/$name"
+                  if [ -z "$CERTIFICATE" ]; then
+                      echo "No signing secrets: the package is unsigned."
+                      cp "$RUNNER_TEMP/unsigned/$name" "$final"
+                  else
+                      keychain="$RUNNER_TEMP/signing.keychain-db"
+                      p12="$RUNNER_TEMP/signing.p12"
+                      keychain_password="$(uuidgen)"
+                      trap 'security delete-keychain "$keychain" 2> /dev/null; rm -f "$p12"' EXIT
+                      security create-keychain -p "$keychain_password" "$keychain"
+                      security set-keychain-settings -lut 3600 "$keychain"
+                      security unlock-keychain -p "$keychain_password" "$keychain"
+                      printf '%s' "$CERTIFICATE" | base64 --decode > "$p12"
+                      security import "$p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/productsign
+                      rm -f "$p12"
+                      security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+                      identity="$(security find-identity -v "$keychain" | awk -F '"' '/Developer ID Installer/ { print $2; exit }')"
+                      if [ -z "$identity" ]; then
+                          echo "The certificate holds no Developer ID Installer identity"
+                          exit 1
+                      fi
+                      productsign --sign "$identity" --keychain "$keychain" --timestamp "$RUNNER_TEMP/unsigned/$name" "$final"
+                      pkgutil --check-signature "$final"
+                      if [ "$APP_SIGNED" != true ]; then
+                          echo "Pi Pocket.app is signed ad hoc: the package is signed, not notarized."
+                      elif [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_TEAM_ID" ] && [ -n "$NOTARY_PASSWORD" ]; then
+                          xcrun notarytool submit "$final" --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" \
+                              --password "$NOTARY_PASSWORD" --wait --timeout 20m
+                          xcrun stapler staple "$final"
+                          spctl --assess --type install --verbose "$final"
+                      else
+                          echo "No notarization secrets: the package is signed, not notarized."
+                      fi
+                  fi
+                  (cd "$RUNNER_TEMP/package" && shasum -a 256 "$name" > "$name.sha256")
+                  cat "$final.sha256"
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: Pi-Pocket-${{ steps.version.outputs.version }}-macos
+                  path: ${{ runner.temp }}/package/Pi-Pocket-*
+                  if-no-files-found: error
+                  retention-days: 14
+
+    attach:
+        needs: build
+        if: github.event_name == 'release'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: Pi-Pocket-${{ needs.build.outputs.version }}-macos
+                  path: package
+
+            - name: Attach the package to the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ github.event.release.tag_name }}
+              run: gh release upload "$TAG" package/Pi-Pocket-* --repo "$GITHUB_REPOSITORY" --clobber

@@ -60,8 +60,10 @@ export function moduleTitle(module) {
             return t("builtin.module.codemode.title", "Codemode");
         case "pip.ts":
             return t("builtin.module.pip.title", "PiP");
-        case "zh-cn.ts":
-            return t("builtin.module.zh-cn.title", "Zh cn");
+        case "pocket-relay.ts":
+            return t("builtin.module.pocket-relay.title", "Relay");
+        case "session-cleanup.ts":
+            return t("builtin.module.session-cleanup.title", "Session cleanup");
         default:
             return module.title;
     }
@@ -140,6 +142,16 @@ export function moduleSummary(module) {
                 "builtin.module.memory.summary",
                 "Memory gives Pi short lessons that last across sessions, for a project or for everywhere: Pi proposes them with its memory tool, the owner approves them (under the call, or in Menu → Memory), and every later session in the same project gets them in its system prompt.",
             );
+        case "pocket-relay.ts":
+            return t(
+                "builtin.module.pocket-relay.summary",
+                "Relay connects chat services and feeds (Discord, Telegram, Slack, Matrix, RSS, any HTTP API, or a drop-in's own connector) to a session: what comes is delivered there as fenced data, and Pi answers with the relay_reply tool.",
+            );
+        case "session-cleanup.ts":
+            return t(
+                "builtin.module.session-cleanup.summary",
+                "Session cleanup: the owner removes the worktrees of archived sessions, or takes archived sessions out of the app with Pocket's own files.",
+            );
         case "pip.ts":
             return t(
                 "builtin.module.pip.summary",
@@ -184,11 +196,6 @@ export function moduleSummary(module) {
             return t(
                 "builtin.module.tool-search.summary",
                 "Tool search keeps tools that few conversations use out of every request until Pi asks for them.",
-            );
-        case "zh-cn.ts":
-            return t(
-                "builtin.module.zh-cn.summary",
-                "Simplified Chinese UI text, selected in Appearance and removed when this module is off.",
             );
         default:
             return module.summary;

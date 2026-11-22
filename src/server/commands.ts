@@ -19,12 +19,14 @@ import {
 import {
     type AgentChange,
     AgentDoc,
+    type Conversation,
     type ConversationCreateOptions,
     type ConversationId,
     type Cursor,
     defineTask,
     type EntryId,
     type InputEntry,
+    type InputSubmissionDraft,
     InboxDoc,
     LiveDoc,
     type ModelRef,
@@ -41,6 +43,7 @@ import type { User } from "./config.ts";
 import {
     AuthorsDoc,
     ChatDoc,
+    DeletedDoc,
     HeldDoc,
     type HeldMessage,
     InterruptsDoc,
@@ -61,7 +64,7 @@ import {
     NOTE_ENTRY,
     splitAttachments,
 } from "./entry-format.ts";
-import { describe, HttpError, optionalText } from "./errors.ts";
+import { describe, HttpError, optionalFlag, optionalText } from "./errors.ts";
 import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
 import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
@@ -69,7 +72,12 @@ import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
 import { snippet } from "./projection.ts";
-import { globalModelSettings, projectModelDefault } from "./project-model.ts";
+import {
+    globalModelSettings,
+    piGlobalSettings,
+    projectModelDefault,
+    rememberedLevel,
+} from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
 import {
@@ -84,7 +92,7 @@ import {
 } from "./resend.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
 import { wantsTitle, writeTitle } from "./titles.ts";
-import { describeMoment, describeRepeat, knownZone } from "./when.ts";
+import { checkRepeat, describeMoment, describeRepeat, knownZone, type Repeat } from "./when.ts";
 import {
     createWorktree,
     discardWorktree,
@@ -646,9 +654,10 @@ export class Commands {
      * The model a new session starts with, always one a person chose: `prefer` (with its thinking level) when it is
      * signed in here, or else the owner's default, even when it is not signed in now: the session then shows that, and
      * its first message fails in sight, where another model would spend on what nobody chose for it. Without an owner's
-     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model,
-     * then Pi's global default. A no-cwd caller (imports and PiP itself) keeps the legacy default selection. Never
-     * the first model there is: with none chosen, the session starts without a model, and someone picks one.
+     * default, ordinary sessions consult trusted project defaults in their final cwd, then the last picked model (at
+     * its level in Pi's `modelThinkingLevels`, when it has one), then Pi's global default. A no-cwd caller (imports and
+     * PiP itself) keeps the legacy default selection. Never the first model there is: with none chosen, the session
+     * starts without a model, and someone picks one.
      */
     #defaultModel(
         prefer?: {
@@ -704,7 +713,10 @@ export class Commands {
               : project !== undefined
                 ? project.thinkingLevel
                 : lastPicked !== undefined
-                  ? last?.thinkingLevel
+                  ? ((cwd === undefined
+                        ? undefined
+                        : rememberedLevel(defaults, lastPicked.provider, lastPicked.id)) ??
+                    last?.thinkingLevel)
                   : cwd === undefined
                     ? settings.getDefaultThinkingLevel()
                     : global?.defaultThinkingLevel) ?? "off") as ModelThinkingLevel;
@@ -769,7 +781,9 @@ export class Commands {
         // Archiving leaves its repeating schedules running: the person is told how many.
         const repeating =
             patch.archived === true
-                ? (await app.schedules.list(id)).filter((item) => item.every !== undefined).length
+                ? (await app.schedules.list(id)).filter(
+                      (item) => item.every !== undefined && item.paused === undefined,
+                  ).length
                 : 0;
 
         return { repeating };
@@ -912,20 +926,16 @@ export class Commands {
         // Only a person's own message interrupts, never one sent for them (`via`). The same durable handoff as a
         // queued message's Interrupt keeps everything waiting, before it stops the run. Admission releases its lease
         // once that handoff is stored, not while the task stops the run and puts the messages back.
+        const draft = {
+            type: "input" as const,
+            content,
+            whenBusy: request.mode === "steer" ? ("steer" as const) : ("followUp" as const),
+            requestId,
+        };
         const admitted = await (
             request.mode === "interrupt" && via === undefined
                 ? this.#interrupt(id, { content, requestId }, submitContext)
-                : conversation
-                      .submit(
-                          {
-                              type: "input",
-                              content,
-                              whenBusy: request.mode === "steer" ? "steer" : "followUp",
-                              requestId,
-                          },
-                          submitContext,
-                      )
-                      .then((submission) => ({ submissionId: submission.id }))
+                : this.#submitInput(conversation, draft, user, via, text, known, submitContext)
         ).finally(() => admission?.afterSubmit());
         let submissionId: SubmissionId;
 
@@ -975,6 +985,34 @@ export class Commands {
         }
 
         return { submissionId: submission.id, requestId };
+    }
+
+    /** A retry (`known`) asks no annotator again, and PiP's conversation gets no notes. */
+    async #submitInput(
+        conversation: Conversation,
+        draft: InputSubmissionDraft & { requestId: string },
+        user: User,
+        via: string | undefined,
+        text: string,
+        known: boolean,
+        submitContext: Context,
+    ): Promise<{ submissionId: SubmissionId }> {
+        const app = this.#app;
+        const noted =
+            !known && app.pip.ownerOf(conversation.id) === undefined
+                ? await app.turnNotes.submit(
+                      conversation,
+                      draft,
+                      { by: user.id, ...(via === undefined ? {} : { via }), text, at: app.now() },
+                      submitContext,
+                  )
+                : undefined;
+
+        if (noted !== undefined) {
+            return { submissionId: noted };
+        }
+
+        return { submissionId: (await conversation.submit(draft, submitContext)).id };
     }
 
     /** Submissions `message.sent` went out for lately: a retry that raced its first try finds its id here. */
@@ -1368,6 +1406,7 @@ export class Commands {
 
         // Subagents' reports go: a person meant the work stopped.
         await this.#discardReports(id);
+        await this.#stoppedByPerson(id);
         void conversation
             .abort(context)
             .catch((error: unknown) => app.notice("error", `Abort failed: ${describe(error)}`, id));
@@ -1381,6 +1420,24 @@ export class Commands {
                     : `stopped the run; ${held} queued ${held === 1 ? "message waits" : "messages wait"} to be sent`,
             );
         }
+    }
+
+    /** A subagent a person stops: its report to its parent says a person did, not that it failed. */
+    async #stoppedByPerson(id: ConversationId): Promise<void> {
+        const parent = this.#app.parentOf(id);
+
+        if (parent === undefined || !this.#app.isBusy(id)) {
+            return;
+        }
+
+        await this.#app.harness.commit(async (tx) => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+            const name = Object.keys(agents).find((each) => agents[each]!.conversationId === id);
+
+            if (name !== undefined) {
+                agents[name]!.stoppedBy = "person";
+            }
+        }, context);
     }
 
     /**
@@ -1496,10 +1553,19 @@ export class Commands {
         app.spend.check(user, id);
         const conversation = await app.conversation(id);
         const held = (await app.harness.snapshot(HeldDoc, id, context))?.items ?? [];
+        let sent = 0;
 
-        for (const item of held) {
-            await conversation.submit(
-                {
+        for (const { key } of held) {
+            // Each goes in the commit that takes it from the list: one withdrawn meanwhile is not there to send.
+            const went = await app.harness.commit(async (tx) => {
+                const doc = await tx.doc(HeldDoc, id);
+                const item = doc.items.find((each) => each.key === key);
+
+                if (item === undefined) {
+                    return false;
+                }
+
+                await conversation.submit(tx, {
                     type: "input",
                     content: item.content as unknown as UserInput,
                     whenBusy: item.mode,
@@ -1507,28 +1573,24 @@ export class Commands {
                     ...(item.entry === undefined
                         ? {}
                         : { entry: item.entry as unknown as InputEntry }),
-                },
-                context,
-            );
+                });
+                doc.items = doc.items.filter((each) => each.key !== key);
+
+                return true;
+            }, context);
+
+            sent += went ? 1 : 0;
         }
 
-        const sent = new Set(held.map((item) => item.key));
-
-        await app.harness.commit(async (tx) => {
-            const doc = await tx.doc(HeldDoc, id);
-
-            doc.items = doc.items.filter((item) => !sent.has(item.key));
-        }, context);
-
-        if (held.length > 0) {
+        if (sent > 0) {
             await app.collab.activity(
                 id,
                 user,
-                `sent the ${held.length === 1 ? "held message" : `${held.length} held messages`}`,
+                `sent the ${sent === 1 ? "held message" : `${sent} held messages`}`,
             );
         }
 
-        return held.length;
+        return sent;
     }
 
     /** Take a held message away for good. Anyone may their own; someone else's needs the right to drive, as in the queue. */
@@ -1788,6 +1850,8 @@ export class Commands {
         // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
         const requests = new Map<number, string | undefined>();
 
+        await this.#stoppedByPerson(id);
+
         for (let attempt = 0; ; attempt++) {
             const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
 
@@ -1985,7 +2049,19 @@ export class Commands {
             );
         }
 
+        // A model picked with no level takes the level Pi's TUI keeps for it; PiP's panel keeps its own.
+        const remembered =
+            request.model === undefined ||
+            request.thinkingLevel !== undefined ||
+            request.pipPanel === true
+                ? undefined
+                : rememberedLevel(
+                      piGlobalSettings(app.defaultCwd),
+                      request.model.provider,
+                      request.model.modelId,
+                  );
         const wanted = (request.thinkingLevel ??
+            remembered ??
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
@@ -2199,23 +2275,37 @@ export class Commands {
     async schedule(
         id: ConversationId,
         user: User,
-        request: { when?: unknown; zone?: unknown },
+        request: {
+            when?: unknown;
+            text?: unknown;
+            next?: unknown;
+            every?: unknown;
+            zone?: unknown;
+            compactBefore?: unknown;
+        },
     ): Promise<Schedule> {
         const app = this.#app;
 
         app.requireSee(user, id);
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
         }
 
+        // From the Schedules sheet's editor: the text, and when as data, instead of `when` typed in words.
+        const given = request.next !== undefined || request.every !== undefined;
+        const at = given ? this.#scheduleTime(request) : undefined;
+
         app.spend.check(user, id);
         const schedule = await app.schedules.add(id, {
             when: optionalText(request.when, "when") ?? "",
+            ...(at === undefined ? {} : { at, text: optionalText(request.text, "text") ?? "" }),
             by: user,
             ...(zone === undefined ? {} : { zone }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
         });
         const when =
             schedule.every === undefined
@@ -2223,6 +2313,118 @@ export class Commands {
                 : describeRepeat(schedule.every);
 
         await app.collab.activity(id, user, `scheduled “${snippet(schedule.text, 60)}” ${when}`);
+
+        return schedule;
+    }
+
+    /**
+     * Change a scheduled message: its text, and when it goes out: `next` (a moment) for one that goes out once, `every`
+     * for a repeat (with `next` its first time, for one every so many minutes), in `zone`.
+     */
+    async updateSchedule(
+        id: ConversationId,
+        user: User,
+        scheduleId: string,
+        request: {
+            text?: unknown;
+            next?: unknown;
+            every?: unknown;
+            zone?: unknown;
+            version?: unknown;
+            compactBefore?: unknown;
+        },
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        await app.requireDriver(id, user);
+        const zone = optionalText(request.zone, "zone");
+        const version = optionalText(request.version, "version");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
+
+        if (zone !== undefined && !knownZone(zone)) {
+            throw new HttpError(400, `Unknown time zone ${zone}`);
+        }
+
+        const at = this.#scheduleTime(request);
+
+        app.spend.check(user, id);
+        const schedule = await app.schedules.update(id, scheduleId, {
+            text: optionalText(request.text, "text") ?? "",
+            ...at,
+            ...(zone === undefined ? {} : { zone }),
+            ...(version === undefined ? {} : { version }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
+            by: user,
+        });
+        const when =
+            schedule.every === undefined
+                ? `for ${describeMoment(schedule.next, schedule.zone)}`
+                : describeRepeat(schedule.every);
+
+        await app.collab.activity(
+            id,
+            user,
+            `changed the scheduled “${snippet(schedule.text, 60)}” to ${when}`,
+        );
+
+        return schedule;
+    }
+
+    /** A schedule's time as the editor sends it, its repeat checked: `next` (a moment), `every` (a repeat), or both. */
+    #scheduleTime(request: { next?: unknown; every?: unknown }): {
+        next?: number;
+        every?: Repeat;
+    } {
+        if (request.next !== undefined && typeof request.next !== "number") {
+            throw new HttpError(400, "next must be a time in milliseconds");
+        }
+
+        try {
+            return {
+                ...(request.next === undefined ? {} : { next: request.next }),
+                ...(request.every === undefined || request.every === null
+                    ? {}
+                    : {
+                          every: checkRepeat(request.every, {
+                              repeatMinutes: this.#app.schedules.limits.repeatMinutes,
+                          }),
+                      }),
+            };
+        } catch (error) {
+            throw new HttpError(400, describe(error));
+        }
+    }
+
+    /** Pause a scheduled message, or resume it: paused, it sends nothing until someone resumes it. */
+    async pauseSchedule(
+        id: ConversationId,
+        user: User,
+        scheduleId: string,
+        paused: unknown,
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        await app.requireDriver(id, user);
+
+        if (typeof paused !== "boolean") {
+            throw new HttpError(400, "paused must be true or false");
+        }
+
+        if (!paused) {
+            app.spend.check(user, id);
+        }
+
+        const { schedule, changed } = await app.schedules.pause(id, scheduleId, paused, user);
+
+        if (changed) {
+            await app.collab.activity(
+                id,
+                user,
+                `${paused ? "paused" : "resumed"} the scheduled “${snippet(schedule.text, 60)}”`,
+            );
+        }
 
         return schedule;
     }
@@ -2684,6 +2886,11 @@ export class Commands {
             at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
 
         const init: ConversationCreateOptions["init"] = async (tx, forked) => {
+            // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
+            if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
+                throw new HttpError(409, "That session was removed.");
+            }
+
             const sessions = await tx.doc(SessionsDoc);
 
             sessions.items[String(forked)] = {
@@ -2695,6 +2902,7 @@ export class Commands {
                 forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
                 ...(place.worktree === undefined ? {} : { worktree: place.worktree }),
             };
+            await app.memory.forked(tx, id, forked, title);
 
             if (fork.resend !== undefined) {
                 await tx.createTask(ResendTask, fork.resend, {

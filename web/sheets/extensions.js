@@ -160,6 +160,30 @@ function settingWords(module, field, builtIn) {
                     "How many commands Pi can run in the background at once in one session. Each keeps running until it ends or is stopped, also across a restart of the server.",
                 ),
             };
+        case "background.commandQuietMinutes":
+            return {
+                ...field,
+                label: t(
+                    "extensions.background.command-quiet",
+                    "Stop a command quiet for (minutes)",
+                ),
+                description: t(
+                    "extensions.background.command-quiet.detail",
+                    "A bash command of Pi's that prints nothing for this long is stopped, with the processes it started, and Pi gets what it printed. One that keeps printing (a long build) runs on, and Pi can give a call its own timeout. 0: no limit.",
+                ),
+            };
+        case "background.taskQuietMinutes":
+            return {
+                ...field,
+                label: t(
+                    "extensions.background.task-quiet",
+                    "Stop a background task quiet for (minutes)",
+                ),
+                description: t(
+                    "extensions.background.task-quiet.detail",
+                    "The same for a background task, unless Pi starts it with its own limit (0 for a server). Pi gets a message when one is stopped. 0: no limit.",
+                ),
+            };
         case "schedules.perSession":
             return {
                 ...field,

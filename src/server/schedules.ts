@@ -13,11 +13,19 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import {
+    AgentDoc,
+    type CompactionResult,
+    type CompactionSettings,
     type ConversationId,
+    configure,
     defineTask,
+    LiveDoc,
     type Task,
+    type TaskId,
     type TaskRuntime,
+    type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { addActivity } from "./collab.ts";
@@ -26,7 +34,7 @@ import { describe, HttpError } from "./errors.ts";
 import { FROM_PREFIX } from "./entry-format.ts";
 import { snippet } from "./projection.ts";
 import { ownRequest, requestFor } from "./requests.ts";
-import { nextRepeat, parseWhen } from "./when.ts";
+import { checkMoment, nextRepeat, outsideWindow, parseWhen, type Repeat } from "./when.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -54,8 +62,20 @@ export const DEFAULT_SCHEDULE_LIMITS: Readonly<ScheduleLimits> = {
     aheadDays: 366,
 };
 
-type ScheduleInput = { scheduleId: string };
-type ScheduleState = { phase: "wait" } | { phase: "send" };
+/**
+ * `last`: given by an edit or a pause that handed the schedule to this task, the request id of the message it sent last
+ * (while it has sent `runs` in all), so the check for a message that still waits finds that one too.
+ */
+type ScheduleInput = { scheduleId: string; last?: { runs: number; request: string } };
+/** `restore`: the conversation's own compaction settings from before, null for none. */
+type ScheduleState =
+    | { phase: "wait" }
+    | { phase: "send"; compacted?: true }
+    | {
+          phase: "compact";
+          restore: CompactionSettings | null;
+          compaction?: TaskId<CompactionResult>;
+      };
 type Runtime = TaskRuntime<ScheduleInput, ScheduleState, null, object>;
 
 /** The schedule as stored now; undefined once it was cancelled. */
@@ -64,10 +84,24 @@ async function stored(
     scheduleId: string,
     context: Context,
 ): Promise<Schedule | undefined> {
-    return (await runtime.snapshot(ScheduleDoc, runtime.conversationId, context))?.items[
+    const schedule = (await runtime.snapshot(ScheduleDoc, runtime.conversationId, context))?.items[
         scheduleId
     ];
+
+    // An edit gives the schedule a new task: the one it replaced finds it no longer its own, and ends.
+    return ownedBy(schedule, runtime) ? schedule : undefined;
 }
+
+/** Whether `runtime`'s task is the one that sends `schedule` now: an edit hands it to a new task. */
+const ownedBy = (schedule: Schedule | undefined, runtime: Runtime): schedule is Schedule =>
+    schedule !== undefined && String(schedule.taskId) === String(runtime.taskId);
+
+/** A schedule by the id someone gave: only one of its own, never an object's built-in (`__proto__`, `constructor`). */
+const own = (items: Record<string, Schedule>, id: string): Schedule | undefined =>
+    Object.hasOwn(items, id) ? items[id] : undefined;
+
+/** How long a paused schedule's task sleeps before it looks again: it keeps a live task, so the board still finds it. */
+const PAUSED_RECHECK_MS = 30 * 24 * 60 * 60_000;
 
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
@@ -116,9 +150,23 @@ function sendingRequest(schedule: Schedule, run: number): string {
           : `schedule:${sending}`;
 }
 
+/** The request id of the message a schedule sent last, from the task that sends it now; undefined before the first. */
+function lastSending(schedule: Schedule, input: ScheduleInput | undefined): string | undefined {
+    if (input?.last !== undefined && input.last.runs === schedule.runs) {
+        return input.last.request;
+    }
+
+    return schedule.runs > 0 ? sendingRequest(schedule, schedule.runs - 1) : undefined;
+}
+
 export type ScheduleRequest = {
     /** When it goes out (`in 30m`, `every weekday 8:00`, …), followed by the message unless `text` is given. */
     when: string;
+    /**
+     * When it goes out, as data instead of `when` (the Schedules sheet's editor): `next` for one that goes out once,
+     * `every` for a repeat, with `next` as its first time for one every so many minutes. Needs `text`.
+     */
+    at?: { next?: number; every?: Repeat };
     text?: string;
     /** The time zone its clock times mean; the server's when absent. */
     zone?: string;
@@ -128,6 +176,7 @@ export type ScheduleRequest = {
     requestedBy?: string;
     /** The same key sets up the same schedule once: a tool call replayed after a restart finds the one it made. */
     key?: string;
+    compactBefore?: boolean;
 };
 
 export class Schedules {
@@ -153,16 +202,45 @@ export class Schedules {
                         return runtime.commit(() => finished, context);
                     }
 
+                    // Paused: it waits for a resume, which hands it to a new task; this one only looks again now and then.
+                    if (schedule.paused !== undefined) {
+                        return runtime.sleepUntil(
+                            runtime.now() + PAUSED_RECHECK_MS,
+                            { phase: "wait" },
+                            context,
+                        );
+                    }
+
                     return runtime.sleepUntil(schedule.next, { phase: "send" }, context);
                 },
                 send: (task, runtime, context) =>
-                    this.#send(task.input.scheduleId, runtime, context),
+                    this.#send(
+                        task.input,
+                        runtime,
+                        context,
+                        task.state.checkpoint.phase === "send" &&
+                            task.state.checkpoint.compacted === true,
+                    ),
+                compact: (task, runtime, context) =>
+                    this.#compact(task.input.scheduleId, task.state.checkpoint, runtime, context),
             },
             abort: (task, runtime, context) =>
                 runtime.commit(async (tx) => {
-                    delete (await tx.doc(ScheduleDoc, runtime.conversationId)).items[
-                        task.input.scheduleId
-                    ];
+                    const doc = await tx.doc(ScheduleDoc, runtime.conversationId);
+                    const checkpoint = (task.state as { checkpoint?: ScheduleState }).checkpoint;
+
+                    // Stopped while it compacted: the conversation gets its own settings back.
+                    if (checkpoint?.phase === "compact") {
+                        await configure(tx, runtime.conversationId, {
+                            compaction: checkpoint.restore,
+                        });
+                        delete doc.items[task.input.scheduleId]?.compacting;
+                    }
+
+                    // Replaced by an edit: the schedule is the new task's, and stays.
+                    if (ownedBy(doc.items[task.input.scheduleId], runtime)) {
+                        delete doc.items[task.input.scheduleId];
+                    }
 
                     return { status: "terminal", outcome: { status: "aborted" } };
                 }, context),
@@ -170,7 +248,13 @@ export class Schedules {
     }
 
     /** Send a schedule's message, unless it may not go out anymore; then wait for the next time, or finish. */
-    async #send(id: string, runtime: Runtime, context: Context): Promise<void> {
+    async #send(
+        input: ScheduleInput,
+        runtime: Runtime,
+        context: Context,
+        compacted = false,
+    ): Promise<void> {
+        const id = input.scheduleId;
         const conversationId = runtime.conversationId;
         const schedule = await stored(runtime, id, context);
         const conversation = await runtime.conversation(conversationId, context);
@@ -179,13 +263,33 @@ export class Schedules {
             return runtime.commit(() => finished, context);
         }
 
+        // Due in its window but late past its end (the server was down, or PiP held it): it waits for the next run.
+        if (
+            schedule.every !== undefined &&
+            outsideWindow(schedule.every, runtime.now(), schedule.zone)
+        ) {
+            return runtime.commit(async (tx) => {
+                const item = (await tx.doc(ScheduleDoc, conversationId)).items[id];
+
+                if (!ownedBy(item, runtime)) {
+                    return finished;
+                }
+
+                if (item.paused === undefined && item.every !== undefined) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+                }
+
+                return { status: "running", checkpoint: { phase: "wait" } } as const;
+            }, context);
+        }
+
         // PiP's conversation while PiP is off would run without PiP's rules: its schedule waits, and goes out once PiP
         // is back. Its `runs` stays, so a sending this replaces keeps its request id.
         if (this.#waitsForPip(conversationId)) {
             return runtime.commit(async (tx) => {
                 const item = (await tx.doc(ScheduleDoc, conversationId)).items[id];
 
-                if (item === undefined) {
+                if (!ownedBy(item, runtime)) {
                     return finished;
                 }
 
@@ -197,11 +301,14 @@ export class Schedules {
 
         const requestId = sendingRequest(schedule, schedule.runs);
         const stopped = this.#stopped(conversationId, schedule);
+        const last = lastSending(schedule, input);
         // Its last message, not yet in the transcript: the session has not taken it, so another would only wait too.
+        // Only a repeat skips: one edited to go out once sends its one message, and never skips without end.
         const waiting =
             stopped === undefined &&
-            schedule.runs > 0 &&
-            (await this.#queued(runtime, sendingRequest(schedule, schedule.runs - 1), context)) &&
+            schedule.every !== undefined &&
+            last !== undefined &&
+            (await this.#queued(runtime, last, context)) &&
             // Run again after a crash, this phase may find its own message sent already: that one counts as sent.
             !(await this.#queued(runtime, requestId, context, true));
 
@@ -209,27 +316,48 @@ export class Schedules {
             return this.#skip(id, runtime, context);
         }
 
-        if (stopped === undefined) {
-            await conversation.submit(
-                { type: "input", content: schedule.content, whenBusy: "followUp", requestId },
-                context,
-            );
+        if (
+            !compacted &&
+            schedule.compactBefore === true &&
+            stopped === undefined &&
+            last !== undefined &&
+            (await this.#startCompaction(id, last, runtime, context))
+        ) {
+            return;
         }
 
+        // Sent in the commit that reads the schedule again, so an edit or cancel either comes first, and nothing goes
+        // out, or after, and the message went out as it was. The request id makes a run again after a crash send once.
         await runtime.commit(async (tx) => {
             const doc = await tx.doc(ScheduleDoc, conversationId);
             const item = doc.items[id];
 
-            if (item === undefined) {
+            if (!ownedBy(item, runtime)) {
                 return finished;
             }
 
-            // Run again after a crash, this phase may find a limit that the message it sent already crossed: the message
-            // went out all the same, and the schedule goes on to its next time, where it is checked again.
-            if (
-                stopped !== undefined &&
-                (await tx.submissionByRequest(conversationId, requestId)) === undefined
-            ) {
+            if (item.paused !== undefined) {
+                return { status: "running", checkpoint: { phase: "wait" } };
+            }
+
+            if (stopped === undefined) {
+                // A queue lookup or commit wait can pass the window's end after the first check.
+                if (
+                    item.every !== undefined &&
+                    outsideWindow(item.every, runtime.now(), item.zone)
+                ) {
+                    item.next = nextRepeat(item.every, runtime.now(), item.zone);
+
+                    return { status: "running", checkpoint: { phase: "wait" } };
+                }
+
+                await conversation.submit(tx, {
+                    type: "input",
+                    content: item.content,
+                    whenBusy: "followUp",
+                    requestId,
+                });
+            } else {
                 delete doc.items[id];
                 addActivity(
                     await tx.doc(ChatDoc, conversationId),
@@ -251,6 +379,163 @@ export class Schedules {
             item.next = nextRepeat(item.every, runtime.now(), item.zone);
 
             return { status: "running", checkpoint: { phase: "wait" } };
+        }, context);
+    }
+
+    /**
+     * Pi Durable keeps the newest `keepRecentTokens`, so until the compaction is done that setting is the estimate of
+     * the last message and all after it, for its model too (a model's setting beats a conversation's). False when the
+     * session is busy or compacting (the cut would move meanwhile), or when nothing comes before.
+     */
+    async #startCompaction(
+        id: string,
+        last: string,
+        runtime: Runtime,
+        context: Context,
+    ): Promise<boolean> {
+        const app = this.#app;
+        const conversationId = runtime.conversationId;
+
+        const live = await runtime.snapshot(LiveDoc, conversationId, context);
+
+        // A run resumed after a restart is in the live document before the app counts it busy.
+        if (
+            app.isBusy(conversationId) ||
+            live?.run !== undefined ||
+            (live?.compactions?.length ?? 0) > 0
+        ) {
+            app.log(
+                `Schedule ${id} in session ${String(conversationId)} sends without compacting first: the session is busy.`,
+            );
+
+            return false;
+        }
+
+        const record = await app.harness.commit(
+            (tx) => tx.submissionByRequest(conversationId, last),
+            context,
+        );
+        const view = await runtime.context(conversationId, context);
+        const from = view.entries.findIndex((entry) => entry.id === record?.entry);
+        const ref = (await runtime.agent(context)).model;
+
+        // Not in the context anymore, or nothing before it to compact.
+        if (from <= (view.head === undefined ? 0 : 1) || ref === undefined) {
+            return false;
+        }
+
+        let keep = 0;
+
+        for (const messages of view.contributions.slice(from)) {
+            for (const message of messages) {
+                keep += estimateMessageTokens(message);
+            }
+        }
+
+        if (keep === 0) {
+            return false;
+        }
+
+        const model = `${ref.provider}/${ref.modelId}`;
+        let moved = false;
+
+        await runtime.commit(async (tx) => {
+            const items = (await tx.doc(ScheduleDoc, conversationId)).items;
+            const item = items[id];
+
+            if (!ownedBy(item, runtime)) {
+                return finished;
+            }
+
+            moved = true;
+
+            // Another schedule of this session compacts now: its settings are not the conversation's own, so this one
+            // sends without compacting, as for a busy session.
+            if (Object.values(items).some((each) => each.compacting === true)) {
+                return { status: "running", checkpoint: { phase: "send", compacted: true } };
+            }
+
+            item.compacting = true;
+            const own = (await tx.doc(AgentDoc, conversationId)).compaction;
+            const restore =
+                own === undefined ? null : (JSON.parse(JSON.stringify(own)) as CompactionSettings);
+
+            await configure(tx, conversationId, {
+                compaction: {
+                    ...restore,
+                    keepRecentTokens: keep,
+                    modelOverrides: {
+                        ...restore?.modelOverrides,
+                        [model]: { ...restore?.modelOverrides?.[model], keepRecentTokens: keep },
+                    },
+                },
+            });
+
+            return { status: "running", checkpoint: { phase: "compact", restore } };
+        }, context);
+
+        return moved;
+    }
+
+    /**
+     * A compaction that fails or finds nothing to compact sends all the same. A restart before its task is in the
+     * checkpoint starts another: it finds nothing to compact once the first is placed, or is stale.
+     */
+    async #compact(
+        id: string,
+        state: Extract<ScheduleState, { phase: "compact" }>,
+        runtime: Runtime,
+        context: Context,
+    ): Promise<void> {
+        const app = this.#app;
+        const conversationId = runtime.conversationId;
+
+        if (state.compaction === undefined) {
+            let compaction: TaskId<CompactionResult> | undefined;
+
+            try {
+                compaction = await (
+                    await app.conversation(conversationId)
+                ).compact(undefined, context);
+            } catch (error) {
+                app.log(
+                    `A schedule in session ${String(conversationId)} did not compact before sending: ${describe(error)}`,
+                );
+            }
+
+            if (compaction !== undefined) {
+                return runtime.commit(
+                    () => ({ status: "running", checkpoint: { ...state, compaction } }),
+                    context,
+                );
+            }
+        } else {
+            try {
+                const { outcome } = (await runtime.waitForTask(state.compaction, context)).state;
+                const submissionId =
+                    outcome.status === "completed" ? outcome.result.submissionId : undefined;
+
+                // The summary goes in once the conversation is idle: the message goes after it.
+                if (submissionId !== undefined) {
+                    await (await app.harness.submission(submissionId, context))?.wait(context);
+                }
+            } catch (error) {
+                // Ended by a stop or a restart: the next run of this phase, or the abort, restores the settings.
+                if (runtime.signal.aborted) {
+                    throw error;
+                }
+
+                app.log(
+                    `A schedule in session ${String(conversationId)} did not wait for its compaction: ${describe(error)}`,
+                );
+            }
+        }
+
+        return runtime.commit(async (tx) => {
+            await configure(tx, conversationId, { compaction: state.restore });
+            delete (await tx.doc(ScheduleDoc, conversationId)).items[id]?.compacting;
+
+            return { status: "running", checkpoint: { phase: "send", compacted: true } };
         }, context);
     }
 
@@ -285,7 +570,7 @@ export class Schedules {
             const doc = await tx.doc(ScheduleDoc, conversationId);
             const item = doc.items[id];
 
-            if (item === undefined) {
+            if (!ownedBy(item, runtime)) {
                 return finished;
             }
 
@@ -388,10 +673,13 @@ export class Schedules {
         let parsed: ReturnType<typeof parseWhen>;
 
         try {
-            parsed = parseWhen(request.when, app.now(), zone, {
-                repeatMinutes: limits.repeatMinutes,
-                aheadMs: limits.aheadDays * 24 * 60 * 60_000,
-            });
+            parsed =
+                request.at === undefined
+                    ? parseWhen(request.when, app.now(), zone, {
+                          repeatMinutes: limits.repeatMinutes,
+                          aheadMs: limits.aheadDays * 24 * 60 * 60_000,
+                      })
+                    : { ...this.#timeOf(request.at, zone), rest: "" };
         } catch (error) {
             throw new HttpError(400, describe(error));
         }
@@ -466,6 +754,7 @@ export class Schedules {
                 runs: 0,
                 taskId,
                 ...(request.key === undefined ? {} : { key: request.key }),
+                ...(request.compactBefore === true ? { compactBefore: true } : {}),
             };
 
             doc.items[id] = schedule;
@@ -474,22 +763,224 @@ export class Schedules {
         }, context);
     }
 
+    /**
+     * Change a schedule: what Pi gets, and when (a moment for one that goes out once, a repeat, or a repeat with its first
+     * time). It goes out as the work of `by`, who changed it last. Its task sleeps until the old time, so a new task takes
+     * it over, and the old one, aborted, finds the schedule no longer its own. Throws an HttpError a person can act on.
+     */
+    async update(
+        conversationId: ConversationId,
+        scheduleId: string,
+        change: {
+            text: string;
+            next?: number;
+            every?: Repeat;
+            zone?: string;
+            /** The version the change was made from (its `revision`): one edited since is refused. */
+            version?: string;
+            by: { id: string; name: string };
+            compactBefore?: boolean;
+        },
+    ): Promise<Schedule> {
+        const app = this.#app;
+
+        if (!this.running) {
+            throw new HttpError(409, "Schedules are turned off in Extensions.");
+        }
+
+        const limits = this.limits;
+        const text = change.text.trim();
+
+        if (text === "") {
+            throw new HttpError(400, "Say what Pi should get.");
+        }
+
+        if (text.length > limits.chars) {
+            throw new HttpError(
+                413,
+                `Scheduled messages are limited to ${limits.chars} characters.`,
+            );
+        }
+
+        const content = app.commands.messageText(change.by, `${SCHEDULED_PREFIX}${text}`);
+        let replaced: Schedule["taskId"] | undefined;
+
+        const updated = await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = own(doc.items, scheduleId);
+
+            if (item === undefined) {
+                throw new HttpError(404, "No such scheduled message");
+            }
+
+            if (change.version !== undefined && change.version !== String(item.revision ?? 0)) {
+                throw new HttpError(409, "Someone changed this schedule while you edited it.");
+            }
+
+            const zone = change.zone ?? item.zone;
+            let next: number;
+
+            try {
+                next = this.#timeOf(change, zone).next;
+            } catch (error) {
+                throw new HttpError(400, describe(error));
+            }
+
+            replaced = item.taskId;
+            item.taskId = await this.#handOff(tx, conversationId, item);
+            item.revision = (item.revision ?? 0) + 1;
+            item.text = text;
+            item.content = content;
+            item.next = next;
+            item.zone = zone;
+            item.by = change.by.id;
+            delete item.requestedBy;
+
+            if (change.every === undefined) {
+                delete item.every;
+            } else {
+                item.every = change.every;
+            }
+
+            if (change.compactBefore === true) {
+                item.compactBefore = true;
+            } else if (change.compactBefore === false) {
+                delete item.compactBefore;
+            }
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
+        }, context);
+
+        // The old task finds the schedule no longer its own and ends.
+        if (replaced !== undefined) {
+            await app.harness.abortTask(replaced, context).catch(() => undefined);
+        }
+
+        return updated;
+    }
+
+    /**
+     * A new task for a schedule an edit or a pause changes, before it changes who it is by: the new task keeps the
+     * request id of the message the old one sent last, so a message that still waits is found.
+     */
+    async #handOff(
+        tx: Tx,
+        conversationId: ConversationId,
+        item: Schedule,
+    ): Promise<Schedule["taskId"]> {
+        const old = (await tx.task(item.taskId))?.input as ScheduleInput | undefined;
+        const request = lastSending(item, old);
+
+        return tx.createTask(
+            this.task,
+            {
+                scheduleId: item.id,
+                ...(request === undefined ? {} : { last: { runs: item.runs, request } }),
+            },
+            { ownership: { kind: "conversation" }, background: true, conversationId },
+        );
+    }
+
+    /**
+     * When a schedule given as data goes out first: `next` for one that goes out once, or for a repeat every so many
+     * minutes without a window when given; else the repeat's next time. Throws with a short explanation when `next`
+     * will not do.
+     */
+    #timeOf(at: { next?: number; every?: Repeat }, zone: string): { next: number; every?: Repeat } {
+        const now = this.#app.now();
+        const aheadMs = this.limits.aheadDays * 24 * 60 * 60_000;
+
+        if (at.every === undefined) {
+            return { next: checkMoment(at.next, now, { aheadMs }) };
+        }
+
+        const next =
+            at.next !== undefined && "minutes" in at.every && at.every.window === undefined
+                ? checkMoment(at.next, now, { aheadMs })
+                : nextRepeat(at.every, now, zone);
+
+        return { next, every: at.every };
+    }
+
+    /**
+     * Pause a schedule, or resume it. Paused, it sends nothing and keeps its place. Resumed, a repeat goes on from its
+     * next time still to come; one that goes out once and whose time passed while paused goes out now. Either way a
+     * new task takes it over, as for an edit, so a sending under way when it was paused is the last. Returns it, and
+     * whether this call changed it: decided in the commit, so of two at once only the one that changed it says so.
+     * Throws a 404 for no such schedule.
+     */
+    async pause(
+        conversationId: ConversationId,
+        scheduleId: string,
+        paused: boolean,
+        by: { id: string },
+    ): Promise<{ schedule: Schedule; changed: boolean }> {
+        const app = this.#app;
+
+        if (!this.running) {
+            throw new HttpError(409, "Schedules are turned off in Extensions.");
+        }
+
+        let replaced: Schedule["taskId"] | undefined;
+
+        const schedule = await app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = own(doc.items, scheduleId);
+
+            if (item === undefined) {
+                throw new HttpError(404, "No such scheduled message");
+            }
+
+            if ((item.paused !== undefined) === paused) {
+                return JSON.parse(JSON.stringify(item)) as Schedule;
+            }
+
+            replaced = item.taskId;
+            item.taskId = await this.#handOff(tx, conversationId, item);
+
+            if (paused) {
+                item.paused = { at: app.now(), by: by.id };
+            } else {
+                delete item.paused;
+
+                if (item.every !== undefined && item.next <= app.now()) {
+                    item.next = nextRepeat(item.every, app.now(), item.zone);
+                }
+            }
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
+        }, context);
+
+        if (replaced !== undefined) {
+            await app.harness.abortTask(replaced, context).catch(() => undefined);
+        }
+
+        return { schedule, changed: replaced !== undefined };
+    }
+
     /** Stop a schedule: it sends nothing more. Returns it; undefined when there is no such schedule. */
     async cancel(
         conversationId: ConversationId,
         scheduleId: string,
     ): Promise<Schedule | undefined> {
-        const schedule = (await this.list(conversationId)).find((item) => item.id === scheduleId);
+        // Removed and read in one commit, so an edit that hands it to a new task in between cannot leave that task
+        // behind: the task stopped is the one it had when it was removed. The task, finding it gone, sends nothing more.
+        const schedule = await this.#app.harness.commit(async (tx) => {
+            const doc = await tx.doc(ScheduleDoc, conversationId);
+            const item = own(doc.items, scheduleId);
 
-        if (schedule === undefined) {
-            return undefined;
-        }
+            if (item === undefined) {
+                return undefined;
+            }
 
-        // The task's abort removes the schedule; one already gone (or never run) is removed here.
-        await this.#app.harness.abortTask(schedule.taskId, context).catch(() => undefined);
-        await this.#app.harness.commit(async (tx) => {
-            delete (await tx.doc(ScheduleDoc, conversationId)).items[scheduleId];
+            delete doc.items[scheduleId];
+
+            return JSON.parse(JSON.stringify(item)) as Schedule;
         }, context);
+
+        if (schedule !== undefined) {
+            await this.#app.harness.abortTask(schedule.taskId, context).catch(() => undefined);
+        }
 
         return schedule;
     }

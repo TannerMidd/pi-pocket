@@ -12,7 +12,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -39,7 +39,18 @@ for (const viewport of ["mobile", "desktop"] as const) {
                 ),
             ]),
         );
-        const app = await openApp(model, join(root, `held-${viewport}`));
+        const data = join(root, `held-${viewport}`);
+        const extensions = join(data, "extensions");
+
+        mkdirSync(extensions, { recursive: true });
+        writeFileSync(
+            join(extensions, "held-locale.ts"),
+            `/** Minimal locale for held-queue regressions. */
+export default (_host, web) => web.uiLocales([{id:"zh-CN",label:"测试",messages:{
+    "web.composer.release0281.held-many":"已暂存 {count} 条消息。"
+}}]);\n`,
+        );
+        const app = await openApp(model, data);
         const id = await newSession(app);
         const guest = app.config.addUser("Literal guest", "guest");
         const server = createServer(
@@ -59,6 +70,7 @@ for (const viewport of ["mobile", "desktop"] as const) {
             until(() => value<boolean>(`return Boolean(${expression})`), name, 15000);
 
         try {
+            await app.setExtensionEnabled(owner(app), "held-locale.ts", true);
             await new Promise<void>((resolve) => server.listen(0, "127.0.0.2", resolve));
             const base = `http://127.0.0.2:${(server.address() as { port: number }).port}`;
 
@@ -68,7 +80,7 @@ for (const viewport of ["mobile", "desktop"] as const) {
             );
             await see(
                 "document.querySelector('.composer textarea') && (await import('/ui-locale.js')).languages().some(item=>item.id==='zh-CN')",
-                "the temporary owner and default Chinese pack",
+                "the temporary owner and test locale",
             );
             await page.evaluate("(await import('/ui-locale.js')).setLocale('zh-CN')");
             await app.commands.submit(id, owner(app), {

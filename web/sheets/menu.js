@@ -42,6 +42,25 @@ import { t } from "../ui-locale.js";
 const touch = matchMedia("(pointer: coarse)").matches;
 
 /** The Extensions row's hint: that this tab loads none of their browser parts (safe mode), and Lancet Guard. */
+/** The menu's word on the session's schedules: how many go out, and how many are paused. */
+function schedulesHint(schedules) {
+    const paused = schedules.filter((each) => each.paused !== undefined).length;
+    const coming = schedules.length - paused;
+
+    if (schedules.length === 0) {
+        return t("web.sheets.menu.menu-sheet.text.none", "none");
+    }
+
+    return [
+        coming > 0 &&
+            t("web.sheets.menu.menu-sheet.text.coming", "{count} coming", { count: coming }),
+        paused > 0 &&
+            t("web.sheets.menu.menu-sheet.text.paused", "{count} paused", { count: paused }),
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
+
 function extensionsHint() {
     const { guard } = store.state;
 
@@ -217,13 +236,13 @@ PLACES.forEach(({ id, label, place }, index) =>
         order: (index + 1) * 100,
         render(context) {
             const shown = place(context);
-            // The label is read as the tile draws, so it follows the language now (`ui-locale.js`).
-            const name = label();
 
             // As before slots: `data-place="files"`, which tests and themes may select.
             return (
                 shown &&
-                html`<${PlaceTile} place=${{ id: id.replace(/^core:/, ""), label: name, ...shown }} />`
+                html`<${PlaceTile}
+                    place=${{ id: id.replace(/^core:/, ""), label: label(), ...shown }}
+                />`
             );
         },
     }),
@@ -248,14 +267,7 @@ export function PlacesSheet() {
         className="places-sheet"
     >
         <${Places} />
-        ${item(
-            t("app.session-menu", "Session menu"),
-            () => openSheet({ type: "menu", fromPlaces: true }),
-            t(
-                "web.sheets.menu.places-sheet.text.rename-context-settings",
-                "rename, context, settings",
-            ),
-        )}
+        ${item(t("app.session-menu", "Session menu"), () => openSheet({ type: "menu", fromPlaces: true }), t("web.sheets.menu.places-sheet.text.rename-context-settings", "rename, context, settings"))}
     <//>`;
 }
 
@@ -265,8 +277,7 @@ function MenuFrame({ title, children }) {
 
     useLayoutEffect(() => {
         const element = host.current;
-        // Not by its label: that is translated, and the button is the top bar's one dialog opener.
-        const button = document.querySelector('.topbar [aria-haspopup="dialog"]');
+        const button = document.querySelector('.topbar [aria-label="Menu"]');
         const active = document.activeElement;
         const opener = active === document.body ? button : active;
 
@@ -447,7 +458,11 @@ export function MenuSheet({ places = true }) {
                         : t("web.sheets.menu.menu-sheet.text.take-turns", "Take turns"),
                     () =>
                         attempt(async () => {
-                            await actions.turns(turns?.on ? "off" : "on");
+                            await actions.turns(
+                                turns?.on
+                                    ? "off"
+                                    : t("web.sheets.menu.menu-sheet.text.content", "on"),
+                            );
                             closeSheet();
                         }),
                     turns?.on
@@ -525,57 +540,11 @@ export function MenuSheet({ places = true }) {
             }
             ${conversation && trustAvailable() && item(t("menu.trust", "Project trust"), () => openSheet({ type: "trust" }), trustHint())}
             ${session && extensionMenuItems("session").map((each) => item(each.label, each.run, each.hint))}
-            ${
-                session &&
-                steer &&
-                driving &&
-                item(
-                    t("menu.instructions", "Instructions for Pi"),
-                    () => openSheet({ type: "instructions" }),
-                    instructions
-                        ? t("web.sheets.menu.menu-sheet.text.content", "on")
-                        : t("web.sheets.menu.menu-sheet.text.none", "none"),
-                )
-            }
-            ${
-                conversation &&
-                steer &&
-                driving &&
-                item(
-                    t("menu.compact", "Compact context"),
-                    () => openSheet({ type: "compact" }),
-                    t(
-                        "web.sheets.menu.menu-sheet.text.summarize-older-messages",
-                        "summarize older messages",
-                    ),
-                )
-            }
-            ${
-                conversation &&
-                steer &&
-                driving &&
-                item(
-                    t("menu.new-context", "New context"),
-                    () => openSheet({ type: "reset" }),
-                    t(
-                        "web.sheets.menu.menu-sheet.text.pi-starts-fresh-history",
-                        "Pi starts fresh; history stays",
-                    ),
-                )
-            }
+            ${session && steer && driving && item(t("menu.instructions", "Instructions for Pi"), () => openSheet({ type: "instructions" }), instructions ? t("web.sheets.menu.menu-sheet.text.content", "on") : t("web.sheets.menu.menu-sheet.text.none", "none"))}
+            ${conversation && steer && driving && item(t("menu.compact", "Compact context"), () => openSheet({ type: "compact" }), t("web.sheets.menu.menu-sheet.text.summarize-older-messages", "summarize older messages"))}
+            ${conversation && steer && driving && item(t("menu.new-context", "New context"), () => openSheet({ type: "reset" }), t("web.sheets.menu.menu-sheet.text.pi-starts-fresh-history", "Pi starts fresh; history stays"))}
             ${conversation && memoryAvailable() && item(t("menu.memory", "Memory"), () => openSheet({ type: "memory" }), memoryHint(memory))}
-            ${
-                schedulesAvailable() &&
-                item(
-                    t("menu.schedules", "Scheduled messages"),
-                    () => openSheet({ type: "schedules" }),
-                    view.schedules.length === 0
-                        ? t("web.sheets.menu.menu-sheet.text.none", "none")
-                        : t("web.sheets.menu.menu-sheet.text.coming", "{count} coming", {
-                              count: view.schedules.length,
-                          }),
-                )
-            }
+            ${schedulesAvailable() && item(t("menu.schedules", "Scheduled messages"), () => openSheet({ type: "schedules" }), schedulesHint(view.schedules))}
             ${
                 watchAvailable() &&
                 steer &&
@@ -615,14 +584,8 @@ export function MenuSheet({ places = true }) {
             ${
                 conversation &&
                 html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
-                    <span>${t(
-                        "web.sheets.menu.menu-sheet.span.export-as-markdown",
-                        "Export as Markdown",
-                    )}</span>
-                    <span class="muted small">${t(
-                        "web.sheets.menu.menu-sheet.span.the-whole-history",
-                        "the whole history",
-                    )}</span>
+                    <span>${t("web.sheets.menu.menu-sheet.span.export-as-markdown", "Export as Markdown")}</span>
+                    <span class="muted small">${t("web.sheets.menu.menu-sheet.span.the-whole-history", "the whole history")}</span>
                 </a>`
             }
             ${
@@ -642,10 +605,7 @@ export function MenuSheet({ places = true }) {
         ${
             view.subagents.length > 0 &&
             html`<div class="group">
-                <div class="group-title">${t(
-                    "web.sheets.menu.menu-sheet.div.subagents",
-                    "Subagents",
-                )}</div>
+                <div class="group-title">${t("web.sheets.menu.menu-sheet.div.subagents", "Subagents")}</div>
                 ${view.subagents.map((agent) =>
                     item(
                         html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
@@ -676,59 +636,13 @@ export function MenuSheet({ places = true }) {
             }
             ${item(t("menu.your-name", "Your name"), () => openSheet({ type: "name" }), me?.name)}
             ${collab() ? item(t("app.people", "People"), () => openSheet({ type: "people" }), me?.role === "viewer" ? t("web.sheets.menu.menu-sheet.text.view", "you can view") : "") : item(t("menu.devices", "Sign in another device"), () => openSheet({ type: "invite" }))}
-            ${
-                collab() &&
-                item(
-                    t("menu.notifications", "Notifications"),
-                    () => openSheet({ type: "notifications" }),
-                    t(
-                        "web.sheets.menu.menu-sheet.text.pi-finished-approvals-chat",
-                        "Pi finished, approvals, chat",
-                    ),
-                )
-            }
-            ${item(
-                t("menu.running", "Running now"),
-                openRunning,
-                t("web.sheets.menu.menu-sheet.text.everything-pi-doing", "everything Pi is doing"),
-            )}
+            ${collab() && item(t("menu.notifications", "Notifications"), () => openSheet({ type: "notifications" }), t("web.sheets.menu.menu-sheet.text.pi-finished-approvals-chat", "Pi finished, approvals, chat"))}
+            ${item(t("menu.running", "Running now"), openRunning, t("web.sheets.menu.menu-sheet.text.everything-pi-doing", "everything Pi is doing"))}
             ${view.conversation && item(t("web.sheets.menu.background", "Background"), () => openSheet({ type: "background" }), t("web.sheets.menu.background-detail", "what commands print as they run"))}
-            ${item(
-                t("menu.spend", "Spend"),
-                () => openSheet({ type: "spend" }),
-                me?.role === "owner"
-                    ? t(
-                          "web.sheets.menu.menu-sheet.text.person-session-limits",
-                          "by person and session, limits",
-                      )
-                    : t("web.sheets.menu.menu-sheet.text.yours", "yours"),
-            )}
-            ${
-                triggersOn() &&
-                me?.role !== "viewer" &&
-                item(
-                    t("menu.webhooks", "Webhooks and watches"),
-                    () => openSheet({ type: "hooks" }),
-                    t(
-                        "web.sheets.menu.menu-sheet.text.git-hub-other-services",
-                        "GitHub, other services",
-                    ),
-                )
-            }
+            ${item(t("menu.spend", "Spend"), () => openSheet({ type: "spend" }), me?.role === "owner" ? t("web.sheets.menu.menu-sheet.text.person-session-limits", "by person and session, limits") : t("web.sheets.menu.menu-sheet.text.yours", "yours"))}
+            ${triggersOn() && me?.role !== "viewer" && item(t("menu.webhooks", "Webhooks and watches"), () => openSheet({ type: "hooks" }), t("web.sheets.menu.menu-sheet.text.git-hub-other-services", "GitHub, other services"))}
             ${me?.role === "owner" && item(t("menu.providers", "Providers"), () => openSheet({ type: "providers" }))}
-            ${
-                modelRefreshAvailable() &&
-                item(
-                    t("menu.refresh-models", "Refresh models"),
-                    refreshModels,
-                    store.state.modelRefresh.loading
-                        ? t("web.sheets.menu.menu-sheet.text.refreshing", "refreshing…")
-                        : t(
-                              "web.sheets.menu.menu-sheet.text.models-json-providers",
-                              "models.json and providers",
-                          ),
-                )
-            }
+            ${modelRefreshAvailable() && item(t("menu.refresh-models", "Refresh models"), refreshModels, store.state.modelRefresh.loading ? t("web.sheets.menu.menu-sheet.text.refreshing", "refreshing…") : t("web.sheets.menu.menu-sheet.text.models-json-providers", "models.json and providers"))}
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
             ${item(t("menu.extensions", "Extensions"), () => openSheet({ type: "extensions" }), extensionsHint())}
             ${
@@ -754,13 +668,7 @@ export function MenuSheet({ places = true }) {
                     ),
                 )
             }
-            ${item(
-                html`<span class="menu-signout">${t(
-                    "web.sheets.menu.menu-sheet.span.sign-out",
-                    "Sign out",
-                )}</span>`,
-                signOut,
-            )}
+            ${item(html`<span class="menu-signout">${t("web.sheets.menu.menu-sheet.span.sign-out", "Sign out")}</span>`, signOut)}
         </div>
         ${
             embedder.items.length > 0 &&

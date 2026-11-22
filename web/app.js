@@ -301,7 +301,7 @@ function Topbar() {
                         ? `${shortPath(cwd, server?.home)}\n${t("app.session-menu", "Session menu")}`
                         : t("app.session-menu", "Session menu")
                 }
-                disabled=${!conversation}
+                disabled=${!conversation || store.state.me == null}
                 onClick=${() => openSheet({ type: "menu" })}
             ></button>
             <span class="title-main" data-part="topbar-title" aria-hidden="true">${title}</span>
@@ -582,7 +582,8 @@ function App() {
             : name;
     }, [state.view.conversation?.title, state.localeRevision]);
 
-    if (state.me === undefined) {
+    // A checked device view can draw before `/api/me`; with no copy, keep the usual boot screen.
+    if (state.me === undefined && state.view.conversation == null) {
         return html`<${Boot}
             caption=${
                 state.notices.some((notice) => notice.level === "error")

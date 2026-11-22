@@ -6,12 +6,14 @@ import {
     cleanUp,
     context,
     lastText,
+    loadTools,
     newSession,
     openApp,
     owner,
     root,
     say,
     scriptedModel,
+    until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -22,9 +24,14 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { User } from "../src/server/config.ts";
-import { ChatDoc, MemoryDoc } from "../src/server/docs.ts";
+import { ChatDoc, MemoryDoc, SubagentsDoc } from "../src/server/docs.ts";
 import { HttpError } from "../src/server/errors.ts";
-import { MAX_PENDING, MAX_PROJECT_LESSONS } from "../src/server/memory.ts";
+import {
+    MAX_PENDING,
+    MAX_PROJECT_LESSONS,
+    MAX_SESSION_LESSONS,
+    sessionKey,
+} from "../src/server/memory.ts";
 
 const tool = (args: Parameters<typeof fauxToolCall>[1]) =>
     fauxAssistantMessage([fauxToolCall("memory", args)], { stopReason: "toolUse" });
@@ -49,6 +56,13 @@ const route: FauxResponseStep = (request) => {
             return tool({ action: "add", text: rest.join(" "), scope: "project" });
         case "remember-everywhere":
             return tool({ action: "add", text: rest.join(" "), scope: "everywhere" });
+        case "remember-session":
+            return tool({ action: "add", text: rest.join(" "), scope: "session" });
+        case "start-helper":
+            return fauxAssistantMessage(
+                [fauxToolCall("subagent", { action: "spawn", name: "helper", message: "hi" })],
+                { stopReason: "toolUse" },
+            );
         case "forget":
             return tool({ action: "remove", id: rest[0] ?? "" });
         case "update":
@@ -64,6 +78,27 @@ const route: FauxResponseStep = (request) => {
             const given = JSON.stringify({ systemPrompt, messages: messages.slice(0, -1) });
 
             return fauxAssistantMessage([fauxText(`has ${rest[0]}: ${given.includes(rest[0]!)}`)]);
+        }
+
+        // "prompt WORD": whether WORD is in the memory section in force now, for a session whose messages name it.
+        // System messages are positional: each sets the sections it names, and null removes one.
+        case "prompt": {
+            const { messages } = request as {
+                messages: { role: string; sections?: Record<string, string | null> }[];
+            };
+            let section: string | null = null;
+
+            for (const message of messages) {
+                if (message.role === "system" && message.sections !== undefined) {
+                    if ("memory" in message.sections) {
+                        section = message.sections.memory ?? null;
+                    }
+                }
+            }
+
+            return fauxAssistantMessage([
+                fauxText(`has ${rest[0]}: ${(section ?? "").includes(rest[0]!)}`),
+            ]);
         }
 
         // "check-text A PHRASE": the same, for a phrase with spaces.
@@ -737,4 +772,198 @@ test("the routes: viewers read, guests add (pending) and cannot remove the owner
         server.closeAllConnections();
         server.close();
     }
+});
+
+/** Whether conversation `id` (a session, or a subagent) has `word` in its system prompt now. */
+async function has(id: ConversationId, word: string): Promise<boolean> {
+    await say(app, id, `prompt ${word}`);
+
+    return (await answer(id)) === `has ${word}: true`;
+}
+
+test("a session's own lessons reach it and its subagents, no other session, and wait for the owner", async () => {
+    await clear();
+    const id = await newSession(app, repo);
+    const other = await newSession(app, repo);
+
+    await say(app, id, "remember-session Serve-on-port-4173-yak.");
+    assert.match(
+        await answer(id),
+        /^ok: Saved \[\w+\] for this session; it waits for the owner's approval/,
+    );
+    const [lesson] = await lessons();
+
+    assert.equal(lesson?.project, sessionKey(id));
+    assert.equal(lesson?.pending, true);
+    assert.ok(!(await has(id, "Serve-on-port-4173-yak")), "not before the owner approves");
+    const pip = await app.pip.ensure(owner(app));
+    const queued = (await app.memory.view(pip, owner(app), true)).lessons.find(
+        (each) => each.id === lesson!.id,
+    );
+
+    assert.equal(queued?.scope, "session");
+    assert.match(queued?.projectName ?? "", /^session “.+”$/);
+    await approve(id, lesson!.id);
+    assert.ok(await has(id, "Serve-on-port-4173-yak"), "the session has it");
+    assert.ok(!(await has(other, "Serve-on-port-4173-yak")), "another session in the project not");
+    assert.ok(!(await given(repo, "Serve-on-port-4173-yak")), "a new session not");
+
+    assert.equal(
+        (await app.memory.view(id, owner(app))).lessons.find((each) => each.id === lesson!.id)
+            ?.scope,
+        "session",
+    );
+    assert.ok(
+        !(await app.memory.view(other, owner(app))).lessons.some((each) => each.id === lesson!.id),
+    );
+    await assert.rejects(app.memory.edit(other, owner(app), lesson!.id, "remove"), {
+        status: 404,
+    });
+
+    await loadTools(app, id, "subagent");
+    await say(app, id, "start-helper");
+    await until(
+        async () =>
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.agents.helper !== undefined,
+        "the helper",
+    );
+    const helper = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.helper!
+        .conversationId as unknown as ConversationId;
+
+    assert.ok(await has(helper, "Serve-on-port-4173-yak"), "the subagent has its root's");
+    await say(app, helper, "remember-session Helper-said-zebu.");
+    const helped = (await lessons()).find((each) => each.text === "Helper-said-zebu.")!;
+
+    assert.equal(helped.project, sessionKey(id), "a subagent's lesson is its session's");
+    assert.equal(helped.from?.conversationId, Number(id));
+    await clear();
+});
+
+test("PiP keeps lessons of its own, which no session gets", async () => {
+    await clear();
+    const pip = await app.pip.ensure(owner(app));
+
+    await app.commands.configure(pip, owner(app), {
+        model: { provider: "faux", modelId: "faux-1" },
+        thinkingLevel: "off",
+    });
+    await say(app, pip, "remember-session PiP-only-tapir.");
+    const [lesson] = await lessons();
+
+    assert.equal(lesson?.project, sessionKey(pip));
+    await approve(pip, lesson!.id);
+    assert.ok(await has(pip, "PiP-only-tapir"));
+    assert.ok(!(await given(elsewhere, "PiP-only-tapir")));
+    assert.equal((await app.memory.view(pip, owner(app))).lessons[0]?.scope, "session");
+    await clear();
+});
+
+test("a session's lessons have a room of their own, and so do the ones that wait", async () => {
+    await clear();
+    const id = await newSession(app, elsewhere);
+    const other = await newSession(app, elsewhere);
+    const writer = { userId: owner(app).id, byPi: false, name: "Owner" };
+
+    for (let index = 0; index < MAX_SESSION_LESSONS; index++) {
+        await app.memory.add(id, elsewhere, writer, { text: `s${index}`, scope: "session" });
+    }
+
+    await assert.rejects(
+        app.memory.add(id, elsewhere, writer, { text: "one more", scope: "session" }),
+        /This session's lessons are full \(20\)/,
+    );
+    // The project, everywhere, and another session still have their room.
+    await app.memory.add(id, elsewhere, writer, { text: "project one", scope: "project" });
+    await app.memory.add(id, elsewhere, writer, { text: "everywhere one", scope: "everywhere" });
+    await app.memory.add(other, elsewhere, writer, { text: "other one", scope: "session" });
+
+    // A full project leaves the session room too.
+    for (let index = 1; index < MAX_PROJECT_LESSONS; index++) {
+        await app.memory.add(id, elsewhere, writer, { text: `p${index}`, scope: "project" });
+    }
+
+    await app.memory.add(other, elsewhere, writer, { text: "other two", scope: "session" });
+    await clear();
+
+    // Waiting ones: a person's session lessons that wait count in that session only.
+    const guest = app.config.addUser("Sid", "guest").user;
+    const asGuest = { userId: guest.id, byPi: false, name: "Sid" };
+
+    for (let index = 0; index < MAX_PENDING; index++) {
+        await app.memory.add(id, elsewhere, asGuest, { text: `g${index}`, scope: "session" });
+    }
+
+    await assert.rejects(
+        app.memory.add(id, elsewhere, asGuest, { text: "one more", scope: "session" }),
+        /for this session wait for the owner's approval already/,
+    );
+    const project = await app.memory.add(id, elsewhere, asGuest, {
+        text: "guest project",
+        scope: "project",
+    });
+
+    assert.equal(project.pending, true);
+    await app.memory.add(other, elsewhere, asGuest, { text: "other", scope: "session" });
+
+    // And at most 40 in all: new sessions do not fill the owner's list.
+    for (let index = 1; index < MAX_PENDING; index++) {
+        await app.memory.add(other, elsewhere, asGuest, { text: `o${index}`, scope: "session" });
+    }
+
+    const third = await newSession(app, elsewhere);
+
+    await assert.rejects(
+        app.memory.add(third, elsewhere, asGuest, { text: "third", scope: "session" }),
+        /40 session lessons wait for the owner's approval already/,
+    );
+    await clear();
+});
+
+test("a fork goes on with its session's lessons in force, as its own", async () => {
+    await clear();
+    const id = await newSession(app, repo);
+
+    await say(app, id, "hello");
+    const kept = await app.memory.remember(id, owner(app), {
+        text: "Fork-keeps-okapi.",
+        scope: "session",
+    });
+    const waits = await app.memory.add(
+        id,
+        repo,
+        { userId: owner(app).id, byPi: true, name: "Pi" },
+        { text: "Fork-skips-quokka.", scope: "session", key: "task-9:call-9" },
+    );
+    const { id: fork } = await app.commands.fork(id, owner(app), {});
+
+    assert.ok(await has(fork, "Fork-keeps-okapi"), "the fork has the lesson in force");
+    const copies = (await lessons()).filter((each) => each.project === sessionKey(fork));
+
+    assert.deepEqual(
+        copies.map((each) => each.text),
+        ["Fork-keeps-okapi."],
+        "what waits stays with the parent",
+    );
+    assert.notEqual(copies[0]!.id, kept.id);
+    assert.equal(copies[0]!.key, undefined);
+
+    await app.memory.edit(fork, owner(app), copies[0]!.id, "remove");
+    assert.ok(!(await has(fork, "Fork-keeps-okapi")));
+    assert.ok(await has(id, "Fork-keeps-okapi"));
+    assert.equal((await lessons()).find((each) => each.id === waits.id)?.project, sessionKey(id));
+    await clear();
+});
+
+test("a session lesson is stored as a project no folder is, so an older server uses it nowhere", async () => {
+    await clear();
+    const id = await newSession(app, repo);
+    const lesson = await app.memory.remember(id, owner(app), {
+        text: "Shape-check-gnu.",
+        scope: "session",
+    });
+
+    // Beta 3 reads a lesson with no project as one for everywhere, and one with a project only in a folder whose
+    // project key is the same. Its keys are absolute paths or `scheme://` addresses: never this one.
+    assert.equal(lesson.project, `pocket-session:${String(id)}`);
+    await clear();
 });

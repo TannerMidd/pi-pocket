@@ -32,6 +32,10 @@ before(async () => {
 
     mkdirSync(extensions, { recursive: true });
     writeFileSync(
+        join(extensions, "locale-sample.ts"),
+        '/** A minimal locale for the public API regression. */\nexport default (_host, web) => web.uiLocales([{id:"zh-CN",label:"测试",messages:{"ui.close":"关闭"}}]);\n',
+    );
+    writeFileSync(
         join(extensions, "locale-reader.ts"),
         '/** Public language API consumer. */\nexport default (_host, web) => web.client("locale-reader.js", {access:"view"});\n',
     );
@@ -61,6 +65,7 @@ before(async () => {
     app = await openApp(scriptedModel(), data);
     session = Number(await newSession(app));
     token = app.config.addUser("Language guest", "guest").token;
+    await app.setExtensionEnabled(owner(app), "locale-sample.ts", true);
     await app.setExtensionEnabled(owner(app), "locale-reader.ts", true);
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.2", port: 0 }, restart: () => {} }),
@@ -105,7 +110,7 @@ test("public translation and locale listeners redraw in place and stop explicitl
     );
     await see(
         `document.querySelector('.locale-reader span')?.textContent==='关闭'`,
-        "default Chinese lookup reaches a live extension",
+        "a registered locale lookup reaches a live extension",
     );
     assert.equal(
         await value<string>("return document.querySelector('.locale-reader input').value"),

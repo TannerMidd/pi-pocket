@@ -18,7 +18,7 @@ Each item below is public as the reference and the guides describe it: its names
 
 ### 1. The module
 
-- A `.ts` file in the drop-in folder (`extensions/` in the data folder), with the `node_modules` link to Pi Pocket's packages.
+- A `.ts` file in the drop-in folder (`extensions/` in the data folder), which imports Pi Pocket's packages by name.
 - The default export `(host, web)`. It can be `async`. It returns one extension, a list, or nothing. Pi Pocket installs all of it or none of it.
 - `export const pocketApi`.
 - The first sentence of the module's `/** … */` comment, which is its description.
@@ -53,9 +53,11 @@ These members are public:
 - `thinkingLevels`
 - `fetchPublic(url, init)` (experimental, since 0.20.0)
 - `ask(request, context)`, `hide(value)`, `commandEnv(provider)`, `browser(conversationId, options)` (experimental, since 0.22.0: [People's values and the browser](../people-values.md))
+- [`pendingApprovals`](../reference/host.md#pendingapprovals): read-only approval snapshots and events (experimental, since 0.30.0)
+- [`annotateTurns(name, annotate)`](../reference/host.md#annotateturns), `Turn`, and `TurnAnnotator`: notes for the model after a person's message (experimental, since 0.30.0: [Turn notes](../turn-notes.md))
 - `on(event, listener)` and the events of `AppEvents` (experimental, since 0.22.0: [Events, services, and settings](../services-settings.md))
 
-These members are on `host` for Pi Pocket's own built-in extensions: `guard`, `approvals`, `schedules`, `goals`, `browsers`, `memory`, `watches`, `repoWatches`, `gallery`, `updates`, `pip`, and `pipCompaction`. They are **internal**. A drop-in can read them, but their shapes can change in any release. One of them becomes public only through a request for an extension point ([core-or-extension.md](core-or-extension.md#ask-for-a-new-extension-point)).
+These members are on `host` for Pi Pocket's own built-in extensions: `guard`, `approvals`, `schedules`, `goals`, `browsers`, `memory`, `watches`, `repoWatches`, `gallery`, `updates`, `pip`, `pipCompaction`, `toolNames`, `stopToolCall`, `waitsForLimit`, and `alertOwner`, and `linkedSessions.activity`, `linkedSessions.stopCall`, and `linkedSessions.onLedRun`. They are **internal**. A drop-in can read them, but their shapes can change in any release. One of them becomes public only through a request for an extension point ([core-or-extension.md](core-or-extension.md#ask-for-a-new-extension-point)).
 
 The host's members do not change while modules reload. A new member comes only after a restart, so a module that uses a new member must check that it is there ([Using the host](../host.md)).
 
@@ -83,7 +85,7 @@ The host's members do not change while modules reload. A new member comes only a
 - `h`, `html`, `Fragment`, and the hooks: `useState`, `useEffect`, `useLayoutEffect`, `useRef`, `useMemo`, `useCallback`, and `useReducer`.
 - The pieces `Icon`, `Loader`, `Spinner`, `Markdown`, and `Switch`, with the props that [pocket](../reference/pocket.md) gives.
 - `t` and `onLocaleChange` (experimental, unreleased; first release unassigned): fixed UI lookup and module-lifetime language notifications, with explicit English fallback.
-- `api`, `on`, `rail`, `menu`, `launcher`, `page`, `sheet`, `toolCall`, `openPage`, `closePage`, `openSheet`, `closeSheet`, `notify`, `me`, `conversationId`, `openConversation` (since 0.16.0), `style`, and `onDispose`.
+- `api`, `on`, `rail`, `menu`, `launcher`, `page`, `sheet`, `toolCall`, `openPage`, `closePage`, `openSheet`, `closeSheet`, `notify`, `me`, `conversationId`, `openConversation` (since 0.16.0; its `options.artifact` and `options.version` are experimental, since 0.29.0), `style`, and `onDispose`.
 - What a page's or a sheet's component gets: `pocket`, `close`, and a sheet's `props`.
 - The icon names that [pocket](../reference/pocket.md) lists. Other icon names can go. An unknown name shows `grid`, so a module does not fail.
 - Safe mode: `?noext=1` and `?noext=0` on the app's address.
@@ -128,7 +130,7 @@ The host's members do not change while modules reload. A new member comes only a
 
 ## Packages from Earendil
 
-Extensions import `@earendil-works/pi-durable`, `@earendil-works/pi-ai`, and the other packages that Pi Pocket has. Earendil makes them, not Pi Pocket. Pi Durable is experimental, and its API can change between its releases. Pi Pocket pins their versions in `package.json`, and a drop-in gets the same versions through the `node_modules` link.
+Extensions import `@earendil-works/pi-durable`, `@earendil-works/pi-ai`, and the other packages that Pi Pocket has. Earendil makes them, not Pi Pocket. Pi Durable is experimental, and its API can change between its releases. Pi Pocket pins their versions in `package.json`, and a drop-in gets the same versions: Pi Pocket resolves them from its own packages.
 
 - **A1. The release notes name each update of a pinned package** in "For extension authors".\
   _Reason:_ an author can then find the cause when a module breaks after an update.
@@ -171,7 +173,7 @@ Since 0.26.0, `pocket.pip` (`ask`) is experimental, with `PipApi` and `PipAskRes
 
 Since 0.27.0, `host.roleOf(personId)` is experimental, and so is the `scroll` field of `host.browser`'s `snapshot()`.
 
-Unreleased: `web.uiLocales`, optional `WebRequest.locale` and `PublicPageRequest.locale`, `pocket.t`, and `pocket.onLocaleChange` are experimental, with the type `UiLocalePack`. They are not in the official 0.28.0 or 0.28.1 releases. Their first release is unassigned and remains the maintainers' decision.
+Unreleased: `web.uiLocales`, optional `WebRequest.locale` and `PublicPageRequest.locale`, `pocket.t`, and `pocket.onLocaleChange` are experimental, with the type `UiLocalePack`. The published upstream release does not provide them. Their first release is unassigned and remains the maintainers' decision.
 
 Since 0.28.0, `web.presentEntry` and `pocket.entryPresentation` are experimental, with `PresentEntry`; so is `ConversationWebRequest.conversationUsage`, with `UsageTotals` and `ConversationUsage`. A module names how an input it sends shows. The model still reads that message in full. Since then too, `pocket.messages` leaves out an input stored as a module's own kind: before, such an input was not a message in the transcript at all.
 

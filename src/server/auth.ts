@@ -8,6 +8,11 @@ export const COOKIE = "pocket_auth";
 export const INVITE_MINUTES = [15, 60, 24 * 60, 7 * 24 * 60] as const;
 export type InviteMinutes = (typeof INVITE_MINUTES)[number];
 
+/** How long a one-time sign-in link lasts: the desktop app opens its window with it at once. */
+export const SIGN_IN_LINK_MS = 60_000;
+/** One-time sign-in links that may wait at once; a new one ends the oldest. */
+const SIGN_IN_LINKS = 8;
+
 export function parseCookies(header: string | undefined): Record<string, string> {
     const out: Record<string, string> = {};
 
@@ -86,6 +91,8 @@ export type InviteGrant =
 /** Invites live in `config.json` (by their codes' hashes), so one that lasts a day or a week outlives a restart. */
 export class Auth {
     readonly #config: ConfigStore;
+    /** One-time sign-in links for the owner: the code, and when it ends. Only in memory, so a restart ends them. */
+    readonly #links = new Map<string, number>();
 
     constructor(config: ConfigStore) {
         this.#config = config;
@@ -189,5 +196,38 @@ export class Auth {
             invite.role,
             invite.session === undefined ? undefined : [invite.session],
         );
+    }
+
+    /**
+     * A one-time sign-in link for the owner, for a window of the desktop app on this machine (docs/desktop-app.md): it
+     * signs a browser in once, within `SIGN_IN_LINK_MS`, so the owner's token never goes on a command line.
+     */
+    createSignInLink(): string {
+        const now = Date.now();
+
+        for (const [code, expiresAt] of this.#links) {
+            if (expiresAt <= now || this.#links.size >= SIGN_IN_LINKS) {
+                this.#links.delete(code);
+            }
+        }
+
+        const code = randomBytes(32).toString("base64url");
+
+        this.#links.set(code, now + SIGN_IN_LINK_MS);
+
+        return code;
+    }
+
+    /** The owner's token for a one-time sign-in link that is still live. The link is gone after this, used or not. */
+    redeemSignInLink(code: string): string | undefined {
+        const expiresAt = this.#links.get(code);
+
+        if (expiresAt === undefined) {
+            return undefined;
+        }
+
+        this.#links.delete(code);
+
+        return expiresAt > Date.now() ? this.#config.ownerToken : undefined;
     }
 }

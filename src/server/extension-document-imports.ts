@@ -1,13 +1,24 @@
 /**
  * Native drop-in imports retain the pre-1.4 document checkpoint default without changing Pi Durable itself, and get
- * TypeBox's `Type` from `@earendil-works/pi-ai` as before Pi 1.5.
+ * TypeBox's `Type` from `@earendil-works/pi-ai` as before Pi 1.5. A package a drop-in does not have of its own comes
+ * from Pi Pocket's, with no `node_modules` link.
  */
-import { registerHooks } from "node:module";
+import { createRequire, registerHooks } from "node:module";
 import { sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const compatUrl = new URL("./extension-document-compat.ts", import.meta.url).href;
 const piAiUrl = new URL("./extension-pi-ai-compat.ts", import.meta.url).href;
+/** Pi Pocket's own package root: a package resolved from here is the very one the server runs. */
+const appUrl = new URL("../../package.json", import.meta.url).href;
+const appRequire = createRequire(appUrl);
+
+const NOT_FOUND = new Set(["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND"]);
+
+/** Not a path or a URL: `preact`, `@earendil-works/pi-mcp/oauth`. */
+function isBare(specifier: string): boolean {
+    return !/^(\.{0,2}\/|[a-zA-Z][a-zA-Z\d+.-]*:|#|\\)/.test(specifier);
+}
 
 type Scope = { directory: string; report: (message: string) => void; warned: Set<string> };
 type Owner = { scope: Scope; module: string; root: string };
@@ -59,7 +70,31 @@ export function documentImports(directory: string, report: (message: string) => 
                     return { url: piAiUrl, shortCircuit: true };
                 }
 
-                const resolved = nextResolve(specifier, context);
+                let resolved: ReturnType<typeof nextResolve>;
+
+                try {
+                    resolved = nextResolve(specifier, context);
+                } catch (error) {
+                    // Where links are blocked, the drop-in folder has no `node_modules` link to Pi Pocket's packages:
+                    // resolve as Pi Pocket itself does. A package the drop-in has of its own resolved above.
+                    if (
+                        parent === undefined ||
+                        !isBare(specifier) ||
+                        !NOT_FOUND.has((error as NodeJS.ErrnoException).code ?? "")
+                    ) {
+                        throw error;
+                    }
+
+                    try {
+                        // `require` ignores another `parentURL`: Pi Pocket's own `require` finds it instead.
+                        return (error as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND"
+                            ? { url: pathToFileURL(appRequire.resolve(specifier)).href }
+                            : nextResolve(specifier, { ...context, parentURL: appUrl });
+                    } catch {
+                        throw error;
+                    }
+                }
+
                 // Node resolves symlinks before the next parentURL. Follow only imports inside extension source
                 // trees, not arbitrary shared dependencies: a shared helper can also run on behalf of core.
                 const requestedUrl = specifier.startsWith("file:")

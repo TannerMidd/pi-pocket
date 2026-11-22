@@ -26,16 +26,41 @@ function themeQuery() {
     })}`;
 }
 
+/** Whether this person may delete an artifact: anyone who steers the session, as the server checks. */
+const mayDelete = (me) => me?.role !== undefined && me.role !== "viewer";
+
+/** Resolves true when it is gone. */
+export function deleteArtifact(conversationId, artifact) {
+    const count = artifact.versions.length;
+    const what =
+        count > 1 ? `“${artifact.title}” and all ${count} versions` : `“${artifact.title}”`;
+
+    if (
+        !confirm(
+            `Delete ${what}? Its links and its cards in replies stop working. Pi's own messages that made it still hold the text Pi sent. This cannot be undone.`,
+        )
+    ) {
+        return Promise.resolve(false);
+    }
+
+    return attempt(async () => {
+        await api(`c/${conversationId}/artifacts/${encodeURIComponent(artifact.id)}`, undefined, {
+            method: "DELETE",
+        });
+        notify("info", `Deleted ${artifact.title}.`);
+
+        return true;
+    }).then((done) => done === true);
+}
+
 export function ArtifactsSheet() {
-    const { artifacts } = store.state.view;
+    const { artifacts, conversation } = store.state.view;
+    const canDelete = mayDelete(store.state.me);
     const items = [...artifacts].sort(
         (a, b) => (b.versions.at(-1)?.createdAt ?? 0) - (a.versions.at(-1)?.createdAt ?? 0),
     );
 
-    return html`<${Sheet} title=${t(
-        "web.sheets.viewers.artifacts-sheet.title.artifacts",
-        "Artifacts",
-    )} onClose=${closeSheet} wide=${true}>
+    return html`<${Sheet} title=${t("web.sheets.viewers.artifacts-sheet.title.artifacts", "Artifacts")} onClose=${closeSheet} wide=${true}>
         ${
             items.length === 0 &&
             html`<p class="muted">
@@ -45,22 +70,35 @@ export function ArtifactsSheet() {
         <div class="artifact-grid">
             ${items.map((artifact) =>
                 [...artifact.versions].reverse().map(
-                    (version) => html`<button
-                        class="artifact-card"
-                        onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
-                    >
-                        <span class="artifact-cover" aria-hidden="true">
-                            <${Icon} name="file" size=${28} />
-                            <span>${artifact.type}</span>
-                        </span>
-                        <span class="artifact-info">
-                            <span class="artifact-name">${artifact.title}</span>
-                            <span class="muted small mono">${artifact.id}</span>
-                            <span class="muted small mono">
-                                ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
+                    (version) => html`<div class="artifact-tile">
+                        <button
+                            class="artifact-card"
+                            onClick=${() => openSheet({ type: "viewer", id: artifact.id, version: version.version })}
+                        >
+                            <span class="artifact-cover" aria-hidden="true">
+                                <${Icon} name="file" size=${28} />
+                                <span>${artifact.type}</span>
                             </span>
-                        </span>
-                    </button>`,
+                            <span class="artifact-info">
+                                <span class="artifact-name">${artifact.title}</span>
+                                <span class="muted small mono">${artifact.id}</span>
+                                <span class="muted small mono">
+                                    ${artifact.type} v${version.version} · ${formatBytes(version.size)} · ${timeAgo(version.createdAt)}
+                                </span>
+                            </span>
+                        </button>
+                        ${
+                            canDelete &&
+                            html`<button
+                                class="icon-button artifact-delete"
+                                title="Delete this artifact"
+                                aria-label=${`Delete ${artifact.title}`}
+                                onClick=${() => deleteArtifact(conversation.id, artifact)}
+                            >
+                                <${Icon} name="trash" size=${16} />
+                            </button>`
+                        }
+                    </div>`,
                 ),
             )}
         </div>
@@ -89,6 +127,11 @@ export function ArtifactViewer({ id, version }) {
     // The Design canvas (a built-in module) shows an HTML page with its versions, comments, and tweaks.
     const designable =
         artifact?.type === "html" && browserModuleState("design")?.status === "ready";
+    // Not in the session, and listed as deleted: someone deleted it.
+    const deleted = artifact === undefined && Object.hasOwn(view.artifactsEnded ?? {}, id);
+
+    const remove = () =>
+        deleteArtifact(view.conversation.id, artifact).then((done) => done && closeSheet());
 
     const openInDesign = () => {
         dispatchEvent(
@@ -104,32 +147,15 @@ export function ArtifactViewer({ id, version }) {
             <div class="viewer-title">
                 <strong>${artifact?.title ?? id}</strong>
                 <span class="muted small">
-                    ${artifact?.type ?? ""}${t(
-                        "web.sheets.viewers.artifact-viewer.span.version-shown",
-                        " · version {shown}",
-                        { shown },
-                    )}
-                    ${
-                        latest && shown !== latest
-                            ? html` · <button class="link" onClick=${() => setShown(latest)}>
-                              ${t(
-                                  "web.sheets.viewers.artifact-viewer.button.latest-is",
-                                  "latest is v{version}",
-                                  { version: latest },
-                              )}
-                          </button>`
-                            : ""
-                    }
+                    ${artifact?.type ?? ""}${t("web.sheets.viewers.artifact-viewer.span.version-shown", " · version {shown}", { shown })}
+                    ${latest && shown !== latest ? html` · <button class="link" onClick=${() => setShown(latest)}>${t("web.sheets.viewers.artifact-viewer.button.latest-is", "latest is v{version}", { version: latest })}</button>` : ""}
                 </span>
             </div>
             ${
                 artifact &&
                 artifact.versions.length > 1 &&
                 html`<select
-                    aria-label=${t(
-                        "web.sheets.viewers.artifact-viewer.aria-label.version",
-                        "Version",
-                    )}
+                    aria-label=${t("web.sheets.viewers.artifact-viewer.aria-label.version", "Version")}
                     value=${shown}
                     onChange=${(event) => setShown(Number(event.currentTarget.value))}
                 >
@@ -140,20 +166,14 @@ export function ArtifactViewer({ id, version }) {
                         )}
                 </select>`
             }
-            <button class="icon-button" title=${t(
-                "web.sheets.viewers.artifact-viewer.title.reload",
-                "Reload",
-            )} onClick=${() => setNonce(nonce + 1)}>
+            <button class="icon-button" title=${t("web.sheets.viewers.artifact-viewer.title.reload", "Reload")} onClick=${() => setNonce(nonce + 1)}>
                 ↻
             </button>
             ${
                 designable &&
                 html`<button
                     class="button small"
-                    title=${t(
-                        "web.sheets.viewers.artifact-viewer.title.open-design-canvas",
-                        "Open it in the Design canvas",
-                    )}
+                    title=${t("web.sheets.viewers.artifact-viewer.title.open-design-canvas", "Open it in the Design canvas")}
                     onClick=${openInDesign}
                 >
                     ${t("web.sheets.viewers.artifact-viewer.button.open-design", "Open in Design")}
@@ -164,39 +184,46 @@ export function ArtifactViewer({ id, version }) {
                 artifact &&
                 html`<button
                     class="button small"
-                    title=${t(
-                        "web.sheets.viewers.artifact-viewer.title.publish-anyone-link",
-                        "Publish it to anyone with a link",
-                    )}
+                    title=${t("web.sheets.viewers.artifact-viewer.title.publish-anyone-link", "Publish it to anyone with a link")}
                     onClick=${() => openSheet({ type: "artifact-share", id, version: shown })}
                 >
                     ${t("web.sheets.viewers.artifact-viewer.button.share", "Share")}
                 </button>`
             }
-            <a class="button small" href=${src} target="_blank" rel="noopener">${t(
-                "web.sheets.viewers.artifact-viewer.a.open-tab",
-                "Open tab",
-            )}</a>
-            <button class="icon-button" onClick=${closeSheet} aria-label=${t(
-                "web.sheets.viewers.artifact-viewer.aria-label.close",
-                "Close",
-            )}>
+            <a class="button small" href=${src} target="_blank" rel="noopener">${t("web.sheets.viewers.artifact-viewer.a.open-tab", "Open tab")}</a>
+            ${
+                mayDelete(me) &&
+                artifact &&
+                html`<button
+                    class="icon-button danger"
+                    title="Delete this artifact"
+                    aria-label="Delete this artifact"
+                    onClick=${remove}
+                >
+                    <${Icon} name="trash" />
+                </button>`
+            }
+            <button class="icon-button viewer-close" onClick=${closeSheet} aria-label=${t("web.sheets.viewers.artifact-viewer.aria-label.close", "Close")}>
                 <${Icon} name="close" />
             </button>
         </header>
-        <iframe
-            ref=${frame}
-            key=${`${src}#${nonce}`}
-            src=${src}
-            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads"
-            allow="fullscreen; clipboard-write; accelerometer; gyroscope"
-            title=${artifact?.title ?? id}
-        ></iframe>
+        ${
+            deleted
+                ? html`<p class="muted viewer-gone">This artifact was deleted.</p>`
+                : html`<iframe
+                      ref=${frame}
+                      key=${`${src}#${nonce}`}
+                      src=${src}
+                      sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads"
+                      allow="fullscreen; clipboard-write; accelerometer; gyroscope"
+                      title=${artifact?.title ?? id}
+                  ></iframe>`
+        }
     </div>`;
 }
 
-/** How long a new share lasts: until it is ended, a day, a week, or a month; built at draw time for its words. */
-const shareLife = () => [
+/** How long a new share lasts: until it is ended, a day, a week, or a month. */
+const SHARE_LIFE = [
     [0, t("web.sheets.viewers.share-life.until-i-end", "Until I end it")],
     [24, t("web.sheets.viewers.share-life.day", "A day")],
     [168, t("web.sheets.viewers.share-life.week", "A week")],
@@ -227,49 +254,17 @@ function ShareRow({ share, base, fresh, canEnd, onRevoke }) {
         <div class="hook-head">
             <strong class="grow">${share.title}</strong>
             <span class="muted small">
-                ${share.type}${
-                    share.version === null
-                        ? t(
-                              "web.sheets.viewers.share-row.span.follows-newest-version",
-                              " · follows the newest version",
-                          )
-                        : t(
-                              "web.sheets.viewers.share-row.span.version-pinned",
-                              " · version {version}, pinned",
-                              { version: share.version },
-                          )
-                }
+                ${share.type}${share.version === null ? t("web.sheets.viewers.share-row.span.follows-newest-version", " · follows the newest version") : t("web.sheets.viewers.share-row.span.version-pinned", " · version {version}, pinned", { version: share.version })}
             </span>
         </div>
         <div class="mono small hook-address">${shareAddress(base, share)}</div>
         <div class="hook-actions">
             <span class="muted small grow">
-                ${
-                    share.expiresAt === null
-                        ? t(
-                              "web.sheets.viewers.share-row.span.stays-until-end",
-                              "stays until you end it",
-                          )
-                        : t("web.sheets.viewers.share-row.span.ends-at", "ends {when}", {
-                              when: formatWhen(share.expiresAt),
-                          })
-                }
+                ${share.expiresAt === null ? t("web.sheets.viewers.share-row.span.stays-until-end", "stays until you end it") : t("web.sheets.viewers.share-row.span.ends-at", "ends {when}", { when: formatWhen(share.expiresAt) })}
             </span>
-            <button class="button small" onClick=${copy}>${t(
-                "web.sheets.viewers.share-row.button.copy-link",
-                "Copy link",
-            )}</button>
-            <a class="button small" href=${share.path} target="_blank" rel="noopener">${t(
-                "web.sheets.viewers.share-row.a.open",
-                "Open",
-            )}</a>
-            ${
-                canEnd &&
-                html`<button class="button small ghost" onClick=${onRevoke}>${t(
-                    "web.sheets.viewers.share-row.button.end",
-                    "End",
-                )}</button>`
-            }
+            <button class="button small" onClick=${copy}>${t("web.sheets.viewers.share-row.button.copy-link", "Copy link")}</button>
+            <a class="button small" href=${share.path} target="_blank" rel="noopener">${t("web.sheets.viewers.share-row.a.open", "Open")}</a>
+            ${canEnd && html`<button class="button small ghost" onClick=${onRevoke}>${t("web.sheets.viewers.share-row.button.end", "End")}</button>`}
         </div>
     </div>`;
 }
@@ -346,39 +341,25 @@ export function ArtifactShareSheet({ id, version }) {
         });
 
     return html`<${Sheet}
-        title=${t("web.sheets.viewers.artifact-share-sheet.title.share", "Share {title}", {
-            title: artifact?.title ?? id,
-        })}
+        title=${t("web.sheets.viewers.artifact-share-sheet.title.share", "Share {title}", { title: artifact?.title ?? id })}
         onClose=${() => (fromDesign ? closeSheet() : openSheet({ type: "viewer", id, version }))}
         wide=${true}
     >
         <p class="muted small">
-            ${t(
-                "web.sheets.viewers.artifact-share-sheet.p.published-page-needs-no",
-                "A published page needs no sign-in: anyone with its address can open it. It is the artifact's own sandboxed page, which still cannot reach this app or its cookies.",
-            )}
+            ${t("web.sheets.viewers.artifact-share-sheet.p.published-page-needs-no", "A published page needs no sign-in: anyone with its address can open it. It is the artifact's own sandboxed page, which still cannot reach this app or its cookies.")}
         </p>
         ${
             steer &&
             html`<div class="hook-form">
                 <div class="field">
-                    <div class="label">${t(
-                        "web.sheets.viewers.artifact-share-sheet.div.shows",
-                        "Shows",
-                    )}</div>
+                    <div class="label">${t("web.sheets.viewers.artifact-share-sheet.div.shows", "Shows")}</div>
                     <div class="segmented">
                         <button
                             class=${pin ? "on" : ""}
                             aria-pressed=${pin}
                             onClick=${() => setPin(true)}
                         >
-                            ${t(
-                                "web.sheets.viewers.artifact-share-sheet.button.version",
-                                "Version {detail}",
-                                {
-                                    detail: version ?? artifact?.versions.at(-1)?.version ?? 1,
-                                },
-                            )}
+                            ${t("web.sheets.viewers.artifact-share-sheet.button.version", "Version {detail}", { detail: version ?? artifact?.versions.at(-1)?.version ?? 1 })}
                         </button>
                         <button
                             class=${pin ? "" : "on"}
@@ -389,26 +370,13 @@ export function ArtifactShareSheet({ id, version }) {
                         </button>
                     </div>
                     <div class="muted small">
-                        ${
-                            pin
-                                ? t(
-                                      "web.sheets.viewers.artifact-share-sheet.div.stays-version-whatever-publish",
-                                      "Stays at this version, whatever you publish after.",
-                                  )
-                                : t(
-                                      "web.sheets.viewers.artifact-share-sheet.div.follows-artifact-every-new",
-                                      "Follows the artifact: every new version shows here too.",
-                                  )
-                        }
+                        ${pin ? t("web.sheets.viewers.artifact-share-sheet.div.stays-version-whatever-publish", "Stays at this version, whatever you publish after.") : t("web.sheets.viewers.artifact-share-sheet.div.follows-artifact-every-new", "Follows the artifact: every new version shows here too.")}
                     </div>
                 </div>
                 <div class="field">
-                    <div class="label">${t(
-                        "web.sheets.viewers.artifact-share-sheet.div.lasts",
-                        "Lasts",
-                    )}</div>
+                    <div class="label">${t("web.sheets.viewers.artifact-share-sheet.div.lasts", "Lasts")}</div>
                     <div class="segmented">
-                        ${shareLife().map(
+                        ${SHARE_LIFE.map(
                             ([hours, label]) => html`<button
                                 class=${life === hours ? "on" : ""}
                                 aria-pressed=${life === hours}
@@ -420,29 +388,11 @@ export function ArtifactShareSheet({ id, version }) {
                     </div>
                 </div>
                 <button class="button primary" disabled=${making} onClick=${make}>
-                    ${
-                        making
-                            ? t(
-                                  "web.sheets.viewers.artifact-share-sheet.button.publishing",
-                                  "Publishing…",
-                              )
-                            : t(
-                                  "web.sheets.viewers.artifact-share-sheet.button.publish-link",
-                                  "Publish link",
-                              )
-                    }
+                    ${making ? t("web.sheets.viewers.artifact-share-sheet.button.publishing", "Publishing…") : t("web.sheets.viewers.artifact-share-sheet.button.publish-link", "Publish link")}
                 </button>
             </div>`
         }
-        ${
-            !list &&
-            html`<${Loader}
-                label=${t(
-                    "web.sheets.viewers.artifact-share-sheet.label.reading-the-links",
-                    "Reading the links",
-                )}
-            />`
-        }
+        ${!list && html`<${Loader} label=${t("web.sheets.viewers.artifact-share-sheet.label.reading-the-links", "Reading the links")} />`}
         ${
             list?.length === 0 &&
             html`<p class="muted small">${t("web.sheets.viewers.artifact-share-sheet.p.no-link-yet-published", "No link yet. A published page stays out of the app, and out of everything an invite to this session gave.")}</p>`
@@ -456,17 +406,7 @@ export function ArtifactShareSheet({ id, version }) {
                 onRevoke: () => revoke(share),
             }),
         )}
-        ${
-            base
-                ? ""
-                : html`<p class="muted small">
-                  ${t(
-                      "web.sheets.viewers.artifact-share-sheet.p.links-start-whoever-opens",
-                      "Links start at {origin}, so whoever opens one must be able to reach it: a tunnel's address works for anyone.",
-                      { origin: location.origin },
-                  )}
-              </p>`
-        }
+        ${base ? "" : html`<p class="muted small">${t("web.sheets.viewers.artifact-share-sheet.p.links-start-whoever-opens", "Links start at {origin}, so whoever opens one must be able to reach it: a tunnel's address works for anyone.", { origin: location.origin })}</p>`}
     <//>`;
 }
 
@@ -490,14 +430,8 @@ export function ImageViewer({ src, alt }) {
         <img src=${src} alt=${alt ?? ""} />
         <div class="lightbox-bar" onClick=${(event) => event.stopPropagation()}>
             <span class="lightbox-title">${alt ?? ""}</span>
-            <a class="button small" href=${src} target="_blank" rel="noopener">${t(
-                "web.sheets.viewers.image-viewer.a.open",
-                "Open",
-            )}</a>
-            <button class="icon-button" onClick=${closeSheet} aria-label=${t(
-                "web.sheets.viewers.image-viewer.aria-label.close",
-                "Close",
-            )}>
+            <a class="button small" href=${src} target="_blank" rel="noopener">${t("web.sheets.viewers.image-viewer.a.open", "Open")}</a>
+            <button class="icon-button" onClick=${closeSheet} aria-label=${t("web.sheets.viewers.image-viewer.aria-label.close", "Close")}>
                 <${Icon} name="close" />
             </button>
         </div>

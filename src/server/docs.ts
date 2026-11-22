@@ -26,6 +26,18 @@ const rebased = {
         info.deltasSinceBase >= 64,
 };
 
+/**
+ * A change that deletes a whole item (`items.<id>`) is a base too: the storage drops the revisions before it, so what
+ * was deleted (`artifacts.ts`) is not kept in them.
+ */
+const rebasedOnDelete = {
+    checkpointWhen: (_value: unknown, ops: unknown, info: CheckpointInfo) =>
+        info.deltasSinceBase >= 64 ||
+        (ops as readonly (readonly [string, (readonly unknown[])?])[]).some(
+            (op) => op[0] === "d" && (op[1]?.length ?? 0) <= 2,
+        ),
+};
+
 export type SessionMeta = {
     title?: string;
     cwd: string;
@@ -37,6 +49,11 @@ export type SessionMeta = {
     forkedFrom?: { id: number; entryId?: number };
     /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */
     linkedFrom?: { id: number };
+    /**
+     * False: this session, as a lead, takes no run-end answers from the sessions it started (`linked-sessions.ts`,
+     * `reports`), and a message from it asks the target to send its answer. Absent: it takes them.
+     */
+    linkedReports?: false;
     /** The most Pi may spend here, in dollars, subagents included. */
     budget?: number;
     /** The git worktree the session works in, when it has one of its own. */
@@ -49,6 +66,34 @@ export type SessionMeta = {
      */
     pip?: string;
 };
+
+/**
+ * Its catalogue entry went in the same commit that wrote this. `conversations`: what a later purge takes. `done`: when
+ * Pocket's own files went; until then, each start goes on with them.
+ */
+export type RemovedSession = {
+    title?: string;
+    cwd: string;
+    conversations: number[];
+    by: string;
+    at: number;
+    worktree?: Worktree;
+    /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
+    forkedFrom?: { id: number; entryId?: number };
+    /** Uploads folders a live fork still reads (`workspace.ts`). */
+    keepUploads?: number[];
+    done?: number;
+    left?: string[];
+};
+
+/** Stored data: never rename the kind. */
+export const DeletedDoc = defineDoc<{ items: Record<string, RemovedSession> }>({
+    kind: "pocket.deleted",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ items: {} }),
+});
 
 /** The catalogue of user-facing sessions: ownerless conversations created by the app. Subagents are not listed. */
 export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
@@ -148,11 +193,13 @@ export const LinkedSessionCallsDoc = defineDoc<{
             by?: string;
             at: number;
             /**
-             * What a stop or an archive returned, so a repeat gives that and changes nothing again. `stopping`: the stop
-             * has not finished.
+             * What a stop, an archive or a reports switch returned, so a repeat gives that and changes nothing again.
+             * `stopping`: the stop has not finished. A reports switch names its own session in `conversationId`.
              */
             result?:
-                { busy: boolean; stopping?: boolean } | { archived: boolean; repeating: number };
+                | { busy: boolean; stopping?: boolean }
+                | { archived: boolean; repeating: number }
+                | { take: boolean };
         }
     >;
 }>({
@@ -215,11 +262,14 @@ export type ArtifactMeta = {
     versions: ArtifactVersion[];
 };
 
-/** The artifacts of one conversation, newest version last. Bodies live in `ArtifactBodyDoc`. */
-export const ArtifactsDoc = defineDoc<{ items: Record<string, ArtifactMeta> }>({
+/** Newest version last. `ended`: each deleted artifact's last version number, so that a number is never reused. */
+export const ArtifactsDoc = defineDoc<{
+    items: Record<string, ArtifactMeta>;
+    ended?: Record<string, number>;
+}>({
     kind: "pocket.artifacts",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",
@@ -260,7 +310,7 @@ export const ArtifactStateDoc = defineDoc<{
 }>({
     kind: "pocket.artifact-state",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "initial",
@@ -283,11 +333,23 @@ export type ArtifactShare = {
     expiresAt?: number;
 };
 
+/**
+ * Asset hashes that deleted artifacts used, each with the number of when it came: `artifacts.ts` retires an asset's bytes
+ * once no artifact in any conversation names it, and a new version that stores the hash takes it out of here.
+ */
+export const ArtifactSweepDoc = defineDoc<{ seq: number; hashes: Record<string, number> }>({
+    kind: "pocket.artifact-sweep",
+    version: 1,
+    ...rebased,
+    scope: "session",
+    initial: () => ({ seq: 0, hashes: {} }),
+});
+
 /** The artifact shares of the whole app, by their token. */
 export const ArtifactSharesDoc = defineDoc<{ items: Record<string, ArtifactShare> }>({
     kind: "pocket.artifact-shares",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "session",
     initial: () => ({ items: {} }),
 });
@@ -341,6 +403,12 @@ export type SubagentRecord = {
      * a later time, so it needs them again.
      */
     dealtAt?: number;
+    /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
+    stall?: { since: number; told?: true; stopped?: true };
+    /** How often the stall watch stopped its work since it last answered: 2 at most, then a person decides. */
+    stops?: number;
+    /** Who stopped its run: a person, its parent (`subagent stop`), or the stall watch. A new message clears it. */
+    stoppedBy?: "person" | "parent" | "deadline";
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
@@ -365,6 +433,8 @@ export const SubagentsDoc = defineDoc<{
     outbox?: PendingReport[];
     /** The task sending them, while there is one. */
     courier?: TaskId;
+    /** The task that looks for subagents at work that make no progress, while any is at work. */
+    stallWatch?: TaskId;
     /**
      * The batch taken from the outbox, kept until it has left the parent's queue, with the request id it goes with: a
      * courier that stops before then leaves it to the next, which sends it again under that id, so it goes once.
@@ -544,6 +614,14 @@ export type Schedule = {
     taskId: TaskId;
     /** Set by the same call already, when a tool call is replayed: its `taskId:callId`. */
     key?: string;
+    /** How many times it was edited: what an editor's save checks, so a save from an older copy is refused. */
+    revision?: number;
+    /** Paused by a person: it sends nothing until someone resumes it. When, and by whom. */
+    paused?: { at: number; by: string };
+    /** Summarize everything before the message it sent last, before each sending (`schedules.ts`). */
+    compactBefore?: true;
+    /** While this schedule compacts: another schedule of the session does not compact meanwhile. */
+    compacting?: true;
 };
 
 /** Messages that go to Pi later, or on repeat. A fork starts without them: they belong to who set them up. */
@@ -574,8 +652,12 @@ export type BackgroundTask = {
     code?: number;
     /** `split`'s exit code, when writing its log failed (a full disk): its output may stop short. */
     logFailed?: number;
-    /** Why Pi Pocket stopped it, when it did of itself (its output came too fast to keep). */
+    /** Why Pi Pocket stopped it, when it did of itself (its output came too fast to keep, or nothing for too long). */
     why?: string;
+    /** "person": a person stopped it, and Pi is told, as Pi may wait for it. */
+    by?: "person";
+    /** How long it may print nothing before Pi Pocket stops it; 0 or absent (a task from before 0.29): no limit. */
+    quietMs?: number;
     /** Processes it started that left its group and still ran when it ended (a daemon): a stop ends them. */
     left?: number[];
     /** The machine's boot it started in: a task of another boot has no process left. */
@@ -661,9 +743,12 @@ export type Lesson = {
     /** Short and stable: what Pi and people use to change or remove it. */
     id: string;
     text: string;
-    /** The project it is for (`memory.ts`: the repository's shared git folder, or the folder); absent: everywhere. */
+    /**
+     * The project it is for (`memory.ts`: the repository's shared git folder, or the folder); absent: everywhere.
+     * `pocket-session:<root id>` (`sessionKey`): that session's own lessons, a key no folder has.
+     */
     project?: string;
-    /** The project's folder name, for people to read. */
+    /** The project's folder name, or the session's title, for people to read. */
     projectName?: string;
     /** The session it came from: a subagent's lesson is its session's. */
     from?: { conversationId: number; title: string };
@@ -684,8 +769,8 @@ export type Lesson = {
 };
 
 /**
- * Memory: short lessons Pi keeps across sessions, by id, for one project or everywhere. Pi gets those that apply in
- * its system prompt (`extensions/memory.ts`).
+ * Memory: short lessons Pi keeps across sessions, by id, for one project, everywhere, or one session. Pi gets those
+ * that apply in its system prompt (`extensions/memory.ts`).
  */
 export const MemoryDoc = defineDoc<{ items: Record<string, Lesson> }>({
     kind: "pocket.memory",
@@ -997,7 +1082,7 @@ export type DesignItem = {
 export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }>({
     kind: "pocket.design-comments",
     version: 1,
-    ...rebased,
+    ...rebasedOnDelete,
     scope: "conversation",
     history: "latest",
     fork: "current",

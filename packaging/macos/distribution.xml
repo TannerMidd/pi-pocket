@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pi Pocket's macOS package (productbuild). It installs in the current user's home folder only, so it needs no
+    admin password, and its scripts run as that user. build.sh puts the version in place of @VERSION@.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>Pi Pocket</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE.txt" mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <domains enable_anywhere="false" enable_currentUserHome="true" enable_localSystem="false"/>
+    <!-- Both architectures: without arm64 here, a Mac with Apple silicon asks for Rosetta to run the scripts. -->
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <!-- The oldest macOS that Node.js 26 supports. -->
+    <allowed-os-versions>
+        <os-version min="13.5"/>
+    </allowed-os-versions>
+    <script>
+        <![CDATA[
+        // An install over an earlier one keeps its sign-in item: the choice starts on when the LaunchAgent is there.
+        function loginItemOn() {
+            var agent = "/Library/LaunchAgents/io.github.tannermidd.pi-pocket.plist";
+
+            try {
+                return system.files.fileExistsAtPath(system.env.HOME + agent);
+            } catch (error) {
+                return false;
+            }
+        }
+        ]]>
+    </script>
+    <choices-outline>
+        <line choice="app"/>
+        <line choice="login"/>
+    </choices-outline>
+    <choice
+        id="app"
+        title="Pi Pocket"
+        description="Node.js, the Pi Pocket launcher, Pi Pocket.app, and Pi Pocket (console).app in the Applications folder of your home folder."
+        enabled="false"
+        selected="true">
+        <pkg-ref id="io.github.tannermidd.pi-pocket"/>
+    </choice>
+    <choice
+        id="login"
+        title="Start Pi Pocket when I sign in"
+        description="Starts Pi Pocket in the menu bar each time you sign in, without a window."
+        start_selected="loginItemOn()">
+        <pkg-ref id="io.github.tannermidd.pi-pocket.login"/>
+    </choice>
+    <pkg-ref id="io.github.tannermidd.pi-pocket" version="@VERSION@" onConclusion="none">pi-pocket-app.pkg</pkg-ref>
+    <pkg-ref id="io.github.tannermidd.pi-pocket.login" version="@VERSION@" onConclusion="none">pi-pocket-login.pkg</pkg-ref>
+</installer-gui-script>

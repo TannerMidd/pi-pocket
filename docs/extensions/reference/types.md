@@ -6,7 +6,7 @@
 
 Use one of these:
 
-1. **`_pocket.d.ts` in the drop-in folder.** Pi Pocket makes this link to its types file each time that it starts, beside the `node_modules` link. Its leading `_` keeps it from loading as a module. The same import then works on all machines. If you point the link at another readable file, such as your own checkout's types, Pi Pocket leaves it as it is. A file of your own with this name also stays.
+1. **`_pocket.d.ts` in the drop-in folder.** Pi Pocket makes this link to its types file each time that it starts. Its leading `_` keeps it from loading as a module. The same import then works on all machines. If you point the link at another readable file, such as your own checkout's types, Pi Pocket leaves it as it is. A file of your own with this name also stays.
 2. **The path in Pi Pocket's folder:** `/path/to/pi-pocket/types/pocket.d.ts`.
 3. **The copy on the documentation site:** `https://tannermidd.github.io/pi-pocket/docs/pocket.d.ts`. It is for the latest release.
 
@@ -37,7 +37,7 @@ export default function setup(pocket) {
 
 From a browser module in a folder, the path is `../_pocket.d.ts`.
 
-The types file imports types from Pi Durable, Pi AI, and Preact by package name. The drop-in folder's `node_modules` link gives them.
+The types file imports types from Pi Durable, Pi AI, and Preact by package name. The drop-in folder's `tsconfig.json` gives them, also where the system refuses links: Pi Pocket writes it at each start, and its `paths` lead each of Pi Pocket's packages to its types. Its first line says that Pi Pocket made it, and Pi Pocket refreshes it when its folders change. Do not edit it. To use your own settings, replace it with a file of your own, without that first line: Pi Pocket then leaves it as it is. Where links work, the drop-in folder's `node_modules` link to Pi Pocket's packages gives the types to tools that do not read `tsconfig.json`.
 
 `tsc` skips `<name>.js` when there is a `<name>.ts`. To check both with `tsc`, put the browser module in the folder `<name>/`. An editor checks each file that you open.
 
@@ -47,7 +47,7 @@ The types file imports types from Pi Durable, Pi AI, and Preact by package name.
 - [`Web`](web.md) and the types that it uses: `WebAccess`, `WebMethod`, `WebHandler`, and `WebRequest`.
 - [`Command`, `CommandContext`, and `CommandResult`](command-context.md).
 - [`Pocket`](pocket.md) and the types that it uses: `BrowserModule`, `Action`, the objects that you give (`RailSpec`, `MenuSpec`, `LauncherSpec`, `PageSpec`, `SheetSpec`, `ToolCallSpec`, `CallSummary`), `Added`, `PageProps`, `SheetProps`, and the props of the pieces.
-- `Module`, `Person`, `Role`, and `NoticeLevel`, on this page.
+- `Module`, `ToolOptions`, `Person`, `Role`, and `NoticeLevel`, on this page.
 - Since 0.22.0, experimental: `PublicPageHandler`, `PublicPageRequest`, `PublicPageAnswer`, `PublicLinks`, `PublicLinkRequest`, and `PublicLinkInfo` ([Public pages](../public-pages.md)); `AskRequest`, `AskField`, `AskAnswer`, `HiddenValue`, `CommandRun`, `CommandEnvProvider`, `BrowserPageHandle`, `BrowserControl`, and `BrowserTarget` ([People's values](../people-values.md)); `AppEvents`, `AppEventName`, `SettingField`, and `SettingValue` ([Events, services, and settings](../services-settings.md)).
 
 The types file does not have the internal members of the host. It does not have Pi Durable's own API either: import `defineExtension`, `defineTool`, and the rest from `@earendil-works/pi-durable`.
@@ -88,6 +88,24 @@ pocketApi?: number;
 Since 0.14.0 · Stable
 
 The version of the extension API that the module needs. A Pi Pocket with an older version does not set up the module. See [API versions](api-versions.md#pocketapi).
+
+## Tool options
+
+### `ToolOptions`
+
+```ts
+interface ToolOptions {
+    readonly subagents?: "always";
+}
+```
+
+Since 0.29.0 · Experimental
+
+Pi Pocket's options on a tool definition, beside Pi Durable's own. Add them with `Object.assign` after `defineTool` ([Tools](../tools.md#tools-for-every-subagent)).
+
+- `subagents: "always"`: give the tool to every subagent whose extensions include it, when the session enables it, even when its `tools` list leaves it out. It is added once. A deferred tool is offered at once with a tool list; a tool that only scripts call brings codemode. Without a list, or on send, nothing changes. It does not add its extension. The tool's prompt and spawn result do not mention the marker or the tools it adds.
+
+Older Pi Pocket ignores the field. The API version stays 2: this is an addition, not a break.
 
 ## Shared types
 

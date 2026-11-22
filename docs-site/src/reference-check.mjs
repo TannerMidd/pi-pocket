@@ -29,6 +29,8 @@ const HEADED = new Map([
     ["SafeText", "text."],
     ["LinkedSessions", "linkedSessions."],
     ["Sessions", "sessions."],
+    ["InboxApi", "inbox."],
+    ["PendingApprovals", "pendingApprovals."],
 ]);
 
 /** Which types each page describes. */
@@ -40,17 +42,24 @@ export const PAGES = {
         "LinkedSessions",
         "LinkedSession",
         "Sessions",
+        "InboxApi",
         "AskRequest",
         "AskField",
         "AskAnswer",
         "HiddenValue",
         "CommandRun",
         "CommandEnvProvider",
+        "Turn",
+        "TurnAnnotator",
         "BrowserTarget",
         "BrowserControl",
         "BrowserPageHandle",
         "AppEvents",
         "AppEventName",
+        "PendingApprovals",
+        "PendingApproval",
+        "ResolvedApproval",
+        "ApprovalEvents",
     ],
     "web.md": [
         "Web",
@@ -121,7 +130,7 @@ export const PAGES = {
         "SwitchProps",
     ],
     "command-context.md": ["Command", "CommandContext", "CommandResult"],
-    "types.md": ["Module", "Person", "Role", "NoticeLevel"],
+    "types.md": ["Module", "ToolOptions", "Person", "Role", "NoticeLevel"],
 };
 
 function meta(node) {

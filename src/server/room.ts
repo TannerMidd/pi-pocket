@@ -277,13 +277,15 @@ function cutQueued(text: string): string {
  */
 function reportNames(text: string): string[] | undefined {
     // Only a message that starts with a report is one: a person's own may begin "[subagent " too.
-    if (!/^\[subagent \S+ (?:answered|failed)/.test(text)) {
+    if (!/^\[subagent \S+ (?:answered|failed|stalled|stopped)/.test(text)) {
         return undefined;
     }
 
     return [
         ...new Set(
-            [...text.matchAll(/\[subagent (\S+) (?:answered|failed)/g)].map((match) => match[1]!),
+            [...text.matchAll(/\[subagent (\S+) (?:answered|failed|stalled|stopped)/g)].map(
+                (match) => match[1]!,
+            ),
         ),
     ];
 }
@@ -370,6 +372,8 @@ export class Room {
     readonly #queued = new Map<number, { text: string; reports: string[] | undefined }>();
     authors: Record<string, string> = {};
     artifacts: Record<string, ArtifactMeta> = {};
+    /** The last version number of each deleted artifact: cards that name one say it was deleted. */
+    artifactsEnded: Record<string, number> = {};
     subagents: Record<string, SubagentRecord> = {};
     /** The subagents whose reports are on their way to this conversation: waiting, or sent and still queued. */
     #reporting = new Set<string>();
@@ -431,9 +435,10 @@ export class Room {
         this.authors = {
             ...((await harness.snapshot(AuthorsDoc, this.id, context))?.entries ?? {}),
         };
-        this.artifacts = {
-            ...((await harness.snapshot(ArtifactsDoc, this.id, context))?.items ?? {}),
-        } as Record<string, ArtifactMeta>;
+        const artifacts = await harness.snapshot(ArtifactsDoc, this.id, context);
+
+        this.artifacts = { ...(artifacts?.items ?? {}) } as Record<string, ArtifactMeta>;
+        this.artifactsEnded = { ...(artifacts?.ended ?? {}) };
         const subagents = await harness.snapshot(SubagentsDoc, this.id, context);
 
         this.subagents = { ...(subagents?.agents ?? {}) } as Record<string, SubagentRecord>;
@@ -570,6 +575,7 @@ export class Room {
             }
         } else if (kind === ArtifactsDoc.definition.kind) {
             this.artifacts = { ...((value?.items as Record<string, ArtifactMeta>) ?? {}) };
+            this.artifactsEnded = { ...((value?.ended as Record<string, number>) ?? {}) };
         } else if (kind === SubagentsDoc.definition.kind) {
             this.subagents = { ...((value?.agents as Record<string, SubagentRecord>) ?? {}) };
             this.#reporting = reportingOf(value as Parameters<typeof reportingOf>[0]);
@@ -828,6 +834,7 @@ export class Room {
                     createdAt: version.createdAt,
                 })),
             })),
+            artifactsEnded: this.artifactsEnded,
             subagents: Object.entries(this.subagents).map(([name, record]) =>
                 subagentView(
                     name,
@@ -854,15 +861,38 @@ export class Room {
             plan: this.plan,
             schedules: Object.values(this.schedules)
                 .sort((a, b) => a.next - b.next)
-                .map(({ id, text, next, every, by, runs, skipped, skippedAt }) => ({
-                    id,
-                    text,
-                    next,
-                    ...(every === undefined ? {} : { repeat: describeRepeat(every) }),
-                    ...(by === undefined ? {} : { by }),
-                    runs,
-                    ...(skipped === undefined ? {} : { skipped, skippedAt }),
-                })),
+                // `every` and `zone` as data too, for the Schedules sheet's editor, and `version`, which each edit
+                // changes (a pause does not), so a save made from an older copy is refused instead of undoing that edit.
+                .map(
+                    ({
+                        id,
+                        text,
+                        next,
+                        every,
+                        zone,
+                        by,
+                        runs,
+                        createdAt,
+                        revision,
+                        paused,
+                        skipped,
+                        skippedAt,
+                        compactBefore,
+                    }) => ({
+                        id,
+                        version: String(revision ?? 0),
+                        text,
+                        next,
+                        ...(every === undefined ? {} : { repeat: describeRepeat(every), every }),
+                        zone,
+                        ...(by === undefined ? {} : { by }),
+                        runs,
+                        ...(skipped === undefined ? {} : { skipped, skippedAt }),
+                        createdAt,
+                        ...(paused === undefined ? {} : { paused: paused.at, pausedBy: paused.by }),
+                        ...(compactBefore === true ? { compactBefore } : {}),
+                    }),
+                ),
             // What a Stop held: each message's start and who wrote it, as the queue shows them.
             held: this.held.map((item) => ({
                 key: item.key,

@@ -1,0 +1,53 @@
+#!/bin/bash
+# Runs after the payload is in place, as the user: it puts the pi-pocket package that the payload holds in app.new/ in
+# place of the private prefix app/ (place-app.mjs, with no network), moves Pi Pocket.app and Pi Pocket (console).app
+# into ~/Applications, and turns the sign-in item off (the "Start Pi Pocket when I sign in" choice, which runs after this, turns it on again; it starts on when the item
+# was on before). A GUI install then opens Pi Pocket.app.
+# build.sh puts the version in place of the marker below.
+set -u
+APP="$2"
+VERSION="@VERSION@"
+
+if [ "$(id -u)" = 0 ] || [ "$APP" != "$HOME/Library/Application Support/Pi Pocket" ]; then
+    echo "Pi Pocket installs for the current user only: install it for yourself, without sudo, not in $APP."
+    exit 1
+fi
+
+"$APP/login-item.sh" off
+
+if ! "$APP/node/bin/node" "$APP/place-app.mjs" "$VERSION"; then
+    echo "Could not put the pi-pocket package in place. Install Pi Pocket $VERSION again."
+    echo "The details are in $APP/install.log:"
+    cat "$APP/install.log"
+    exit 1
+fi
+
+cat "$APP/install.log"
+
+# Each app goes into ~/Applications. Only an earlier copy is replaced, not another app of the same name: then it stays in
+# $APP. It prints where the app is.
+place() {
+    local name="$1" id="$2" target="$HOME/Applications/$1"
+
+    if [ -e "$target" ] && [ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$target/Contents/Info.plist" \
+        2>/dev/null)" != "$id" ]; then
+        echo "$target is another app: $name stays in $APP." >&2
+        echo "$APP/$name"
+
+        return 0
+    fi
+
+    mkdir -p "$HOME/Applications" && rm -rf "$target" && mv "$APP/$name" "$target" || return 1
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$target" 2> /dev/null || true
+    echo "$target"
+}
+
+launcher="$(place "Pi Pocket.app" io.github.tannermidd.pi-pocket.launcher)" || exit 1
+place "Pi Pocket (console).app" io.github.tannermidd.pi-pocket.console > /dev/null || exit 1
+
+if [ "${COMMAND_LINE_INSTALL:-}" != 1 ]; then
+    /usr/bin/open "$launcher" || true
+fi
+
+exit 0

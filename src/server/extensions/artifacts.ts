@@ -6,8 +6,6 @@
  * the call, so a replayed call finds the version it already wrote instead of writing another.
  */
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { open } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { arr, bool, obj, opt, str } from "@earendil-works/pi-schema";
@@ -29,7 +27,9 @@ import {
     type ArtifactType,
     type ArtifactVersion,
 } from "../docs.ts";
+import { keepAssets, nextVersion } from "../artifacts.ts";
 import { APP_ROOT } from "../config.ts";
+import { openNoFollow } from "../no-follow.ts";
 import type { PocketHost } from "../host.ts";
 import { localFolder } from "../design/files.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
@@ -52,10 +52,7 @@ export function slugify(value: string): string {
 
 /** Agent-local files, not browser file access: parent links are allowed, the final file must not be a link. */
 async function readFileBytes(path: string, limit: number): Promise<Buffer> {
-    const handle = await open(
-        path,
-        constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
-    );
+    const handle = await openNoFollow(path);
 
     try {
         const info = await handle.stat();
@@ -294,6 +291,8 @@ async function publish(
         }
 
         let content: string;
+        // The version that edits apply to: it must still be there when they commit.
+        let base: number | undefined;
         let type: ArtifactType = inline ? "html" : (args.type ?? previous?.type ?? "html");
 
         if (args.path !== undefined) {
@@ -331,6 +330,8 @@ async function publish(
             if (latest === undefined) {
                 throw new Error(`There is no artifact ${id} to edit yet; send content.`);
             }
+
+            base = latest.version;
 
             const body = await api.snapshot(
                 ArtifactBodyDoc,
@@ -456,6 +457,15 @@ async function publish(
                 return again.version;
             }
 
+            // Edits made on a version that was deleted while this call read it would bring its page back, also
+            // under an artifact published again with the same id (its numbers never repeat a deleted one's).
+            if (
+                base !== undefined &&
+                (current === undefined || !current.versions.some((each) => each.version === base))
+            ) {
+                throw new Error(`Artifact ${id} was deleted; send content.`);
+            }
+
             if (inline && current !== undefined && current.type !== "html") {
                 throw notHtml(current.type);
             }
@@ -511,7 +521,14 @@ async function publish(
                 await tx.doc(ArtifactAssetDoc, asset.hash, { base64: bytes.toString("base64") });
             }
 
-            const next = (current?.versions.at(-1)?.version ?? 0) + 1;
+            if (prepared.size > 0) {
+                await keepAssets(
+                    tx,
+                    [...prepared.values()].map(({ asset }) => asset.hash),
+                );
+            }
+
+            const next = nextVersion(doc, id);
             const record: ArtifactVersion = {
                 version: next,
                 taskId: api.taskId,

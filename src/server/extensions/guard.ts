@@ -1,7 +1,8 @@
 /**
  * Lancet Guard for Pi Pocket's tools. Before a bash, write, or edit call, the guard from the user's Pi install judges
- * it. Blocks become error results for the model. "Ask" verdicts wait for anyone in the conversation to approve or deny
- * the call in the app. The answer is stored in the call's memo, so a restart after the answer never asks twice.
+ * it. Before any call, core's rule blocks one that would read a file Pi Pocket keeps secrets in (`secrets.ts`).
+ * Blocks become error results for the model. "Ask" verdicts wait for anyone in the conversation to approve or deny the
+ * call in the app. The answer is stored in the call's memo, so a restart after the answer never asks twice.
  */
 import { AgentDoc, defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
 import type { ApprovalAnswer, PocketHost } from "../host.ts";
@@ -49,6 +50,14 @@ export default function createGuard(host: PocketHost) {
                     let answer = await api.memo<ApprovalAnswer>("pocket.approval", context);
 
                     if (answer === undefined) {
+                        // Keep the original time when the pending hook runs again after a restart.
+                        const createdAt =
+                            (await api.memo<number>("pocket.approval.created-at", context)) ??
+                            (await api.memo<number>(
+                                "pocket.approval.created-at",
+                                Date.now(),
+                                context,
+                            ));
                         const asked = await host.approvals.request(
                             {
                                 // The call, not just its task: a codemode script makes several calls in one task, maybe at once.
@@ -60,7 +69,7 @@ export default function createGuard(host: PocketHost) {
                                 subject,
                                 reason: `${decision.reason}${scored}`,
                                 ...(decision.score === undefined ? {} : { score: decision.score }),
-                                createdAt: Date.now(),
+                                createdAt,
                             },
                             context,
                         );
