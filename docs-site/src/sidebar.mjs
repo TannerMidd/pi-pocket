@@ -23,6 +23,7 @@ export const SIDEBAR = [
             ["docs/extensions/inbox.md", "Delivering outside data"],
             ["docs/extensions/turn-notes.md", "Turn notes"],
             ["docs/extensions/relay.md", "Relay connectors"],
+            ["docs/extensions/surfaces.md", "Surfaces: components and A2UI"],
             ["docs/extensions/workspaces.md", "Execution environments for workspaces"],
             ["docs/extensions/app.md", "Adding to the app"],
             ["docs/extensions/routes.md", "Routes"],

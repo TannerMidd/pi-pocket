@@ -1793,6 +1793,14 @@ export interface Web {
      */
     presentEntry(spec: PresentEntry): void;
     /**
+     * Adds a component to surfaces (Pi's cards, the `ui` tool), while the module is on. `type` is
+     * `x.<module>.<Name>`. The server checks a card's use of it against `props` and `bind`; its browser half is
+     * `pocket.surfaceComponent`.
+     * @since 0.31.0
+     * @experimental
+     */
+    surfaceComponent(spec: SurfaceComponentSpec): void;
+    /**
      * Sends an event to the browser module: to everyone it loads for, or to the person `to`. It never throws.
      * @since 0.14.0
      */
@@ -2766,6 +2774,54 @@ export interface CallSummary {
 }
 
 /**
+ * What `pocket.surfaceComponent` registers: how this browser draws a component the module added with
+ * `web.surfaceComponent` on the server. The renderer is the owner's installed code, never the card's.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceRenderSpec {
+    /** The type the server registered, `x.<module>.<Name>`. */
+    type: string;
+    /** What the app renders for each component of that type. */
+    render: ComponentType<SurfaceRenderProps>;
+}
+
+/**
+ * The props of a surface component's renderer. It reads props and data, may bind one value, and makes no new kinds of
+ * action: `act` presses one of the card's own buttons.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceRenderProps {
+    /** The component's props as the card gave them, with expressions worked out. */
+    props: Record<string, unknown>;
+    /** The data at the component's `bind` path; undefined without one. */
+    value: unknown;
+    /** Sets the bound value for everyone. The server checks it against the schema `bind` gave. */
+    set(next: unknown): void;
+    /** Presses a Button of the card by its id: only the card's own actions. */
+    act(button: string): void;
+    /** True when the card ended or this person may not use the component. */
+    disabled: boolean;
+}
+
+/**
+ * What `web.surfaceComponent` registers on the server.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceComponentSpec {
+    /** `x.<module>.<Name>`: the module's name, then letters and digits. */
+    type: string;
+    /** A pi-schema for the component's props (every key but `type`, `bind`, and `who`). */
+    props: object;
+    /** A pi-schema for the one value it binds (`bind: "/path"`). Without it the component binds nothing. */
+    bind?: object;
+    /** Its plain text for the transcript, an export, a chat, and browsers without its module. Up to 500 characters. */
+    text(props: Record<string, unknown>, data: Record<string, unknown>): string;
+}
+
+/**
  * A code fence renderer for one or more languages.
  * @since 0.28.0
  * @experimental
@@ -3237,6 +3293,13 @@ export interface Pocket {
      * @experimental
      */
     fence(spec: FenceSpec): Added<FenceSpec>;
+    /**
+     * Draws a component of surfaces (Pi's cards) that the module registered with `web.surfaceComponent`.
+     * Without this module in a browser, the card shows the component's text.
+     * @since 0.31.0
+     * @experimental
+     */
+    surfaceComponent(spec: SurfaceRenderSpec): Added<SurfaceRenderSpec>;
     /**
      * Sets the inline and display math renderer.
      * @since 0.28.0

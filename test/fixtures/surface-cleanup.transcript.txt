@@ -1,0 +1,6 @@
+Cleanup dry run
+[x] /tmp/a  4.2 GB
+[ ] /tmp/b  9.7 GB
+Note: (empty)
+4.2 GB selected
+[Delete]   [Refresh]

@@ -21989,3 +21989,507 @@ pre.gallery-code {
     color: var(--accent);
     font: 12px var(--mono);
 }
+
+/* ─── Pocket Surfaces: Pi's interactive card in the transcript (surfaces.js) ─────────────────────────────────── */
+
+/* A fixed frame that Pi's content cannot restyle: its own border, label and title, and the line under it. */
+.surf {
+    min-width: 0;
+    max-width: 100%;
+    margin: 0.5rem 0;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--body);
+    overflow: hidden;
+}
+
+.surf-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hair-2);
+    background: var(--card-2);
+}
+
+.surf-tag {
+    flex: none;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.surf-title-line {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.surf-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px;
+}
+
+.surf-foot {
+    padding: 8px 12px;
+    border-top: 1px solid var(--hair-2);
+    color: var(--muted);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
+/* A short error under the body: it leaves by itself after a few seconds. */
+.surf-error {
+    margin: 0;
+    padding: 8px 12px;
+    border-top: 1px solid var(--err-line);
+    background: var(--err-soft);
+    color: var(--text);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+/* A fork's or an old card's text, as the server wrote it. */
+.surf-copy {
+    margin: 0;
+    color: var(--body);
+    font: 13px/1.5 var(--mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Layout. */
+.surf-col,
+.surf-row {
+    display: flex;
+    min-width: 0;
+}
+
+.surf-col {
+    flex-direction: column;
+}
+
+.surf-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.surf-row > * {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.surf-wrap {
+    flex-wrap: wrap;
+}
+
+.surf-gap-s {
+    gap: 6px;
+}
+
+.surf-gap-m {
+    gap: 10px;
+}
+
+.surf-gap-l {
+    gap: 16px;
+}
+
+.surf-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-control);
+    background: var(--bg);
+}
+
+.surf-box-title {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.surf-divider {
+    width: 100%;
+    margin: 2px 0;
+    border: 0;
+    border-top: 1px solid var(--hair-2);
+}
+
+/* Text is plain text: its line breaks show, nothing else is read in it. */
+.surf-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.surf-title {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.surf-caption {
+    color: var(--muted);
+    font-size: 12.5px;
+}
+
+.surf-mono {
+    font: 13px/1.5 var(--mono);
+}
+
+.surf-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--r-control);
+}
+
+.surf-chip {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 12px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-control);
+    color: var(--accent);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+/* Buttons. */
+.surf-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: center;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.surf-btn-primary {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+.surf-btn-danger {
+    border-color: var(--err-line);
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+.surf-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+@media (hover: hover) {
+    .surf-btn:not(:disabled):hover {
+        border-color: var(--accent-line);
+    }
+}
+
+/* "Delete the selected paths?" with Yes and Cancel, in the place of the button. */
+.surf-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-control);
+    background: var(--warn-soft);
+}
+
+.surf-confirm-text {
+    flex: 1 1 14rem;
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-confirm-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+/* Inputs. The app's own field style applies; these set the label and the touch size. */
+.surf-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.surf-label {
+    color: var(--muted);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
+.surf-input {
+    min-height: 40px;
+    padding: 8px 10px;
+    background: var(--bg);
+    font-size: 14px;
+}
+
+textarea.surf-input {
+    resize: vertical;
+}
+
+.surf-input:disabled {
+    opacity: 0.6;
+}
+
+.surf-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    min-width: 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.surf-check input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+}
+
+.surf-check input:disabled + span {
+    opacity: 0.6;
+}
+
+.surf-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.surf-option {
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-option[aria-checked="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* The chosen one shows in a mark too, not by color alone. */
+.surf-option[aria-checked="true"]::before {
+    content: "✓ ";
+    color: var(--accent);
+}
+
+.surf-option:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* A table: a real table from 700px up, stacked rows with the column's label before each value on a phone. */
+.surf-table-wrap {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.surf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+}
+
+.surf-table th {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--hair-2);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+
+.surf-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--hair);
+    color: var(--body);
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+}
+
+.surf-pick {
+    width: 44px;
+}
+
+.surf-pick-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    min-height: 40px;
+    cursor: pointer;
+}
+
+.surf-pick-box input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+}
+
+@media (max-width: 699px) {
+    .surf-table,
+    .surf-table tbody,
+    .surf-table tr,
+    .surf-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .surf-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+
+    .surf-table tr {
+        padding: 6px 0;
+        border-bottom: 1px solid var(--hair-2);
+    }
+
+    .surf-table td {
+        border-bottom: 0;
+    }
+
+    .surf-table td[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        color: var(--muted);
+        font-size: 11.5px;
+    }
+
+    .surf-table td.surf-pick {
+        width: auto;
+        padding-bottom: 0;
+    }
+}
+
+/* Status: a dot with a word beside it (never color alone), a detail line, and a bar. */
+.surf-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.surf-status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.surf-status-label {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-status-word {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.surf-status-detail {
+    overflow-wrap: anywhere;
+}
+
+.surf-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: var(--r-pill);
+    background: var(--faint);
+}
+
+.surf-dot-running {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.surf-dot-ok {
+    background: var(--ok);
+}
+
+.surf-dot-warn {
+    background: var(--warn);
+}
+
+.surf-dot-error {
+    background: var(--err);
+}
+
+.surf-bar {
+    height: 6px;
+    border-radius: var(--r-pill);
+    background: var(--hair-2);
+    overflow: hidden;
+}
+
+.surf-bar-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+}

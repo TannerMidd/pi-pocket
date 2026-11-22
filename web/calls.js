@@ -55,6 +55,26 @@ export function describeCall(call) {
                 mono: false,
             };
 
+        case "ui": {
+            const labels = {
+                patch: "Updated card",
+                wait: "Waiting on card",
+                close: "Closed card",
+            };
+            const shows = args.action === undefined || args.action === "show";
+
+            return {
+                icon: "▦",
+                label: shows ? "Showed card" : (labels[args.action] ?? "Card"),
+                subject: shows
+                    ? typeof args.title === "string"
+                        ? `“${short(args.title, 60)}”`
+                        : ""
+                    : String(args.id ?? ""),
+                mono: false,
+            };
+        }
+
         case "codemode": {
             // The first line that does something: not the options line, a comment, or blank.
             const line = String(args.code ?? "")

@@ -1,0 +1,7 @@
+Cleanup dry run (s3). Reply with numbers:
+1 [x] /tmp/a  4.2 GB
+2 [ ] /tmp/b  9.7 GB
+3 Note: (empty)
+4.2 GB selected
+4 Delete   5 Refresh
+Reply "1" to toggle row 1, "4" to press Delete, "3: your text" to fill Note.

@@ -79,6 +79,7 @@ interface Message {
     webhook_id?: string;
     author?: User;
     mentions?: { id: string }[];
+    message_reference?: { message_id?: string };
     attachments?: {
         id?: string;
         filename?: string;
@@ -322,6 +323,9 @@ function toEvent(
             bot: author.bot === true || message.webhook_id !== undefined || own,
         },
         channel: message.channel_id,
+        ...(typeof message.message_reference?.message_id === "string"
+            ? { replyTo: message.message_reference.message_id }
+            : {}),
         ...(channelName === undefined ? {} : { channelName }),
         mentioned: named || guild === undefined,
         url: `https://discord.com/channels/${guild ?? "@me"}/${message.channel_id}/${message.id}`,

@@ -20,6 +20,7 @@ import { describersChanged, setCallDescriber } from "./calls.js";
 import { jumpToEntry } from "./chat.js";
 import { modulePresentationMode, setPresentationMode } from "./entry-presentation.js";
 import { markdownChanged, setFences, setMath } from "./markdown-ext.js";
+import { setSurfaceComponents, surfaceComponentsChanged } from "./surface-registry.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
@@ -78,8 +79,11 @@ const KINDS = [
     "composerKey",
     "fence",
     "mathInline",
+    "surfaceComponent",
 ];
 const MARKDOWN_KINDS = new Set(["fence", "mathInline"]);
+/** A surface component's type: `x.<module>.<Name>`. */
+const SURFACE_TYPE = /^x\.[a-z0-9-]{1,40}\.[A-Za-z][A-Za-z0-9]{0,39}$/;
 const FENCE_LANG = /^[\w+#.-]{1,24}$/;
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
@@ -126,6 +130,18 @@ function markdownSpecOf(kind, matches = () => true) {
 
     return undefined;
 }
+
+setSurfaceComponents((type) => {
+    for (const module of order) {
+        const record = modules.get(module);
+
+        if (liveRecord(record) && record.adds.surfaceComponent.has(type)) {
+            return record.adds.surfaceComponent.get(type);
+        }
+    }
+
+    return undefined;
+});
 
 setFences((lang) => {
     const spec = markdownSpecOf("fence", (each) =>
@@ -598,6 +614,7 @@ function unload(record) {
 /** Take away what a browser module added, and run its cleanups, last first. */
 function teardown(record) {
     const hadMarkdown = record.adds.fence.size > 0 || record.adds.mathInline.size > 0;
+    const hadSurfaces = record.adds.surfaceComponent.size > 0;
 
     for (const kind of KINDS) {
         record.adds[kind].clear();
@@ -605,6 +622,10 @@ function teardown(record) {
 
     if (hadMarkdown) {
         markdownChanged();
+    }
+
+    if (hadSurfaces) {
+        surfaceComponentsChanged();
     }
 
     record.arrangements.clear();
@@ -675,6 +696,18 @@ function check(kind, spec) {
 
         if (typeof spec.component !== "function") {
             throw new Error(`${name} ${spec.id}: give it a component to show`);
+        }
+
+        return;
+    }
+
+    if (kind === "surfaceComponent") {
+        if (typeof spec.type !== "string" || !SURFACE_TYPE.test(spec.type)) {
+            throw new Error(`${name}: type is x.<module>.<Name>, as the server registered it`);
+        }
+
+        if (typeof spec.render !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a render function`);
         }
 
         return;
@@ -929,6 +962,10 @@ function pocketFor(record) {
                     markdownChanged();
                 }
 
+                if (kind === "surfaceComponent") {
+                    surfaceComponentsChanged();
+                }
+
                 redraw();
             }
         }
@@ -960,6 +997,10 @@ function pocketFor(record) {
                     markdownChanged();
                 }
 
+                if (kind === "surfaceComponent") {
+                    surfaceComponentsChanged();
+                }
+
                 redraw();
             },
             remove() {
@@ -970,6 +1011,10 @@ function pocketFor(record) {
 
                     if (MARKDOWN_KINDS.has(kind)) {
                         markdownChanged();
+                    }
+
+                    if (kind === "surfaceComponent") {
+                        surfaceComponentsChanged();
                     }
 
                     redraw();
@@ -1260,6 +1305,9 @@ function pocketFor(record) {
         composerKey: (spec) => add("composerKey", spec),
         fence: (spec) => add("fence", spec),
         mathInline: (spec) => add("mathInline", spec),
+        /** How this browser draws a surface component the module registered on the server (`web.surfaceComponent`). */
+        surfaceComponent: (spec) =>
+            add("surfaceComponent", { ...(spec ?? {}), id: String(spec?.type ?? "") }),
         /** Put text into the message box, after what is there, for the person to send: never sent by itself. */
         insertText(text, options) {
             tick(record);

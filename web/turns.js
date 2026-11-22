@@ -146,6 +146,7 @@ const DID = {
     browser: { verb: "used the browser" },
     artifact: { verb: "published", noun: "artifact", by: "id" },
     artifact_inline: { verb: "published", noun: "artifact", by: "id" },
+    ui: { verb: "showed", noun: "card", by: "id" },
     // PiP's.
     sessions: { verb: "looked over sessions" },
     session_read: { verb: "read", noun: "session", by: "session" },
@@ -168,6 +169,7 @@ const ONE = {
     subagent: "a subagent",
     script: "a script",
     artifact: "an artifact",
+    card: "a card",
     session: "a session",
     message: "a message",
     reminder: "a reminder",
@@ -197,6 +199,18 @@ function byAction(name, args) {
 
     if (scheduling && args.action === "cancel") {
         return { verb: "cancelled", noun: name === "schedule" ? "reminder" : "message", by: "id" };
+    }
+
+    if (name === "ui" && args.action === "patch") {
+        return { verb: "updated", noun: "card", by: "id" };
+    }
+
+    if (name === "ui" && args.action === "wait") {
+        return { verb: "waited on", noun: "card", by: "id" };
+    }
+
+    if (name === "ui" && args.action === "close") {
+        return { verb: "closed", noun: "card", by: "id" };
     }
 
     if (name === "approvals" && args.action === "deny") {
@@ -300,10 +314,13 @@ export function summarize(steps, thinking) {
 
 /**
  * Whether a call shows its page as a card in the reply (`src/server/extensions/artifacts.ts`): `artifact` with
- * `inline: true`, or `artifact_inline`, the tool of that name before 0.28, whose calls are still in old sessions.
+ * `inline: true`, or `artifact_inline`, the tool of that name before 0.28, whose calls are still in old sessions. A
+ * `ui` call that shows a surface is one too (`surfaces.js`); its patch, wait, and close calls are steps.
  */
 export const isInlineCall = (block) =>
-    block.name === "artifact_inline" || (block.name === "artifact" && block.args?.inline === true);
+    block.name === "artifact_inline" ||
+    (block.name === "artifact" && block.args?.inline === true) ||
+    (block.name === "ui" && (block.args?.action ?? "show") === "show");
 
 /** Words worth showing: a model can send an empty or blank text block between its calls. */
 export const says = (block) => block.type === "text" && block.text.trim() !== "";

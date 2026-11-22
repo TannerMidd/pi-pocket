@@ -8,6 +8,7 @@ import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { InboxApi } from "../../host.ts";
+import type { SurfacesRelayApi } from "../../surfaces/relay.ts";
 import { MAX_REPLY_BYTES } from "./files.ts";
 import {
     type RelayConnector,
@@ -351,6 +352,8 @@ const backoff = (failures: number, min: number, max: number): number =>
 interface RelayOptions {
     folder: string;
     inbox: () => InboxApi | undefined;
+    /** Cards Pi shows in a chat (`surfaces/relay.ts`): a message that acts on one is answered here and not sent to Pi. */
+    surfaces?: () => SurfacesRelayApi | undefined;
     log: (line: string) => void;
     onStatus: (id: string, status: Status) => void;
     hide: (values: { value: string; label: string }[]) => () => void;
@@ -1007,6 +1010,44 @@ export class Relay {
             return "retry";
         }
 
+        // A reply to a card Pi showed here (`3`, `1 2`, `5: text`) is an action on it: the relay answers it itself.
+        const surfaces = this.#options.surfaces?.();
+
+        if (surfaces !== undefined) {
+            try {
+                const outcome = await surfaces.fromRelay(
+                    config.target as unknown as ConversationId,
+                    {
+                        connector: config.name,
+                        ...(event.channel === undefined ? {} : { channel: event.channel }),
+                        ...(event.thread === undefined ? {} : { thread: event.thread }),
+                        ...(event.replyTo === undefined ? {} : { replyTo: event.replyTo }),
+                        text: event.text,
+                        author: {
+                            id: event.author.id,
+                            name: String(event.author.name ?? event.author.id),
+                        },
+                        ownerIds: config.ownerIds,
+                        by: config.by,
+                    },
+                );
+
+                if (outcome.handled) {
+                    await this.#say(config, event, outcome.reply);
+
+                    return finish("delivered");
+                }
+
+                if (outcome.refusal !== undefined) {
+                    await this.#say(config, event, outcome.refusal);
+                }
+            } catch (error) {
+                this.log(
+                    `${config.name}: a card's action failed: ${this.scrub(config, message(error))}`,
+                );
+            }
+        }
+
         // A triage hook a module set screens deliveries from senders the owner did not mark. It never holds the
         // queue: past its cap, or when it fails, the message goes on as it came.
         if (this.#triage !== undefined && !config.ownerIds.includes(event.author.id)) {
@@ -1155,7 +1196,14 @@ export class Relay {
 
     async reply(
         config: ConnectorConfig,
-        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        request: {
+            text: string;
+            replyTo?: string;
+            key: string;
+            files?: RelayOutFile[];
+            /** Called once a new send went out, with where and the service's id for it. */
+            onSent?: (sent: { id?: string; channel?: string; thread?: string }) => Promise<void>;
+        },
         signal: AbortSignal,
     ): Promise<string> {
         await this.ready;
@@ -1222,7 +1270,7 @@ export class Relay {
     async #send(
         config: ConnectorConfig,
         connector: RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
-        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        request: Parameters<Relay["reply"]>[1],
         signal: AbortSignal,
     ): Promise<string> {
         const state = this.stateOf(config.id);
@@ -1342,8 +1390,46 @@ export class Relay {
         }
 
         await this.persist();
+        await request.onSent?.({
+            ...(id === undefined ? {} : { id }),
+            ...(to?.channel === undefined ? {} : { channel: to.channel }),
+            ...(to?.thread === undefined ? {} : { thread: to.thread }),
+        });
 
         return "Sent.";
+    }
+
+    /**
+     * A short answer the relay gives itself, in the place an event came from. A connector that cannot reply says
+     * nothing, and an answer that fails to send is only logged: the action it answers was done.
+     */
+    async #say(config: ConnectorConfig, event: RelayEvent, text: string): Promise<void> {
+        const connector = this.#kinds.get(config.kind);
+
+        if (typeof connector?.reply !== "function" || this.#stopped || !this.#safe) {
+            return;
+        }
+
+        try {
+            await connector.reply(
+                {
+                    values: valuesOf(config, connector.fields),
+                    signal: AbortSignal.any([this.#replies.signal, AbortSignal.timeout(30_000)]),
+                    log: (line) => this.log(`${config.name}: ${this.scrub(config, String(line))}`),
+                },
+                {
+                    text,
+                    to: { ...event, text: "" },
+                    ...(event.channel === undefined ? {} : { channel: event.channel }),
+                    ...(event.thread === undefined ? {} : { thread: event.thread }),
+                    key: `surface-${config.id}-${event.id}`,
+                },
+            );
+        } catch (error) {
+            this.log(
+                `${config.name}: an answer was not sent: ${this.scrub(config, message(error))}`,
+            );
+        }
     }
 
     /** Download attachment `index` (from 1) of a recent event. Its errors have no secrets and no links. */

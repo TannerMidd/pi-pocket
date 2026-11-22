@@ -13,6 +13,7 @@ import {
     type EntryId,
     type TaskId,
 } from "@earendil-works/pi-durable";
+import type { SurfacesState } from "./surfaces/types.ts";
 import type { Repeat } from "./when.ts";
 import type { Worktree } from "./worktrees.ts";
 
@@ -1087,4 +1088,20 @@ export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }
     history: "latest",
     fork: "current",
     initial: () => ({ items: {} }),
+});
+
+/**
+ * The surfaces Pi showed in a conversation (`surfaces/`, `extensions/surfaces.ts`): interactive cards, each a flat
+ * layout with data and one parked tool call that an action wakes. Singleton: one commit can change it with the signal.
+ * `fork: "initial"`: a fork starts with none, because a copy would name a task of another conversation, and a tap in
+ * the fork would wake it. Stored data: never rename the kind or change these settings.
+ */
+export const SurfacesDoc = defineDoc<SurfacesState>({
+    kind: "pocket.surfaces",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ seq: 0, items: {} }),
 });

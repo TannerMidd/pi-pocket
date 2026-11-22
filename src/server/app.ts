@@ -81,6 +81,7 @@ import {
     SpendDoc,
     type SubagentRecord,
     SubagentsDoc,
+    SurfacesDoc,
     TurnsDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
@@ -117,6 +118,15 @@ import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
 import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
+import { setComponentSource } from "./surfaces/components.ts";
+import {
+    fromRelay,
+    prepareRelay,
+    recordSent,
+    type RelayMessage,
+    type SurfaceWhere,
+} from "./surfaces/relay.ts";
+import type { Surface } from "./surfaces/types.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
@@ -511,6 +521,7 @@ export class PocketApp {
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
+    #unsetComponents: (() => void) | undefined;
     #unsubscribeRunEnds: (() => void) | undefined;
     #unsubscribeApprovals: (() => void) | undefined;
     #unsubscribeBrowsers: (() => void) | undefined;
@@ -678,6 +689,7 @@ export class PocketApp {
             links: this.publicLinks,
             settings: (module) => this.config.extensionSettings(module),
         });
+        this.#unsetComponents = setComponentSource(() => this.webs.surfaceComponents());
         this.secrets = new CoreSecrets({
             hidden: this.hidden,
             config: this.config,
@@ -973,6 +985,14 @@ export class PocketApp {
             watches: this.watches,
             repoWatches: this.repoWatches,
             memory: this.memory,
+            surfaces: Object.freeze({
+                prepare: (id: ConversationId, surface: string, where: SurfaceWhere) =>
+                    prepareRelay(this, id, surface, where),
+                sent: (id: ConversationId, surface: string, messageId: string | undefined) =>
+                    recordSent(this, id, surface, messageId),
+                fromRelay: (id: ConversationId, message: RelayMessage) =>
+                    fromRelay(this, id, message),
+            }),
             gallery: this.gallery,
             updates: this.updates,
             text: Object.freeze({ quoted, defang }),
@@ -1471,6 +1491,11 @@ export class PocketApp {
                 if (this.#noteChat(id, (value as { messages?: ChatMessage[] } | null)?.messages)) {
                     sessionsChanged = true;
                 }
+            } else if (kind === SurfacesDoc.definition.kind) {
+                this.alerts.announceSurfaces(
+                    id,
+                    (value as { items?: Record<string, Surface> } | null)?.items,
+                );
             } else if (kind === SubagentsDoc.definition.kind) {
                 this.#noteSubagents(id, value as SubagentsValue | null);
                 // The list counts each session's subagents, and the board lists them.
@@ -4340,6 +4365,7 @@ export class PocketApp {
             this.spend.close();
             this.limits.close();
             this.background.close();
+            this.#unsetComponents?.();
             this.#unsubscribeCommits?.();
             this.#unsubscribeRunEnds?.();
             this.#unsubscribeApprovals?.();

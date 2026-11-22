@@ -44,6 +44,11 @@ export interface RelayEvent {
     thread?: string;
     /** It names the connector's own account (a mention), or it came in a direct message. */
     mentioned?: boolean;
+    /**
+     * The id of the message it answers, when the service says so (`RelayEvent.id` of that message, or the service's own
+     * id for it): a reply to a card Pi showed then goes to that card. Since 0.31.0.
+     */
+    replyTo?: string;
     /** A link to it, when it has one. */
     url?: string;
     /** When it was sent, in ms since 1970. */

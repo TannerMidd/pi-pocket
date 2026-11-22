@@ -29,6 +29,7 @@ const ALWAYS_ALLOWED = new Set([
     "codemode",
     "subagent",
     "ask",
+    "ui",
 ]);
 /** What the browser may do in plan mode: look at pages, not act on them. */
 const BROWSER_LOOKS = new Set([

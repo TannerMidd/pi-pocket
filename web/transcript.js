@@ -24,6 +24,7 @@ import { quoteParts } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted, InlineArtifact } from "./rich.js";
+import { SurfaceCard } from "./surfaces.js";
 import {
     actions,
     attempt,
@@ -1854,6 +1855,7 @@ function ActivityGroup({
 /**
  * A page Pi showed in its reply (`artifact` with `inline: true`): its card once the call has published, between the words around
  * it. Until then, and if the call failed, was denied, or stopped, its step as the timeline draws it, so the reason shows.
+ * A `ui` call shows its surface as a card (`SurfaceCard`, which follows the store itself) and, with none, its step.
  */
 function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
     const { block, entry, canRun } = item.step;
@@ -1871,6 +1873,22 @@ function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
         typeof details.id === "string" &&
         Number.isInteger(details.version);
 
+    const step = html`<div class="activity open">
+        <div class="timeline">
+            <${ToolStep}
+                call=${block}
+                result=${result}
+                slot=${slot}
+                approval=${approval}
+                entryId=${entry?.id}
+                streaming=${entry === undefined}
+                canRun=${canRun}
+                busy=${busy}
+                conversationId=${conversationId}
+            />
+        </div>
+    </div>`;
+
     return html`<div class="inline-row">
         ${item.anchors.map(
             (entryId) => html`<span class="entry-anchor" id=${`entry-${entryId}`}></span>`,
@@ -1883,21 +1901,14 @@ function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
                       title=${details.title ?? details.id}
                       version=${details.version}
                   />`
-                : html`<div class="activity open">
-                      <div class="timeline">
-                          <${ToolStep}
-                              call=${block}
-                              result=${result}
-                              slot=${slot}
-                              approval=${approval}
-                              entryId=${entry?.id}
-                              streaming=${entry === undefined}
-                              canRun=${canRun}
-                              busy=${busy}
-                              conversationId=${conversationId}
-                          />
-                      </div>
-                  </div>`
+                : block.name === "ui" && !result?.isError
+                  ? html`<${SurfaceCard}
+                        conversationId=${conversationId}
+                        callId=${block.id}
+                        details=${details}
+                        fallback=${step}
+                    />`
+                  : step
         }
     </div>`;
 }

@@ -93,6 +93,8 @@ const emptyView = () => ({
     approvals: [],
     artifacts: [],
     artifactsEnded: {},
+    /** Pocket Surfaces by id (`surfaces.js`): the server sends a surface again only when its revision is new. */
+    surfaces: {},
     subagents: [],
     authors: {},
     linkedPeers: {},
@@ -1720,6 +1722,7 @@ function mergeView(current, data) {
         inbox: data.inbox ?? base.inbox,
         artifacts: data.artifacts ?? base.artifacts,
         artifactsEnded: data.artifactsEnded ?? base.artifactsEnded,
+        surfaces: mergeSurfaces(base.surfaces, data),
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
         linkedPeers: data.linkedPeers ?? base.linkedPeers,
@@ -1740,6 +1743,26 @@ function mergeView(current, data) {
         // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
         branch: data.branch === undefined ? base.branch : data.branch,
     };
+}
+
+/**
+ * The surfaces after a view: a full one (`base` is empty then) holds them all; an update brings the ones whose revision
+ * is new (`surfaces`) and names the ones that left (`surfacesGone`). The same map when nothing changed.
+ */
+function mergeSurfaces(had, data) {
+    const gone = data.surfacesGone ?? [];
+
+    if (data.surfaces === undefined && gone.length === 0) {
+        return had;
+    }
+
+    const next = { ...had, ...data.surfaces };
+
+    for (const id of gone) {
+        delete next[id];
+    }
+
+    return next;
 }
 
 let reconnecting = false;
