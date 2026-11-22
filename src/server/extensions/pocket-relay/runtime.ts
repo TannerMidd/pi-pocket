@@ -1420,6 +1420,21 @@ export class Relay {
         }
 
         try {
+            // The echo of a card holds the whole card, values typed in the app too: the outbound screen reads it as it
+            // reads a reply of Pi's, and a block means nothing is sent.
+            if (
+                this.#outbound !== undefined &&
+                (await this.#screenOutbound(
+                    config,
+                    { text, key: `surface-${config.id}-${event.id}` },
+                    event.channel,
+                )) === "block"
+            ) {
+                this.log(`held an answer on ${config.name}: the outbound screen blocked it`);
+
+                return;
+            }
+
             await connector.reply(
                 {
                     values: valuesOf(config, connector.fields),
