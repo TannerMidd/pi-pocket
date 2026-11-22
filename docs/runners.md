@@ -229,6 +229,8 @@ The shell's exit code is final when the shell ends, even if a descendant redirec
 
 Their logs and exit codes stay in `<temp>/pi-pocket-tasks/<permission id>/` on that computer, reachable only by their session. Running now and the log view read them there, with the same output limits as local tasks. While the computer is offline, its watch waits, then checks again when it reconnects. Completed output and exit codes reach the session when it is back. The runner checks a live session permission and the command's folder before it starts a task. On Linux and macOS, commands use Bash, or `sh` if Bash is absent. On Windows, they use an installed Bash (not the Windows WSL launcher), or `cmd.exe` if Bash is absent. Temporary files can disappear when the computer restarts.
 
+**Session cleanup** works for a session on another computer too. Its worktree is checked and removed on that computer, and its background tasks are stopped there, with their logs and exit codes. This happens only while the computer is online and the session's approval there is still valid; otherwise the session stays, and the confirm says why. A cleanup never makes a computer ask for an approval. A worktree on another computer counts as 0 bytes: its size is not read. When the computer is no longer linked, or the person who started the session may no longer use it, the session can still be removed; what it has on that computer stays there, and its unfinished tasks are recorded as lost. The owner's cleanup leaves out sessions on another computer that they may not see.
+
 A project's own `.pi/settings.json` and prompt templates on that computer are not read.
 
 ### Extensions

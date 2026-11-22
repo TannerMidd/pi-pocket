@@ -79,6 +79,10 @@ test("a run that hits a limit waits inside its request and answers by itself, wi
     await send(app, id, "hello");
     await until(() => waits(app, id) !== undefined, "the run to wait");
     assert.ok(app.isBusy(id));
+    assert.deepEqual((await app.room(id)).peek()?.lines.at(-1), {
+        kind: "event",
+        text: "Waiting to retry: faux is overloaded",
+    });
 
     // Only someone who may steer sends the request now.
     await assert.rejects(app.commands.retryLimit(id, app.config.addUser("Vee", "viewer").user), {

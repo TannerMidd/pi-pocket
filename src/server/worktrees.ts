@@ -201,14 +201,22 @@ export async function createWorktree(
     }
 }
 
+/**
+ * A path as its computer has it: links resolved, and on Windows the long name of each part with its case on disk, so
+ * that `C:\Users\RUNNER~1` and `C:\Users\runneradmin` (or a path git gives with `/`) compare equal. The path itself
+ * when it does not exist.
+ */
+function real(path: string, access: FolderAccess): Promise<string> {
+    return access.realpath(path).catch(() => access.path.resolve(path));
+}
+
 /** Whether a folder is the worktree's or one inside it, also when reached through a symbolic link. */
 export async function inWorktree(
     worktree: Worktree,
     cwd: string,
     access: FolderAccess = localAccess,
 ): Promise<boolean> {
-    const real = (path: string) => access.realpath(path).catch(() => access.path.resolve(path));
-    const [base, folder] = await Promise.all([real(worktree.path), real(cwd)]);
+    const [base, folder] = await Promise.all([real(worktree.path, access), real(cwd, access)]);
     const relative = access.path.relative(base, folder);
 
     return (
@@ -235,15 +243,14 @@ export async function sourceFolders(
             return worktree.source;
         }
 
-        const mapped = access.path.resolve(root, access.path.relative(worktree.path, cwd));
+        const [base, folder] = await Promise.all([real(worktree.path, access), real(cwd, access)]);
+        const mapped = access.path.resolve(root, access.path.relative(base, folder));
+        const there = await access.info(mapped).then(
+            () => true,
+            () => false,
+        );
 
-        return mapped === original ||
-            !(await access.info(mapped).then(
-                () => true,
-                () => false,
-            ))
-            ? worktree.source
-            : mapped;
+        return !there || (await real(mapped, access)) === original ? worktree.source : mapped;
     };
 }
 

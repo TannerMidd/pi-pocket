@@ -17,7 +17,7 @@
  * politely, then by force. A sweep, apart from the watches, keeps each log under its limit. The background extension
  * (`extensions/background.ts`) installs the task and gives Pi its tool; while it is off, the watches wait.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { isConnectionLost } from "@earendil-works/pi-env";
 import { RemoteBackground } from "./background-remote.ts";
@@ -40,6 +40,7 @@ import {
     defineTask,
     LiveDoc,
     type Task,
+    type TaskId,
     type TaskRuntime,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -47,6 +48,7 @@ import { DEFAULT_QUIET_MINUTES, DEFAULT_TASK_QUIET_MINUTES } from "./deadline.ts
 import { BackgroundDoc, type BackgroundTask } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang, quoted } from "./fence.ts";
+import { BACKGROUND_MARKER, type TaskProcesses, type TaskRef, taskProcesses } from "./processes.ts";
 import { requestFor } from "./requests.ts";
 
 export type { BackgroundTask } from "./docs.ts";
@@ -57,8 +59,7 @@ const context = BACKGROUND_CONTEXT;
 export const BACKGROUND_EXTENSION = "pocket-background";
 /** How a background task's message to Pi starts, so Pi (and people reading along) know where it came from. */
 export const BACKGROUND_PREFIX = "[background] ";
-/** The environment variable that marks each process of a task: `<data folder>#<conversation>/<id>`. */
-export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
+export { BACKGROUND_MARKER } from "./processes.ts";
 
 /** What the owner can change in Extensions: how many tasks may run at once in one session. */
 /**
@@ -138,156 +139,6 @@ export type BackgroundStart = {
     /** The same key starts the same task once: a tool call replayed after a restart finds the one it started. */
     key?: string;
 };
-
-// ─── Processes ──────────────────────────────────────────────────────────────
-
-const PROC = "/proc";
-const hasProc = existsSync(`${PROC}/self/stat`);
-
-/** This boot of the machine: a task from another boot has no process left, whatever pid it had. */
-const BOOT = (() => {
-    try {
-        return readFileSync(`${PROC}/sys/kernel/random/boot_id`, "utf8").trim();
-    } catch {
-        return undefined;
-    }
-})();
-
-type ProcInfo = { pid: number; pgid: number; state: string; start: number };
-
-/** A process's group, state, and start time, from `/proc/<pid>/stat`. */
-function procStat(pid: number): ProcInfo | undefined {
-    try {
-        const text = readFileSync(`${PROC}/${pid}/stat`, "utf8");
-        // After the name, which can hold spaces and parentheses: state (3), ppid (4), pgrp (5), …, starttime (22).
-        const rest = text.slice(text.lastIndexOf(")") + 2).split(" ");
-
-        return { pid, pgid: Number(rest[2]), state: rest[0] ?? "", start: Number(rest[19]) };
-    } catch {
-        return undefined;
-    }
-}
-
-const gone = (info: ProcInfo) => info.state === "Z" || info.state === "X";
-
-/** Every process's stat, read once for all the watches that look in the same moment. */
-let scan: { at: number; all: ProcInfo[] } | undefined;
-
-function processes(fresh = false): ProcInfo[] {
-    const now = Date.now();
-
-    if (!fresh && scan !== undefined && now - scan.at < 250) {
-        return scan.all;
-    }
-
-    const all: ProcInfo[] = [];
-
-    for (const name of readdirSync(PROC)) {
-        if (/^\d+$/.test(name)) {
-            const info = procStat(Number(name));
-
-            if (info !== undefined && !gone(info)) {
-                all.push(info);
-            }
-        }
-    }
-
-    scan = { at: now, all };
-
-    return all;
-}
-
-/** Whether a process carries a marker in its environment; false for a process not ours to read. */
-function marked(pid: number, marker: string): boolean {
-    try {
-        return readFileSync(`${PROC}/${pid}/environ`, "utf8")
-            .split("\0")
-            .includes(`${BACKGROUND_MARKER}=${marker}`);
-    } catch {
-        return false;
-    }
-}
-
-/**
- * The live processes of a task's group. While its leader runs (the same pid, started at the same time), the group is
- * the task's; once the leader is gone, a member counts only while one carries the task's marker, so a group id that a
- * new process took after the task's ended is not taken for it.
- */
-function members(item: BackgroundTask, marker: string, fresh = false): number[] {
-    if (item.pid <= 0 || (item.boot !== undefined && item.boot !== BOOT)) {
-        return [];
-    }
-
-    if (!hasProc) {
-        try {
-            process.kill(-item.pid, 0);
-
-            return [item.pid];
-        } catch (error) {
-            return (error as NodeJS.ErrnoException).code === "EPERM" ? [item.pid] : [];
-        }
-    }
-
-    // Cheap first, as most looks go: no process in the group at all, or its leader still the same.
-    try {
-        process.kill(-item.pid, 0);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EPERM") {
-            return [];
-        }
-    }
-
-    const first = procStat(item.pid);
-
-    if (
-        first !== undefined &&
-        !gone(first) &&
-        first.pgid === item.pid &&
-        item.startTicks !== undefined &&
-        first.start === item.startTicks
-    ) {
-        return [item.pid];
-    }
-
-    // The leader is gone and the group is not: what is left of it, from a scan.
-    let group = processes(fresh).filter((each) => each.pgid === item.pid);
-
-    // A scan from before the task started does not know it yet.
-    if (group.length === 0 && !fresh) {
-        group = processes(true).filter((each) => each.pgid === item.pid);
-    }
-
-    const leader = group.find((each) => each.pid === item.pid);
-
-    if (
-        leader !== undefined &&
-        (item.startTicks === undefined || leader.start === item.startTicks)
-    ) {
-        return group.map((each) => each.pid);
-    }
-
-    return group.some((each) => marked(each.pid, marker)) ? group.map((each) => each.pid) : [];
-}
-
-/**
- * Every live process that carries a task's marker, wherever it is: its group, or one that left it (`setsid`, a daemon).
- * Reads each process's environment, so it is for the moments that need it: the end of a group, a stop, a recovery.
- */
-function markedProcesses(marker: string): ProcInfo[] {
-    if (!hasProc) {
-        return [];
-    }
-
-    return processes(true).filter((each) => marked(each.pid, marker));
-}
-
-function kill(pid: number, name: NodeJS.Signals): void {
-    try {
-        process.kill(pid, name);
-    } catch {
-        // Gone already, or never ours.
-    }
-}
 
 // ─── Words ──────────────────────────────────────────────────────────────────
 
@@ -441,6 +292,7 @@ export class BackgroundTasks {
     #remoteSweeps = new Set<ConversationId>();
     /** Whether `split` was found. */
     #split = false;
+    readonly #procs: TaskProcesses = taskProcesses();
     /** The durable task behind each background command; the background extension installs it. */
     readonly task: Task<WatchInput, WatchState, null, object>;
 
@@ -533,6 +385,7 @@ export class BackgroundTasks {
     /** Stop the sweep: the server closes. Its tasks' processes run on. */
     close(): void {
         clearInterval(this.#sweeper);
+        this.#procs.close();
         this.#sweeper = undefined;
     }
 
@@ -682,6 +535,17 @@ export class BackgroundTasks {
         return items !== undefined && Object.hasOwn(items, id) ? items[id] : undefined;
     }
 
+    #ref(conversationId: ConversationId, item: BackgroundTask): TaskRef {
+        return {
+            pid: item.pid,
+            ...(item.startTicks === undefined ? {} : { startTicks: item.startTicks }),
+            ...(item.boot === undefined ? {} : { boot: item.boot }),
+            marker: this.#marker(conversationId, item.id),
+            files: join(this.#dir(conversationId), item.id),
+            startedAt: item.startedAt,
+        };
+    }
+
     /**
      * Whether a task still runs: any process of its group. A process that left the group (a daemon, `setsid`) does not
      * keep it running, or a build tool's daemon would hold one of the session's places for good and its end would never
@@ -695,7 +559,7 @@ export class BackgroundTasks {
         const remote = this.#remote(conversationId);
 
         return remote === undefined
-            ? members(item, this.#marker(conversationId, item.id), fresh).length > 0
+            ? (await this.#procs.members(this.#ref(conversationId, item), fresh)).length > 0
             : item.pid > 0 &&
                   (
                       await remote.processes(
@@ -710,38 +574,33 @@ export class BackgroundTasks {
     /** The processes with a task's marker that still run outside its group: what it left behind. */
     async #left(conversationId: ConversationId, item: BackgroundTask): Promise<number[]> {
         const remote = this.#remote(conversationId);
-        const all =
-            remote === undefined
-                ? markedProcesses(this.#marker(conversationId, item.id))
-                : await remote.processes(this.#marker(conversationId, item.id));
 
-        return all.filter((each) => each.pgid !== item.pid).map((each) => each.pid);
+        if (remote === undefined) {
+            return this.#procs.left(this.#ref(conversationId, item));
+        }
+
+        return (await remote.processes(this.#marker(conversationId, item.id)))
+            .filter((each) => each.pgid !== item.pid)
+            .map((each) => each.pid);
     }
 
     /** Send a signal to every process of a task: its group, and each process with its marker, found afresh. */
     async #signal(
         conversationId: ConversationId,
         item: BackgroundTask,
-        name: NodeJS.Signals,
+        name: "SIGTERM" | "SIGKILL",
     ): Promise<void> {
-        const marker = this.#marker(conversationId, item.id);
         const remote = this.#remote(conversationId);
 
-        if (remote !== undefined) {
-            await remote.processes(marker, item.pid, name.replace(/^SIG/, ""));
-
-            return;
+        if (remote === undefined) {
+            return this.#procs.signal(this.#ref(conversationId, item), name);
         }
 
-        if (members(item, marker, true).length > 0) {
-            kill(-item.pid, name);
-        }
-
-        for (const each of markedProcesses(marker)) {
-            kill(each.pid === each.pgid ? -each.pid : each.pid, name);
-        }
-
-        scan = undefined;
+        await remote.processes(
+            this.#marker(conversationId, item.id),
+            item.pid,
+            name.replace(/^SIG/, ""),
+        );
     }
 
     /** Ask every process of a task to stop, and force what is left after the grace period. */
@@ -1021,18 +880,23 @@ export class BackgroundTasks {
      */
     async #recover(runtime: Runtime, item: BackgroundTask, context: Context): Promise<boolean> {
         const conversationId = runtime.conversationId;
-        const marker = this.#marker(conversationId, item.id);
         const remote = this.#remote(conversationId);
-        const found =
-            remote === undefined ? markedProcesses(marker) : await remote.processes(marker);
+        let found: { pid: number; start?: number } | undefined;
 
-        if (found.length > 0) {
-            const leader =
-                found.find((each) => each.pid === each.pgid) ??
-                (remote !== undefined || found[0] === undefined
+        if (remote === undefined) {
+            found = await this.#procs.find(this.#ref(conversationId, item));
+        } else {
+            const processes = await remote.processes(this.#marker(conversationId, item.id));
+            const leader = processes.find((each) => each.pid === each.pgid);
+
+            // A runner's task whose shell ended reports no group (0): its own id stands for it.
+            found =
+                processes[0] === undefined
                     ? undefined
-                    : procStat(found[0].pgid));
+                    : { pid: leader?.pid ?? (processes[0].pgid || processes[0].pid) };
+        }
 
+        if (found !== undefined) {
             await this.#app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
 
@@ -1041,17 +905,10 @@ export class BackgroundTasks {
                 }
 
                 stored.status = "running";
-                // A runner's task whose shell ended reports no group (0): its own id stands for it.
-                stored.pid = leader?.pid ?? (found[0]!.pgid || found[0]!.pid);
+                stored.pid = found.pid;
 
-                // A leader that carries the marker is known for sure; a group whose leader is gone counts by its members.
-                if (
-                    remote === undefined &&
-                    leader !== undefined &&
-                    "start" in leader &&
-                    marked(leader.pid, marker)
-                ) {
-                    stored.startTicks = leader.start as number;
+                if (found.start !== undefined) {
+                    stored.startTicks = found.start;
                 }
             }, context);
 
@@ -1507,6 +1364,9 @@ export class BackgroundTasks {
 
         for (const id of ids ?? []) {
             rmSync(this.#exitFile(conversationId, id), { force: true });
+            // Windows: the pid its bash wrote, and the processes found of it.
+            rmSync(join(this.#dir(conversationId), `${id}.pid`), { force: true });
+            rmSync(join(this.#dir(conversationId), `${id}.pids`), { force: true });
             // A log of one file, as builds of 0.24.0 before its release wrote.
             rmSync(join(this.#dir(conversationId), `${id}.log`), { force: true });
 
@@ -1516,18 +1376,49 @@ export class BackgroundTasks {
         }
     }
 
+    /** Remove the files of tasks (their logs, their exit codes), here or on the session's computer. */
+    forgetFiles(conversationId: ConversationId, ids: readonly string[]): Promise<void> {
+        return this.#removeFiles(conversationId, ids);
+    }
+
+    /**
+     * Give up a session's unfinished tasks, with no signal to any process: for a session on a computer that is not
+     * reached any more, before the session is removed. Once it is, nothing says its tasks ran on another computer, and
+     * a watch or a stop would take their process ids for this machine's. Recorded first, so that the watches' aborts
+     * find nothing to stop.
+     */
+    async abandon(conversationId: ConversationId): Promise<void> {
+        const unfinished = (item: BackgroundTask) =>
+            item.status === "running" || item.status === "starting";
+        const items =
+            (await this.#app.harness.snapshot(BackgroundDoc, conversationId, context))?.items ?? {};
+
+        if (!Object.values(items).some(unfinished)) {
+            return;
+        }
+
+        const watches: TaskId[] = [];
+
+        await this.#app.harness.commit(async (tx) => {
+            for (const item of Object.values((await tx.doc(BackgroundDoc, conversationId)).items)) {
+                if (unfinished(item)) {
+                    item.status = "lost";
+                    item.endedAt = this.#app.now();
+                    item.notify = false;
+                    watches.push(item.taskId);
+                }
+            }
+        }, context);
+
+        for (const watch of watches) {
+            await this.#app.harness.abortTask(watch, context).catch(() => undefined);
+        }
+    }
+
     /** Where Pi can start one: a session's own conversation, not a subagent's or PiP's. */
     #check(conversationId: ConversationId): void {
         if (!this.running) {
             throw new HttpError(409, "Background tasks are turned off in Extensions.");
-        }
-
-        // Without /proc a task's processes cannot be told from others that took their ids: a stop could hit those.
-        if (!hasProc && this.#remote(conversationId) === undefined) {
-            throw new HttpError(
-                501,
-                "Background tasks need Linux: they follow their processes through /proc.",
-            );
         }
 
         const meta = this.#app.sessionMeta(conversationId);
@@ -1575,6 +1466,14 @@ export class BackgroundTasks {
 
         await remote?.supported();
 
+        // Where a task's processes cannot be told from others that took their ids, a stop could hit those: none starts.
+        // This machine's own check: a session's computer answers for itself (`supported`).
+        const unsupported = remote === undefined ? await this.#procs.unsupported() : undefined;
+
+        if (unsupported !== undefined) {
+            throw new HttpError(501, unsupported);
+        }
+
         if (remote === undefined && !existsSync(cwd)) {
             throw new HttpError(400, `The session's folder is not there: ${cwd}`);
         }
@@ -1621,7 +1520,9 @@ export class BackgroundTasks {
                 command,
                 cwd,
                 pid: 0,
-                ...(remote !== undefined || BOOT === undefined ? {} : { boot: BOOT }),
+                ...(remote !== undefined || this.#procs.boot === undefined
+                    ? {}
+                    : { boot: this.#procs.boot }),
                 segment: this.sizes.segment,
                 startedAt: app.now(),
                 status: "starting",
@@ -1669,15 +1570,16 @@ export class BackgroundTasks {
                 this.#needsSplit();
             }
 
-            const spawned =
+            const { pid: spawned, start } =
                 remote === undefined
-                    ? this.#spawn(conversationId, item, added)
-                    : await remote.spawn(item, added, SEGMENT_BYTES);
+                    ? await this.#spawn(conversationId, item, added)
+                    : { pid: await remote.spawn(item, added, SEGMENT_BYTES), start: undefined };
 
             pid = spawned;
             await this.beforeRecord?.();
 
-            const startTicks = remote === undefined ? procStat(spawned)?.start : undefined;
+            const startTicks =
+                remote === undefined ? (start ?? (await this.#procs.startOf(spawned))) : undefined;
             const recorded = await app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
 
@@ -1698,7 +1600,7 @@ export class BackgroundTasks {
 
             if (!recorded) {
                 if (remote === undefined) {
-                    kill(-spawned, "SIGKILL");
+                    await this.#procs.killSpawned(this.#ref(conversationId, item), spawned);
                 } else {
                     await this.#signal(conversationId, { ...item, pid: spawned }, "SIGKILL");
                 }
@@ -1726,8 +1628,12 @@ export class BackgroundTasks {
 
     /** Throws when `split`, which writes the logs, is not on this machine; looked for again until it is found. */
     #needsSplit(): void {
+        const shell = this.#procs.shell();
+
         this.#split ||=
-            spawnSync("bash", ["-c", "command -v split"], { stdio: "ignore" }).status === 0;
+            shell !== undefined &&
+            spawnSync(shell, ["-c", "command -v split"], { stdio: "ignore", windowsHide: true })
+                .status === 0;
 
         if (!this.#split) {
             throw new HttpError(
@@ -1737,32 +1643,31 @@ export class BackgroundTasks {
         }
     }
 
-    #spawn(conversationId: ConversationId, item: BackgroundTask, added: Record<string, string>) {
+    async #spawn(
+        conversationId: ConversationId,
+        item: BackgroundTask,
+        added: Record<string, string>,
+    ): Promise<{ pid: number; start?: number }> {
         mkdirSync(this.#dir(conversationId), { recursive: true });
 
-        const child = spawn("bash", ["-c", WRAPPER], {
-            cwd: item.cwd,
-            detached: true,
-            stdio: "ignore",
-            env: {
-                ...process.env,
-                ...added,
-                [BACKGROUND_MARKER]: this.#marker(conversationId, item.id),
-                PI_POCKET_BACKGROUND_COMMAND: item.command,
-                PI_POCKET_BACKGROUND_EXIT: this.#exitFile(conversationId, item.id),
-                PI_POCKET_BACKGROUND_LOG: this.#logPrefix(conversationId, item.id),
-                PI_POCKET_BACKGROUND_SEGMENT: String(item.segment ?? SEGMENT_BYTES),
-            },
-        });
-
-        child.on("error", () => {});
-        child.unref();
-
-        if (child.pid === undefined) {
-            throw new HttpError(500, "The command could not start: no bash on this machine?");
+        try {
+            return await this.#procs.spawn(
+                WRAPPER,
+                item.cwd,
+                {
+                    ...process.env,
+                    ...added,
+                    [BACKGROUND_MARKER]: this.#marker(conversationId, item.id),
+                    PI_POCKET_BACKGROUND_COMMAND: item.command,
+                    PI_POCKET_BACKGROUND_EXIT: this.#exitFile(conversationId, item.id),
+                    PI_POCKET_BACKGROUND_LOG: this.#logPrefix(conversationId, item.id),
+                    PI_POCKET_BACKGROUND_SEGMENT: String(item.segment ?? SEGMENT_BYTES),
+                },
+                this.#ref(conversationId, item),
+            );
+        } catch (error) {
+            throw new HttpError(500, (error as Error).message);
         }
-
-        return child.pid;
     }
 
     /** Take back a reservation whose start failed: its watch, its record, its files, and any process it has. */
@@ -1771,11 +1676,17 @@ export class BackgroundTasks {
         item: BackgroundTask,
         pid?: number,
     ): Promise<void> {
-        if (this.#remote(conversationId) === undefined && pid !== undefined) {
-            kill(-pid, "SIGKILL");
+        const remote = this.#remote(conversationId);
+
+        if (remote === undefined && pid !== undefined) {
+            await this.#procs.killSpawned(this.#ref(conversationId, item), pid);
         }
 
-        await this.#signal(conversationId, { ...item, pid: pid ?? item.pid }, "SIGKILL");
+        await this.#signal(
+            conversationId,
+            remote === undefined ? item : { ...item, pid: pid ?? item.pid },
+            "SIGKILL",
+        );
 
         await this.#app.harness.commit(async (tx) => {
             delete (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
@@ -2049,12 +1960,17 @@ export class BackgroundTasks {
             return item;
         }
 
-        const marker = this.#marker(conversationId, item.id);
         const remote = this.#remote(conversationId);
-        const found = remote === undefined ? undefined : await remote.processes(marker);
-        const left = item.left.filter((pid) =>
-            found === undefined ? marked(pid, marker) : found.some((each) => each.pid === pid),
-        );
+        let left: number[];
+
+        if (remote === undefined) {
+            left = await this.#procs.stillLeft(this.#ref(conversationId, item), item.left);
+        } else {
+            const found = await remote.processes(this.#marker(conversationId, item.id));
+
+            left = item.left.filter((pid) => found.some((each) => each.pid === pid));
+        }
+
         const { left: _was, ...rest } = item;
 
         return left.length === 0 ? rest : { ...item, left };
@@ -2068,12 +1984,19 @@ export class BackgroundTasks {
         return (await this.list(conversationId)).find((item) => String(item.taskId) === taskId);
     }
 
-    /** Whether any process of a task's group runs: for tests and checks. */
-    alive(conversationId: ConversationId, item: BackgroundTask): boolean | Promise<boolean> {
-        if (this.#remote(conversationId) !== undefined) {
-            return this.#alive(conversationId, item, true);
-        }
+    /**
+     * From what is known at once: for a count, tests, and checks. A task on another computer counts as running: only
+     * a fresh look (`aliveNow`) asks that computer.
+     */
+    alive(conversationId: ConversationId, item: BackgroundTask): boolean {
+        return (
+            this.#app.runnerOf(conversationId) !== undefined ||
+            this.#procs.aliveSync(this.#ref(conversationId, item))
+        );
+    }
 
-        return members(item, this.#marker(conversationId, item.id), true).length > 0;
+    /** From a fresh look. */
+    aliveNow(conversationId: ConversationId, item: BackgroundTask): Promise<boolean> {
+        return this.#alive(conversationId, item, true);
     }
 }

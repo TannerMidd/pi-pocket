@@ -418,20 +418,6 @@ function span(ms) {
     return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}m`;
 }
 
-/** Who a wait for a limit is for: the provider by the name people know it by, and the model when only it waits. */
-function limitWho({ provider, modelId, scope }) {
-    const names = {
-        anthropic: "Claude",
-        "openai-codex": "ChatGPT",
-        openai: "OpenAI",
-        "opencode-go": "OpenCode Go",
-        openrouter: "OpenRouter",
-    };
-    const name = names[provider] ?? provider;
-
-    return scope === "model" && modelId ? `${name} ${modelId}'s limit` : `${name}'s limit`;
-}
-
 /** When a message was sent, from the server's time: "10:42" today, "Oct 3 10:42" before. */
 const clock = (at) => clockTime(new Date(fromServer(at)));
 
@@ -2692,6 +2678,22 @@ function NoteEntry({ entry }) {
     </div>`;
 }
 
+/** An extension's note for Pi (`host.annotateTurns`), never the person's words. */
+function TurnNoteEntry({ entry }) {
+    const [open, setOpen] = useState(false);
+
+    return html`<div class="note-line turn-note" id=${`entry-${entry.id}`}>
+        <span class="muted">Note for Pi from ${entry.source}:</span>
+        <button
+            class=${`turn-note-text${open ? " open" : ""}`}
+            aria-expanded=${open}
+            onClick=${() => setOpen(!open)}
+        >
+            ${entry.text}
+        </button>
+    </div>`;
+}
+
 /** How long a `!` command's row may wait for its entry: past the server's limit for a command, something went wrong. */
 const PENDING_MS = 11 * 60_000;
 
@@ -2766,6 +2768,10 @@ function EntryView({ entry }) {
 
     if (entry.kind === "note") {
         return html`<${NoteEntry} entry=${entry} />`;
+    }
+
+    if (entry.kind === "turnNote") {
+        return html`<${TurnNoteEntry} entry=${entry} />`;
     }
 
     if (entry.kind === "user") {
@@ -3319,7 +3325,7 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
 
     const partial = live.generation?.message?.blocks ?? [];
     const retry = live.generation?.retry;
-    // Pi's request waits for the provider's limit to clear (`limit-gate.ts`): until a time, or a try.
+    // The request waits to retry (`limit-gate.ts`), with a fixed reason from the server.
     const limit = live.limit;
     const working = (live.tools ?? []).some((slot) => slot.status !== "done");
     const waiting = approvals.length > 0;
@@ -3338,7 +3344,7 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
               ? "Waiting for an answer"
               : "Waiting for approval";
     } else if (limit) {
-        state = `Waiting for ${limitWho(limit)}`;
+        state = "Waiting to retry";
     } else if (retry) {
         state = "Retrying";
     } else if ((live.compactions ?? []).length > 0) {
@@ -4042,22 +4048,10 @@ export function Transcript() {
     }
 
     if (!view.conversation || held) {
-        const { connection, sessions, conversationId, pending } = store.state;
+        const { connection, sessions, conversationId } = store.state;
         const title = sessions.find((session) => session.id === conversationId)?.title;
 
-        // Nothing kept anywhere: the session's own pane, its title, and a quiet loader, not the full-page boot screen.
-        // A session held for its changes keeps that screen, as before.
-        if (pending === conversationId && !held) {
-            return html`<main class="scroller">
-                <div class="transcript" data-part="transcript">
-                    <div class="loader" role="status">
-                        <${Spinner} label="Loading" />
-                        <span>${title ? `Loading ${title}` : "Loading"}…</span>
-                    </div>
-                </div>
-            </main>`;
-        }
-
+        // Nothing kept anywhere, or a session held for its changes: the loading screen in the session's own pane.
         const caption =
             connection === "connecting"
                 ? "connecting"

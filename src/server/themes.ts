@@ -26,6 +26,7 @@ import { pathToFileURL } from "node:url";
 import { APP_ROOT } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { opened } from "./http/io.ts";
+import { openNoFollowSync } from "./no-follow.ts";
 import { desktopTheme } from "./omarchy.ts";
 import { watchTree } from "./reload.ts";
 import { cssReferences, themeFile, tokenize } from "./themes/css.ts";
@@ -651,10 +652,7 @@ export class Themes {
         let css = "";
 
         if (hasCss) {
-            const fd = openSync(
-                main,
-                constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-            );
+            const fd = openNoFollowSync(main);
 
             try {
                 css = readFileSync(fd, "utf8");

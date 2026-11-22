@@ -1,0 +1,30 @@
+#!/bin/bash
+# Runs before the payload goes in, as the user (the package installs in the home folder only): it stops a running
+# Pi Pocket of this install, and removes the old Node.js, so that no file of an older one stays in the new one. It also
+# removes what an earlier install left: an app folder that was not put in place, and the files of the installs that
+# got the package from npm (install-app.mjs, and the tarball of a CI build).
+# $2 is the install folder, ~/Library/Application Support/Pi Pocket.
+set -u
+APP="$2"
+
+if [ "$(id -u)" = 0 ] || [ "$APP" != "$HOME/Library/Application Support/Pi Pocket" ]; then
+    echo "Pi Pocket installs for the current user only: install it for yourself, without sudo, not in $APP."
+    exit 1
+fi
+
+# The folder must be empty or an earlier install: the deletes below must not hit files that are not Pi Pocket's.
+if [ -d "$APP" ] && [ ! -f "$APP/pi-pocket" ] && [ -n "$(ls -A "$APP")" ]; then
+    echo "$APP is not empty and holds no Pi Pocket install."
+    exit 1
+fi
+
+# shellcheck source=packaging/macos/stop-pi-pocket.sh
+. "$(dirname "$0")/stop-pi-pocket.sh"
+
+if ! stop_pi_pocket; then
+    echo "Pi Pocket still runs: quit it (Pi Pocket in the menu bar, then Quit), then install again."
+    exit 1
+fi
+
+rm -rf "$APP/node" "$APP/Pi Pocket.app" "$APP/Pi Pocket (console).app" "$APP/Pi Pocket at sign-in.command" \
+    "$APP/app.new" "$APP/app.old" "$APP/install-app.mjs" "$APP"/pi-pocket-*.tgz

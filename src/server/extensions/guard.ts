@@ -50,6 +50,14 @@ export default function createGuard(host: PocketHost) {
                     let answer = await api.memo<ApprovalAnswer>("pocket.approval", context);
 
                     if (answer === undefined) {
+                        // Keep the original time when the pending hook runs again after a restart.
+                        const createdAt =
+                            (await api.memo<number>("pocket.approval.created-at", context)) ??
+                            (await api.memo<number>(
+                                "pocket.approval.created-at",
+                                Date.now(),
+                                context,
+                            ));
                         const asked = await host.approvals.request(
                             {
                                 // The call, not just its task: a codemode script makes several calls in one task, maybe at once.
@@ -61,7 +69,7 @@ export default function createGuard(host: PocketHost) {
                                 subject,
                                 reason: `${decision.reason}${scored}`,
                                 ...(decision.score === undefined ? {} : { score: decision.score }),
-                                createdAt: Date.now(),
+                                createdAt,
                             },
                             context,
                         );

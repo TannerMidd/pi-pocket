@@ -2,14 +2,16 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { constants, createWriteStream, rmSync } from "node:fs";
-import { type FileHandle, open } from "node:fs/promises";
+import { createWriteStream, rmSync } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
+import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { withDesignMirror } from "../design/mirror.ts";
+import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
@@ -41,7 +43,7 @@ async function download(response: ServerResponse, file: string): Promise<void> {
     let handle: FileHandle;
 
     try {
-        handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        handle = await openNoFollow(file);
     } catch {
         throw new HttpError(404, "File not found");
     }
@@ -671,6 +673,16 @@ export async function conversationRoutes(
                 await writeState(app, id, user, fourth, await readJson(request)),
             );
         }
+    }
+
+    // Deleting an artifact with all its versions (`artifacts.ts`): anyone who sees the session and steers.
+    if (
+        third === "artifacts" &&
+        fourth !== undefined &&
+        parts.length === 4 &&
+        method === "DELETE"
+    ) {
+        return json(response, 200, await deleteArtifact(app, id, user, fourth));
     }
 
     // An artifact published to anyone with its address: the shares of this session, and ending one.

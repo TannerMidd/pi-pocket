@@ -82,13 +82,18 @@ function sandbox() {
     const command = npmCommand();
 
     const npm = (args: string[], cwd = dir) => {
-        const result = spawnSync(command.file, args, {
-            cwd,
-            env,
-            encoding: "utf8",
-            shell: command.shell,
-            timeout: 60_000,
-        });
+        // As `npm-update.ts` quotes them: a shell on Windows splits the prefix, which has a space.
+        const result = spawnSync(
+            command.shell ? `"${command.file}"` : command.file,
+            command.shell ? args.map((arg) => `"${arg}"`) : args,
+            {
+                cwd,
+                env,
+                encoding: "utf8",
+                shell: command.shell,
+                timeout: 60_000,
+            },
+        );
 
         assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
 

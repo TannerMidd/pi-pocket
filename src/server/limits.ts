@@ -1,7 +1,7 @@
 /**
  * Provider limits, read from a failed model request: is this a limit a run can wait out, and when does it clear?
- * `classify` takes what a failed request left (its error text, and the status and headers the request's `fetch` saw)
- * and gives one verdict. Nothing here waits, stores, or sends: `limit-gate.ts` does that.
+ * `classify` takes what a failed request left (its error text, and facts the request's `fetch` saw) and gives one
+ * verdict. Nothing here waits, stores, or sends: `limit-gate.ts` does that.
  *
  * What each provider sends is listed in docs/design/rate-limit-wait.md. Only the error text is certain to reach this
  * code; headers come from the recording fetch (`recordResponses`) for the adapters that take one.
@@ -11,8 +11,10 @@
 const KEPT_HEADER =
     /^(retry-after(-ms)?|anthropic-ratelimit-.+|x-ratelimit-.+|x-codex-.+|x-should-retry)$/;
 
-/** What a failed request's response said: its status, and only the headers that tell about limits, by lowercase name. */
-export type ResponseFacts = { status: number; headers: Record<string, string> };
+type ErrorHint = "request" | "restart" | "overload";
+
+/** Status, limit headers, and a hint from an error body. The body itself is not kept. */
+export type ResponseFacts = { status: number; headers: Record<string, string>; hint?: ErrorHint };
 
 /** The facts of a response: its status and the limit headers. Anything else is dropped here. */
 export function responseFacts(
@@ -44,6 +46,8 @@ export type Source = "header" | "body" | "text";
 export type Classified =
     /** Not a limit, or one that waiting does not clear (a sign-in, billing, a bad request): the error goes on as it is. */
     | { type: "other"; why: string }
+    /** Only this request's conversation could not continue. The account and model must not wait. */
+    | { type: "request" }
     /** A limit. `resetAt` (epoch ms) when its end is known; otherwise `backoff`: only trying again tells. */
     | {
           type: "limit";
@@ -60,6 +64,7 @@ export type Classified =
 
 export type LimitInput = {
     provider: string;
+    modelId?: string;
     /** `AssistantMessage.errorMessage`. */
     message: string;
     facts?: ResponseFacts | undefined;
@@ -100,6 +105,63 @@ const TRANSIENT =
     /overloaded|server[ _-]busy|servers are currently busy|high demand|at capacity|rate[ _.-]?limit|too many requests|\b(?:429|500|502|503|504|520|524|529)\b|service[ _-]?(?:is[ _-])?(?:temporarily[ _-])?unavailable|server[ _-]?error|internal[ _-]?error|retry delay|resource[ _-]?exhausted|throttl|slow_down|exhausted your capacity/i;
 
 const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504, 520, 524, 529]);
+
+const STATUS_PREFIX = /^\s*(?:HTTP\s+)?([45]\d\d)(?=[:\s]|$)[:\s]*/i;
+const CONVERSATION_CODE =
+    /^(?:(?:invalid|unknown|missing|expired)_(?:previous_response|conversation)(?:_id)?|(?:previous_response|conversation)(?:_(?:id|owner(?:_account)?))?_(?:invalid|missing|expired|not_found|unavailable))$/i;
+const CONVERSATION_TEXT =
+    /\b(?:(?:invalid|unknown|missing|expired|no such) (?:previous response|conversation)|(?:previous response|conversation)(?: id| owner(?: account)?)? (?:is )?(?:unavailable|invalid|missing|expired|not found|does not exist))\b/i;
+const RESTART = /\b(?:server|service) (?:is )?(?:draining|restarting)\b/i;
+const OVERLOAD =
+    /\boverloaded(?:_error)?\b|server[ _-]busy|servers are currently busy|high demand|at capacity/i;
+
+/** Some adapters put the HTTP status at the start of the error, but do not take a recording fetch. */
+export function messageStatus(message: string): number | undefined {
+    const match = STATUS_PREFIX.exec(message);
+
+    return match === null ? undefined : Number(match[1]);
+}
+
+/** Read known error shapes, not arbitrary mentions of a conversation in the provider's text. */
+export function serverErrorHint(status: number | undefined, text: string): ErrorHint | undefined {
+    const body = text.replace(STATUS_PREFIX, "").trim();
+    let message = body;
+    let codes: string[] = [];
+
+    if (body.startsWith("{")) {
+        type Detail = { code?: unknown; type?: unknown; param?: unknown; message?: unknown };
+
+        try {
+            const parsed = JSON.parse(body) as Detail & { error?: Detail };
+            const error = parsed.error ?? parsed;
+
+            codes = [error.code, error.type].filter((value) => typeof value === "string");
+            message = typeof error.message === "string" ? error.message : "";
+
+            if (
+                !codes.some((code) => OVERLOAD.test(code)) &&
+                (codes.some((code) => CONVERSATION_CODE.test(code)) ||
+                    (codes.includes("invalid_request_error") &&
+                        (error.param === "previous_response_id" ||
+                            error.param === "conversation_id")))
+            ) {
+                return "request";
+            }
+        } catch {
+            // The SDK may have cut a long body short. Its ordinary error text can still say what happened.
+        }
+    }
+
+    if (status === 503 && RESTART.test(message)) {
+        return "restart";
+    }
+
+    if (OVERLOAD.test(message) || codes.some((code) => OVERLOAD.test(code))) {
+        return "overload";
+    }
+
+    return CONVERSATION_TEXT.test(message) ? "request" : undefined;
+}
 
 /**
  * The usage limits that providers send as a 429, or as a 403 with a reset time: only these shapes (not any "usage
@@ -220,10 +282,14 @@ function retryAfter(headers: Record<string, string>, now: number): number | unde
 function fromHeaders(
     headers: Record<string, string>,
     now: number,
+    fable429: boolean,
 ): { resetAt?: number; account: boolean; model: boolean; long?: true } {
-    // Claude subscription: windows that cover the sign-in. A claim for one model's cap (seven_day_opus) is the model's.
+    // Fable has its own pool. An ambiguous subscription 429 from it should not stop a request to another model.
+    // Keep explicit shared claims account-wide, and leave API-key limits and other models unchanged.
     const unified = headers["anthropic-ratelimit-unified-status"];
-    const claim = headers["anthropic-ratelimit-unified-representative-claim"] ?? "";
+    const claim = headers["anthropic-ratelimit-unified-representative-claim"]?.trim() ?? "";
+    const sharedClaim = /^(five_hour|seven_day)$/i.test(claim);
+    const modelLimit = /opus|sonnet|haiku|fable/i.test(claim) || (fable429 && !sharedClaim);
 
     // The windows by name: a rejected 5-hour window waits for its reset; a rejected 7-day window is days away.
     const week = headers["anthropic-ratelimit-unified-7d-status"] === "rejected";
@@ -238,8 +304,8 @@ function fromHeaders(
 
         return {
             ...(reset === undefined ? {} : { resetAt: reset }),
-            account: !/opus|sonnet|haiku/i.test(claim),
-            model: /opus|sonnet|haiku/i.test(claim),
+            account: !modelLimit,
+            model: modelLimit,
             ...(week ? { long: true as const } : {}),
         };
     }
@@ -252,8 +318,8 @@ function fromHeaders(
         if (rejected) {
             return {
                 ...(reset === undefined ? {} : { resetAt: reset }),
-                account: !/opus|sonnet|haiku/i.test(claim),
-                model: /opus|sonnet|haiku/i.test(claim),
+                account: !modelLimit,
+                model: modelLimit,
             };
         }
     }
@@ -405,6 +471,21 @@ export function classify(input: LimitInput): Classified {
         return { type: "other", why: `HTTP ${status}` };
     }
 
+    // A gateway can send a continuation error as a 5xx. Keep it out of shared gates, even with Retry-After.
+    // A real 429 or 529 still limits other requests. An ordinary 4xx follows the no-wait rules above and below.
+    const reported = status ?? messageStatus(message);
+
+    if (
+        reported !== undefined &&
+        reported >= 500 &&
+        reported < 600 &&
+        reported !== 529 &&
+        statusWaits(reported) &&
+        (facts?.hint ?? serverErrorHint(reported, message)) === "request"
+    ) {
+        return { type: "request" };
+    }
+
     if ((SIGN_IN.test(message) && !(status === 403 && usageShape)) || status === 401) {
         return { type: "other", why: "sign-in or permission" };
     }
@@ -432,7 +513,11 @@ export function classify(input: LimitInput): Classified {
     }
 
     const headers = facts?.headers ?? {};
-    const fromHeader = fromHeaders(headers, now);
+    const fable429 =
+        status === 429 &&
+        input.provider === "anthropic" &&
+        /^claude-fable(?:-|$)/i.test(input.modelId ?? "");
+    const fromHeader = fromHeaders(headers, now, fable429);
 
     // A conflict is a refusal of this request, not of load: it waits only when the response itself says when to try
     // again (a header). Pi Durable's own short retries still cover a conflict that clears at once.

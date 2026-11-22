@@ -20,12 +20,14 @@ import {
 import {
     type AgentChange,
     AgentDoc,
+    type Conversation,
     type ConversationCreateOptions,
     type ConversationId,
     type Cursor,
     defineTask,
     type EntryId,
     type InputEntry,
+    type InputSubmissionDraft,
     InboxDoc,
     LiveDoc,
     type ModelRef,
@@ -43,6 +45,7 @@ import type { User } from "./config.ts";
 import {
     AuthorsDoc,
     ChatDoc,
+    DeletedDoc,
     HeldDoc,
     type HeldMessage,
     InterruptsDoc,
@@ -64,7 +67,7 @@ import {
     NOTE_ENTRY,
     splitAttachments,
 } from "./entry-format.ts";
-import { describe, HttpError, optionalText } from "./errors.ts";
+import { describe, HttpError, optionalFlag, optionalText } from "./errors.ts";
 import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
 import { localRepo, remoteRepo } from "./repo.ts";
@@ -1288,20 +1291,16 @@ export class Commands {
         // Only a person's own message interrupts, never one sent for them (`via`). The same durable handoff as a
         // queued message's Interrupt keeps everything waiting, before it stops the run. Admission releases its lease
         // once that handoff is stored, not while the task stops the run and puts the messages back.
+        const draft = {
+            type: "input" as const,
+            content,
+            whenBusy: request.mode === "steer" ? ("steer" as const) : ("followUp" as const),
+            requestId,
+        };
         const admitted = await (
             request.mode === "interrupt" && via === undefined
                 ? this.#interrupt(id, { content, requestId }, submitContext)
-                : conversation
-                      .submit(
-                          {
-                              type: "input",
-                              content,
-                              whenBusy: request.mode === "steer" ? "steer" : "followUp",
-                              requestId,
-                          },
-                          submitContext,
-                      )
-                      .then((submission) => ({ submissionId: submission.id }))
+                : this.#submitInput(conversation, draft, user, via, text, known, submitContext)
         ).finally(() => admission?.afterSubmit());
         let submissionId: SubmissionId;
 
@@ -1351,6 +1350,34 @@ export class Commands {
         }
 
         return { submissionId: submission.id, requestId };
+    }
+
+    /** A retry (`known`) asks no annotator again, and PiP's conversation gets no notes. */
+    async #submitInput(
+        conversation: Conversation,
+        draft: InputSubmissionDraft & { requestId: string },
+        user: User,
+        via: string | undefined,
+        text: string,
+        known: boolean,
+        submitContext: Context,
+    ): Promise<{ submissionId: SubmissionId }> {
+        const app = this.#app;
+        const noted =
+            !known && app.pip.ownerOf(conversation.id) === undefined
+                ? await app.turnNotes.submit(
+                      conversation,
+                      draft,
+                      { by: user.id, ...(via === undefined ? {} : { via }), text, at: app.now() },
+                      submitContext,
+                  )
+                : undefined;
+
+        if (noted !== undefined) {
+            return { submissionId: noted };
+        }
+
+        return { submissionId: (await conversation.submit(draft, submitContext)).id };
     }
 
     /** Submissions `message.sent` went out for lately: a retry that raced its first try finds its id here. */
@@ -2055,10 +2082,19 @@ export class Commands {
         app.spend.check(user, id);
         const conversation = await app.conversation(id);
         const held = (await app.harness.snapshot(HeldDoc, id, context))?.items ?? [];
+        let sent = 0;
 
-        for (const item of held) {
-            await conversation.submit(
-                {
+        for (const { key } of held) {
+            // Each goes in the commit that takes it from the list: one withdrawn meanwhile is not there to send.
+            const went = await app.harness.commit(async (tx) => {
+                const doc = await tx.doc(HeldDoc, id);
+                const item = doc.items.find((each) => each.key === key);
+
+                if (item === undefined) {
+                    return false;
+                }
+
+                await conversation.submit(tx, {
                     type: "input",
                     content: item.content as unknown as UserInput,
                     whenBusy: item.mode,
@@ -2066,28 +2102,24 @@ export class Commands {
                     ...(item.entry === undefined
                         ? {}
                         : { entry: item.entry as unknown as InputEntry }),
-                },
-                context,
-            );
+                });
+                doc.items = doc.items.filter((each) => each.key !== key);
+
+                return true;
+            }, context);
+
+            sent += went ? 1 : 0;
         }
 
-        const sent = new Set(held.map((item) => item.key));
-
-        await app.harness.commit(async (tx) => {
-            const doc = await tx.doc(HeldDoc, id);
-
-            doc.items = doc.items.filter((item) => !sent.has(item.key));
-        }, context);
-
-        if (held.length > 0) {
+        if (sent > 0) {
             await app.collab.activity(
                 id,
                 user,
-                `sent the ${held.length === 1 ? "held message" : `${held.length} held messages`}`,
+                `sent the ${sent === 1 ? "held message" : `${sent} held messages`}`,
             );
         }
 
-        return held.length;
+        return sent;
     }
 
     /** Take a held message away for good. Anyone may their own; someone else's needs the right to drive, as in the queue. */
@@ -2811,6 +2843,7 @@ export class Commands {
             next?: unknown;
             every?: unknown;
             zone?: unknown;
+            compactBefore?: unknown;
         },
     ): Promise<Schedule> {
         const app = this.#app;
@@ -2818,6 +2851,7 @@ export class Commands {
         app.requireSee(user, id);
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
@@ -2833,6 +2867,7 @@ export class Commands {
             ...(at === undefined ? {} : { at, text: optionalText(request.text, "text") ?? "" }),
             by: user,
             ...(zone === undefined ? {} : { zone }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
         });
         const when =
             schedule.every === undefined
@@ -2858,6 +2893,7 @@ export class Commands {
             every?: unknown;
             zone?: unknown;
             version?: unknown;
+            compactBefore?: unknown;
         },
     ): Promise<Schedule> {
         const app = this.#app;
@@ -2866,6 +2902,7 @@ export class Commands {
         await app.requireDriver(id, user);
         const zone = optionalText(request.zone, "zone");
         const version = optionalText(request.version, "version");
+        const compactBefore = optionalFlag(request.compactBefore, "compactBefore");
 
         if (zone !== undefined && !knownZone(zone)) {
             throw new HttpError(400, `Unknown time zone ${zone}`);
@@ -2879,6 +2916,7 @@ export class Commands {
             ...at,
             ...(zone === undefined ? {} : { zone }),
             ...(version === undefined ? {} : { version }),
+            ...(compactBefore === undefined ? {} : { compactBefore }),
             by: user,
         });
         const when =
@@ -3713,6 +3751,11 @@ export class Commands {
             at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
 
         const init: ConversationCreateOptions["init"] = async (tx, forked) => {
+            // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
+            if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
+                throw new HttpError(409, "That session was removed.");
+            }
+
             const sessions = await tx.doc(SessionsDoc);
 
             sessions.items[String(forked)] = {

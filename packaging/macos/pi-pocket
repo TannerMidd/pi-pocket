@@ -1,0 +1,10 @@
+#!/bin/sh
+# Starts the Pi Pocket launcher with the Node.js and the npm prefix that the macOS package put beside this file.
+# Pi Pocket.app runs it with --desktop, through the user's login shell; Pi Pocket (console).app runs it through a
+# .command file in Terminal. Arguments go to pi-pocket (pi-pocket --help lists them).
+here="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
+export NPM_CONFIG_PREFIX="$here/app"
+export NPM_CONFIG_CACHE="$here/npm-cache"
+export NPM_CONFIG_UPDATE_NOTIFIER=false
+export PATH="$here/node/bin:$here/app/bin:$PATH"
+exec "$here/node/bin/node" "$here/app/lib/node_modules/pi-pocket/bin/pi-pocket.js" "$@"

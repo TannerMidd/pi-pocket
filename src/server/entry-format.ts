@@ -12,6 +12,10 @@ export const FILE_BLOCK = '<file name="';
 export const CONTEXT_BLOCK = "<pocket-context";
 /** The entry kind of a note about what a person did (`Commands.note`). */
 export const NOTE_ENTRY = "pocket.note";
+/** The entry kind of a turn note (`turn-notes.ts`): not the person's words. */
+export const TURN_NOTE_ENTRY = "pocket.turn-note";
+
+export type TurnNoteData = { source: string; text: string };
 
 /** The speaker prefix Pi Pocket adds to messages when several people share the server. */
 export const FROM_PREFIX = /^\[from: ([^\]\n]{1,60})\] /;

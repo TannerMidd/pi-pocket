@@ -5,9 +5,9 @@ import { store } from "./store.js";
 
 /** What a working subagent does this moment: its peek's waiting call, running call, or words. */
 export function nowDoing(agent, peek = store.state.peeks?.[agent.conversationId]) {
-    // Its request waits for its provider's limit to clear: that is what it does, whatever its peek last showed.
+    // Its request waits to retry, whatever its peek last showed.
     if (agent.limited !== undefined) {
-        return "Waiting for a usage limit to clear";
+        return "Waiting to retry";
     }
 
     const waiting = peek?.approvals?.[0];

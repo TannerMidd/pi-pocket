@@ -158,9 +158,9 @@ test("keeps the command environment on the computer", async () => {
             async () => (await app.background.output(id, item.id))!.text.includes("from provider"),
             "command environment output",
         );
-        assert.equal(await app.background.alive(id, item), true);
+        assert.equal(await app.background.aliveNow(id, item), true);
         await app.background.stop(id, item.id);
-        assert.equal(await app.background.alive(id, item), false);
+        assert.equal(await app.background.aliveNow(id, item), false);
     } finally {
         remove();
     }
@@ -179,7 +179,7 @@ test("the tool starts there, Running now lists it, and log reads use the compute
 
     assert.equal(item.status, "running");
     assert.ok(item.pid > 0);
-    assert.equal(await app.background.alive(id, item), true);
+    assert.equal(await app.background.aliveNow(id, item), true);
     const running = await runningNow(app, owner(app));
 
     assert.ok(
@@ -236,7 +236,7 @@ test("Running now's Stop forces a long task that ignores the polite signal", asy
 
     assert.equal(stopped.status, 200);
     assert.equal((await one(id)).status, "stopped");
-    await until(async () => !(await app.background.alive(id, item)), "process group stopped");
+    await until(async () => !(await app.background.aliveNow(id, item)), "process group stopped");
 });
 
 test("a server reopen resumes the watch without stopping or starting the task again", async () => {

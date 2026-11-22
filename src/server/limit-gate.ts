@@ -7,7 +7,8 @@
  * for the limit's key: the sign-in for a limit that covers the account, the model for one that does not. Every
  * request that meets a closed gate waits, until the reset time (or a backoff when there is none). Then ONE request, the
  * canary, goes out. That is the real request: one the provider rejects costs nothing. When it gets content, the gate
- * opens and the others leave one by one, a second or more apart.
+ * opens and the others leave one by one, a second or more apart. A conversation failure instead backs off inside
+ * that request, with its own time and try count; it never closes a shared gate.
  *
  * Nothing here stores a wait as the truth. A restart replays the generation's request, which meets the limit again
  * and waits again; `provider-limits.json` only keeps the gates, so each waiting session does not send one rejected
@@ -29,7 +30,15 @@ import {
     type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
-import { classify, type ResponseFacts, responseFacts, type Scope, type Source } from "./limits.ts";
+import {
+    classify,
+    messageStatus,
+    type ResponseFacts,
+    responseFacts,
+    type Scope,
+    serverErrorHint,
+    type Source,
+} from "./limits.ts";
 
 /** The adapters that send their requests through `options.fetch`, so the status and headers of a failure can be seen. */
 const RECORDS_FETCH = new Set([
@@ -41,6 +50,58 @@ const RECORDS_FETCH = new Set([
     "mistral-conversations",
     "pi-messages",
 ]);
+
+/** Capture a hint from a small error body. The adapter still owns the original response. */
+async function recordResponse(response: Response): Promise<ResponseFacts> {
+    const facts = responseFacts(response.status, response.headers);
+
+    if (facts.status < 500 || facts.status >= 600 || facts.status === 529) {
+        return facts;
+    }
+
+    try {
+        const reader = response.clone().body?.getReader();
+
+        if (reader === undefined) {
+            return facts;
+        }
+
+        // Do not wait for an unfinished body after the adapter stopped reading. Cancelling a cloned body is not
+        // awaited: its cancellation can wait for the other branch of the stream.
+        const cancel = () => void reader.cancel().catch(() => {});
+        const timeout = setTimeout(cancel, 1_000);
+        const decoder = new TextDecoder();
+        let bytes = 0;
+        let text = "";
+
+        timeout.unref();
+
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+
+                if (done) {
+                    const hint = serverErrorHint(facts.status, text + decoder.decode());
+
+                    return hint === undefined ? facts : { ...facts, hint };
+                }
+
+                bytes += value.byteLength;
+
+                if (bytes > 8 * 1024) {
+                    return facts;
+                }
+
+                text += decoder.decode(value, { stream: true });
+            }
+        } finally {
+            clearTimeout(timeout);
+            cancel();
+        }
+    } catch {
+        return facts;
+    }
+}
 
 /** A request made with this in its options never waits: it fails as it would without the gate (titles, summaries). */
 export const NO_WAIT = Symbol("pocket.noWait");
@@ -86,14 +147,16 @@ export const DEFAULT_TUNING: LimitTuning = {
     canaryStallMs: 2 * 60_000,
 };
 
+/** Shared keys are strings. A symbol belongs only to the stream that created it and is never stored. */
+type GateKey = string | symbol;
+
 /** What a gate shows to the people whose runs wait at it. */
 export type WaitView = {
-    /** The gate's key: the same for every session that waits on it. */
-    key: string;
+    key: GateKey;
     provider: string;
-    /** The model, for a limit that is the model's. */
+    /** The model, for a model gate or a single request's wait. */
     modelId?: string;
-    scope: Scope;
+    scope: Scope | "request";
     /** `reset`: until a known time. `backoff`: no time is known. */
     kind: "reset" | "backoff";
     since: number;
@@ -126,13 +189,15 @@ type Waiter = {
      */
     since?: number;
     tries: number;
+    /** Its private backoff, separate from the time and try count for shared gates. */
+    retry?: Gate;
     /** The gate this request is in the set of. */
     at?: Gate | undefined;
 };
 
 type Gate = {
-    key: string;
-    scope: Scope;
+    key: GateKey;
+    scope: WaitView["scope"];
     provider: string;
     modelId?: string;
     kind: "reset" | "backoff";
@@ -144,9 +209,7 @@ type Gate = {
     reason: string;
     tries: number;
     state: "waiting" | "probing" | "refusing";
-    /** What a request meeting a refusing gate fails with, and its second part (the reason it gave up). */
     refusal?: string;
-    refusalWhy?: string;
     canary?: Waiter;
     /** When the canary went. */
     canarySince?: number;
@@ -207,7 +270,12 @@ function isAborted(signal: AbortSignal | undefined): boolean {
  * What a gate tells everyone who waits at it, and the tabs and pushes: fixed wording by kind, never the provider's own
  * text, which can hold ids of another person's organisation.
  */
-function describeLimit(verdict: { scope: Scope; reason: string }, provider: string): string {
+function describeLimit(
+    provider: string,
+    scope: WaitView["scope"],
+    message = "",
+    facts?: ResponseFacts,
+): string {
     const names: Record<string, string> = {
         anthropic: "Claude",
         "openai-codex": "ChatGPT",
@@ -217,14 +285,51 @@ function describeLimit(verdict: { scope: Scope; reason: string }, provider: stri
     };
     const name = names[provider] ?? provider;
 
-    if (verdict.scope === "account") {
+    if (scope === "request") {
+        return `${name} could not continue this conversation`;
+    }
+
+    const status =
+        facts !== undefined && facts.status >= 400 ? facts.status : messageStatus(message);
+    const hint = facts?.hint ?? serverErrorHint(status, message);
+
+    if (hint === "restart") {
+        return `${name} is restarting`;
+    }
+
+    if (scope === "account") {
         return `${name}'s usage limit`;
     }
 
-    return /overload|unavailable|busy|\b5\d\d\b/i.test(verdict.reason)
-        ? `${name} is overloaded`
-        : `${name}'s rate limit`;
+    if (status === 529 || hint === "overload") {
+        return `${name} is overloaded`;
+    }
+
+    if (status !== undefined && status >= 500) {
+        return `${name} returned server errors (${status})`;
+    }
+
+    if (status === 408) {
+        return `${name} timed out`;
+    }
+
+    if (status === 409) {
+        return `${name} reported a request conflict`;
+    }
+
+    if (
+        status === undefined &&
+        /server[ _-]error|internal[ _-]error|service.*unavailable/i.test(message)
+    ) {
+        return `${name} returned a server error`;
+    }
+
+    return `${name}'s rate limit`;
 }
+
+const triesExhausted = (tries: number) =>
+    `it did not clear after ${tries} ${tries === 1 ? "try" : "tries"}`;
+const gaveUp = (reason: string, why: string) => `${reason}. Not waiting: ${why}.`;
 
 /** A span as people read it: `2 h 10 min`, `45 s`. */
 export function span(ms: number): string {
@@ -284,7 +389,7 @@ function failure(
 export class LimitGate {
     readonly #deps: GateDeps;
     readonly #tuning: LimitTuning;
-    readonly #gates = new Map<string, Gate>();
+    readonly #gates = new Map<GateKey, Gate>();
     readonly #now: () => number;
     readonly #random: () => number;
 
@@ -366,8 +471,8 @@ export class LimitGate {
                 if (waiter.conversationId === conversationId) {
                     const now = this.#now();
 
-                    // The gate is shared by every session of the account, and anyone who may steer one session can press
-                    // this: one manual try each 30 seconds, and none while a canary is out.
+                    // A person who may steer a waiting session can send one manual try each 30 seconds, and none
+                    // while a canary is out.
                     if (
                         gate.state !== "waiting" ||
                         now - (gate.manualAt ?? -Infinity) < MANUAL_GAP_MS
@@ -377,10 +482,14 @@ export class LimitGate {
 
                     gate.until = now;
                     gate.manualAt = now;
-                    // Its failure is not the limit's: it counts toward no cap, so pressing cannot make the gate give up.
-                    gate.manual = true;
+
+                    // A manual try counts only for a private wait: pressing cannot make a shared gate give up.
+                    if (gate.scope !== "request") {
+                        gate.manual = true;
+                        this.#save();
+                    }
+
                     this.#poke(gate);
-                    this.#save();
                     this.#deps.changed();
 
                     return true;
@@ -549,6 +658,7 @@ export class LimitGate {
                 // The attempt failed before any content, and the failure is not an abort.
                 const verdict = classify({
                     provider: model.provider,
+                    modelId: model.id,
                     message: attempt.message.errorMessage ?? "",
                     facts: attempt.facts,
                     now: this.#now(),
@@ -569,13 +679,33 @@ export class LimitGate {
                     continue;
                 }
 
-                const gated = this.#limited(model, verdict, waiter, canary);
+                if (verdict.type === "request") {
+                    // Its failure says nothing about a shared gate. Give up this canary so another request can probe.
+                    this.#leave(waiter);
+
+                    const refusal = await this.#retryRequest(waiter);
+
+                    if (refusal !== undefined) {
+                        this.#flush(attempt, out, refusal);
+
+                        return;
+                    }
+
+                    continue;
+                }
+
+                const reason = describeLimit(
+                    model.provider,
+                    verdict.scope,
+                    verdict.reason,
+                    attempt.facts,
+                );
+                const gated = this.#limited(model, verdict, reason, waiter, canary);
 
                 this.#leave(waiter);
 
                 if (gated.state === "refusing") {
-                    // Gave up: this request fails with what the gate says.
-                    this.#flush(attempt, out, `${verdict.reason} ${gated.refusalWhy}`);
+                    this.#flush(attempt, out, gated.refusal ?? gated.reason);
 
                     return;
                 }
@@ -606,13 +736,17 @@ export class LimitGate {
               facts: ResponseFacts | undefined;
           }
     > {
-        let facts: ResponseFacts | undefined;
+        let facts: Promise<ResponseFacts> | undefined;
         const base: FetchFunction | undefined = options?.fetch;
 
         const recording: FetchFunction = async (input, init) => {
+            // The adapter can retry internally. Do not use the last response to classify a later transport failure.
+            facts = undefined;
+
             const response = await (base ?? globalThis.fetch)(input, init);
 
-            facts = responseFacts(response.status, response.headers);
+            // The SDK and the copy can read at the same time. Only a pre-content failure needs these facts.
+            facts = recordResponse(response);
 
             return response;
         };
@@ -676,7 +810,7 @@ export class LimitGate {
             return { type: "done", content: flowing };
         }
 
-        return { type: "failed", message: terminal, held, facts };
+        return { type: "failed", message: terminal, held, facts: await facts };
     }
 
     /** End the consumer's stream with a failed attempt as it was, or with `text` in place of its error. */
@@ -694,6 +828,49 @@ export class LimitGate {
 
         out.push({ type: "error", reason: "error", error: message });
         out.end(message);
+    }
+
+    /** Back off only this stream. The next attempt still has to pass any shared gate that closed in the meantime. */
+    async #retryRequest(waiter: Waiter): Promise<string | undefined> {
+        const now = this.#now();
+        const gate: Gate = (waiter.retry ??= {
+            key: Symbol("request"),
+            scope: "request",
+            provider: waiter.provider,
+            modelId: waiter.modelId,
+            kind: "backoff",
+            since: now,
+            until: now,
+            reason: describeLimit(waiter.provider, "request"),
+            tries: 0,
+            state: "waiting",
+            waiters: new Set(),
+        });
+        const deadline = this.#deadline(gate);
+
+        if (++gate.tries > this.#tuning.maxTries) {
+            return gaveUp(gate.reason, triesExhausted(this.#tuning.maxTries));
+        }
+
+        if (now >= deadline) {
+            return gaveUp(gate.reason, `it did not clear in ${span(now - gate.since)}`);
+        }
+
+        gate.until = Math.min(now + this.#backoff(gate), deadline);
+        gate.state = "waiting";
+        this.#gates.set(gate.key, gate);
+
+        try {
+            const turn = await this.#wait(gate, waiter);
+
+            return turn === "refuse" ? gate.refusal : undefined;
+        } finally {
+            if (this.#gates.has(gate.key)) {
+                this.#drop(gate);
+            }
+
+            this.#leave(waiter);
+        }
     }
 
     // ─── Gates ──────────────────────────────────────────────────────────────
@@ -721,7 +898,17 @@ export class LimitGate {
         );
     }
 
-    /** The closed gate a request for this model meets: its account's first, then its model's. */
+    #backoff(gate: Gate): number {
+        const { backoffMs, minWaitMs, subscriptionBackoffMs } = this.#tuning;
+        // No tries are counted yet when a manual try moved the scope: the first delay.
+        const step = Math.max(0, Math.min(gate.tries - 1, backoffMs.length - 1));
+        const delay = gate.subscription ? subscriptionBackoffMs : backoffMs[step]!;
+        const varied = delay * (0.8 + this.#random() * 0.4);
+
+        return Number.isFinite(varied) ? Math.max(varied, minWaitMs) : minWaitMs;
+    }
+
+    /** The closed shared gate a request for this model meets: its account's first, then its model's. */
     #closed(model: Model<Api>): Gate | undefined {
         const keys = [this.#accountKey(model.provider), this.#modelKey(model.provider, model.id)];
 
@@ -756,6 +943,7 @@ export class LimitGate {
     #limited(
         model: Model<Api>,
         verdict: Extract<ReturnType<typeof classify>, { type: "limit" }>,
+        reason: string,
         waiter: Waiter,
         held: Gate | undefined,
     ): Gate {
@@ -818,7 +1006,7 @@ export class LimitGate {
                     gate.until = later;
                     gate.kind = "reset";
                     gate.resetAt = verdict.resetAt;
-                    gate.reason = describeLimit(verdict, model.provider);
+                    gate.reason = reason;
                     this.#poke(gate);
                     this.#save();
                     this.#deps.changed();
@@ -838,7 +1026,7 @@ export class LimitGate {
                 // The wait is the request's as well as the gate's: a gate made as the scope moves takes the earlier time.
                 since: Math.min(now, waiter.since, owned?.since ?? now),
                 until: now,
-                reason: describeLimit(verdict, model.provider),
+                reason,
                 tries: 0,
                 state: "waiting",
                 waiters: new Set(),
@@ -853,7 +1041,7 @@ export class LimitGate {
         }
 
         gate.since = Math.min(gate.since, waiter.since);
-        gate.reason = describeLimit(verdict, model.provider);
+        gate.reason = reason;
         gate.canary = undefined;
 
         if (verdict.subscription) {
@@ -883,14 +1071,9 @@ export class LimitGate {
         } else {
             const total = gate.subscription ? maxReset : Math.min(tuning.maxBackoffMs, maxReset);
             const deadline = gate.since + total;
-            // No tries are counted yet when a manual try moved the scope: the first delay.
-            const step = Math.max(0, Math.min(gate.tries - 1, tuning.backoffMs.length - 1));
-            const delay =
-                (gate.subscription ? tuning.subscriptionBackoffMs : tuning.backoffMs[step]!) *
-                (0.8 + this.#random() * 0.4);
 
             // The last try is at the deadline, not after it.
-            until = Math.min(now + Math.max(delay, tuning.minWaitMs), deadline);
+            until = Math.min(now + this.#backoff(gate), deadline);
             gate.kind = "backoff";
             delete gate.resetAt;
             delete gate.source;
@@ -905,7 +1088,7 @@ export class LimitGate {
             !gate.subscription &&
             Math.max(gate.tries, waiter.tries) > tuning.maxTries
         ) {
-            why = `it did not clear after ${tuning.maxTries} tries`;
+            why = triesExhausted(tuning.maxTries);
         }
 
         if (why !== undefined) {
@@ -951,21 +1134,24 @@ export class LimitGate {
     }
 
     /**
-     * A gate that will not wait: its requests fail at once, with `why`, for a few minutes. What the others are told is
-     * the gate's fixed wording, never the provider's own text (`#run` gives the request that met it its own).
+     * A gate that will not wait: its requests fail with fixed wording, never the provider's own text. Shared gates
+     * refuse new requests for a few minutes; a request-specific wait has no other requests to refuse.
      */
     #giveUp(gate: Gate, why: string): void {
         gate.state = "refusing";
-        gate.refusalWhy = `Not waiting: ${why}.`;
-        gate.refusal = `${gate.reason}. ${gate.refusalWhy}`;
+        gate.refusal = gaveUp(gate.reason, why);
         gate.canary = undefined;
-        gate.until = this.#now() + this.#tuning.refuseMs;
-        clearTimeout(gate.timer);
-        gate.timer = setTimeout(() => this.#drop(gate), this.#tuning.refuseMs);
-        gate.timer.unref();
-        this.#deps.log(`Limit at ${gate.key}: ${gate.refusal}`);
+
+        if (typeof gate.key === "string") {
+            gate.until = this.#now() + this.#tuning.refuseMs;
+            clearTimeout(gate.timer);
+            gate.timer = setTimeout(() => this.#drop(gate), this.#tuning.refuseMs);
+            gate.timer.unref();
+            this.#deps.log(`Limit at ${gate.key}: ${gate.refusal}`);
+            this.#save();
+        }
+
         this.#poke(gate);
-        this.#save();
         this.#deps.changed();
     }
 
@@ -1018,7 +1204,11 @@ export class LimitGate {
         }
 
         this.#poke(gate);
-        this.#save();
+
+        if (typeof gate.key === "string") {
+            this.#save();
+        }
+
         this.#deps.changed();
     }
 
@@ -1194,25 +1384,27 @@ export class LimitGate {
         }
 
         // A refusal is kept with its end (`until`), so a restart does not give the same limit a new wait.
-        const gates = [...this.#gates.values()].map((gate) => ({
-            state: gate.state === "refusing" ? "refusing" : "waiting",
-            refusal: gate.refusal,
-            key: gate.key,
-            scope: gate.scope,
-            provider: gate.provider,
-            modelId: gate.modelId,
-            kind: gate.kind,
-            since: gate.since,
-            until: gate.until,
-            resetAt: gate.resetAt,
-            source: gate.source,
-            subscription: gate.subscription,
-            reason: gate.reason,
-            tries: gate.tries,
-        }));
+        const gates = [...this.#gates.values()]
+            .filter((gate) => typeof gate.key === "string")
+            .map((gate) => ({
+                state: gate.state === "refusing" ? "refusing" : "waiting",
+                refusal: gate.refusal,
+                key: gate.key,
+                scope: gate.scope,
+                provider: gate.provider,
+                modelId: gate.modelId,
+                kind: gate.kind,
+                since: gate.since,
+                until: gate.until,
+                resetAt: gate.resetAt,
+                source: gate.source,
+                subscription: gate.subscription,
+                reason: gate.reason,
+                tries: gate.tries,
+            }));
 
         try {
-            writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, gates }), { mode: 0o600 });
+            writeFileSync(`${file}.tmp`, JSON.stringify({ version: 2, gates }), { mode: 0o600 });
             renameSync(`${file}.tmp`, file);
         } catch (error) {
             this.#deps.log(`Provider limits not saved: ${String(error)}`);
@@ -1238,7 +1430,7 @@ export class LimitGate {
         try {
             const saved = JSON.parse(text) as { version?: unknown; gates?: unknown };
 
-            if (saved.version !== 1 || !Array.isArray(saved.gates)) {
+            if ((saved.version !== 1 && saved.version !== 2) || !Array.isArray(saved.gates)) {
                 return;
             }
 
@@ -1246,8 +1438,13 @@ export class LimitGate {
 
             for (const each of saved.gates.slice(0, 200) as Record<string, unknown>[]) {
                 const gate = this.#restored(each, now);
+                // Before 0.30.1 a Fable limit was kept as the whole Claude sign-in's: one canary finds out again.
+                const fable =
+                    saved.version === 1 &&
+                    gate?.provider === "anthropic" &&
+                    gate.scope === "account";
 
-                if (gate !== undefined) {
+                if (gate !== undefined && !fable) {
                     this.#gates.set(gate.key, gate);
                 }
             }

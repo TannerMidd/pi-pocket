@@ -8,9 +8,11 @@ const ask = (
     status?: number,
     headers: Record<string, string> = {},
     provider = "p",
+    modelId?: string,
 ) =>
     classify({
         provider,
+        ...(modelId === undefined ? {} : { modelId }),
         message,
         now,
         ...(status === undefined ? {} : { facts: { status, headers } }),
@@ -68,6 +70,76 @@ test("what clears with time waits, for the account or the model, until the time 
         [five, seven, weekly].map((each) => each.type === "limit" && each.long === true),
         [false, true, true],
     );
+});
+
+test("Anthropic scopes explicit Fable claims to the model, not the whole account", () => {
+    const reset = String(now / 1000 + 3_600);
+
+    for (const [window, claim, long] of [
+        ["unified", "fable", false],
+        ["unified-5h", "five_hour_fable", false],
+        ["unified-7d", "seven_day_fable", true],
+    ] as const) {
+        assert.deepEqual(
+            ask(
+                "429 rate_limit_error",
+                429,
+                {
+                    [`anthropic-ratelimit-${window}-status`]: "rejected",
+                    [`anthropic-ratelimit-${window}-reset`]: reset,
+                    "anthropic-ratelimit-unified-representative-claim": claim,
+                },
+                "anthropic",
+            ),
+            {
+                type: "limit",
+                scope: "model",
+                resetAt: now + 3_600_000,
+                source: "header",
+                backoff: false,
+                ...(long ? { long: true } : {}),
+                reason: "429 rate_limit_error",
+            },
+        );
+    }
+});
+
+test("an ambiguous Anthropic Fable 429 keeps its reset but does not block other models", () => {
+    const message = "This request would exceed your account's rate limit. Please try again later.";
+    const reset = String(now / 1000 + 3_600);
+    const claimHeader = "anthropic-ratelimit-unified-representative-claim";
+    const headers = {
+        "anthropic-ratelimit-unified-status": "rejected",
+        "anthropic-ratelimit-unified-reset": reset,
+    };
+
+    for (const claim of [undefined, "unknown_window", "five_hour", "seven_day"]) {
+        const facts = claim === undefined ? headers : { ...headers, [claimHeader]: claim };
+
+        assert.deepEqual(ask(message, 429, facts, "anthropic", "claude-fable-5-2"), {
+            type: "limit",
+            scope: claim === "five_hour" || claim === "seven_day" ? "account" : "model",
+            resetAt: now + 3_600_000,
+            source: "header",
+            backoff: false,
+            reason: message,
+        });
+    }
+
+    for (const [provider, model] of [
+        ["anthropic", "claude-opus-5-5"],
+        ["other", "claude-fable-5-2"],
+    ] as const) {
+        const verdict = ask(message, 429, headers, provider, model);
+
+        assert.equal(verdict.type === "limit" && verdict.scope, "account");
+    }
+
+    // A named window with no claim stays on Fable too: only a claim makes it shared.
+    const window = { "anthropic-ratelimit-unified-5h-status": "rejected" };
+    const verdict = ask(message, 429, window, "anthropic", "claude-fable-5-2");
+
+    assert.equal(verdict.type === "limit" && verdict.scope, "model");
 });
 
 test("a person's problem, a refused request, or a monthly plan limit never waits", () => {
@@ -164,6 +236,27 @@ test("a ChatGPT Business admin cap never waits, even with a retry time", () => {
             }).type,
             "other",
         );
+    }
+});
+
+test("a transient server failure may be about one conversation, not model load", () => {
+    for (const message of [
+        "Previous response owner account is unavailable; retry later.",
+        "Invalid conversation ID",
+    ]) {
+        assert.equal(ask(message, 502, { "retry-after": "30" }).type, "request");
+        assert.equal(ask(message, 400).type, "other");
+    }
+
+    for (const [message, status] of [
+        ["Bad Gateway", 502],
+        ["conversation service unavailable", 503],
+        ["529 overloaded_error", 529],
+        ["Too many requests", 429],
+    ] as const) {
+        const verdict = ask(message, status);
+
+        assert.ok(verdict.type === "limit" && verdict.scope === "model", message);
     }
 });
 

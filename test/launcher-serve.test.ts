@@ -584,11 +584,13 @@ withFake("a probe that hangs is abandoned and says so", { hang: true }, (run) =>
 
 // ─── The launcher itself ─────────────────────────────────────────────────
 
-/**
- * The launcher itself, copied beside a stub server that only says it is ready, started in `local` mode on `port` with
- * the fake tailscale on its PATH. It runs until the stub starts, which is after the stale mount cleanup, then quits.
- */
-async function launchLocal(data: string, port: number, access = "local"): Promise<boolean> {
+/** The launcher beside a stub server. It quits once the stub starts, which is after the stale mount cleanup. */
+async function launchLocal(
+    data: string,
+    port: number,
+    access = "local",
+    listen = ["--access", access, "--port", String(port)],
+): Promise<boolean> {
     const repo = fileURLToPath(new URL("..", import.meta.url));
     const root = mkdtempSync(join(tmpdir(), "pi-pocket-launcher-"));
     const started = join(root, "started");
@@ -603,7 +605,7 @@ async function launchLocal(data: string, port: number, access = "local"): Promis
             copyFileSync(join(repo, "src", "launcher", file), join(root, "src", "launcher", file));
         }
 
-        for (const file of ["lock.ts", "update-state.ts"]) {
+        for (const file of ["lock.ts", "socket-path.ts", "update-state.ts"]) {
             copyFileSync(join(repo, "src", "server", file), join(root, "src", "server", file));
         }
 
@@ -612,6 +614,7 @@ async function launchLocal(data: string, port: number, access = "local"): Promis
             join(root, "src", "server", "main.ts"),
             `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(started)}, "");
+writeFileSync(${JSON.stringify(join(data, "server-args.json"))}, JSON.stringify(process.argv.slice(2)));
 // What the launcher tells its server about access, for the test to read back, and the Serve receipt as it was then.
 process.on("message", (message) => {
     appendFileSync(${JSON.stringify(join(data, "access.jsonl"))}, JSON.stringify(message) + "\\n");
@@ -635,7 +638,7 @@ setInterval(() => {}, 60_000);
             process.execPath,
             [
                 join(root, "src", "launcher", "main.ts"),
-                ...["--access", access, "--port", String(port), "--data", data, "--cwd", root],
+                ...[...listen, "--data", data, "--cwd", root],
             ],
             { stdio: "ignore", env: { ...process.env, NO_COLOR: "1" } },
         );
@@ -757,5 +760,25 @@ withFake(
         // SIGTERM goes through the same quit as "q": the mount this run made is taken down and the receipt dropped.
         assert.equal(run.fake.offs().length, 2);
         assert.equal(existsSync(receipt(run.data)), false);
+    },
+);
+
+withFake(
+    "on a socket the launcher runs no tailscale command, not even to clear a receipted mount, and starts no TCP server, nor with an empty --socket",
+    { serve: mounted() },
+    async (run) => {
+        // The node's Serve route may now be the one that reaches the socket: clearing the old mount would take it down.
+        const socket = join(run.data, "p.sock");
+
+        own(run.data, LOCAL_PORT);
+        assert.equal(await launchLocal(run.data, LOCAL_PORT, "local", ["--socket", socket]), true);
+        assert.deepEqual(run.fake.calls(), []);
+        assert.ok(existsSync(receipt(run.data)), "the receipt stays for a later start on a port");
+        const args = JSON.parse(readFileSync(join(run.data, "server-args.json"), "utf8"));
+
+        assert.deepEqual(args.slice(0, 2), ["--socket", socket]);
+        assert.ok(!args.includes("--port") && !args.includes("--host"));
+        // An unset shell variable gives an empty path.
+        assert.equal(await launchLocal(run.data, LOCAL_PORT, "local", ["--socket", ""]), false);
     },
 );

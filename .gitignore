@@ -15,3 +15,5 @@ result-*
 
 # What `npm pack` makes.
 /*.tgz
+packaging/windows/out/
+packaging/macos/out/

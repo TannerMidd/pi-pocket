@@ -1,4 +1,3 @@
-// A run waiting for a provider's limit, in a real browser: the live line says so and has Retry now.
 import {
     type App,
     cleanUp,
@@ -70,7 +69,7 @@ after(async () => {
 });
 
 test(
-    "the live line says Pi waits for a limit and has Retry now, which sends the request",
+    "the live line explains why Pi waits and has Retry now, which sends the request",
     real,
     async () => {
         const id = await newSession(app);
@@ -85,7 +84,7 @@ test(
         await until(() => app.limits.waitFor(Number(id)) !== undefined, "the wait");
         await page.navigate(`${base}/s/${id}`);
         await until(
-            async () => /Waiting for .*Retry now/s.test(await line()),
+            async () => /Waiting to retry.*faux is overloaded.*Retry now/s.test(await line()),
             "the live line",
             20_000,
         );
@@ -121,7 +120,7 @@ test(
     },
 );
 
-test("Stop cancels a usage wait on a phone", real, async () => {
+test("Stop cancels a retry wait on a phone", real, async () => {
     state.limited = true;
     const id = await newSession(app);
 

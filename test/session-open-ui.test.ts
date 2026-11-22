@@ -311,7 +311,7 @@ test("a switch reads rows kept only on the device before the server answers", re
 });
 
 test(
-    "an uncached switch keeps its header and a quiet loader, then fills the same pane",
+    "an uncached switch keeps its header and the loading screen in its pane, then fills the same pane",
     real,
     async () => {
         const first = await newSession(app);
@@ -342,9 +342,23 @@ test(
             await until(() => switched.entered, "the held switch request");
             const waiting = await shown("not kept anywhere");
 
-            assert.equal(waiting.boot, false);
+            assert.equal(waiting.boot, false, "not the full-page starting screen");
             assert.equal(waiting.rows, false);
-            assert.equal(waiting.loader, true);
+            assert.equal(waiting.loader, false, "no loader of another kind");
+            assert.equal(
+                await inPage<boolean>(`
+            const boot = document.querySelector('.pane .boot.inline');
+
+            return JSON.stringify(
+                boot !== null &&
+                    boot.getClientRects().length > 0 &&
+                    boot.querySelector('.boot-caption').textContent === 'loading session' &&
+                    boot.querySelector('.boot-detail').textContent === expectedTitle,
+            );
+        `),
+                true,
+                "the usual loading screen, in the session's pane, names the session",
+            );
             assert.equal(
                 await inPage<boolean>(`
             return JSON.stringify(document.querySelector('[data-part="topbar-title"]').textContent === expectedTitle);

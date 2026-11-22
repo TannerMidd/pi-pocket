@@ -279,7 +279,7 @@ test("a link drop and a real pi-env daemon restart do not stop a task or lose ou
         async () => (await app.background.output(id, item.id))!.text.includes("after reconnect"),
         "output after reconnect",
     );
-    assert.equal(await app.background.alive(id, item), true);
+    assert.equal(await app.background.aliveNow(id, item), true);
     assert.ok(
         (await app.runners.link(computer).taskList(app.runnerScope(id).id)).some(
             (task) => task.task === item.id && task.pid === item.pid,

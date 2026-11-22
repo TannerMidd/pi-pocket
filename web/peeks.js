@@ -834,7 +834,7 @@ function tileProps(tiles, compact) {
                       ? `${someAgents(waitingAgents)} ${waitingAgents === 1 ? "needs" : "need"} you`
                       : `${someAgents(waitingAgents)} waiting`
                 : status === "limited"
-                  ? "waiting for a limit"
+                  ? "waiting to retry"
                   : status === "working"
                     ? session.busy || compact
                         ? "working"

@@ -6,7 +6,7 @@
 
 Use one of these:
 
-1. **`_pocket.d.ts` in the drop-in folder.** Pi Pocket makes this link to its types file each time that it starts, beside the `node_modules` link. Its leading `_` keeps it from loading as a module. The same import then works on all machines. If you point the link at another readable file, such as your own checkout's types, Pi Pocket leaves it as it is. A file of your own with this name also stays.
+1. **`_pocket.d.ts` in the drop-in folder.** Pi Pocket makes this link to its types file each time that it starts. Its leading `_` keeps it from loading as a module. The same import then works on all machines. If you point the link at another readable file, such as your own checkout's types, Pi Pocket leaves it as it is. A file of your own with this name also stays.
 2. **The path in Pi Pocket's folder:** `/path/to/pi-pocket/types/pocket.d.ts`.
 3. **The copy on the documentation site:** `https://tannermidd.github.io/pi-pocket/docs/pocket.d.ts`. It is for the latest release.
 
@@ -37,7 +37,7 @@ export default function setup(pocket) {
 
 From a browser module in a folder, the path is `../_pocket.d.ts`.
 
-The types file imports types from Pi Durable, Pi AI, and Preact by package name. The drop-in folder's `node_modules` link gives them.
+The types file imports types from Pi Durable, Pi AI, and Preact by package name. The drop-in folder's `tsconfig.json` gives them, also where the system refuses links: Pi Pocket writes it at each start, and its `paths` lead each of Pi Pocket's packages to its types. Its first line says that Pi Pocket made it, and Pi Pocket refreshes it when its folders change. Do not edit it. To use your own settings, replace it with a file of your own, without that first line: Pi Pocket then leaves it as it is. Where links work, the drop-in folder's `node_modules` link to Pi Pocket's packages gives the types to tools that do not read `tsconfig.json`.
 
 `tsc` skips `<name>.js` when there is a `<name>.ts`. To check both with `tsc`, put the browser module in the folder `<name>/`. An editor checks each file that you open.
 
