@@ -145,9 +145,8 @@ function cardFor(
         return replied.status === "open" ? replied : "ended";
     }
 
-    return here
-        .filter((surface) => surface.status === "open")
-        .sort((a, b) => b.createdAt - a.createdAt)[0];
+    // A bare number is only a card's when it names the card (`s5 1`): otherwise it is a message for Pi, as any other.
+    return named === undefined ? undefined : here.find((surface) => surface.status === "open");
 }
 
 /** What the numbers of a message do: the body of an act, and the values worked out from the card as it is then. */

@@ -234,7 +234,9 @@ export function render(
     const out: string[] = [];
 
     if (numbered) {
-        out.push(`${surface.title} (${surface.id}).${live ? " Reply with numbers:" : ""}`);
+        out.push(
+            `${surface.title} (${surface.id}).${live ? " Reply to this message with numbers:" : ""}`,
+        );
     } else {
         out.push(surface.title);
     }

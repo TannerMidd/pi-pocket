@@ -197,6 +197,7 @@ const message = (text: string, more: object = {}) => ({
     connector: "Chat",
     channel: "room-1",
     text,
+    replyTo: "m1",
     author: { id: "me", name: "Me" },
     ownerIds: ["me"],
     by: owner(app).id,
