@@ -64,6 +64,8 @@ export interface LinkedActivity {
     address: string;
     /** Changes while it makes any progress: a new message, a call, output, its answer as it streams. */
     progress: string;
+    /** Its last tool calls and the tail of its output, trimmed, for a stall verdict to read. */
+    recent?: { calls: { tool: string; arguments: string }[]; output?: string };
     /** When its newest message came. */
     at?: number;
     /** What it waits on, in words: "its bash call", "its model". */
@@ -535,10 +537,18 @@ export interface PocketHost {
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /**
+     * The classifier model the owner chose in Providers (`provider/modelId`), or undefined when none is chosen. Pi
+     * Pocket names no classifier on its own.
+     *
+     * @experimental @since 0.31.0
+     */
+    classifierModel(): string | undefined;
+    /**
      * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model`
-     * names (`classify.ts`). It runs through Pi's model runtime with the owner's stored provider sign-ins and keys,
-     * exactly as a session's own model calls do. It throws when the model is not a classifier here, when its provider
-     * has no stored sign-in or key, or when the call fails; it never wakes a session.
+     * names, or by the owner's chosen classifier when it names none (`classify.ts`). It runs through Pi's model
+     * runtime with the owner's stored provider sign-ins and keys, exactly as a session's own model calls do. It throws
+     * when no classifier is named or chosen, when the model is not a classifier here, when its provider has no stored
+     * sign-in or key, or when the call fails; it never wakes a session.
      *
      * @experimental @since 0.31.0
      */

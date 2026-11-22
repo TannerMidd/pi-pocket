@@ -120,6 +120,16 @@ Since 0.13.1 · Stable
 
 Why Pi cannot use a model now, in words that Pi can tell a person. For example, Pi Pocket does not know the model, its provider is not signed in, or its sign-in expired. It is `undefined` when Pi can use the model. With `fresh: true`, it asks the provider about the sign-in again first.
 
+### `classifierModel`
+
+```ts
+classifierModel(): string | undefined;
+```
+
+Since 0.31.0 · Experimental
+
+The classifier model the owner chose in Menu → Providers, as `provider/modelId`, or `undefined` when none is chosen. Pi Pocket names no classifier model on its own: a module that has no model of its own, and finds none here, does nothing.
+
 ### `classify`
 
 ```ts
@@ -128,12 +138,12 @@ classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
 
 Since 0.31.0 · Experimental
 
-One classifier-model call: typed questions about JSON state, answered by the model that `request.model` names. Classifier models are a class of their own (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna): they do not chat, and they answer a choice, a score, or yes/no. The call runs through Pi's model runtime and uses the owner's stored provider sign-ins and keys, exactly as a session's own model calls do, so an OpenRouter sign-in is enough for `openrouter/~typesafe/jev-latest`, the OpenRouter route of TypeSafe's Jev, which is the model Pi Pocket's own modules name by default. It never wakes a session.
+One classifier-model call: typed questions about JSON state, answered by the model that `request.model` names, or by the owner's chosen classifier (`classifierModel`) when it names none. Classifier models are a class of their own (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna): they do not chat, and they answer a choice, a score, or yes/no. The call runs through Pi's model runtime and uses the owner's stored provider sign-ins and keys, exactly as a session's own model calls do. It never wakes a session. What you put in `state` and `images` goes to that provider: say so in your module's settings, so the owner knows what leaves the machine.
 
-- `model` is `provider/modelId` of a classifier model; the id may hold more slashes, as in `openrouter/~typesafe/jev-latest`. A bare id works when it names one classifier only. A chat model is refused with an error. Find the ids with Pi's model listing, such as `models.getAvailableOfType("classifier")` in a codemode script.
+- `model` is `provider/modelId` of a classifier model; the id may hold more slashes. A bare id works when it names one classifier only. A chat model is refused with an error. Leave it out to use the owner's choice. Find the ids with Pi's model listing, such as `models.getAvailableOfType("classifier")` in a codemode script.
 - `state` is what the model judges. `questions` maps ids to questions, in pi-ai's `ClassifierQuestion` shapes: `{ type: "choice", instructions, criteria: { label: meaning } }`, `{ type: "score", instructions, criteria: [lowest, …, highest] }`, or `{ type: "bool", instructions, criteria: { true: meaning, false: meaning } }`. At least one question.
 - It resolves to the answers by question id, in pi-ai's `ClassifierAnswer` shapes: `{ type: "choice", choice, probabilities, confidence }`, `{ type: "score", score, confidence }`, or `{ type: "bool", probability }`.
-- It throws when no such classifier exists, when the spec names a chat model, when its provider has no stored sign-in or key, or when the call fails. Nothing is sent without the owner's stored key, and the owner can see the cost with the provider as any other model call.
+- It throws when no classifier model is named and the owner chose none ("No classifier model is chosen: pick one in Providers"), when no such classifier exists, when the spec names a chat model, when its provider has no stored sign-in or key, or when the call fails. Nothing is sent without the owner's stored key, and the owner can see the cost with the provider as any other model call.
 
 A module that runs on a server older than 0.31.0 checks `typeof host.classify === "function"` first and works without it.
 
@@ -141,8 +151,9 @@ A module that runs on a server older than 0.31.0 checks `typeof host.classify ==
 
 Since 0.31.0 · Experimental
 
-- `model`: the classifier model, `provider/modelId`, as `classify` above takes it.
+- `model`: the classifier model, `provider/modelId`, as `classify` above takes it. Optional: left out, the owner's choice is used.
 - `state`: what the model judges, one JSON object.
+- `images`: images judged together with `state`. Only classifier models whose input accepts images answer them.
 - `questions`: what it answers, by question id, with the shapes of pi-ai's `ClassifierQuestion`.
 
 ### `registerModelProvider`

@@ -195,6 +195,67 @@ function SubagentModels({ names }) {
     </div>`;
 }
 
+/**
+ * The owner's one shared classifier model, which the classifier features (relay triage, run outcomes, stall verdicts,
+ * and the rest) use unless their own setting names another. Only classifier models of providers signed in to are
+ * listed. Empty, the default: none is chosen and those features do nothing. `providers` reloads the list after a
+ * sign-in or sign-out.
+ */
+function ClassifierModel({ providers }) {
+    const chosen = store.state.server?.classifierModel;
+    const [models, setModels] = useState(null);
+    const [asked, setAsked] = useState(null);
+
+    useEffect(() => {
+        attempt(async () => setModels(await api("classifier-models")));
+    }, [providers]);
+
+    // A server that does not keep the choice sends none.
+    if (chosen === undefined) {
+        return null;
+    }
+
+    const value = asked ?? chosen ?? "";
+    const listed = (models ?? []).some((model) => model.spec === value);
+
+    const change = async (next) => {
+        setAsked(next);
+        await attempt(() => api("settings", { classifierModel: next === "" ? null : next }));
+        setAsked(null);
+    };
+
+    return html`<div class="limit-wait">
+        <label class="small" for="classifier-model">Classifier model</label>
+        <p class="muted small">
+            Used by the features that read text with a classifier (relay triage, run outcomes, stall
+            verdicts, PiP search, screenshots, memory suggestions) unless their own setting names another.
+            Pi Pocket chooses none for you: the text those features read goes to this model's provider.
+            Empty: they do nothing.
+        </p>
+        <select
+            id="classifier-model"
+            value=${value}
+            disabled=${models === null}
+            onChange=${(event) => change(event.currentTarget.value)}
+        >
+            <option value="">None chosen</option>
+            ${value !== "" && !listed && html`<option value=${value}>${value} (not signed in)</option>`}
+            ${(models ?? []).map(
+                (model) =>
+                    html`<option value=${model.spec}>${model.name} · ${model.provider}</option>`,
+            )}
+        </select>
+        ${
+            models !== null &&
+            models.length === 0 &&
+            html`<p class="muted small">
+                No classifier models yet: sign in to a provider that has them (TypeSafe, OpenRouter,
+                Cloudflare Workers AI, OpenCode, OpenAI, GitHub Copilot).
+            </p>`
+        }
+    </div>`;
+}
+
 /** How long a run waits for a provider's limit to clear (`limit-gate.ts`), at most. */
 const LIMIT_WAIT = [
     [0, "Off"],
@@ -245,7 +306,20 @@ const ENDPOINT_KEYS = {
     missing: "no key set",
 };
 
-const modelCount = (n) => `${n} ${n === 1 ? "model" : "models"}`;
+/** "3 models", "1 classifier model", or "3 models, 1 classifier model": classifiers are counted on their own. */
+function modelCount(provider) {
+    const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    const chat = provider.models ?? 0;
+    const classifiers = provider.classifiers ?? 0;
+
+    if (classifiers === 0) {
+        return count(chat, "model");
+    }
+
+    return chat === 0
+        ? count(classifiers, "classifier model")
+        : `${count(chat, "model")}, ${count(classifiers, "classifier model")}`;
+}
 
 /** A provider row's line under its name: its sign-in and its models, or what the row adds. */
 function aboutOf(provider, endpoint) {
@@ -254,7 +328,7 @@ function aboutOf(provider, endpoint) {
     }
 
     if (endpoint !== undefined && !provider.needsSignIn) {
-        return `${endpoint.baseUrl} · ${ENDPOINT_KEYS[endpoint.key]} · ${modelCount(provider.models)}`;
+        return `${endpoint.baseUrl} · ${ENDPOINT_KEYS[endpoint.key]} · ${modelCount(provider)}`;
     }
 
     const account = provider.label || SOURCES[provider.source] || provider.source;
@@ -265,7 +339,7 @@ function aboutOf(provider, endpoint) {
           ? `signed in${account ? ` · ${account}` : ""}`
           : "not configured";
 
-    return `${signIn} · ${modelCount(provider.models)}`;
+    return `${signIn} · ${modelCount(provider)}`;
 }
 
 /** How long a panel under a row takes to close: `.provider-panel.closing` in style.css. */
@@ -538,6 +612,7 @@ export function ProvidersSheet() {
             }
             <div class="providers-main">
                 ${auth && !authInList && html`<${AuthDialog} inline=${true} />`}
+                ${owner && html`<${ClassifierModel} providers=${providers} />`}
                 ${owner && html`<${LimitWait} />`}
                 <label class="search">
                     <${Icon} name="search" size=${16} />
