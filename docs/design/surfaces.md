@@ -118,7 +118,7 @@ Why a core route: extension routes are closed to session-invited guests (`mayUse
 `toText(surface, "transcript" | "relay" | "push")` is one pure function, golden-tested. Relay form:
 
 ```
-Cleanup dry run (s3). Reply with numbers:
+Cleanup dry run (s3). Reply to this message with numbers:
 1 [x] /tmp/a  4.2 GB
 2 [ ] /tmp/b  9.7 GB
 3 Note: (empty)

@@ -338,6 +338,7 @@ test("a card answers only in the channel and thread it went to, and a toggle is 
         connector: "Chat",
         channel: "room-1",
         text,
+        replyTo: "m1",
         author: { id: "me", name: "Me" },
         ownerIds: ["me"],
         by,
@@ -418,7 +419,8 @@ test("a thread card answers only in its thread", async () => {
     const message = (more: object) => ({
         connector: "Chat",
         channel: "room-1",
-        text: "2",
+        // A bare number answers a card only as a reply to its message; this card was never sent, so it is named.
+        text: `${made.id} 2`,
         author: { id: "me", name: "Me" },
         ownerIds: ["me"],
         by: owner(app).id,

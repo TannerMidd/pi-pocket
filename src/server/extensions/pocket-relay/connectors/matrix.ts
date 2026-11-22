@@ -26,7 +26,12 @@ interface MatrixEvent {
         url?: string;
         info?: { mimetype?: string; size?: number };
         "m.mentions"?: { user_ids?: string[] };
-        "m.relates_to"?: { rel_type?: string; event_id?: string };
+        "m.relates_to"?: {
+            rel_type?: string;
+            event_id?: string;
+            "m.in_reply_to"?: { event_id?: string };
+            is_falling_back?: boolean;
+        };
     };
 }
 interface Sync {
@@ -194,10 +199,14 @@ function eventOf(event: MatrixEvent, room: string, user: string): RelayEvent {
               ]
             : [];
 
+    // A thread message points at the thread's latest message only as a fallback for clients with no threads.
+    const answered = relation?.is_falling_back === true ? undefined : relation?.["m.in_reply_to"];
+
     return {
         id: event.event_id,
         channel: room,
         thread: relation?.rel_type === "m.thread" ? relation.event_id : undefined,
+        ...(typeof answered?.event_id === "string" ? { replyTo: answered.event_id } : {}),
         text: text.split(user).join("").trim(),
         author: { id: event.sender, name: event.sender, bot: event.sender === user },
         mentioned: content["m.mentions"]?.user_ids?.includes(user) === true || text.includes(user),

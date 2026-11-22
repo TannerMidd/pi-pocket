@@ -31,7 +31,7 @@ interface Message {
     caption?: string;
     entities?: { type: string; offset: number; length: number }[];
     caption_entities?: { type: string; offset: number; length: number }[];
-    reply_to_message?: { from?: TelegramUser };
+    reply_to_message?: { message_id?: number; from?: TelegramUser };
     photo?: TelegramFile[];
     document?: TelegramFile;
     video?: TelegramFile;
@@ -265,6 +265,10 @@ function eventOf(message: Message, bot: TelegramUser): RelayEvent {
         id: `${message.chat.id}:${message.message_id}`,
         channel: String(message.chat.id),
         channelName: message.chat.title,
+        // In the id `reply` returns for a sent message: a reply to a card of Pi's names it.
+        ...(typeof message.reply_to_message?.message_id === "number"
+            ? { replyTo: `${message.chat.id}:${message.reply_to_message.message_id}` }
+            : {}),
         text: stripped.trim(),
         author: {
             id: String(author?.id ?? message.sender_chat?.id ?? "unknown"),

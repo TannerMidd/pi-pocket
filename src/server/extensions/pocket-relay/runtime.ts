@@ -1065,7 +1065,28 @@ export class Relay {
                 );
 
                 if (outcome.handled) {
-                    await this.#say(config, event, outcome.reply);
+                    const echo = await this.#say(config, event, outcome.reply);
+
+                    // A reply to the echo of a card acts on the card too: the surface keeps its id. Whatever
+                    // happens here, the action is done and the message is not Pi's.
+                    if (
+                        echo !== undefined &&
+                        outcome.surface !== undefined &&
+                        outcome.echo !== undefined
+                    ) {
+                        await surfaces
+                            .echoed(
+                                config.target as unknown as ConversationId,
+                                outcome.surface,
+                                echo,
+                                outcome.echo,
+                            )
+                            .catch((error: unknown) =>
+                                this.log(
+                                    `${config.name}: an echo was not recorded: ${this.scrub(config, message(error))}`,
+                                ),
+                            );
+                    }
 
                     return finish("delivered");
                 }
@@ -1471,13 +1492,18 @@ export class Relay {
 
     /**
      * A short answer the relay gives itself, in the place an event came from. A connector that cannot reply says
-     * nothing, and an answer that fails to send is only logged: the action it answers was done.
+     * nothing, and an answer that fails to send is only logged: the action it answers was done. It returns the id the
+     * service gave the message, when it did.
      */
-    async #say(config: ConnectorConfig, event: RelayEvent, text: string): Promise<void> {
+    async #say(
+        config: ConnectorConfig,
+        event: RelayEvent,
+        text: string,
+    ): Promise<string | undefined> {
         const connector = this.#kinds.get(config.kind);
 
         if (typeof connector?.reply !== "function" || this.#stopped || !this.#safe) {
-            return;
+            return undefined;
         }
 
         try {
@@ -1493,10 +1519,10 @@ export class Relay {
             ) {
                 this.log(`held an answer on ${config.name}: the outbound screen blocked it`);
 
-                return;
+                return undefined;
             }
 
-            await connector.reply(
+            const sent = await connector.reply(
                 {
                     values: valuesOf(config, connector.fields),
                     signal: AbortSignal.any([this.#replies.signal, AbortSignal.timeout(30_000)]),
@@ -1510,10 +1536,14 @@ export class Relay {
                     key: `surface-${config.id}-${event.id}`,
                 },
             );
+
+            return typeof sent?.id === "string" ? sent.id : undefined;
         } catch (error) {
             this.log(
                 `${config.name}: an answer was not sent: ${this.scrub(config, message(error))}`,
             );
+
+            return undefined;
         }
     }
 

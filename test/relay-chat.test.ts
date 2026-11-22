@@ -103,7 +103,7 @@ test(
                             message: message(5, 10, {
                                 text: "answer",
                                 entities: [],
-                                reply_to_message: { from: { id: 1 } },
+                                reply_to_message: { message_id: 3, from: { id: 1 } },
                             }),
                         },
                         {
@@ -152,6 +152,9 @@ test(
             [true, true, true, false],
         );
         assert.equal(resumed.events[3]!.author.bot, true);
+        // A reply names the message it answers in the id that `reply` returns for a sent message.
+        assert.equal(resumed.events[2]!.replyTo, "10:3");
+        assert.equal(resumed.events[1]!.replyTo, undefined);
     },
 );
 
@@ -261,10 +264,15 @@ test(
                                             "m.relates_to": {
                                                 rel_type: "m.thread",
                                                 event_id: "$root",
+                                                "m.in_reply_to": { event_id: "$latest" },
+                                                is_falling_back: true,
                                             },
                                         }),
                                         event("$mention", {
                                             "m.mentions": { user_ids: ["@relay:local"] },
+                                            "m.relates_to": {
+                                                "m.in_reply_to": { event_id: "$card" },
+                                            },
                                         }),
                                         event("$own", {}, "@relay:local"),
                                         { type: "m.room.member", event_id: "$member" },
@@ -312,6 +320,9 @@ test(
             [true, true, false],
         );
         assert.equal(resumed.events[2]!.author.bot, true);
+        // A reply names the event it answers; a thread message's fallback pointer is not a reply.
+        assert.equal(resumed.events[1]!.replyTo, "$card");
+        assert.equal(resumed.events[0]!.replyTo, undefined);
     },
 );
 
@@ -479,6 +490,9 @@ test(
             [true, true, false, true],
         );
         assert.equal(fake.events[2]!.thread, "100.1");
+        // A thread reply answers the thread's first message, in the id `reply` returns; a top-level message answers none.
+        assert.equal(fake.events[2]!.replyTo, "C:100.1");
+        assert.equal(fake.events[0]!.replyTo, undefined);
         // Every envelope is acknowledged; one with an event only after the relay stored it, so filtered ones go first.
         const acks = (mock.sockets[0]!.received as { envelope_id: string }[]).map(
             (ack) => ack.envelope_id,

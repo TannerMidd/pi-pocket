@@ -78,7 +78,11 @@ let server: Server;
 let session: ConversationId;
 let base = "";
 
-type Mock = { push: (events: unknown[]) => void; sent: { text: string; channel?: string }[] };
+type Mock = {
+    push: (events: unknown[]) => void;
+    sent: { text: string; channel?: string }[];
+    holdNext?: () => Promise<void>;
+};
 const mock = () => (globalThis as { relayMock?: Mock }).relayMock!;
 
 before(async () => {
@@ -108,7 +112,14 @@ export default (_host, web) => {
                 await context.emit(next);
             }
         },
-        reply: async (_context, reply) => { sent.push({ text: reply.text, channel: reply.channel }); return { id: "m" + sent.length }; },
+        reply: async (_context, reply) => {
+            sent.push({ text: reply.text, channel: reply.channel });
+            const id = "m" + sent.length;
+            const hold = globalThis.relayMock.holdNext;
+            delete globalThis.relayMock.holdNext;
+            await hold?.();
+            return { id };
+        },
     };
     const add = () => { stop(); stop = web.use("pocket-relay")?.register(connector) ?? (() => {}); };
     add();
@@ -186,7 +197,7 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     assert.equal(sent.channel, "room-1");
     assert.match(
         sent.text,
-        /^Ship it\? \(s1\)\. Reply with numbers:\n1 \[ \] Agree\n2 \[ \] Public\n3 Note: \(empty\)\n4 Go\nReply "1" to toggle Agree, "4" to press Go, "3: your text" to fill Note\.$/,
+        /^Ship it\? \(s1\)\. Reply to this message with numbers:\n1 \[ \] Agree\n2 \[ \] Public\n3 Note: \(empty\)\n4 Go\nReply "1" to toggle Agree, "4" to press Go, "3: your text" to fill Note\.$/,
     );
     // The message id is stored once the send returns, a moment after the chat has the text.
     await until(async () => (await surface())!.relay?.msgId === "m1", "the card's message id");
@@ -194,17 +205,39 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     const before = (await userTexts()).length;
 
     // The owner's own account toggles and presses: handled, confirmed in the chat, never sent to Pi.
-    mock().push([event("e2", "owner-1", "1")]);
+    mock().push([event("e2", "owner-1", "1", { replyTo: "m1" })]);
     await until(async () => (await surface())!.data.agree === true, "the toggle");
     await until(() => mock().sent.length === 2, "the confirmation");
     assert.match(mock().sent[1]!.text, /1 \[x\] Agree/);
 
+    // The confirmation (m2) is a copy of the card: a reply to it acts on the card too, as one to the card's message.
+    await until(
+        async () =>
+            (await surface())!.relay?.echoes?.some(
+                (each) => typeof each !== "string" && each.id === "m2",
+            ) === true,
+        "the echo",
+    );
+    mock().push([event("e2b", "owner-1", "1", { replyTo: "m2" })]);
+    await until(
+        async () => (await surface())!.data.agree === false,
+        "the toggle back, by the echo",
+    );
+    await until(() => mock().sent.length === 3, "the second confirmation");
+    // A reply in a thread (Slack's way of answering) is in another thread than the card: the reply decides, not it.
+    mock().push([event("e2c", "owner-1", "1", { replyTo: "m3", thread: "thread-9" })]);
+    await until(
+        async () => (await surface())!.data.agree === true,
+        "the toggle, by the second echo",
+    );
+    await until(() => mock().sent.length === 4, "the third confirmation");
+
     // A stranger may use only what says `anyone`: 2 and 3 yes, 1 and 4 no; the refusal goes to Pi as data too.
-    mock().push([event("e3", "stranger", "2")]);
+    mock().push([event("e3", "stranger", "2", { replyTo: "m1" })]);
     await until(async () => (await surface())!.data.pub === true, "the stranger's toggle");
-    mock().push([event("e4", "stranger", "3: hi there")]);
+    mock().push([event("e4", "stranger", "3: hi there", { replyTo: "m1" })]);
     await until(async () => (await surface())!.data.note === "hi there", "the stranger's text");
-    mock().push([event("e5", "stranger", "1")]);
+    mock().push([event("e5", "stranger", "1", { replyTo: "m1" })]);
     await until(
         () => mock().sent.some((each) => /That did not work on card s1\./.test(each.text)),
         "the refusal",
@@ -212,7 +245,7 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     assert.equal((await surface())!.data.agree, true, "unchanged by a stranger");
 
     // A number the card does not have, and a message that is not an action at all.
-    mock().push([event("e6", "owner-1", "9")]);
+    mock().push([event("e6", "owner-1", "9", { replyTo: "m1" })]);
     await until(
         () => mock().sent.some((each) => /There is no 9 on card s1/.test(each.text)),
         "no such number",
@@ -222,18 +255,29 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
         async () => (await userTexts()).some((text) => text.includes("looks good")),
         "normal data",
     );
+    // A bare number that does not reply to the card's message is a message for Pi, never the card's.
+    const agreed = (await surface())!.data.agree;
+
+    mock().push([event("e7b", "owner-1", "1")]);
+    await until(
+        async () =>
+            (await userTexts()).slice(before).filter((text) => text.includes("<relay-message"))
+                .length === 4,
+        "the bare number reaching Pi",
+    );
+    assert.equal((await surface())!.data.agree, agreed, "a bare number leaves the card alone");
 
     const fresh = (await userTexts()).slice(before);
 
     assert.equal(fresh.join("\n").includes("hi there"), false, "a handled reply never reaches Pi");
     assert.equal(
         fresh.filter((text) => text.includes("<relay-message")).length,
-        3,
-        "only the refused, the unknown number, and the plain message reach Pi",
+        4,
+        "only the refused, the unknown number, the plain message, and the bare number reach Pi",
     );
 
     // Go: the card is done, and the surface's action reaches the session once.
-    mock().push([event("e8", "owner-1", "4")]);
+    mock().push([event("e8", "owner-1", "4", { replyTo: "m1" })]);
     await until(async () => (await surface())!.status === "done", "the card done");
     assert.match(mock().sent.at(-1)!.text, /s1: Go pressed, and the card is done\./);
     await until(
@@ -262,7 +306,7 @@ test("the relay's own echo of a card goes through the outbound screen", async ()
     const sent = mock().sent.length;
 
     try {
-        mock().push([event("e30", "owner-1", "1")]);
+        mock().push([event("e30", "owner-1", "s2 1")]);
         await until(
             async () => (await surfaces()).find((each) => each.id === "s2")!.data.agree === true,
             "the toggle",
@@ -274,8 +318,50 @@ test("the relay's own echo of a card goes through the outbound screen", async ()
         stop();
     }
 
-    mock().push([event("e31", "owner-1", "1")]);
+    mock().push([event("e31", "owner-1", "s2 1")]);
     await until(() => mock().sent.length === sent + 1, "the echo with no screen");
+});
+
+test("a delayed echo cannot become a reply target after Pi sends the card again", async () => {
+    const second = (await surfaces()).find((each) => each.id === "s2")!;
+    const sent = mock().sent.length;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    mock().holdNext = () => held;
+    mock().push([event("e40", "owner-1", "s2 1")]);
+
+    try {
+        await until(() => mock().sent.length === sent + 1, "the echo waiting at the service");
+        await prepareRelay(app, session, second.id, { connector: "Chat", channel: "room-1" });
+    } finally {
+        release();
+    }
+
+    mock().push([event("e41", "owner-1", "s2 1")]);
+    await until(
+        async () =>
+            (await surfaces()).find((each) => each.id === "s2")!.relay?.echoes?.length === 1,
+        "the newer echo recorded",
+    );
+
+    const relay = (await surfaces()).find((each) => each.id === "s2")!.relay!;
+
+    assert.deepEqual(
+        relay.echoes?.map((each) => (typeof each === "string" ? each : each.id)),
+        [`m${sent + 2}`],
+    );
+    mock().push([event("e42", "owner-1", "1", { replyTo: `m${sent + 1}` })]);
+    await until(
+        async () => (await userTexts()).some((text) => text.includes("event: e42")),
+        "the old echo reply reaching Pi",
+    );
+    assert.equal(
+        (await surfaces()).find((each) => each.id === "s2")!.data.agree,
+        second.data.agree,
+    );
 });
 
 test("a card Pi waits for is pushed to the person who can act, by its title only", async () => {
