@@ -232,7 +232,14 @@ function Live({ surface, conversationId }) {
                 return;
             }
 
-            const flushed = [...drafts.current.values()].flatMap((read) => read() ?? []);
+            const read = [...drafts.current.values()].flatMap((each) => each() ?? []);
+
+            // A draft that does not fit its field's pattern stops the press: the field says why.
+            if (read.some((draft) => draft.unfit === true)) {
+                return;
+            }
+
+            const flushed = read;
             const set = {};
             const held = flushed.map((draft) => {
                 set[draft.path] = draft.text;
@@ -640,8 +647,10 @@ function DraftText({
     seenPv,
     register,
     onSend,
+    fits = () => true,
 }) {
     const [draft, setDraft] = useState(null);
+    const [unfit, setUnfit] = useState(false);
     // The draft as it is now: an event handler can run before the draw that shows it.
     const held = useRef(null);
     const timer = useRef(0);
@@ -674,6 +683,12 @@ function DraftText({
             return;
         }
 
+        if (!fits(text)) {
+            setUnfit(true);
+
+            return;
+        }
+
         sent.current = text;
         Promise.resolve(onSend(text, seen.current ?? seenPv())).then((taken) => {
             if (taken === false) {
@@ -691,6 +706,12 @@ function DraftText({
                     return undefined;
                 }
 
+                if (!fits(text)) {
+                    setUnfit(true);
+
+                    return { unfit: true };
+                }
+
                 clearTimeout(timer.current);
                 timer.current = 0;
                 sent.current = text;
@@ -702,6 +723,7 @@ function DraftText({
 
     const props = {
         value: draft ?? value,
+        "aria-invalid": unfit ? "true" : undefined,
         maxLength: max,
         placeholder,
         disabled,
@@ -717,6 +739,7 @@ function DraftText({
 
             seen.current ??= seenPv();
             change(text);
+            setUnfit(false);
             clearTimeout(timer.current);
             timer.current = setTimeout(() => send(text), TYPING_MS);
         },
@@ -730,9 +753,34 @@ function DraftText({
         },
     };
 
-    return multiline
+    const input = multiline
         ? html`<textarea class="surf-input" rows="3" ...${props}></textarea>`
         : html`<input class="surf-input" type="text" ...${props} />`;
+
+    return unfit
+        ? html`${input}<${Why} why="That does not fit the form this field asks for" />`
+        : input;
+}
+
+/**
+ * The browser's check of a TextField's `pattern`, as the server once ran it: an unanchored test with the `u` flag, and
+ * an empty value always fits. The server no longer runs a pattern from Pi (it could take minutes on crafted input), so
+ * this check is the form's only one: it keeps a draft that does not fit from being sent.
+ */
+function fitsPattern(pattern) {
+    if (typeof pattern !== "string" || pattern === "") {
+        return () => true;
+    }
+
+    let re = null;
+
+    try {
+        re = new RegExp(pattern, "u");
+    } catch {
+        return () => true;
+    }
+
+    return (text) => text === "" || re.test(text.slice(0, 2000));
 }
 
 function TextFieldView({ id, component, ctx }) {
@@ -755,6 +803,7 @@ function TextFieldView({ id, component, ctx }) {
                 seenPv=${ctx.pvNow}
                 register=${ctx.draft}
                 onSend=${(text, pv) => ctx.setValue(path, text, pv)}
+                fits=${fitsPattern(component.pattern)}
             />
         </label>
         <${Why} why=${why} />

@@ -117,6 +117,21 @@ const noteCard = {
     ],
 };
 
+// The server never runs a pattern from Pi: the browser's form is the only check.
+const codeCard = {
+    ...noteCard,
+    title: "Code",
+    components: [
+        {
+            type: "Column",
+            children: [
+                { type: "TextField", label: "Code", bind: "/note", pattern: "^[0-9]+$" },
+                noteCard.components[0]!.children[2]!,
+            ],
+        },
+    ],
+};
+
 const controlsCard = {
     action: "show",
     title: "Controls",
@@ -227,6 +242,7 @@ const route: Parameters<typeof scriptedModel>[0] = (request) => {
 
     for (const [words, card] of [
         ["show the note", noteCard],
+        ["show the code", codeCard],
         ["show the controls", controlsCard],
         ["show the layout", layoutCard],
     ] as const) {
@@ -534,6 +550,25 @@ test("a press sends the text typed just before it, in the same request", real, a
     await until(async () => (await surfaceOf(id)).status === "done", "the card done", SLOW);
     assert.deepEqual((await surfaceOf(id)).final?.values, { note: "typed now" });
 });
+
+test(
+    "a draft that does not fit the field's pattern stops the press and says why",
+    real,
+    async () => {
+        const { id, page } = await shown("show the code", "Code");
+
+        await run(page, `${TYPE} ${SEND}.click(); return null;`);
+        await waitFor(page, ".surf-why", /does not fit the form/, "the field's note");
+        assert.equal((await surfaceOf(id)).status, "open", "nothing was pressed");
+
+        await run(
+            page,
+            `const input = document.querySelector(".surf input[type=text]"); input.value = "1234"; input.dispatchEvent(new Event("input", { bubbles: true })); ${SEND}.click(); return null;`,
+        );
+        await until(async () => (await surfaceOf(id)).status === "done", "the card done", SLOW);
+        assert.deepEqual((await surfaceOf(id)).final?.values, { note: "1234" });
+    },
+);
 
 test(
     "a field that lost focus and a press right after it still send the text first",
