@@ -11,6 +11,7 @@ import {
     type Tx,
 } from "@earendil-works/pi-durable";
 // At run time this module uses nothing of Pi Pocket's but the host and web, and pure helpers: model facts, stall facts.
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
@@ -73,11 +74,46 @@ const requested = (person: string | undefined, key: string) =>
 const MAX_STOPS = 2;
 /** How long none is at work before the watch ends: a session just started or sent to may not be at work yet. */
 const EMPTY_MS = 3 * 60_000;
+/** How long one stall-verdict call may take; past it, today's stall message stands as it is. */
+const VERDICT_TIMEOUT_MS = 10_000;
+
+/** What a stalled helper's activity can be judged as, when the time rule first fires. */
+export type StallVerdict = "progressing" | "looping" | "stuck";
+
+/** One stall line the watch holds for a verdict, with the state the classifier judges. */
+type Held = { address: string; line: string; state: Record<string, unknown> };
+
+/** One classifier call about a held stall line: the verdict, or undefined when it failed or is not set up. */
+type VerdictOf = (state: Record<string, unknown>) => Promise<StallVerdict | undefined>;
+
+const VERDICT_QUESTIONS: ClassifyRequest["questions"] = {
+    verdict: {
+        type: "choice",
+        instructions:
+            "A helper session of a team has made no progress for the quiet time in state, so the stall rule fired once. Judge from its recent activity in state whether it is still progressing, looping, or stuck.",
+        criteria: {
+            progressing:
+                "Its work looks healthy: a long call that can still run or is still writing, and the quiet time is within what that work can take. Likely slow, not stuck.",
+            looping:
+                "It repeats the same work: turns or calls that cycle back to the same state, with nothing new. Likely looping.",
+            stuck: "It waits on one call or its model with no change, and nothing suggests the work will move again. Likely stuck.",
+        },
+    },
+};
 
 /** The marks of the stall watch: per address, its quiet spell, and its stops since the lead last sent it work. */
 const Stalls = defineDoc<{
     watch?: number;
-    spells: Record<string, { since: number; told?: true; stopped?: true }>;
+    spells: Record<
+        string,
+        {
+            since: number;
+            told?: true;
+            stopped?: true;
+            /** One verdict was asked for this spell: no second classify while it lasts. */
+            classified?: true;
+        }
+    >;
     stops: Record<string, number>;
     /** When the lead last sent each one work: a message starts the wait over. */
     sent?: Record<string, number>;
@@ -99,6 +135,8 @@ type StallState =
           seen: Seen;
           at: number;
           lines: string[];
+          /** Stall lines held for a verdict (`spell.classified`): the act classifies once and then sends or holds them. */
+          classify: Held[];
           stop: { to: string; callId: string }[];
           alerts: string[];
       };
@@ -112,6 +150,7 @@ function stallWatchFor(
     host: PocketHost,
     linked: PocketHost["linkedSessions"],
     limits: () => { soft: number; hard: number },
+    verdictOf: VerdictOf,
 ) {
     return defineTask<null, StallState, null>({
         name: "pocket.linked-stall-watch",
@@ -141,6 +180,7 @@ function stallWatchFor(
                 }
 
                 const lines: string[] = [];
+                const classify: Held[] = [];
                 const stop: { to: string; callId: string }[] = [];
                 const alerts: string[] = [];
                 const emptySince =
@@ -172,10 +212,39 @@ function stallWatchFor(
 
                         // A call with its own timeout runs until then: no stall before it.
                         if (quiet >= Math.max(soft, each.timeoutMs ?? 0) && spell.told !== true) {
-                            spell.told = true;
-                            lines.push(
-                                `Linked session ${each.address} stalled: no progress for ${span(quiet)}, waiting on ${each.waiting} since ${clock(since)}.${hard > 0 && each.callId !== undefined ? ` Pi Pocket stops that call at ${span(hard)} with no progress.` : ""}`,
-                            );
+                            const line = `Linked session ${each.address} stalled: no progress for ${span(quiet)}, waiting on ${each.waiting} since ${clock(since)}.${hard > 0 && each.callId !== undefined ? ` Pi Pocket stops that call at ${span(hard)} with no progress.` : ""}`;
+
+                            // When a classifier is there, the first fire of a spell holds the line for one verdict:
+                            // looping or stuck report at once with it, progressing says nothing yet, and the time
+                            // rules stay the backstop. Without one, or past a progressing verdict, today's rules alone.
+                            if (typeof host.classify === "function" && spell.classified !== true) {
+                                spell.classified = true;
+                                classify.push({
+                                    address: each.address,
+                                    line,
+                                    state: {
+                                        address: each.address,
+                                        waitingOn: each.waiting,
+                                        quietFor: span(quiet),
+                                        since: clock(since),
+                                        ...(each.callId === undefined
+                                            ? {}
+                                            : {
+                                                  call: {
+                                                      id: each.callId,
+                                                      ownTimeout:
+                                                          each.timeoutMs === undefined
+                                                              ? "none"
+                                                              : span(each.timeoutMs),
+                                                  },
+                                              }),
+                                        activity: each.progress,
+                                    },
+                                });
+                            } else if (spell.classified !== true) {
+                                spell.told = true;
+                                lines.push(line);
+                            }
                         }
 
                         if (hard <= 0 || quiet < hard || spell.stopped === true) {
@@ -214,10 +283,23 @@ function stallWatchFor(
                         };
                     }
 
-                    if (stop.length > 0 || alerts.length > 0 || lines.length > 0) {
+                    if (
+                        stop.length > 0 ||
+                        alerts.length > 0 ||
+                        lines.length > 0 ||
+                        classify.length > 0
+                    ) {
                         return {
                             status: "running",
-                            checkpoint: { phase: "act", seen, at, lines, stop, alerts },
+                            checkpoint: {
+                                phase: "act",
+                                seen,
+                                at,
+                                lines,
+                                classify,
+                                stop,
+                                alerts,
+                            },
                         };
                     }
 
@@ -236,8 +318,23 @@ function stallWatchFor(
             // its message, under its own id, goes once. A lead at work takes it at its next pause.
             act: async (watch, runtime, context) => {
                 const checkpoint = watch.state.checkpoint as Extract<StallState, { phase: "act" }>;
+                const lines = [...checkpoint.lines];
 
-                if (checkpoint.lines.length > 0) {
+                // One verdict per held line. Looping and stuck report at once with it; a call that fails, or runs
+                // out of time, reports as today; progressing says nothing yet and the time rules stay the backstop.
+                for (const held of checkpoint.classify) {
+                    const verdict = await verdictOf(held.state);
+
+                    if (verdict === "looping" || verdict === "stuck") {
+                        lines.push(
+                            `${held.line} A classifier model reads its recent activity as ${verdict}.`,
+                        );
+                    } else if (verdict !== "progressing") {
+                        lines.push(held.line);
+                    }
+                }
+
+                if (lines.length > 0) {
                     const conversation = await runtime.conversation(
                         runtime.conversationId,
                         context,
@@ -246,7 +343,7 @@ function stallWatchFor(
                     await conversation?.submit(
                         {
                             type: "input",
-                            content: `[linked sessions] ${checkpoint.lines.join(" ")} Their final answers still come by themselves.`,
+                            content: `[linked sessions] ${lines.join(" ")} Their final answers still come by themselves.`,
                             whenBusy: "steer",
                             // As the lead's person's work, so a spend limit there holds it back.
                             requestId: requested(
@@ -336,6 +433,14 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             min: 0,
             max: 10080,
         },
+        {
+            name: "classifyModel",
+            label: "Classify model",
+            description:
+                "When a linked session stalls, a classifier model reads its recent activity: looping and stuck are reported at once with the verdict, progressing says nothing yet and the time rules stay. As provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+            type: "text",
+            default: DEFAULT_CLASSIFY_MODEL,
+        },
     ]);
 
     const minutes = (name: string, fallback: number) => {
@@ -344,10 +449,45 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
         return (typeof value === "number" ? value : fallback) * 60_000;
     };
 
-    const StallWatch = stallWatchFor(host, linked, () => ({
-        soft: minutes("stalledMinutes", STALLED_MINUTES),
-        hard: minutes("stopMinutes", STOP_MINUTES),
-    }));
+    /**
+     * One held stall line's verdict, from the module's classify model. Undefined when no classifier is there, when
+     * its model setting is not usable, or when the call fails or runs out of time: today's stall message then stands.
+     */
+    const verdictOf: VerdictOf = async (state) => {
+        const call = typeof host.classify === "function" ? host.classify : undefined;
+
+        if (call === undefined) {
+            return undefined;
+        }
+
+        const value = web?.setting("classifyModel");
+        const model =
+            typeof value === "string" && value.trim() !== ""
+                ? value.trim()
+                : DEFAULT_CLASSIFY_MODEL;
+        const answers = await withDeadline(
+            () => call({ model, state, questions: VERDICT_QUESTIONS }),
+            VERDICT_TIMEOUT_MS,
+        );
+        const answer = answers?.verdict;
+
+        return answer?.type === "choice" &&
+            (answer.choice === "progressing" ||
+                answer.choice === "looping" ||
+                answer.choice === "stuck")
+            ? answer.choice
+            : undefined;
+    };
+
+    const StallWatch = stallWatchFor(
+        host,
+        linked,
+        () => ({
+            soft: minutes("stalledMinutes", STALLED_MINUTES),
+            hard: minutes("stopMinutes", STOP_MINUTES),
+        }),
+        verdictOf,
+    );
 
     /** Start the stall watch of this lead when none runs; a message sent to `to` starts its stops over. */
     const watching = async (
