@@ -15,7 +15,8 @@ type Model = {
     imageKind: (url: unknown) => { kind: string; src?: string; href?: string; host?: string };
     httpsUrl: (url: unknown) => URL | undefined;
     footerOf: (surface: Surface) => string | undefined;
-    actBody: (surface: Surface, what: { set?: unknown; event?: string }) => unknown;
+    actBody: (surface: Surface, what: { set?: unknown; event?: string; pv?: number }) => unknown;
+    stepIndex: (count: number, at: number, key: string) => number | undefined;
     toggled: (current: unknown, options: unknown, value: string, on: boolean) => string[];
     bodyOfText: (text: string, title: string) => string;
 };
@@ -99,4 +100,18 @@ test("the footer, the action body, and a multiple choice", () => {
         "b",
     ]);
     assert.equal(model.bodyOfText("Title\nline", "Title"), "line");
+});
+
+test("an action carries the pv the person saw, and the arrow keys step among radio buttons", () => {
+    assert.deepEqual(model.actBody(surface({ pv: 7 }), { event: "go" }), { pv: 7, event: "go" });
+    assert.deepEqual(model.actBody(surface({ pv: 7 }), { set: { "/a": 1 }, event: "go", pv: 4 }), {
+        pv: 4,
+        set: { "/a": 1 },
+        event: "go",
+    });
+    assert.equal(model.stepIndex(3, 2, "ArrowRight"), 0);
+    assert.equal(model.stepIndex(3, 0, "ArrowLeft"), 2);
+    assert.equal(model.stepIndex(3, 1, "Home"), 0);
+    assert.equal(model.stepIndex(3, 1, "End"), 2);
+    assert.equal(model.stepIndex(3, 1, "a"), undefined);
 });

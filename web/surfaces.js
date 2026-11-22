@@ -1,7 +1,8 @@
 // Pocket Surfaces in the transcript (`docs/design/surfaces.md`): an interactive card drawn from the JSON the server
 // keeps. The layout, the data and the rules of who may act all come from the server; the browser only draws them,
-// sends the one thing a person did (`{ pv, set }` or `{ pv, event }`), and shows the change when the next revision
-// arrives. Text is always plain text, and an https image is a link, never a load.
+// sends the one thing a person did (`{ pv, set }`, `{ pv, event }`, or both: a press carries the text typed before
+// it), and shows the change when the next revision arrives. An edit carries the `pv` seen when it began; the data
+// changes of the next revisions (`rev`) redraw the card and do not make an edit stale (only `pv` does). Text is always plain text, and an https image is a link, never a load.
 
 import { Component } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -17,6 +18,7 @@ import {
     imageKind,
     optionsOf,
     prunePending,
+    stepIndex,
     surfaceOfCall,
     toggled,
     withPending,
@@ -113,9 +115,16 @@ function Live({ surface, conversationId }) {
     const latest = useRef(surface);
     const pending = useRef({});
     const timer = useRef(0);
+    // The text fields' unsent drafts, by path: a press sends them with its event.
+    const drafts = useRef(new Map());
+    // Sets on their way, and the order every request goes in.
+    const inflight = useRef(new Set());
+    const queue = useRef(Promise.resolve());
+    const pressing = useRef(new Set());
     const [, redraw] = useState(0);
     const [busy, setBusy] = useState({});
     const [error, setError] = useState("");
+    const [asking, setAsking] = useState(null);
 
     latest.current = surface;
     prunePending(pending.current, surface.rev);
@@ -123,42 +132,65 @@ function Live({ surface, conversationId }) {
 
     const again = () => redraw((count) => count + 1);
 
+    // One error line at a time, and a failed request shows it once.
     const fail = (problem) => {
         clearTimeout(timer.current);
         setError(problem?.message || "That did not work");
         timer.current = setTimeout(() => setError(""), ERROR_MS);
     };
 
-    const call = async (body, key) => {
-        const now = latest.current;
+    const send = (body, keys) => {
+        const run = async () => {
+            const now = latest.current;
 
-        setBusy((had) => ({ ...had, [key]: true }));
+            setBusy((had) =>
+                Object.fromEntries([...Object.entries(had), ...keys.map((k) => [k, true])]),
+            );
 
-        try {
-            return await api(`c/${conversationId}/surfaces/${now.id}/act`, actBody(now, body));
-        } catch (problem) {
-            fail(problem);
+            try {
+                return await api(`c/${conversationId}/surfaces/${now.id}/act`, actBody(now, body));
+            } catch (problem) {
+                fail(problem);
 
-            return null;
-        } finally {
-            setBusy((had) => {
-                const rest = { ...had };
+                return null;
+            } finally {
+                setBusy((had) => {
+                    const rest = { ...had };
 
-                delete rest[key];
+                    for (const key of keys) {
+                        delete rest[key];
+                    }
 
-                return rest;
-            });
-        }
+                    return rest;
+                });
+            }
+        };
+
+        const task = queue.current.then(run);
+
+        queue.current = task;
+
+        return task;
     };
 
-    const setValue = async (path, value) => {
+    const track = (task) => {
+        inflight.current.add(task);
+        task.finally(() => inflight.current.delete(task));
+
+        return task;
+    };
+
+    // What a person set shows at once; the server's revision (`until`) takes it over, a failure takes it away.
+    const hold = (path, value) => {
         const entry = { value };
 
         pending.current[path] = entry;
         again();
 
-        const result = await call({ set: { [path]: value } }, path);
+        return entry;
+    };
 
+    const settle = (path, entry, result) => {
         // A newer set of the same path took over: it settles it.
         if (pending.current[path] === entry) {
             if (result === null) {
@@ -172,14 +204,124 @@ function Live({ surface, conversationId }) {
         }
     };
 
-    const press = (id) => call({ event: id }, id);
+    /** Sets a path; the promise says whether the server took it. `seen` is the `pv` the person saw. */
+    const setValue = (path, value, seen = latest.current.pv) => {
+        const entry = hold(path, value);
+
+        return track(
+            send({ set: { [path]: value }, pv: seen }, [path]).then((result) => {
+                settle(path, entry, result);
+
+                return result !== null;
+            }),
+        );
+    };
+
+    const press = async (id, asked) => {
+        if (pressing.current.has(id)) {
+            return;
+        }
+
+        pressing.current.add(id);
+
+        try {
+            let pv = asked ?? latest.current.pv;
+
+            // A set still on its way goes first, and a failed one stops the press: Pi would get the old text.
+            if ((await Promise.all([...inflight.current])).includes(false)) {
+                return;
+            }
+
+            const flushed = [...drafts.current.values()].flatMap((read) => read() ?? []);
+            const set = {};
+            const held = flushed.map((draft) => {
+                set[draft.path] = draft.text;
+                pv = Math.min(pv, draft.pv);
+
+                return hold(draft.path, draft.text);
+            });
+            const result = await track(
+                send({ set: flushed.length === 0 ? undefined : set, event: id, pv }, [
+                    id,
+                    ...flushed.map((draft) => draft.path),
+                ]),
+            );
+
+            flushed.forEach((draft, index) => {
+                settle(draft.path, held[index], result);
+
+                if (result === null) {
+                    draft.failed();
+                }
+            });
+        } finally {
+            pressing.current.delete(id);
+        }
+    };
+
     const data = withPending(surface.data, pending.current);
+    const scope = { data, computed: evaluateComputed(surface.computed, data) };
+
+    // A button that acts: whether it is off for this person, and its question; undefined for any other component.
+    const button = (id) => {
+        const component = surface.components?.[id];
+
+        if (component?.type !== "Button" || component.action?.event === undefined) {
+            return undefined;
+        }
+
+        const confirm = component.action.event.confirm;
+
+        return {
+            disabled:
+                !controlState(surface, id).enabled || Boolean(evaluate(component.disabled, scope)),
+            confirm: typeof confirm === "string" ? confirm : undefined,
+        };
+    };
+
+    // The same way in for a person's tap and an extension's `act`: the question first, and nothing for a button that is off.
+    const act = (id) => {
+        const state = button(id);
+
+        if (state === undefined || state.disabled) {
+            return;
+        }
+
+        if (state.confirm === undefined) {
+            press(id);
+        } else {
+            // The question is about the card as it is now: Yes sends this `pv`.
+            setAsking({ id, pv: latest.current.pv });
+        }
+    };
+
+    // A question closes when its button is off or Pi changed the card (`pv`): it was about another card.
+    useEffect(() => {
+        if (
+            asking !== null &&
+            (asking.pv !== surface.pv || (button(asking.id)?.disabled ?? true))
+        ) {
+            setAsking(null);
+        }
+    });
+
     const ctx = {
         surface,
         busy,
+        asking: asking?.id ?? null,
+        asked: asking?.pv,
+        setAsking,
         setValue,
         press,
-        scope: { data, computed: evaluateComputed(surface.computed, data) },
+        act,
+        button,
+        pvNow: () => latest.current.pv,
+        draft: (path, read) => {
+            drafts.current.set(path, read);
+
+            return () => drafts.current.delete(path);
+        },
+        scope,
     };
 
     return html`<${Frame} title=${surface.title} footer=${footerOf(surface)} error=${error}>
@@ -247,7 +389,7 @@ function Piece({ id, component, ctx, depth }) {
         }
 
         case "Row": {
-            const wrap = component.wrap === true ? "surf-wrap" : "";
+            const wrap = component.wrap === false ? "surf-nowrap" : "";
 
             return html`<div class=${`surf-row ${GAPS[component.gap] ?? "surf-gap-m"} ${wrap}`}>
                 <${Children} component=${component} ctx=${ctx} depth=${depth} />
@@ -339,16 +481,16 @@ function ExtensionView({ id, component, ctx }) {
     const props = Object.fromEntries(
         Object.entries(rest).map(([name, each]) => [name, evaluate(each, ctx.scope)]),
     );
-    const { off } = stateOf(ctx, id, typeof bind === "string" ? bind : id);
+    const { off, why } = stateOf(ctx, id);
 
     return html`<${spec.render}
         props=${props}
         value=${typeof bind === "string" ? readPath(bind, ctx.scope) : undefined}
         set=${(next) => (typeof bind === "string" && !off ? ctx.setValue(bind, next) : undefined)}
-        act=${(button) =>
-            ctx.surface.components?.[button]?.type === "Button" ? ctx.press(button) : undefined}
+        act=${(button) => ctx.act(button)}
         disabled=${off}
-    />`;
+    />
+    <${Why} why=${why} />`;
 }
 
 function ImageView({ component }) {
@@ -374,23 +516,48 @@ function ImageView({ component }) {
     return html`<p class="surf-text surf-caption">${alt || "An image that cannot be shown"}</p>`;
 }
 
-/** The state of a control for this person: whether it is live, and why it is not. */
+/**
+ * The state of a control for this person: whether it is off, and the words that say why when the person's role is the
+ * reason (a card that ended says so in its footer). A request on its way (`busy`) never turns a control off: a person
+ * who uses the keyboard keeps the focus, and a second press is ignored.
+ */
 function stateOf(ctx, id, key = id) {
     const state = controlState(ctx.surface, id);
 
     return {
-        off: !state.enabled || ctx.busy[key] === true,
-        locked: !state.enabled,
-        why: state.why,
+        off: !state.enabled,
+        busy: ctx.busy[key] === true,
+        why: ctx.surface.status === "open" ? state.why : "",
     };
 }
 
+/** The visible reason a control is off. */
+function Why({ why }) {
+    return why === "" ? null : html`<span class="surf-text surf-caption surf-why">${why}</span>`;
+}
+
 function ButtonView({ id, component, ctx }) {
-    const [asking, setAsking] = useState(false);
+    const main = useRef(null);
+    const yes = useRef(null);
+    const moved = useRef(false);
     const label = textOf(component.label);
     const style = ["primary", "danger"].includes(component.style) ? component.style : "default";
     const classes = `surf-btn surf-btn-${style}`;
     const open = component.action?.open;
+    const { busy, why } = stateOf(ctx, id);
+    const { disabled, confirm } = ctx.button(id) ?? { disabled: true };
+    const showAsk = ctx.asking === id && !disabled && confirm !== undefined;
+
+    // The question takes the focus (on "Yes"), and closing it gives the focus back to the button.
+    useEffect(() => {
+        if (showAsk) {
+            yes.current?.focus();
+            moved.current = true;
+        } else if (moved.current) {
+            moved.current = false;
+            main.current?.focus();
+        }
+    }, [showAsk]);
 
     if (open !== undefined) {
         const url = httpsUrl(open?.url);
@@ -408,62 +575,130 @@ function ButtonView({ id, component, ctx }) {
               </a>`;
     }
 
-    const { off, locked, why } = stateOf(ctx, id);
-    const disabled = off || Boolean(evaluate(component.disabled, ctx.scope));
-    const confirm = component.action?.event?.confirm;
+    if (showAsk) {
+        const close = () => ctx.setAsking(null);
 
-    if (asking && !disabled && typeof confirm === "string") {
-        return html`<div class="surf-confirm" role="group" aria-label=${label}>
+        return html`<div
+            class="surf-confirm"
+            role="group"
+            aria-label=${label}
+            onKeyDown=${(event) => {
+                if (event.key === "Escape") {
+                    event.stopPropagation();
+                    close();
+                }
+            }}
+        >
             <span class="surf-confirm-text">${confirm}</span>
             <span class="surf-confirm-buttons">
                 <button
                     type="button"
                     class=${classes}
+                    ref=${yes}
                     onClick=${() => {
-                        setAsking(false);
-                        ctx.press(id);
+                        close();
+                        ctx.press(id, ctx.asked);
                     }}
                 >
                     Yes
                 </button>
-                <button type="button" class="surf-btn" onClick=${() => setAsking(false)}>
-                    Cancel
-                </button>
+                <button type="button" class="surf-btn" onClick=${close}>Cancel</button>
             </span>
         </div>`;
     }
 
-    return html`<button
+    const control = html`<button
         type="button"
         class=${classes}
+        ref=${main}
         disabled=${disabled}
-        title=${locked ? why : undefined}
-        onClick=${() => (typeof confirm === "string" ? setAsking(true) : ctx.press(id))}
+        aria-busy=${busy ? "true" : undefined}
+        onClick=${() => ctx.act(id)}
     >
         ${label}
     </button>`;
+
+    return why === ""
+        ? control
+        : html`<span class="surf-btn-cell">${control}<${Why} why=${why} /></span>`;
 }
 
 /**
  * A text input that keeps what the person types as a draft, sends it after a short pause and when it loses focus, and
- * does not take the server's value while it has focus.
+ * does not take the server's value while it has focus. A press of a button reads the draft too (`register`) and sends
+ * it with its event. The draft goes out with the card's `pv` from when the person began to type; if the server refuses
+ * it, the draft is dropped (the card shows the error once) and is not sent again.
  */
-function DraftText({ value, max, multiline, placeholder, label, disabled, onSend }) {
+function DraftText({
+    path,
+    value,
+    max,
+    multiline,
+    placeholder,
+    label,
+    disabled,
+    seenPv,
+    register,
+    onSend,
+}) {
     const [draft, setDraft] = useState(null);
+    // The draft as it is now: an event handler can run before the draw that shows it.
+    const held = useRef(null);
     const timer = useRef(0);
     const stored = useRef(value);
+    const seen = useRef(null);
+    const sent = useRef(null);
 
     stored.current = value;
     useEffect(() => () => clearTimeout(timer.current), []);
+
+    const change = (next) => {
+        held.current = next;
+        setDraft(next);
+    };
+
+    // Dropped when it failed, unless the person has typed more since.
+    const failed = (text) => {
+        if (held.current === text) {
+            change(null);
+        }
+
+        sent.current = null;
+    };
 
     const send = (text) => {
         clearTimeout(timer.current);
         timer.current = 0;
 
-        if (text !== stored.current) {
-            onSend(text);
+        if (text === stored.current || text === sent.current) {
+            return;
         }
+
+        sent.current = text;
+        Promise.resolve(onSend(text, seen.current ?? seenPv())).then((taken) => {
+            if (taken === false) {
+                failed(text);
+            }
+        });
     };
+
+    useEffect(
+        () =>
+            register(path, () => {
+                const text = held.current;
+
+                if (text === null || text === stored.current || text === sent.current) {
+                    return undefined;
+                }
+
+                clearTimeout(timer.current);
+                timer.current = 0;
+                sent.current = text;
+
+                return { path, text, pv: seen.current ?? seenPv(), failed: () => failed(text) };
+            }),
+        [path],
+    );
 
     const props = {
         value: draft ?? value,
@@ -472,20 +707,26 @@ function DraftText({ value, max, multiline, placeholder, label, disabled, onSend
         disabled,
         "aria-label": label,
         autoComplete: "off",
-        onFocus: () => setDraft(value),
+        onFocus: () => {
+            seen.current = seenPv();
+            sent.current = null;
+            change(value);
+        },
         onInput: (event) => {
             const text = event.currentTarget.value;
 
-            setDraft(text);
+            seen.current ??= seenPv();
+            change(text);
             clearTimeout(timer.current);
             timer.current = setTimeout(() => send(text), TYPING_MS);
         },
         onBlur: () => {
-            if (draft !== null) {
-                send(draft);
+            if (held.current !== null) {
+                send(held.current);
             }
 
-            setDraft(null);
+            change(null);
+            seen.current = null;
         },
     };
 
@@ -496,43 +737,53 @@ function DraftText({ value, max, multiline, placeholder, label, disabled, onSend
 
 function TextFieldView({ id, component, ctx }) {
     const path = String(component.bind);
-    const { locked, why } = stateOf(ctx, id, path);
+    const { off, why } = stateOf(ctx, id, path);
 
-    return html`<label class="surf-field" title=${locked ? why : undefined}>
-        <span class="surf-label">${textOf(component.label)}</span>
-        <${DraftText}
-            value=${textOf(readPath(path, ctx.scope))}
-            max=${typeof component.max === "number" ? component.max : undefined}
-            multiline=${component.multiline === true}
-            placeholder=${
-                typeof component.placeholder === "string" ? component.placeholder : undefined
-            }
-            label=${textOf(component.label)}
-            disabled=${locked || Boolean(evaluate(component.disabled, ctx.scope))}
-            onSend=${(text) => ctx.setValue(path, text)}
-        />
-    </label>`;
+    return html`<div class="surf-field">
+        <label class="surf-field">
+            <span class="surf-label">${textOf(component.label)}</span>
+            <${DraftText}
+                path=${path}
+                value=${textOf(readPath(path, ctx.scope))}
+                max=${typeof component.max === "number" ? component.max : undefined}
+                multiline=${component.multiline === true}
+                placeholder=${
+                    typeof component.placeholder === "string" ? component.placeholder : undefined
+                }
+                label=${textOf(component.label)}
+                disabled=${off || Boolean(evaluate(component.disabled, ctx.scope))}
+                seenPv=${ctx.pvNow}
+                register=${ctx.draft}
+                onSend=${(text, pv) => ctx.setValue(path, text, pv)}
+            />
+        </label>
+        <${Why} why=${why} />
+    </div>`;
 }
 
 function CheckBoxView({ id, component, ctx }) {
     const path = String(component.bind);
-    const { off, locked, why } = stateOf(ctx, id, path);
+    const { off, busy, why } = stateOf(ctx, id, path);
     const disabled = off || Boolean(evaluate(component.disabled, ctx.scope));
 
-    return html`<label class="surf-check" title=${locked ? why : undefined}>
-        <input
-            type="checkbox"
-            checked=${readPath(path, ctx.scope) === true}
-            disabled=${disabled}
-            onChange=${(event) => ctx.setValue(path, event.currentTarget.checked)}
-        />
-        <span>${textOf(component.label)}</span>
-    </label>`;
+    return html`<div class="surf-field">
+        <label class="surf-check">
+            <input
+                type="checkbox"
+                checked=${readPath(path, ctx.scope) === true}
+                disabled=${disabled}
+                aria-busy=${busy ? "true" : undefined}
+                onChange=${(event) => ctx.setValue(path, event.currentTarget.checked)}
+            />
+            <span>${textOf(component.label)}</span>
+        </label>
+        <${Why} why=${why} />
+    </div>`;
 }
 
 function PickerView({ id, component, ctx }) {
     const path = String(component.bind);
-    const { off, locked, why } = stateOf(ctx, id, path);
+    const { off, busy, why } = stateOf(ctx, id, path);
     const disabled = off || Boolean(evaluate(component.disabled, ctx.scope));
     const options = optionsOf(component.options);
     const current = readPath(path, ctx.scope);
@@ -540,13 +791,14 @@ function PickerView({ id, component, ctx }) {
     let control;
 
     if (component.multiple === true) {
-        control = html`<div class="surf-col surf-gap-s">
+        control = html`<div class="surf-col surf-gap-s" role="group" aria-label=${label}>
             ${options.map(
                 (option) => html`<label class="surf-check" key=${option.value}>
                     <input
                         type="checkbox"
                         checked=${Array.isArray(current) && current.includes(option.value)}
                         disabled=${disabled}
+                        aria-busy=${busy ? "true" : undefined}
                         onChange=${(event) =>
                             ctx.setValue(
                                 path,
@@ -563,16 +815,38 @@ function PickerView({ id, component, ctx }) {
             )}
         </div>`;
     } else if (options.length <= BUTTONS_UP_TO) {
+        // One stop in the group (the chosen one, or the first), and the arrow keys move the choice.
+        const chosen = options.findIndex((option) => option.value === current);
+        const stop = chosen < 0 ? 0 : chosen;
+
         control = html`<div class="surf-options" role="radiogroup" aria-label=${label}>
             ${options.map(
-                (option) => html`<button
+                (option, at) => html`<button
                     type="button"
                     role="radio"
                     class="surf-option"
                     key=${option.value}
                     aria-checked=${current === option.value}
+                    aria-busy=${busy ? "true" : undefined}
+                    tabindex=${at === stop ? 0 : -1}
                     disabled=${disabled}
                     onClick=${() => current !== option.value && ctx.setValue(path, option.value)}
+                    onKeyDown=${(event) => {
+                        const to = stepIndex(options.length, at, event.key);
+
+                        if (to === undefined) {
+                            return;
+                        }
+
+                        const group = event.currentTarget.parentElement;
+
+                        event.preventDefault();
+                        group.children[to]?.focus();
+
+                        if (options[to].value !== current) {
+                            ctx.setValue(path, options[to].value);
+                        }
+                    }}
                 >
                     ${option.label}
                 </button>`,
@@ -584,6 +858,7 @@ function PickerView({ id, component, ctx }) {
         control = html`<select
             class="surf-input"
             aria-label=${label}
+            aria-busy=${busy ? "true" : undefined}
             value=${known ? current : ""}
             disabled=${disabled}
             onChange=${(event) => ctx.setValue(path, event.currentTarget.value)}
@@ -597,9 +872,10 @@ function PickerView({ id, component, ctx }) {
         </select>`;
     }
 
-    return html`<div class="surf-field" title=${locked ? why : undefined}>
+    return html`<div class="surf-field">
         <span class="surf-label">${label}</span>
         ${control}
+        <${Why} why=${why} />
     </div>`;
 }
 
@@ -615,7 +891,7 @@ function TableView({ id, component, ctx }) {
         if (typeof column.bind === "string") {
             const path = cellPath(component.rows, index, column.bind);
             const stored = row?.[column.bind];
-            const off = !state.enabled || ctx.busy[path] === true;
+            const off = !state.enabled;
 
             if (Array.isArray(column.options)) {
                 const options = optionsOf(column.options);
@@ -642,7 +918,10 @@ function TableView({ id, component, ctx }) {
                 max=${500}
                 label=${`${textOf(column.label)}, row ${index + 1}`}
                 disabled=${!state.enabled}
-                onSend=${(text) => ctx.setValue(path, text)}
+                path=${path}
+                seenPv=${ctx.pvNow}
+                register=${ctx.draft}
+                onSend=${(text, pv) => ctx.setValue(path, text, pv)}
             />`;
         }
 
@@ -651,11 +930,13 @@ function TableView({ id, component, ctx }) {
         return column.format === "bytes" ? bytes(shown) : textOf(shown);
     };
 
-    return html`<div class="surf-table-wrap" title=${state.enabled ? undefined : state.why}>
+    const why = ctx.surface.status === "open" ? state.why : "";
+
+    return html`<div class="surf-table-wrap">
         <table class="surf-table">
             <thead>
                 <tr>
-                    ${select !== undefined && html`<th class="surf-pick"></th>`}
+                    ${select !== undefined && html`<th class="surf-pick"><span class="surf-sr">Select</span></th>`}
                     ${columns.map((column) => html`<th>${textOf(column.label)}</th>`)}
                 </tr>
             </thead>
@@ -673,7 +954,7 @@ function TableView({ id, component, ctx }) {
                                         type="checkbox"
                                         aria-label=${`Select row ${index + 1}`}
                                         checked=${row?.[select] === true}
-                                        disabled=${!state.enabled || ctx.busy[path] === true}
+                                        disabled=${!state.enabled}
                                         onChange=${(event) =>
                                             ctx.setValue(path, event.currentTarget.checked)}
                                     />
@@ -689,6 +970,7 @@ function TableView({ id, component, ctx }) {
                 })}
             </tbody>
         </table>
+        <${Why} why=${why} />
     </div>`;
 }
 

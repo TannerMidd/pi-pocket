@@ -180,10 +180,13 @@ export function surfaceOfCall(surfaces, callId) {
     return Object.values(surfaces ?? {}).find((each) => each.callId === callId);
 }
 
-/** The body of an action: only `pv` and what the person did, never layout or computed values. */
-export function actBody(surface, { set, event }) {
+/**
+ * The body of an action: only `pv` and what the person did, never layout or computed values. `pv` is the card's
+ * layout the person saw (an edit sent after Pi changed the card carries the number from when typing began).
+ */
+export function actBody(surface, { set, event, pv }) {
     return {
-        pv: surface.pv,
+        pv: pv ?? surface.pv,
         ...(set === undefined ? {} : { set }),
         ...(event === undefined ? {} : { event }),
     };
@@ -202,4 +205,25 @@ export function toggled(current, options, value, on) {
     return optionsOf(options)
         .map((option) => option.value)
         .filter((each) => have.has(each));
+}
+
+/**
+ * Where an arrow key moves among `count` radio buttons from `at`: the next one, the one before (both wrap), or the
+ * first or last; undefined for any other key.
+ */
+export function stepIndex(count, at, key) {
+    switch (key) {
+        case "ArrowRight":
+        case "ArrowDown":
+            return (at + 1) % count;
+        case "ArrowLeft":
+        case "ArrowUp":
+            return (at + count - 1) % count;
+        case "Home":
+            return 0;
+        case "End":
+            return count - 1;
+        default:
+            return undefined;
+    }
 }
