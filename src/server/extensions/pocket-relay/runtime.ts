@@ -1069,12 +1069,17 @@ export class Relay {
 
                     // A reply to the echo of a card acts on the card too: the surface keeps its id. Whatever
                     // happens here, the action is done and the message is not Pi's.
-                    if (echo !== undefined && outcome.surface !== undefined) {
+                    if (
+                        echo !== undefined &&
+                        outcome.surface !== undefined &&
+                        outcome.echo !== undefined
+                    ) {
                         await surfaces
                             .echoed(
                                 config.target as unknown as ConversationId,
                                 outcome.surface,
                                 echo,
+                                outcome.echo,
                             )
                             .catch((error: unknown) =>
                                 this.log(

@@ -5,6 +5,7 @@
  * the card has. Who: an author in the connector's `ownerIds` acts as the connector's person; anyone else is a viewer,
  * so only controls that say `anyone` take their numbers. The route's checks (`act.ts`) apply the same.
  */
+import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -14,7 +15,7 @@ import { describe, HttpError } from "../errors.ts";
 import { type Actor, actAs } from "./act.ts";
 import { controlsFor } from "./bindings.ts";
 import { render } from "./text.ts";
-import type { Surface, Target } from "./types.ts";
+import type { RelayView, Surface, Target } from "./types.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -42,8 +43,11 @@ export type RelayMessage = {
     by: string;
 };
 
+export type RelayEcho = RelayView & { generation?: string };
+
 export type RelayOutcome =
-    { handled: true; reply: string; surface?: string } | { handled: false; refusal?: string };
+    | { handled: true; reply: string; surface?: string; echo?: RelayEcho }
+    | { handled: false; refusal?: string };
 
 /** How many answers of the relay are kept for each card, for the replies that name them. */
 const ECHOES = 5;
@@ -76,6 +80,7 @@ export async function prepareRelay(
             connector: where.connector,
             channel: where.channel ?? "",
             ...(where.thread === undefined ? {} : { thread: where.thread }),
+            generation: randomUUID(),
             pv: surface.pv,
             map: out.map,
         };
@@ -129,17 +134,25 @@ export async function recordEcho(
     id: ConversationId,
     sid: string,
     msgId: string,
+    echo: RelayEcho,
 ): Promise<void> {
     await app.harness.commit(async (tx) => {
         const surface = (await tx.doc(SurfacesDoc, id)).items[sid];
 
-        if (surface?.relay === undefined || surface.relay.msgId === msgId) {
+        if (
+            surface?.relay === undefined ||
+            surface.relay.msgId === msgId ||
+            echo === undefined ||
+            surface.relay.generation !== echo.generation
+        ) {
             return;
         }
 
-        const kept = (surface.relay.echoes ?? []).filter((each) => each !== msgId);
+        const kept = (surface.relay.echoes ?? []).filter(
+            (each) => (typeof each === "string" ? each : each.id) !== msgId,
+        );
 
-        surface.relay.echoes = [...kept, msgId].slice(-ECHOES);
+        surface.relay.echoes = [...kept, { id: msgId, map: echo.map, pv: echo.pv }].slice(-ECHOES);
     }, context);
 }
 
@@ -169,7 +182,9 @@ function cardFor(
             : there.find(
                   (surface) =>
                       surface.relay!.msgId === message.replyTo ||
-                      surface.relay!.echoes?.includes(message.replyTo!) === true,
+                      surface.relay!.echoes?.some(
+                          (each) => (typeof each === "string" ? each : each.id) === message.replyTo,
+                      ) === true,
               );
 
     if (replied !== undefined) {
@@ -193,8 +208,13 @@ type Planned = {
 };
 
 /** Which controls the numbers press, and what to set: the body of an act, or a refusal. */
-function plan(surface: Surface, numbers: string[], fill: string | undefined): Planned | string {
-    const map = surface.relay!.map;
+function plan(
+    surface: Surface,
+    view: RelayView,
+    numbers: string[],
+    fill: string | undefined,
+): Planned | string {
+    const map = view.map;
     const set: Record<string, JsonValue> = {};
     const derive: Planned["derive"] = {};
     let event: string | undefined;
@@ -241,7 +261,7 @@ function plan(surface: Surface, numbers: string[], fill: string | undefined): Pl
     }
 
     return {
-        body: { pv: surface.pv, set, ...(event === undefined ? {} : { event }) },
+        body: { pv: view.pv, set, ...(event === undefined ? {} : { event }) },
         derive,
         ...(event === undefined
             ? {}
@@ -302,11 +322,20 @@ export async function fromRelay(
     const said = (detail: string) =>
         owner === undefined ? `That did not work on card ${surface.id}.` : detail;
 
-    if (surface.relay!.pv !== surface.pv) {
+    const relay = surface.relay!;
+    const echo =
+        named === undefined
+            ? relay.echoes?.find(
+                  (each) => (typeof each === "string" ? each : each.id) === message.replyTo,
+              )
+            : relay.echoes?.at(-1);
+    const view = echo !== undefined && typeof echo !== "string" ? echo : relay;
+
+    if (view.pv !== surface.pv) {
         return { handled: false, refusal: `Card ${surface.id} changed. Look at the new one.` };
     }
 
-    const made = plan(surface, picked, fill === null ? undefined : fill[3]!.trim());
+    const made = plan(surface, view, picked, fill === null ? undefined : fill[3]!.trim());
 
     if (typeof made === "string") {
         return owner === undefined ? { handled: false } : { handled: false, refusal: made };
@@ -333,13 +362,17 @@ export async function fromRelay(
 
         const after = (await app.harness.snapshot(SurfacesDoc, id, context))?.items[surface.id];
 
+        if (after === undefined) {
+            return { handled: true, surface: surface.id, reply: `${surface.id}: done.` };
+        }
+
+        const out = render(after as Surface, "relay");
+
         return {
             handled: true,
             surface: surface.id,
-            reply:
-                after === undefined
-                    ? `${surface.id}: done.`
-                    : render(after as Surface, "relay").text,
+            reply: out.text,
+            echo: { pv: after.pv, map: out.map, generation: after.relay?.generation },
         };
     } catch (error) {
         const status = error instanceof HttpError ? error.status : 500;
@@ -371,6 +404,11 @@ export interface SurfacesRelayApi {
         where?: { channel?: string; thread?: string },
     ): Promise<void>;
     /** The relay answered an action on a card with a message of this id: a reply to it acts on the card too. */
-    echoed(conversationId: ConversationId, surface: string, messageId: string): Promise<void>;
+    echoed(
+        conversationId: ConversationId,
+        surface: string,
+        messageId: string,
+        echo: RelayEcho,
+    ): Promise<void>;
     fromRelay(conversationId: ConversationId, message: RelayMessage): Promise<RelayOutcome>;
 }

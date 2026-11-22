@@ -25,6 +25,9 @@ export type Target =
     | { kind: "press"; control: string }
     | { kind: "text"; path: string };
 
+/** The numbering displayed by one relay message. */
+export type RelayView = { pv: number; map: Record<string, Target> };
+
 export type SurfaceStatus = "open" | "done" | "closed" | "expired" | "cancelled";
 
 export type Surface = {
@@ -75,8 +78,10 @@ export type Surface = {
         channel: string;
         thread?: string;
         msgId?: string;
-        /** The ids of the last messages the relay answered with the card as it then was (newest last): a reply to one acts on the card too. */
-        echoes?: string[];
+        /** Each prepare gets a new token, even when the card's pv stays the same. */
+        generation?: string;
+        /** Newest last. String entries come from older stored cards and use the original map and pv. */
+        echoes?: (string | ({ id: string } & RelayView))[];
         pv: number;
         map: Record<string, Target>;
     };
