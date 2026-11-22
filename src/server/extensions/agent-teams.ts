@@ -10,8 +10,9 @@ import {
     type ConversationId,
     type Tx,
 } from "@earendil-works/pi-durable";
-// At run time this module uses nothing of Pi Pocket's but the host and web, and pure helpers: model facts, stall facts.
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+// At run time this module uses nothing of Pi Pocket's but the host and web, and pure helpers: model facts, stall facts,
+// and the classifier helpers (`classify.ts`, `classifier-activity.ts`).
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { modelLine } from "../model-facts.ts";
@@ -82,10 +83,10 @@ const VERDICT_TIMEOUT_MS = 10_000;
 export type StallVerdict = "progressing" | "looping" | "stuck";
 
 /** One stall line the watch holds for a verdict, with the state the classifier judges. */
-type Held = { address: string; line: string; state: Record<string, unknown> };
+export type Held = { address: string; since: number; line: string; state: Record<string, unknown> };
 
 /** One classifier call about a held stall line: the verdict, or undefined when it failed or is not set up. */
-type VerdictOf = (state: Record<string, unknown>) => Promise<StallVerdict | undefined>;
+export type VerdictOf = (state: Record<string, unknown>) => Promise<StallVerdict | undefined>;
 
 const VERDICT_QUESTIONS: ClassifyRequest["questions"] = {
     verdict: {
@@ -102,6 +103,38 @@ const VERDICT_QUESTIONS: ClassifyRequest["questions"] = {
     },
 };
 
+/**
+ * One verdict per held line, asked together, so all of them wait one call's time (`VERDICT_TIMEOUT_MS`) at most
+ * however many helpers stalled. Looping and stuck report at once with it; a call that fails, or runs out of time,
+ * reports as today; progressing says nothing yet, and the line comes at twice the soft limit. `sent` lists the held
+ * lines that were said, to be marked told. `held` is missing in a checkpoint saved before verdicts existed.
+ */
+export async function verdictsFor(
+    held: Held[] | undefined,
+    verdictOf: VerdictOf,
+): Promise<{ said: string[]; sent: Held[] }> {
+    const each = held ?? [];
+    const verdicts = await Promise.all(
+        each.map((one) => verdictOf(one.state).catch(() => undefined)),
+    );
+    const said: string[] = [];
+    const sent: Held[] = [];
+
+    for (const [at, one] of each.entries()) {
+        const verdict = verdicts[at];
+
+        if (verdict === "looping" || verdict === "stuck") {
+            said.push(`${one.line} A classifier model reads its recent activity as ${verdict}.`);
+            sent.push(one);
+        } else if (verdict !== "progressing") {
+            said.push(one.line);
+            sent.push(one);
+        }
+    }
+
+    return { said, sent };
+}
+
 /** The marks of the stall watch: per address, its quiet spell, and its stops since the lead last sent it work. */
 const Stalls = defineDoc<{
     watch?: number;
@@ -111,7 +144,10 @@ const Stalls = defineDoc<{
             since: number;
             told?: true;
             stopped?: true;
-            /** One verdict was asked for this spell: no second classify while it lasts. */
+            /**
+             * One verdict was asked for this spell: no second classify while it lasts. The line goes at once with a
+             * `looping` or `stuck` verdict, or without one (`told`); after `progressing` it goes at twice the soft limit.
+             */
             classified?: true;
         }
     >;
@@ -152,6 +188,7 @@ function stallWatchFor(
     linked: PocketHost["linkedSessions"],
     limits: () => { soft: number; hard: number },
     verdictOf: VerdictOf,
+    classifierChosen: () => boolean,
 ) {
     return defineTask<null, StallState, null>({
         name: "pocket.linked-stall-watch",
@@ -211,17 +248,29 @@ function stallWatchFor(
 
                         const hard = limit <= 0 ? 0 : hardLimitOf(limit, each.timeoutMs);
 
-                        // A call with its own timeout runs until then: no stall before it.
-                        if (quiet >= Math.max(soft, each.timeoutMs ?? 0) && spell.told !== true) {
+                        // A call with its own timeout runs until then: no stall before it. After a progressing verdict
+                        // (a spell classified, its line not sent), the time rule is the backstop: the line comes at
+                        // twice that quiet time.
+                        const due = Math.max(soft, each.timeoutMs ?? 0);
+
+                        if (
+                            quiet >= (spell.classified === true ? due * 2 : due) &&
+                            spell.told !== true
+                        ) {
                             const line = `Linked session ${each.address} stalled: no progress for ${span(quiet)}, waiting on ${each.waiting} since ${clock(since)}.${hard > 0 && each.callId !== undefined ? ` Pi Pocket stops that call at ${span(hard)} with no progress.` : ""}`;
 
                             // When a classifier is there, the first fire of a spell holds the line for one verdict:
-                            // looping or stuck report at once with it, progressing says nothing yet, and the time
-                            // rules stay the backstop. Without one, or past a progressing verdict, today's rules alone.
-                            if (typeof host.classify === "function" && spell.classified !== true) {
+                            // looping or stuck report at once with it, progressing says nothing yet and the line comes
+                            // later, at twice the soft limit. Without one, or when it fails, the line comes now.
+                            if (
+                                typeof host.classify === "function" &&
+                                classifierChosen() &&
+                                spell.classified !== true
+                            ) {
                                 spell.classified = true;
                                 classify.push({
                                     address: each.address,
+                                    since,
                                     line,
                                     state: {
                                         address: each.address,
@@ -239,10 +288,15 @@ function stallWatchFor(
                                                               : span(each.timeoutMs),
                                                   },
                                               }),
-                                        activity: each.progress,
+                                        ...(each.recent === undefined
+                                            ? {}
+                                            : { recentCalls: each.recent.calls }),
+                                        ...(each.recent?.output === undefined
+                                            ? {}
+                                            : { outputTail: each.recent.output }),
                                     },
                                 });
-                            } else if (spell.classified !== true) {
+                            } else {
                                 spell.told = true;
                                 lines.push(line);
                             }
@@ -321,19 +375,20 @@ function stallWatchFor(
                 const checkpoint = watch.state.checkpoint as Extract<StallState, { phase: "act" }>;
                 const lines = [...checkpoint.lines];
 
-                // One verdict per held line. Looping and stuck report at once with it; a call that fails, or runs
-                // out of time, reports as today; progressing says nothing yet and the time rules stay the backstop.
-                for (const held of checkpoint.classify) {
-                    const verdict = await verdictOf(held.state);
+                for (const each of checkpoint.stop) {
+                    await linked.stopCall?.(runtime.conversationId, each).catch(() => false);
+                }
 
-                    if (verdict === "looping" || verdict === "stuck") {
-                        lines.push(
-                            `${held.line} A classifier model reads its recent activity as ${verdict}.`,
-                        );
-                    } else if (verdict !== "progressing") {
-                        lines.push(held.line);
+                for (const alert of checkpoint.alerts) {
+                    if (typeof host.alertOwner === "function") {
+                        host.alertOwner(runtime.conversationId, "Linked session stalled", alert);
                     }
                 }
+
+                // The stops are done already. The held lines get their verdicts together.
+                const { said, sent } = await verdictsFor(checkpoint.classify, verdictOf);
+
+                lines.push(...said);
 
                 if (lines.length > 0) {
                     const conversation = await runtime.conversation(
@@ -356,24 +411,26 @@ function stallWatchFor(
                     );
                 }
 
-                for (const each of checkpoint.stop) {
-                    await linked.stopCall?.(runtime.conversationId, each).catch(() => false);
-                }
+                await runtime.commit(async (tx) => {
+                    const state =
+                        sent.length === 0
+                            ? undefined
+                            : await tx.doc(Stalls, runtime.conversationId);
 
-                for (const alert of checkpoint.alerts) {
-                    if (typeof host.alertOwner === "function") {
-                        host.alertOwner(runtime.conversationId, "Linked session stalled", alert);
+                    for (const held of sent) {
+                        const spell = state?.spells[held.address];
+
+                        if (spell?.since === held.since) {
+                            spell.told = true;
+                        }
                     }
-                }
 
-                await runtime.commit(
-                    () => ({
+                    return {
                         status: "sleeping",
                         until: runtime.now() + STALL_LOOK.ms,
                         checkpoint: { phase: "look", seen: checkpoint.seen },
-                    }),
-                    context,
-                );
+                    };
+                }, context);
             },
         },
         abort: (_watch, runtime, context) =>
@@ -418,7 +475,7 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             name: "stalledMinutes",
             label: "Stalled after (minutes)",
             description:
-                "A linked session at work with no progress for this long (no new message, tool call, tool result, or output) is stalled: the session that started it gets one message about it. Nothing is stopped yet.",
+                "A linked session at work with no progress for this long (no new message, tool call, tool result, or output) is stalled: the session that started it gets one message about it. Nothing is stopped yet. With a classifier model chosen, a verdict of progressing delays that message to twice this time.",
             type: "number",
             default: STALLED_MINUTES,
             min: 1,
@@ -438,9 +495,9 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             name: "classifyModel",
             label: "Classify model",
             description:
-                "When a linked session stalls, a classifier model reads its recent activity: looping and stuck are reported at once with the verdict, progressing says nothing yet and the time rules stay. As provider/modelId. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, only time rules apply. On a stall it sends the session's last 5 calls with arguments and 800 characters of output to its provider.",
             type: "text",
-            default: DEFAULT_CLASSIFY_MODEL,
+            default: "",
         },
     ]);
 
@@ -461,11 +518,12 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             return undefined;
         }
 
-        const value = web?.setting("classifyModel");
-        const model =
-            typeof value === "string" && value.trim() !== ""
-                ? value.trim()
-                : DEFAULT_CLASSIFY_MODEL;
+        const model = classifierFor(host, web?.setting("classifyModel"));
+
+        if (model === undefined) {
+            return undefined;
+        }
+
         const answers = await classifyFor(
             call,
             "agent-teams",
@@ -490,6 +548,7 @@ export default function createAgentTeams(host: PocketHost, web?: ExtensionWeb) {
             hard: minutes("stopMinutes", STOP_MINUTES),
         }),
         verdictOf,
+        () => classifierFor(host, web?.setting("classifyModel")) !== undefined,
     );
 
     /** Start the stall watch of this lead when none runs; a message sent to `to` starts its stops over. */

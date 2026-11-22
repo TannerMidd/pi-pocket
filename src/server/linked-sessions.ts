@@ -35,7 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
-import { callTimeoutMs, progressOf, waitingOn } from "./stall-facts.ts";
+import { callTimeoutMs, progressOf, recentWork, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -577,7 +577,9 @@ export class LinkedSessions implements LinkedSessionsApi {
             }
 
             const on = waitingOn(live);
-            const { at, timeoutMs } = await app.harness.commit(async (tx) => {
+            // A value the owner hid never goes to a classifier either.
+            const hide = (text: string) => app.hidden.replace(text, id);
+            const { at, timeoutMs, recent } = await app.harness.commit(async (tx) => {
                 const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
                 const messages = page.items.flatMap((entry) => entry.model ?? []);
                 const times = messages
@@ -588,12 +590,14 @@ export class LinkedSessions implements LinkedSessionsApi {
                     at: times.length === 0 ? undefined : Math.max(...times),
                     timeoutMs:
                         on.callId === undefined ? undefined : callTimeoutMs(messages, on.callId),
+                    recent: recentWork(messages, live, hide),
                 };
             }, context);
 
             found.push({
                 address: addresses.get(each.id)!,
                 progress: progressOf(live),
+                recent,
                 ...(at === undefined ? {} : { at }),
                 waiting: on.what,
                 ...(on.callId === undefined ? {} : { callId: on.callId }),

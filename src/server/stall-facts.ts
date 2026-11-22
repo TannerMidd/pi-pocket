@@ -34,6 +34,91 @@ export function progressOf(live: LiveState): string {
     ]);
 }
 
+/** The most tool calls, and characters of each one's arguments and of the last output, a stall verdict reads. */
+const RECENT_CALLS = 5;
+const RECENT_ARGUMENTS = 300;
+const RECENT_OUTPUT = 800;
+
+/** What a classifier reads of a session's recent work: its last calls with trimmed arguments, and the output's tail. */
+export type RecentWork = {
+    calls: { tool: string; arguments: string }[];
+    /** The tail of the running call's output so far, else of the last call's result. */
+    output?: string;
+};
+
+const tail = (text: string, max: number) => (text.length > max ? `…${text.slice(-max)}` : text);
+const head = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/** A call's arguments in one trimmed line: each value cut, the whole capped. */
+function trimmedArguments(args: unknown, hide: (text: string) => string): string {
+    if (typeof args !== "object" || args === null) {
+        return "";
+    }
+
+    const parts = Object.entries(args).map(([key, value]) => {
+        const text = hide(typeof value === "string" ? value : (JSON.stringify(value) ?? ""));
+
+        return `${key}: ${head(text.replace(/\s+/g, " "), 120)}`;
+    });
+
+    return head(parts.join("; "), RECENT_ARGUMENTS);
+}
+
+/**
+ * What a stall verdict reads: from the newest `messages` (newest first), the last few tool calls with their arguments
+ * trimmed, and a trimmed tail of the output so far, which is the running call's, or else the last result's. Capped in
+ * size; `live` is the session's live state, `hide` takes out values the owner hid.
+ */
+export function recentWork(
+    messages: readonly unknown[],
+    live: LiveState,
+    hide: (text: string) => string = (text) => text,
+): RecentWork {
+    const calls: RecentWork["calls"] = [];
+    let output: string | undefined;
+
+    for (const message of messages as {
+        role?: string;
+        content?: unknown;
+    }[]) {
+        const parts = Array.isArray(message.content)
+            ? (message.content as {
+                  type?: string;
+                  name?: string;
+                  arguments?: unknown;
+                  text?: string;
+              }[])
+            : [];
+
+        if (message.role === "toolResult" && output === undefined) {
+            const text = parts.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : []));
+
+            output = text.join("\n");
+        }
+
+        if (message.role === "assistant") {
+            for (const part of [...parts].reverse()) {
+                if (part.type === "toolCall" && calls.length < RECENT_CALLS) {
+                    calls.unshift({
+                        tool: String(part.name ?? ""),
+                        arguments: trimmedArguments(part.arguments, hide),
+                    });
+                }
+            }
+        }
+    }
+
+    const running = (live.tools ?? []).find((tool) => tool.status === "running");
+    const latest = running?.output ?? output;
+
+    return {
+        calls,
+        ...(latest === undefined || latest.trim() === ""
+            ? {}
+            : { output: tail(hide(latest).trim(), RECENT_OUTPUT) }),
+    };
+}
+
 /** What a conversation at work waits on: its running call, a retry of its model request, or its model. */
 export function waitingOn(live: LiveState): { what: string; callId?: string } {
     const call = (live.tools ?? []).find((tool) => tool.status === "running");
