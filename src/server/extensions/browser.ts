@@ -17,7 +17,7 @@ import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
 import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
 import { presetOf, viewportFrom } from "../browser/viewport.ts";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
@@ -101,6 +101,11 @@ function clip(text: string, max = MAX_TEXT): string {
         : text;
 }
 
+/** A page address without its query and fragment, which can hold tokens: what a classifier may read of it. */
+function withoutQuery(url: string): string {
+    return url.replace(/[?#].*$/s, "");
+}
+
 /** Where the page is, for the end of every answer. */
 function where(page: BrowserPage): string {
     const viewport = page.viewport;
@@ -126,7 +131,7 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                 name: "triageScreenshots",
                 label: "Triage screenshots",
                 description:
-                    "A classifier reads each screenshot and adds a line beside it that says what it shows: content, an error state, broken layout, or still loading. One still loading is taken again after half a second, once. Needs a classifier model with image input; off by default.",
+                    "A classifier reads each screenshot and adds a line saying what it shows (content, error, broken layout, loading; loading is shot again once). Needs image input. Sends each screenshot, the page address (no query) and title to the classifier's provider. Off by default.",
                 type: "boolean",
                 default: false,
             },
@@ -134,21 +139,15 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                 name: "classifyModel",
                 label: "Screenshot classifier model",
                 description:
-                    "The classifier that reads each screenshot, as provider/modelId. It must accept image input. Default: OpenRouter's Jev route; an OpenRouter sign-in is enough.",
+                    "Optional own classifier, provider/modelId, with image input. Empty: the one chosen in Providers. With neither, screenshots get no line.",
                 type: "text",
-                default: DEFAULT_CLASSIFY_MODEL,
+                default: "",
             },
         ]);
     }
 
-    /** The classifier model the owner named for triage, or the default one. */
-    const model = () => {
-        const value = web?.setting("classifyModel");
-
-        return typeof value === "string" && value.trim() !== ""
-            ? value.trim()
-            : DEFAULT_CLASSIFY_MODEL;
-    };
+    /** The classifier model for triage: this module's setting, else the owner's choice; undefined: none. */
+    const model = () => classifierFor(host, web?.setting("classifyModel"));
 
     const browser = defineTool({
         name: "browser",
@@ -343,11 +342,18 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                     let triage: TriageLabel | undefined;
 
                     /** One classifier read of a shot: its label, or undefined to attach no line. */
-                    const read = async (data: string): Promise<TriageLabel | undefined> => {
-                        // Off, or a server too old for `host.classify` (this module reloaded into it): no line.
+                    const read = async (
+                        data: string,
+                        mimeType: string,
+                    ): Promise<TriageLabel | undefined> => {
+                        const chosen = model();
+
+                        // Off, no classifier chosen, or a server too old for `host.classify` (this module reloaded
+                        // into it): no line.
                         if (
                             web === undefined ||
                             web.setting("triageScreenshots") !== true ||
+                            chosen === undefined ||
                             typeof host.classify !== "function"
                         ) {
                             return undefined;
@@ -357,9 +363,9 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                             host.classify,
                             "browser-screenshots",
                             {
-                                model: model(),
-                                state: { url: page.url, title: page.title },
-                                images: [{ type: "image", data, mimeType: "image/jpeg" }],
+                                model: chosen,
+                                state: { url: withoutQuery(page.url), title: page.title },
+                                images: [{ type: "image", data, mimeType }],
                                 questions: TRIAGE_QUESTIONS,
                             },
                             TRIAGE_TIMEOUT_MS,
@@ -376,12 +382,12 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                     // second image and its label are what the tool returns. A call that fails or runs out of time
                     // attaches no line, and the shot goes back as it came.
                     if (web?.setting("triageScreenshots") === true) {
-                        triage = await read(shot.data);
+                        triage = await read(shot.data, shot.mimeType);
 
                         if (triage === "loading") {
                             await new Promise((resolve) => setTimeout(resolve, LOADING_RETRY_MS));
                             shot = await run(page.screenshot({ fullPage: args.fullPage === true }));
-                            triage = await read(shot.data);
+                            triage = await read(shot.data, shot.mimeType);
                         }
                     }
 
@@ -391,7 +397,7 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                             ? `, shown at ${Math.round(shot.width * shot.scale)}×${Math.round(shot.height * shot.scale)}: multiply a point in it by ${(1 / shot.scale).toFixed(2)} for CSS pixels`
                             : "";
 
-                    image = { type: "image", data: shot.data, mimeType: "image/jpeg" };
+                    image = { type: "image", data: shot.data, mimeType: shot.mimeType };
                     lines.push(
                         `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels${smaller}.`,
                     );

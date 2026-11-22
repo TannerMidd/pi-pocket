@@ -25,6 +25,8 @@ function choice(value: string, confidence: number): ClassifierAnswer {
 }
 
 let fail = false;
+/** While set, the classifier waits for it: a notification then waits on its outcome label. */
+let hold: Promise<void> | undefined;
 let app: App;
 
 before(async () => {
@@ -50,6 +52,7 @@ before(async () => {
                 "typesafe-system-one": {
                     async classify(_model, input) {
                         seen.push(input.state as Record<string, unknown>);
+                        await hold;
 
                         return {
                             api: "typesafe-system-one",
@@ -198,5 +201,105 @@ test("the owner sees only sanitized verdicts and counts in Jev Hub, not guests o
     } finally {
         server.closeAllConnections();
         server.close();
+    }
+});
+
+test("with no classifier chosen the notification keeps its plain title; the shared choice labels it", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
+    const sent = () =>
+        tab.events
+            .filter((event) => event.event === "embedder-notify")
+            .map((event) => event.data as { url?: string; title?: string; body?: string })
+            .filter((data) => data.url === `/s/${String(id)}`);
+
+    await app.attach(client);
+    await app.setExtensionEnabled(owner(app), "run-outcomes.ts", true);
+    await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: "" });
+    verdict = choice("needs_input", 1);
+
+    try {
+        const before = seen.length;
+
+        await say(app, id, "no classifier answer");
+        await until(() => sent().length === 1, "plain notification");
+        assert.match(String(sent()[0]?.title), /^Pi finished · /);
+        assert.ok(
+            !seen.slice(before).some((state) => String(state.answer).includes("no classifier")),
+            "nothing of this session was sent to any classifier",
+        );
+
+        await app.setClassifierModel(owner(app), model);
+        await say(app, id, "shared classifier answer");
+        await until(() => sent().length === 2, "labelled notification");
+        assert.match(String(sent()[1]?.title), /^Needs input · /);
+        assert.ok(
+            seen.slice(before).some((state) => String(state.answer).includes("shared classifier")),
+        );
+
+        // The shared choice must be a signed-in classifier, and null clears it.
+        await assert.rejects(
+            app.setClassifierModel(owner(app), "faux-jev/nope"),
+            /classifier model/,
+        );
+        await app.setClassifierModel(owner(app), null);
+        assert.equal(app.config.classifierModel, undefined);
+    } finally {
+        await app.setClassifierModel(owner(app), null);
+        await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: model });
+        app.detach(client);
+    }
+});
+
+test("a long answer goes as its head and its tail, so a closing question is read", async () => {
+    const id = await newSession(app);
+    const long = `${"A".repeat(6_000)} Which target do you want?`;
+
+    verdict = choice("needs_input", 1);
+    await app.classifyRunOutcome(id, 77, long);
+
+    const sentAnswer = String(seen.at(-1)?.answer);
+
+    assert.ok(sentAnswer.startsWith("AAAA"), "the start is kept");
+    assert.ok(sentAnswer.endsWith("Which target do you want?"), "the end is kept");
+    assert.ok(sentAnswer.length < 4_200, "and the rest is left out");
+});
+
+test("a notification that waited on its label is dropped when a new run began meanwhile", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
+    const sent = () =>
+        tab.events
+            .filter((event) => event.event === "embedder-notify")
+            .map((event) => event.data as { url?: string; body?: string })
+            .filter((data) => data.url === `/s/${String(id)}`);
+
+    let release = () => {};
+
+    await app.setExtensionEnabled(owner(app), "run-outcomes.ts", true);
+    await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: model });
+    await app.attach(client);
+    hold = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    try {
+        const before = seen.length;
+
+        await say(app, id, "first run");
+        await until(() => seen.length > before, "the first notification waits on its label", 8_000);
+        // A new run begins and ends while the label is awaited.
+        await say(app, id, "second run");
+        await until(() => sent().length >= 1, "a notification", 10_000);
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+
+        assert.equal(sent().length, 1, "one notification: the first run's is stale and dropped");
+        assert.match(String(sent()[0]?.body), /second run/);
+    } finally {
+        release();
+        hold = undefined;
+        app.detach(client);
     }
 });
