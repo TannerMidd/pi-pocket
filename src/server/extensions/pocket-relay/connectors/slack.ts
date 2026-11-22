@@ -136,6 +136,10 @@ function eventOf(event: SlackEvent, user: string, channels: string[]): RelayEven
         id: `${event.channel}:${event.ts}`,
         channel: event.channel,
         thread: event.thread_ts ?? event.ts,
+        // Slack answers a message with a thread reply: in the id `reply` returns for the thread's first message.
+        ...(event.thread_ts !== undefined && event.thread_ts !== event.ts
+            ? { replyTo: `${event.channel}:${event.thread_ts}` }
+            : {}),
         text: text.split(mention).join("").trim(),
         author: { id: event.user, name: event.user, bot: event.user === user },
         mentioned: text.includes(mention) || event.channel_type === "im",
