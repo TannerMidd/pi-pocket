@@ -1,6 +1,6 @@
-# Pocket Surfaces (design, no code yet)
+# Pocket Surfaces (design)
 
-Status: **proposed**. The owner must approve section 1 before any code: a document kind's settings are permanent once data exists. Everything else can change later.
+Status: **built** (all three slices, on the branch `surfaces`; experimental, since 0.31.0). The owner approved section 1, the core placement, and the default `who` of `owner`. [Implementation notes](#implementation-notes-as-built) at the end lists where the code differs from this text. Section 1 is unchanged: a document kind's settings are permanent once data exists.
 
 Pi can show an interactive **surface** in the transcript: declarative JSON, no code in the browser. The server stores it, validates it, and checks who may act.
 
@@ -8,7 +8,7 @@ Pi can show an interactive **surface** in the transcript: declarative JSON, no c
 
 Pi Durable 1.6.0 gives a tool `execute()` a park: `{ sleep: { signals: [key], until?, checkpoint? } }`. The call holds no invocation while it sleeps. `defineSignal` makes a schema-checked token. `tx.signal(taskId, token, key, value)` delivers a value in the same commit that changes documents, and it is kept even if the task has not parked yet. `ask` does not: `host.ask` waits in memory (`Approvals`), and after a restart it asks again. A surface's answer survives a restart.
 
-**New territory** (nothing in Pocket parks or signals today): the guard, plan and tool-search wrappers with a parked call; stall watches on a call that sleeps for days; codemode, where a nested call holds its invocation and is not restart-safe (as `ask` today); a `cancel` handler on Stop; the busy display while a call sleeps. `tx.signal` reads the task, so call it **before** the first table write; document reads and writes may follow. **Slice 1 starts with a one-hour spike test** (park, restart, signal, wake). Fallback if it fails: the surface keeps the answer in its document, and the tool waits in memory and returns the stored answer when it runs again. The design does not change.
+**New territory** (nothing in Pocket parks or signals today): the guard, plan and tool-search wrappers with a parked call; stall watches on a call that sleeps for days; codemode, where a nested call holds its invocation and is not restart-safe (as `ask` today); a `cancel` handler on Stop; the busy display while a call sleeps. `tx.signal` reads the task, so call it **before** the first table write; document reads and writes may follow. **Slice 1 starts with a one-hour spike test** (park, restart, signal, wake). Fallback if it fails: the surface keeps the answer in its document, and the tool waits in memory and returns the stored answer when it runs again. The design does not change. **Result: the spike passed.** A parked `ui` call survives `openApp` on the same data folder, makes no second surface, and a `tx.signal` wakes it with the values; no fallback was needed.
 
 ## 1. The document kind (for the owner to approve)
 
@@ -119,11 +119,15 @@ Why a core route: extension routes are closed to session-invited guests (`mayUse
 
 ```
 Cleanup dry run (s3). Reply with numbers:
-1 [x] /tmp/a  4.2 GB      2 [ ] /tmp/b  9.7 GB
-13.9 GB selected
-3 Delete   4 Cancel
-Reply "1" to toggle row 1, "3" to press Delete.
+1 [x] /tmp/a  4.2 GB
+2 [ ] /tmp/b  9.7 GB
+3 Note: (empty)
+4.2 GB selected
+4 Delete   5 Refresh
+Reply "1" to toggle row 1, "4" to press Delete, "3: your text" to fill Note.
 ```
+
+(The golden file in `test/fixtures/surface-cleanup.relay.txt` is the form the code makes: one table row to a line, and the total follows the ticks.)
 
 Every control gets a number: a checkbox or table row toggles, a choice picks an option, a button presses, `5: text` fills a TextField. Numbers map to targets in `surface.relay.map` for one `pv`.
 
@@ -234,3 +238,20 @@ Release gate (no wait on `show`; the Release event reaches Pi as a `[via surface
 1. **Approve section 1**: `pocket.surfaces`, singleton, conversation scope, `latest`, `fork: "initial"`, version 1.
 2. **Core changes** (section 10): small, but they touch the room view, one route and the transcript. The alternative, extension only, means session-invited guests cannot act and see no live updates. Recommended: core.
 3. **Default `who`**: `owner` (recommended) or `requester`.
+
+## Implementation notes (as built)
+
+Where the code made a choice that the text above left open, or differs from it. The code and its tests (`test/surfaces*.test.ts`) are the truth.
+
+- **Waits.** `wait: true` waits 24 hours; `{ minutes }` and `ui wait` take at most 7 days. While a call is parked its session shows "Working", as for any run with a live call: the busy display was not changed.
+- **A non-resolving action** (`resolves: false`) with a wait wakes the call and ends that wait. The next action reaches Pi as a `[via surface]` message, unless Pi waits again with `ui wait`.
+- **`show` with an `id`** replaces the layout of an open surface with no parked wait of another call (a parked one is refused: patch it); its `callId` moves to the new call, so the older call's card falls back to its text.
+- **Layout checks beyond section 2.** A `danger` button must carry `confirm` (the check refuses it otherwise). Field names in a Table are plain keys (`[A-Za-z0-9_-]`), not paths. A TextField `pattern` is at most 100 characters and may not nest a quantifier. `Status.state` and `Text.text` may be expressions; labels and field labels are 40 and 120 characters.
+- **The `act` body.** Keys other than `pv`, `set`, and `event` are ignored, never used: the server's own values reach Pi. An action that was refused for a person is a 4xx with a short message; a second resolving action gets `409 This card is done by <name>`.
+- **Surface fields added** (optional, no version bump): `a2ui` (the id A2UI messages use) beside `relay`. The view sent to tabs has `waiting`, `can`, and `fallbacks` (the text of extension components), never `taskId`, the wait's key, or the relay's map.
+- **Live updates** send each surface once per revision per tab (`surfaces`) and name the ones that left (`surfacesGone`); a full view sends all.
+- **Relay.** `host.surfaces` is an internal member with three calls (`prepare`, `sent`, `fromRelay`). `relay.channel` is `""` when Pi sent a card without `reply_to` (the connector's default place): such a card matches any channel of its connector. A message that looks like an action but is refused (a stranger on an owner control, a number the card lacks, a changed card) gets a short answer in the chat and still goes to Pi as ordinary outside data. A handled reply is answered with the updated card (a toggle) or one line (a button).
+- **Push.** Announced from the commit that stores the card, once, when the card is at most two minutes old; to participants who can act on at least one control; the `approval` preference.
+- **Extension components.** Props are literals (no expressions) checked against the module's pi-schema; a stored card that used a type stays valid while its module is off (it shows the text). `act(buttonId)` in a renderer presses a Button the card already has.
+- **A2UI.** The `ui` tool takes `action: "a2ui"` with `messages` of one surface. The refusals are listed in `docs/extensions/surfaces.md`. A delivered action also comes back to Pi as A2UI's own action message (`structuredOutput.a2ui`).
+- **Not done.** Image files of the session and artifact images, remote `Icon` names, and `ask` on surfaces (section 11) are later.

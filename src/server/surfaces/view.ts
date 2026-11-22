@@ -4,6 +4,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { controlsFor } from "./bindings.ts";
+import { componentText, extensionComponent, propsOf } from "./components.ts";
 import type { Component, JsonObject, Surface, SurfaceStatus, Who } from "./types.ts";
 
 export type SurfaceView = {
@@ -24,6 +25,8 @@ export type SurfaceView = {
     waiting: boolean;
     last?: { name: string; by: string; at: number };
     final?: { text: string };
+    /** The plain text of each extension component, for browsers that do not draw it (`web.surfaceComponent`). */
+    fallbacks?: Record<string, string>;
     /** The controls this person may use. */
     can: Record<string, boolean>;
     updatedAt: number;
@@ -35,6 +38,20 @@ export function viewOf(
     person: { id: string; role: string },
     nameOf: (id: string) => string,
 ): SurfaceView {
+    const fallbacks: Record<string, string> = {};
+
+    for (const [id, component] of Object.entries(surface.components)) {
+        const registered = extensionComponent(component.type);
+        const text =
+            registered === undefined
+                ? undefined
+                : componentText(registered, propsOf(component), surface.data);
+
+        if (text !== undefined) {
+            fallbacks[id] = text;
+        }
+    }
+
     return {
         id: surface.id,
         title: surface.title,
@@ -59,6 +76,7 @@ export function viewOf(
                   },
               }),
         ...(surface.final === undefined ? {} : { final: { text: surface.final.text } }),
+        ...(Object.keys(fallbacks).length === 0 ? {} : { fallbacks }),
         can: surface.status === "open" ? controlsFor(surface, person) : {},
         updatedAt: surface.updatedAt,
     };

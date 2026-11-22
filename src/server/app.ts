@@ -116,6 +116,7 @@ import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
 import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
+import { setComponentSource } from "./surfaces/components.ts";
 import {
     fromRelay,
     prepareRelay,
@@ -518,6 +519,7 @@ export class PocketApp {
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
+    #unsetComponents: (() => void) | undefined;
     #unsubscribeRunEnds: (() => void) | undefined;
     #unsubscribeApprovals: (() => void) | undefined;
     #unsubscribeBrowsers: (() => void) | undefined;
@@ -685,6 +687,7 @@ export class PocketApp {
             links: this.publicLinks,
             settings: (module) => this.config.extensionSettings(module),
         });
+        this.#unsetComponents = setComponentSource(() => this.webs.surfaceComponents());
         this.secrets = new CoreSecrets({
             hidden: this.hidden,
             config: this.config,
@@ -4339,6 +4342,7 @@ export class PocketApp {
             this.spend.close();
             this.limits.close();
             this.background.close();
+            this.#unsetComponents?.();
             this.#unsubscribeCommits?.();
             this.#unsubscribeRunEnds?.();
             this.#unsubscribeApprovals?.();

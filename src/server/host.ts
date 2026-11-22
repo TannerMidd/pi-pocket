@@ -32,6 +32,7 @@ import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 import type { ApprovalTransition, PendingApprovalsApi } from "./pending-approvals.ts";
+import type { SurfaceComponentSpec } from "./surfaces/components.ts";
 import type { SurfacesRelayApi } from "./surfaces/relay.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
@@ -949,6 +950,12 @@ export interface ExtensionWeb {
      * An optional `userPrefix` matches only a user message nobody wrote.
      */
     presentEntry(spec: PresentEntry): void;
+    /**
+     * A component for surfaces (Pi's cards, `ui`): a type `x.<module>.<Name>` with a pi-schema for its props, an
+     * optional schema for the one value it binds, and a `text` function for the plain forms. Its browser half is
+     * `pocket.surfaceComponent`. It goes when the module goes.
+     */
+    surfaceComponent(spec: SurfaceComponentSpec): void;
     /**
      * Draw the module's public pages: what anyone with one of its links (`web.links`) sees, with no sign-in, at
      * `/l/<token>`. GET shows the page; a form on it posts back to the same address. One handler for each module.

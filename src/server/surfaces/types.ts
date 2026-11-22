@@ -56,6 +56,8 @@ export type Surface = {
     last?: { name: string; by: string; at: number };
     /** Set when the status leaves `open`: the text the transcript, an export, and a fork show. */
     final?: { text: string; values?: JsonValue };
+    /** The id A2UI messages call this surface by (`a2ui.ts`), when it came from them. */
+    a2ui?: string;
     relay?: {
         connector: string;
         channel: string;

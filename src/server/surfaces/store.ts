@@ -61,6 +61,7 @@ export type NewSurface = {
     callId: string;
     now: number;
     parts: Parts;
+    a2ui?: string;
 };
 
 /** Add a surface to the draft; the checks have run. */
@@ -91,6 +92,7 @@ export function addSurface(state: SurfacesState, input: NewSurface): Surface {
         components: input.parts.components,
         data: input.parts.data,
         ...(input.parts.computed === undefined ? {} : { computed: input.parts.computed }),
+        ...(input.a2ui === undefined ? {} : { a2ui: input.a2ui }),
     };
 
     state.items[surface.id] = surface;

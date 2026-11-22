@@ -46,6 +46,7 @@ import {
     settingValue,
 } from "./extension-settings.ts";
 import type { PublicLinks } from "./public-links.ts";
+import { checkComponentSpec, type RegisteredComponent } from "./surfaces/components.ts";
 
 /**
  * The version of the extension API: the server's `web` and the app's `pocket`. It goes up only when something modules
@@ -244,6 +245,8 @@ export class WebPart {
     readonly commands: RegisteredCommand[] = [];
     /** How this module's own inputs show (`web.presentEntry`). Gone when this version goes. */
     readonly presentations: RegisteredPresentation[] = [];
+    /** The surface components it added (`web.surfaceComponent`). Gone when this version goes. */
+    readonly surfaceComponents: RegisteredComponent[] = [];
     /** The tools the module installed with this version: its browser module may describe only their calls. */
     tools: readonly string[] = [];
     readonly disposers: (() => void)[] = [];
@@ -273,7 +276,8 @@ export class WebPart {
             this.service === undefined &&
             this.settings === undefined &&
             this.commands.length === 0 &&
-            this.presentations.length === 0
+            this.presentations.length === 0 &&
+            this.surfaceComponents.length === 0
         );
     }
 }
@@ -428,6 +432,23 @@ export class ExtensionWebs {
 
                 this.#presentationClash(part, registered);
                 part.presentations.push(registered);
+            },
+            surfaceComponent: (spec) => {
+                open("surfaceComponent");
+
+                const registered = checkComponentSpec(part.module, spec);
+
+                if (part.surfaceComponents.some((each) => each.type === registered.type)) {
+                    throw new Error(`web.surfaceComponent: ${registered.type} is registered twice`);
+                }
+
+                if (part.surfaceComponents.length >= 20) {
+                    throw new Error(
+                        "web.surfaceComponent: a module registers 20 components at most",
+                    );
+                }
+
+                part.surfaceComponents.push(registered);
             },
             publicPage: (handle) => {
                 open("publicPage");
@@ -784,6 +805,19 @@ export class ExtensionWebs {
     }
 
     /** How every module that is on shows its own inputs. Empty when none do. */
+    /** The surface components of the modules that are on, by type (`surfaces/components.ts` reads them). */
+    surfaceComponents(): ReadonlyMap<string, RegisteredComponent> {
+        const found = new Map<string, RegisteredComponent>();
+
+        for (const part of this.#parts.values()) {
+            for (const each of part.surfaceComponents) {
+                found.set(each.type, each);
+            }
+        }
+
+        return found;
+    }
+
     presentations(): EntryPresentations {
         if (this.#presentations === undefined) {
             const compiled = compilePresentations(this.#parts.values());

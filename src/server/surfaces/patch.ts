@@ -263,7 +263,10 @@ export function applyOps(parts: Parts, ops: unknown): Patched {
         }
     }
 
-    checkSurface(state);
+    checkSurface(
+        state,
+        new Set(Object.values(parts.components).map((component) => component.type)),
+    );
 
     return { parts: state, layout };
 }

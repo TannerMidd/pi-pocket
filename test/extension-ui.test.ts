@@ -78,6 +78,7 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     sessionSearch: true,
     composerKey: true,
     fence: true,
+    surfaceComponent: true,
     mathInline: true,
     onConversation: true,
     messages: true,

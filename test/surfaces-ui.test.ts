@@ -14,7 +14,7 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -102,6 +102,20 @@ const route: Parameters<typeof scriptedModel>[0] = (request) => {
         return fauxAssistantMessage([fauxText("Deleted what you chose.")]);
     }
 
+    if (text.includes("show the rating")) {
+        return fauxAssistantMessage(
+            [
+                fauxToolCall("ui", {
+                    action: "show",
+                    title: "Rate it",
+                    data: { rating: 1 },
+                    components: [{ type: "x.stars.Rating", label: "Quality", bind: "/rating" }],
+                } as never),
+            ],
+            { stopReason: "toolUse" },
+        );
+    }
+
     return text.includes("show the cleanup")
         ? fauxAssistantMessage([fauxToolCall("ui", card as never)], { stopReason: "toolUse" })
         : fauxAssistantMessage([fauxText(`echo: ${text}`)]);
@@ -113,7 +127,11 @@ let base = "";
 let session: ConversationId;
 const browsers: Browsers[] = [];
 
-async function tab(path: string, width = 1100): Promise<BrowserPage> {
+async function tab(
+    path: string,
+    width = 1100,
+    token = app.config.ownerToken,
+): Promise<BrowserPage> {
     const set = new Browsers({
         dataDir: mkdtempSync(join(root, "surfaces-ui-")),
         load: async () => undefined,
@@ -124,7 +142,7 @@ async function tab(path: string, width = 1100): Promise<BrowserPage> {
     const page = await set.open(1);
 
     await page.setViewport({ width, height: 800, scale: 1, mobile: false });
-    await page.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+    await page.navigate(`${base}/login?token=${encodeURIComponent(token)}`);
     await page.navigate(`${base}${path}`);
 
     return page;
@@ -162,7 +180,35 @@ before(async () => {
         return;
     }
 
+    mkdirSync(join(root, "data", "extensions"), { recursive: true });
+    writeFileSync(
+        join(root, "data", "extensions", "stars.ts"),
+        `/** Stars: a rating component for surfaces. */
+import { int, obj, opt, str } from "@earendil-works/pi-schema";
+export default (_host, web) => {
+    web.client("stars.js");
+    web.surfaceComponent({
+        type: "x.stars.Rating",
+        props: obj({ label: str({ maxLength: 40 }) }),
+        bind: int({ minimum: 0, maximum: 5 }),
+        text: (props, data) => props.label + ": " + String(data.rating ?? 0) + " of 5",
+    });
+};
+`,
+    );
+    writeFileSync(
+        join(root, "data", "extensions", "stars.js"),
+        `export const pocketApi = 1;
+export default function (pocket) {
+    pocket.surfaceComponent({
+        type: "x.stars.Rating",
+        render: ({ props, value, set, disabled }) => pocket.html\`<div class="stars">\${props.label}\${[1, 2, 3].map((n) => pocket.html\`<button class="star" disabled=\${disabled} onClick=\${() => set(n)}>\${n <= (value ?? 0) ? "★" : "☆"}</button>\`)}</div>\`,
+    });
+}
+`,
+    );
     app = await openApp(scriptedModel(route));
+    await app.setExtensionEnabled(owner(app), "stars.ts", true);
     session = await newSession(app);
     await loadTools(app, session, "ui");
     server = createServer(
@@ -268,3 +314,39 @@ test("a fork shows the card as read-only text", real, async () => {
         0,
     );
 });
+
+test(
+    "an extension's component is drawn by its browser module, and shows its text without it",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await loadTools(app, id, "ui");
+        const invited = app.config.addUser("Ines", "guest", [String(id)]);
+        const owners = await tab(`/s/${id}`);
+
+        await app.commands.submit(id, owner(app), { text: "show the rating", requestId: "ui-2" });
+        await waitFor(owners, ".surf .stars .star", undefined, "the stars");
+        assert.match(await text(owners, ".surf .stars"), /Quality★☆☆/);
+        await owners.evaluate(`document.querySelectorAll(".surf .star")[2].click(); return "null"`);
+        await waitFor(owners, ".surf .stars", /Quality★★★/, "the rating set to 3");
+        assert.equal(
+            Object.values((await app.harness.snapshot(SurfacesDoc, id, context))!.items)[0]!.data
+                .rating,
+            3,
+        );
+
+        // A person invited to one session loads no extension browser module: the card shows the module's text.
+        const theirs = await tab(`/s/${id}`, 390, invited.token);
+
+        await waitFor(theirs, ".surf .surf-text", /Quality: 3 of 5/, "the text of the component");
+        assert.equal(
+            JSON.parse(
+                await theirs.evaluate(
+                    `return JSON.stringify(document.querySelectorAll(".surf .star").length)`,
+                ),
+            ),
+            0,
+        );
+    },
+);

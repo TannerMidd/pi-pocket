@@ -6,6 +6,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { checkExpr, isExpr, pointer } from "../../../web/surfaces-expr.js";
+import { extensionComponent, propsOf } from "./components.ts";
 import { type Component, type JsonObject, LIMITS, type Surface, WHO, type Who } from "./types.ts";
 
 /** A problem in what Pi sent: its message goes back to Pi as it is, so it says where and what to change. */
@@ -360,13 +361,53 @@ function checkColumns(value: unknown, where: string): void {
     }
 }
 
+/**
+ * A component an extension added (`web.surfaceComponent`): its props against the module's schema, its binding against
+ * the schema it gave. One that a stored surface already used (`known`) stays valid while its module is off: the code
+ * never drops a type that stored surfaces use, and the card shows its text.
+ */
+function checkExtension(where: string, component: Component, known: ReadonlySet<string>): void {
+    const registered = extensionComponent(component.type);
+
+    if (registered === undefined) {
+        if (known.has(component.type) && component.type.startsWith("x.")) {
+            return;
+        }
+
+        return fail(
+            where,
+            `has an unknown type. The types are ${TYPES.join(", ")}${component.type.startsWith("x.") ? "; the module for this one is not on" : ""}`,
+        );
+    }
+
+    if (component.bind !== undefined) {
+        if (registered.bind === undefined) {
+            fail(where, "binds nothing: it has no bind");
+        }
+
+        dataPath(component.bind, `${where}.bind`);
+    }
+
+    if (component.who !== undefined) {
+        checkWho(component.who, `${where}.who`);
+    }
+
+    const result = registered.props.validate(propsOf(component));
+
+    if (!result.ok) {
+        const first = result.errors[0];
+
+        fail(where, `props do not fit: ${first?.message ?? "invalid"}`);
+    }
+}
+
 /** Checks one component's props (not its children's ids): types, limits, and that no prop is unknown. */
-function checkComponent(id: string, component: Component): void {
+function checkComponent(id: string, component: Component, known: ReadonlySet<string>): void {
     const where = `component ${id} (${component.type})`;
     const allowed = PROPS[component.type];
 
     if (allowed === undefined) {
-        return fail(where, `has an unknown type. The types are ${TYPES.join(", ")}`);
+        return checkExtension(where, component, known);
     }
 
     for (const key of Object.keys(component)) {
@@ -712,7 +753,7 @@ export function flatten(
 }
 
 /** The whole surface, checked as it is stored: the tree, every component, the data, the expressions, the size. */
-export function checkSurface(parts: Parts): void {
+export function checkSurface(parts: Parts, known: ReadonlySet<string> = new Set()): void {
     const { root, components, data, computed } = parts;
     const ids = Object.keys(components);
 
@@ -733,7 +774,7 @@ export function checkSurface(parts: Parts): void {
 
         const component = components[id]!;
 
-        checkComponent(id, component);
+        checkComponent(id, component, known);
 
         if (component.type === "Button") {
             actions += 1;

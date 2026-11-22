@@ -5,6 +5,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { bytes, evaluate, evaluateComputed, readPath, textOf } from "../../../web/surfaces-expr.js";
+import { componentText, extensionComponent, propsOf } from "./components.ts";
 import { type Component, type Surface, type Target } from "./types.ts";
 import { childrenOf, isObject, optionValues } from "./validate.ts";
 
@@ -212,8 +213,15 @@ export function render(
             }
 
             default: {
-                // A type this code does not know (a later version's, or an extension's): its text, if it has any.
-                return [textOf(component.text ?? component.label ?? component.type)];
+                // An extension's component gives its own text; a type this code does not know (a later version's, or an
+                // extension's whose module is off) shows what text it has.
+                const registered = extensionComponent(component.type);
+                const own =
+                    registered === undefined
+                        ? undefined
+                        : componentText(registered, propsOf(component), surface.data);
+
+                return [own ?? textOf(component.text ?? component.label ?? component.type)];
             }
         }
     };

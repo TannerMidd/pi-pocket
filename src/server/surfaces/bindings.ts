@@ -6,6 +6,7 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import { pointer, readPath } from "../../../web/surfaces-expr.js";
 import { type Component, LIMITS, type Surface, type Who } from "./types.ts";
+import { extensionComponent } from "./components.ts";
 import { isObject, optionValues } from "./validate.ts";
 
 /** A person's problem with what they sent: the route answers it as 400. */
@@ -82,6 +83,25 @@ export function bindingFor(surface: Surface, path: string): Binding | undefined 
     }
 
     for (const [id, component] of Object.entries(surface.components)) {
+        if (component.type.startsWith("x.") && component.bind === path) {
+            const bound = extensionComponent(component.type)?.bind;
+
+            if (bound !== undefined) {
+                return {
+                    control: id,
+                    check: (value) => {
+                        const result = bound.validate(value);
+
+                        if (!result.ok) {
+                            throw new InputError("That value does not fit this control");
+                        }
+
+                        return JSON.parse(JSON.stringify(result.value)) as JsonValue;
+                    },
+                };
+            }
+        }
+
         if (component.type === "TextField" && component.bind === path) {
             return { control: id, check: (value) => text(component, value) };
         }
@@ -184,7 +204,8 @@ export function controlsFor(
             component.type === "TextField" ||
             component.type === "CheckBox" ||
             component.type === "ChoicePicker" ||
-            component.type === "Table"
+            component.type === "Table" ||
+            (component.type.startsWith("x.") && typeof component.bind === "string")
         ) {
             out[id] = mayAct(person, whoOf(surface, id), surface.by);
         }

@@ -590,6 +590,16 @@ Since 0.28.0 · Experimental
 
 Registers a component for one or more fenced-code languages. The app renders it with exactly `{ source, lang, streaming }`: the code text, the language label from the fence, and whether the Markdown is still streaming. The component uses the app's Preact and can use the Preact functions in `pocket`. Language matching ignores case. When registrations match the same language, the first one in server module order, then registration order, wins. See [`FenceSpec`](#fencespec), [`FenceProps`](#fenceprops), and [`Added`](#added).
 
+### `surfaceComponent`
+
+```ts
+surfaceComponent(spec: SurfaceRenderSpec): Added<SurfaceRenderSpec>;
+```
+
+Since 0.31.0 · Experimental
+
+Draws a surface component that the module registered on the server with [`web.surfaceComponent`](web.md#surfacecomponent). The app renders it with `{ props, value, set, act, disabled }` ([`SurfaceRenderProps`](#surfacerenderprops)), in a Preact component of the module's own. The renderer is the owner's installed code, never the card's. A surface component in a browser without this module shows its text. See [`SurfaceRenderSpec`](#surfacerenderspec) and [`Added`](#added).
+
 ### `mathInline`
 
 ```ts
@@ -1289,6 +1299,35 @@ type SheetProps<P extends object = object> = P & PageProps;
 Since 0.14.0 · Stable
 
 What a sheet's component gets: the fields of the `props` that `openSheet` gave, and `pocket` and `close`.
+
+### `SurfaceRenderSpec`
+
+```ts
+interface SurfaceRenderSpec {
+    type: string;
+    render: ComponentType<SurfaceRenderProps>;
+}
+```
+
+Since 0.31.0 · Experimental
+
+The type the server registered, and the Preact component the app renders for each component of it.
+
+### `SurfaceRenderProps`
+
+```ts
+interface SurfaceRenderProps {
+    props: Record<string, unknown>;
+    value: unknown;
+    set(next: unknown): void;
+    act(button: string): void;
+    disabled: boolean;
+}
+```
+
+Since 0.31.0 · Experimental
+
+What the renderer gets. `props` are the component's props, with expressions worked out. `value` is the data at its `bind` path, and `set` changes it for everyone, after the server checks it against `bind`. `act` presses a Button of the card by its id: a component makes no new kinds of action. `disabled` is true when the card ended or this person may not use it.
 
 ### `FenceSpec`
 

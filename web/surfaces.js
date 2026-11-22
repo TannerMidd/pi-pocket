@@ -21,6 +21,7 @@ import {
     toggled,
     withPending,
 } from "./surfaces-model.js";
+import { onSurfaceComponents, surfaceComponentOf } from "./surface-registry.js";
 import { html } from "./ui.js";
 
 /** How long a short error line stays in the card. */
@@ -306,12 +307,48 @@ function Piece({ id, component, ctx, depth }) {
         }
 
         default: {
-            // A type this code does not know (a later version's, or an extension's): its text, as the server's text form does.
-            return html`<p class="surf-text surf-body">
-                ${textOf(value(component.text ?? component.label ?? component.type))}
-            </p>`;
+            // An extension's component, drawn by its own browser module; any other type this code does not know (a
+            // later version's) shows as text.
+            return html`<${ExtensionView} id=${id} component=${component} ctx=${ctx} />`;
         }
     }
+}
+
+/**
+ * A component an extension registered (`web.surfaceComponent`, `pocket.surfaceComponent`). Its renderer is the owner's
+ * installed code, never the card's: it gets the props (expressions worked out), the value of its one binding and a
+ * way to set it, a way to press one of the card's own buttons, and whether it is off. Without the module in this
+ * browser (it is off, or this person is a guest in one session), the text the server worked out shows instead.
+ */
+function ExtensionView({ id, component, ctx }) {
+    const [, redraw] = useState(0);
+
+    useEffect(() => onSurfaceComponents(() => redraw((count) => count + 1)), []);
+
+    const spec = component.type.startsWith("x.") ? surfaceComponentOf(component.type) : undefined;
+
+    if (spec === undefined) {
+        const text =
+            ctx.surface.fallbacks?.[id] ??
+            textOf(evaluate(component.text ?? component.label ?? component.type, ctx.scope));
+
+        return html`<p class="surf-text surf-body">${text}</p>`;
+    }
+
+    const { type: _type, bind, who: _who, ...rest } = component;
+    const props = Object.fromEntries(
+        Object.entries(rest).map(([name, each]) => [name, evaluate(each, ctx.scope)]),
+    );
+    const { off } = stateOf(ctx, id, typeof bind === "string" ? bind : id);
+
+    return html`<${spec.render}
+        props=${props}
+        value=${typeof bind === "string" ? readPath(bind, ctx.scope) : undefined}
+        set=${(next) => (typeof bind === "string" && !off ? ctx.setValue(bind, next) : undefined)}
+        act=${(button) =>
+            ctx.surface.components?.[button]?.type === "Button" ? ctx.press(button) : undefined}
+        disabled=${off}
+    />`;
 }
 
 function ImageView({ component }) {
