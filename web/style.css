@@ -22078,8 +22078,10 @@ pre.gallery-code {
     flex-direction: column;
 }
 
+/* A row wraps by default: three buttons on a phone go to the next line, never break inside a word. */
 .surf-row {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
 }
 
@@ -22088,8 +22090,8 @@ pre.gallery-code {
     min-width: 0;
 }
 
-.surf-wrap {
-    flex-wrap: wrap;
+.surf-nowrap {
+    flex-wrap: nowrap;
 }
 
 .surf-gap-s {
@@ -22215,6 +22217,29 @@ pre.gallery-code {
     cursor: default;
 }
 
+.surf-btn[aria-busy="true"] {
+    opacity: 0.7;
+}
+
+/* A button with the reason it is off under it. */
+.surf-btn-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Words for screen readers only. */
+.surf-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 @media (hover: hover) {
     .surf-btn:not(:disabled):hover {
         border-color: var(--accent-line);
@@ -22335,10 +22360,11 @@ textarea.surf-input {
     cursor: default;
 }
 
-/* A table: a real table from 700px up, stacked rows with the column's label before each value on a phone. */
+/* A table: a real table when its card has room (a container query, not the window's width), stacked rows with the column's label before each value when not. */
 .surf-table-wrap {
     min-width: 0;
     max-width: 100%;
+    container-type: inline-size;
 }
 
 .surf-table {
@@ -22385,7 +22411,7 @@ textarea.surf-input {
     accent-color: var(--accent);
 }
 
-@media (max-width: 699px) {
+@container (max-width: 31rem) {
     .surf-table,
     .surf-table tbody,
     .surf-table tr,

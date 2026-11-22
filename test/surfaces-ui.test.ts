@@ -95,6 +95,115 @@ const card = {
     ],
 };
 
+const noteCard = {
+    action: "show",
+    title: "Note",
+    wait: { minutes: 120 },
+    data: { note: "old", marker: "v1" },
+    components: [
+        {
+            type: "Column",
+            children: [
+                { type: "Text", text: { "@path": "/marker" } },
+                { type: "TextField", label: "Note", bind: "/note" },
+                {
+                    type: "Button",
+                    id: "send",
+                    label: "Send",
+                    action: { event: { name: "send", context: { note: { "@path": "/note" } } } },
+                },
+            ],
+        },
+    ],
+};
+
+const controlsCard = {
+    action: "show",
+    title: "Controls",
+    wait: { minutes: 120 },
+    data: { size: "M", tags: ["a"], rating: 1 },
+    components: [
+        {
+            type: "Column",
+            children: [
+                { type: "ChoicePicker", label: "Size", bind: "/size", options: ["S", "M", "L"] },
+                {
+                    type: "ChoicePicker",
+                    label: "Tags",
+                    bind: "/tags",
+                    multiple: true,
+                    options: ["a", "b"],
+                },
+                { type: "x.stars.Rating", label: "Quality", bind: "/rating" },
+                {
+                    type: "Row",
+                    children: [
+                        {
+                            type: "Button",
+                            id: "plain",
+                            label: "Plain",
+                            action: { event: { name: "plain", resolves: false } },
+                        },
+                        {
+                            type: "Button",
+                            id: "gone",
+                            label: "Gone",
+                            action: {
+                                event: { name: "gone", confirm: "Really?", resolves: false },
+                            },
+                        },
+                        {
+                            type: "Button",
+                            id: "off",
+                            label: "Off",
+                            disabled: true,
+                            action: { event: { name: "off", resolves: false } },
+                        },
+                    ],
+                },
+            ],
+        },
+    ],
+};
+
+const layoutCard = {
+    action: "show",
+    title: "Layout",
+    data: {
+        rows: [
+            { name: "/tmp/a", size: 1, picked: false },
+            { name: "/tmp/b", size: 2, picked: true },
+        ],
+    },
+    components: [
+        {
+            type: "Column",
+            children: [
+                {
+                    type: "Row",
+                    children: ["Approve everything", "Request a review", "Discard all changes"].map(
+                        (label, at) => ({
+                            type: "Button",
+                            id: `b${at}`,
+                            label,
+                            action: { event: { name: `b${at}`, resolves: false } },
+                        }),
+                    ),
+                },
+                {
+                    type: "Table",
+                    rows: "/rows",
+                    select: "picked",
+                    columns: [
+                        { label: "Path", value: "name" },
+                        { label: "Size", value: "size" },
+                    ],
+                },
+            ],
+        },
+    ],
+};
+
 const route: Parameters<typeof scriptedModel>[0] = (request) => {
     const { role, text } = lastText(request as never);
 
@@ -114,6 +223,18 @@ const route: Parameters<typeof scriptedModel>[0] = (request) => {
             ],
             { stopReason: "toolUse" },
         );
+    }
+
+    for (const [words, card] of [
+        ["show the note", noteCard],
+        ["show the controls", controlsCard],
+        ["show the layout", layoutCard],
+    ] as const) {
+        if (text.includes(words)) {
+            return fauxAssistantMessage([fauxToolCall("ui", card as never)], {
+                stopReason: "toolUse",
+            });
+        }
     }
 
     return text.includes("show the cleanup")
@@ -146,6 +267,32 @@ async function tab(
     await page.navigate(`${base}${path}`);
 
     return page;
+}
+
+const count = async (page: BrowserPage, selector: string) =>
+    JSON.parse(
+        await page.evaluate(
+            `return JSON.stringify(document.querySelectorAll(${JSON.stringify(selector)}).length)`,
+        ),
+    ) as number;
+
+const run = async (page: BrowserPage, script: string) =>
+    JSON.parse(await page.evaluate(`return JSON.stringify(await (async () => { ${script} })())`));
+
+const surfaceOf = async (id: ConversationId) =>
+    Object.values((await app.harness.snapshot(SurfacesDoc, id, context))!.items)[0]!;
+
+async function shown(words: string, wanted: string, width = 1100) {
+    const id = await newSession(app);
+
+    await loadTools(app, id, "ui");
+    const page = await tab(`/s/${id}`, width);
+
+    await waitFor(page, ".composer textarea", undefined, "the message box");
+    await app.commands.submit(id, owner(app), { text: words, requestId: `ui-${id}` });
+    await waitFor(page, ".surf", undefined, `the card of "${wanted}"`);
+
+    return { id, page };
 }
 
 const text = async (page: BrowserPage, selector: string) =>
@@ -202,13 +349,37 @@ export default (_host, web) => {
 export default function (pocket) {
     pocket.surfaceComponent({
         type: "x.stars.Rating",
-        render: ({ props, value, set, disabled }) => pocket.html\`<div class="stars">\${props.label}\${[1, 2, 3].map((n) => pocket.html\`<button class="star" disabled=\${disabled} onClick=\${() => set(n)}>\${n <= (value ?? 0) ? "★" : "☆"}</button>\`)}</div>\`,
+        render: ({ props, value, set, act, disabled }) => pocket.html\`<div class="stars">\${props.label}\${[1, 2, 3].map((n) => pocket.html\`<button class="star" disabled=\${disabled} onClick=\${() => set(n)}>\${n <= (value ?? 0) ? "★" : "☆"}</button>\`)}</div><button class="act-gone" onClick=\${() => act("gone")}></button><button class="act-off" onClick=\${() => act("off")}></button>\`,
     });
+}
+`,
+    );
+    writeFileSync(
+        join(root, "data", "extensions", "rogue.ts"),
+        `/** Rogue: a browser module that draws another module's component. */
+export default (_host, web) => {
+    web.client("rogue.js");
+};
+`,
+    );
+    writeFileSync(
+        join(root, "data", "extensions", "rogue.js"),
+        `export const pocketApi = 1;
+export default function (pocket) {
+    try {
+        pocket.surfaceComponent({
+            type: "x.stars.Rating",
+            render: () => pocket.html\`<div class="rogue">EVIL</div>\`,
+        });
+    } catch (error) {
+        console.warn("rogue refused", error.message);
+    }
 }
 `,
     );
     app = await openApp(scriptedModel(route));
     await app.setExtensionEnabled(owner(app), "stars.ts", true);
+    await app.setExtensionEnabled(owner(app), "rogue.ts", true);
     session = await newSession(app);
     await loadTools(app, session, "ui");
     server = createServer(
@@ -328,6 +499,8 @@ test(
         await app.commands.submit(id, owner(app), { text: "show the rating", requestId: "ui-2" });
         await waitFor(owners, ".surf .stars .star", undefined, "the stars");
         assert.match(await text(owners, ".surf .stars"), /Quality★☆☆/);
+        // Another module's browser part cannot draw this module's type.
+        assert.equal(await count(owners, ".surf .rogue"), 0);
         await owners.evaluate(`document.querySelectorAll(".surf .star")[2].click(); return "null"`);
         await waitFor(owners, ".surf .stars", /Quality★★★/, "the rating set to 3");
         assert.equal(
@@ -347,6 +520,203 @@ test(
                 ),
             ),
             0,
+        );
+    },
+);
+
+const SEND = `[...document.querySelectorAll(".surf button")].find((b) => b.textContent.trim() === "Send")`;
+const TYPE = `const input = document.querySelector(".surf input[type=text]"); input.focus(); input.value = "typed now"; input.dispatchEvent(new Event("input", { bubbles: true }));`;
+
+test("a press sends the text typed just before it, in the same request", real, async () => {
+    const { id, page } = await shown("show the note", "Note");
+
+    await run(page, `${TYPE} ${SEND}.click(); return null;`);
+    await until(async () => (await surfaceOf(id)).status === "done", "the card done", SLOW);
+    assert.deepEqual((await surfaceOf(id)).final?.values, { note: "typed now" });
+});
+
+test(
+    "a field that lost focus and a press right after it still send the text first",
+    real,
+    async () => {
+        const { id, page } = await shown("show the note", "Note");
+
+        await run(page, `${TYPE} document.activeElement.blur(); ${SEND}.click(); return null;`);
+        await until(async () => (await surfaceOf(id)).status === "done", "the card done", SLOW);
+        assert.deepEqual((await surfaceOf(id)).final?.values, { note: "typed now" });
+    },
+);
+
+test(
+    "an edit carries the card's pv from when typing began, and a refused one is dropped once",
+    real,
+    async () => {
+        const { id, page } = await shown("show the note", "Note");
+
+        await run(page, `${TYPE} return null;`);
+        // Pi changes the card while the person types.
+        await app.harness.commit(async (tx) => {
+            const surface = Object.values((await tx.doc(SurfacesDoc, id)).items)[0]!;
+
+            surface.data.marker = "v2";
+            surface.rev += 1;
+            surface.pv += 1;
+        }, context);
+        await waitFor(page, ".surf .surf-text", /v2/, "Pi's change in the card");
+        await run(page, `document.activeElement.blur(); return null;`);
+        await waitFor(page, ".surf-error", /changed/i, "the refusal");
+
+        // The draft is gone: the field shows the stored text, and the blur does not send it again.
+        assert.equal(await run(page, `return document.querySelector(".surf input").value`), "old");
+        assert.equal((await surfaceOf(id)).data.note, "old");
+    },
+);
+
+test(
+    "controls stay enabled and focused while a press is on its way, and a confirm takes the focus",
+    real,
+    async () => {
+        const { id, page } = await shown("show the controls", "Controls");
+
+        await waitFor(page, ".surf .act-gone", undefined, "the extension's buttons");
+
+        // Pressing a plain button keeps the focus on it (it is never disabled for its own request).
+        await run(
+            page,
+            `const plain = [...document.querySelectorAll(".surf-btn")].find((b) => b.textContent.trim() === "Plain"); plain.focus(); plain.click(); return null;`,
+        );
+        await until(async () => (await surfaceOf(id)).last?.name === "plain", "the press", SLOW);
+        await until(
+            async () =>
+                await run(
+                    page,
+                    `return document.activeElement?.textContent.trim() === "Plain" && !document.activeElement.disabled`,
+                ),
+            "the focus on the button",
+            SLOW,
+        );
+
+        // An extension's act of a button asks the same question: it focuses "Yes", and Escape gives the focus back.
+        await run(page, `document.querySelector(".act-gone").click(); return null;`);
+        await waitFor(page, ".surf-confirm", /Really\?/, "the question");
+        await until(
+            async () =>
+                (await run(page, `return document.activeElement.textContent.trim()`)) === "Yes",
+            "the focus on Yes",
+            SLOW,
+        );
+        await run(
+            page,
+            `document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return null;`,
+        );
+        await until(
+            async () => (await count(page, ".surf-confirm")) === 0,
+            "the question gone",
+            SLOW,
+        );
+        await until(
+            async () =>
+                (await run(page, `return document.activeElement.textContent.trim()`)) === "Gone",
+            "the focus back on the button",
+            SLOW,
+        );
+
+        // A button that is off does nothing for an extension's act: no question and no request.
+        await run(page, `document.querySelector(".act-off").click(); return null;`);
+        await run(page, `document.querySelector(".act-gone").click(); return null;`);
+        await waitFor(page, ".surf-confirm", /Really\?/, "the question again");
+        assert.equal(await count(page, ".surf-error"), 0);
+        assert.equal((await surfaceOf(id)).last?.name, "plain");
+    },
+);
+
+test(
+    "the radio buttons move with the arrow keys, and the multiple choice is a labelled group",
+    real,
+    async () => {
+        const { id, page } = await shown("show the controls", "Controls");
+
+        assert.equal(await count(page, `.surf [role=group][aria-label="Tags"]`), 1);
+        assert.deepEqual(
+            await run(
+                page,
+                `return [...document.querySelectorAll(".surf [role=radio]")].map((b) => b.tabIndex)`,
+            ),
+            [-1, 0, -1],
+        );
+        await run(
+            page,
+            `const on = document.querySelector('.surf [role=radio][aria-checked=true]'); on.focus(); on.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); return null;`,
+        );
+        await until(async () => (await surfaceOf(id)).data.size === "L", "the choice moved", SLOW);
+        assert.equal(
+            await run(page, `return document.activeElement.textContent.trim()`),
+            "L",
+            "the focus follows",
+        );
+    },
+);
+
+test("a card that someone else may use says so in words under each control", real, async () => {
+    const { id } = await shown("show the controls", "Controls");
+    const guest = app.config.addUser("Ines", "guest", [String(id)]);
+    const theirs = await tab(`/s/${id}`, 390, guest.token);
+
+    await waitFor(theirs, ".surf-why", /Only the owner can use this/, "the reason");
+    // A picker, the multiple choice, and the three buttons: each has its own line.
+    assert.ok((await count(theirs, ".surf-why")) >= 5);
+});
+
+test(
+    "a row wraps on a phone without breaking a word, and a table stacks by its card's width",
+    real,
+    async () => {
+        const { page } = await shown("show the layout", "Layout", 390);
+        const wide = await shown("show the layout", "Layout", 1100);
+        const broken = `let broken = 0; for (const b of document.querySelectorAll(".surf-row .surf-btn")) { const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT); for (let node = walk.nextNode(); node; node = walk.nextNode()) { for (const word of node.data.matchAll(/\\S+/g)) { const range = document.createRange(); range.setStart(node, word.index); range.setEnd(node, word.index + word[0].length); if (range.getClientRects().length > 1) { broken++; } } } } return broken;`;
+
+        assert.equal(await run(page, `return document.documentElement.scrollWidth <= 390`), true);
+        assert.equal(await run(page, broken), 0);
+        assert.equal(
+            await run(
+                page,
+                `return getComputedStyle(document.querySelector(".surf-table td")).display`,
+            ),
+            "block",
+        );
+        assert.equal(
+            await run(
+                wide.page,
+                `return getComputedStyle(document.querySelector(".surf-table td")).display`,
+            ),
+            "table-cell",
+        );
+        // The select column has a name for screen readers.
+        assert.equal(await text(page, "th.surf-pick .surf-sr"), "Select");
+    },
+);
+
+test(
+    "a question closes when Pi changes the card under it, so Yes never confirms the new layout",
+    real,
+    async () => {
+        const { id, page } = await shown("show the controls", "Controls");
+
+        await run(
+            page,
+            `[...document.querySelectorAll(".surf-btn")].find((b) => b.textContent.trim() === "Gone").click(); return null;`,
+        );
+        await waitFor(page, ".surf-confirm", /Really\?/, "the question");
+        await app.harness.commit(async (tx) => {
+            const surface = Object.values((await tx.doc(SurfacesDoc, id)).items)[0]!;
+
+            surface.rev += 1;
+            surface.pv += 1;
+        }, context);
+        await until(
+            async () => (await count(page, ".surf-confirm")) === 0,
+            "the question closed",
+            SLOW,
         );
     },
 );

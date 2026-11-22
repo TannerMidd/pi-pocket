@@ -201,6 +201,10 @@ function byAction(name, args) {
         return { verb: "cancelled", noun: name === "schedule" ? "reminder" : "message", by: "id" };
     }
 
+    if (name === "ui" && (args.action ?? "show") === "show" && replacesCard({ args })) {
+        return { verb: "replaced", noun: "card", by: "id" };
+    }
+
     if (name === "ui" && args.action === "patch") {
         return { verb: "updated", noun: "card", by: "id" };
     }
@@ -312,15 +316,33 @@ export function summarize(steps, thinking) {
     return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
+/** A2UI messages that make a new card hold a `createSurface`; the others change a card that is already there. */
+const createsSurface = (block) =>
+    Array.isArray(block.args?.messages) &&
+    block.args.messages.some((message) => typeof message === "object" && message?.createSurface);
+
+/** Whether a `ui` call makes a new card: a show that does not replace one, or A2UI messages that create a surface. */
+const showsCard = (block) => {
+    const action = block.args?.action ?? "show";
+
+    return (
+        (action === "show" && !replacesCard(block)) || (action === "a2ui" && createsSurface(block))
+    );
+};
+
+const replacesCard = (block) => typeof block.args?.id === "string" && block.args.id !== "";
+
 /**
  * Whether a call shows its page as a card in the reply (`src/server/extensions/artifacts.ts`): `artifact` with
  * `inline: true`, or `artifact_inline`, the tool of that name before 0.28, whose calls are still in old sessions. A
- * `ui` call that shows a surface is one too (`surfaces.js`); its patch, wait, and close calls are steps.
+ * `ui` call that shows a surface is one too (`surfaces.js`); its patch, wait, and close calls are steps, and so is a
+ * show with an `id` and A2UI messages with no `createSurface`: they change the card of an earlier call, which stays
+ * where it is (its `callId` does not change).
  */
 export const isInlineCall = (block) =>
     block.name === "artifact_inline" ||
     (block.name === "artifact" && block.args?.inline === true) ||
-    (block.name === "ui" && (block.args?.action ?? "show") === "show");
+    (block.name === "ui" && showsCard(block));
 
 /** Words worth showing: a model can send an empty or blank text block between its calls. */
 export const says = (block) => block.type === "text" && block.text.trim() !== "";
