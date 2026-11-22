@@ -1613,8 +1613,24 @@ export class Pip {
             .join("\n");
 
         const part = answerPart(text.trim(), 0, id);
+        const outcome =
+            state === "finished" ? await this.#outcomeNote(id, last.id, text, last.stopReason) : "";
 
-        return `${name} ${state}. Pi's last answer:\n${fenced(part.text)}${part.note === undefined ? "" : `\n${part.note}`}`;
+        return `${name} ${state}. Pi's last answer:\n${fenced(part.text)}${part.note === undefined ? "" : `\n${part.note}`}${outcome}`;
+    }
+
+    async #outcomeNote(
+        id: ConversationId,
+        answerId: number,
+        text: string,
+        stopReason: string | undefined,
+    ): Promise<string> {
+        const label =
+            stopReason === "stop"
+                ? await this.#app.classifyRunOutcome(id, answerId, text)
+                : undefined;
+
+        return label === undefined ? "" : `\nReported outcome: ${label}.`;
     }
 
     /**
@@ -1723,20 +1739,26 @@ export class Pip {
         }
 
         const answerId = settled.answer;
-        let text = "";
+        let message: AssistantMessage | undefined;
 
         await runtime.commit(async (tx) => {
-            text = textOf(
-                (await tx.entry(AssistantEntry, answerId))?.model?.[0] as
-                    AssistantMessage | undefined,
-            );
+            message = (await tx.entry(AssistantEntry, answerId))?.model?.[0] as
+                AssistantMessage | undefined;
 
             return undefined;
         }, context);
 
-        const part = answerPart(text.trim(), 0, input.sessionId);
+        const answer = message as AssistantMessage | undefined;
+        const text = textOf(answer);
+        const part = answerPart(text, 0, input.sessionId);
+        const outcome = await this.#outcomeNote(
+            input.sessionId,
+            Number(answerId),
+            text,
+            answer?.stopReason,
+        );
 
-        return `${name} answered your message:\n${fenced(part.text || "(no text)")}${part.note === undefined ? "" : `\n${part.note}`}`;
+        return `${name} answered your message:\n${fenced(part.text || "(no text)")}${part.note === undefined ? "" : `\n${part.note}`}${outcome}`;
     }
 
     /** Mark this follow as reported in PiP's list, where it stays a while so a replayed call does not follow again. */

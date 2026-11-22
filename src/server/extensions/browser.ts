@@ -17,7 +17,8 @@ import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
 import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
 import { presetOf, viewportFrom } from "../browser/viewport.ts";
-import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest, withDeadline } from "../classify.ts";
+import { DEFAULT_CLASSIFY_MODEL, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
 
@@ -352,14 +353,15 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                             return undefined;
                         }
 
-                        const answers = await withDeadline(
-                            () =>
-                                host.classify({
-                                    model: model(),
-                                    state: { url: page.url, title: page.title },
-                                    images: [{ type: "image", data, mimeType: "image/jpeg" }],
-                                    questions: TRIAGE_QUESTIONS,
-                                }),
+                        const answers = await classifyFor(
+                            host.classify,
+                            "browser-screenshots",
+                            {
+                                model: model(),
+                                state: { url: page.url, title: page.title },
+                                images: [{ type: "image", data, mimeType: "image/jpeg" }],
+                                questions: TRIAGE_QUESTIONS,
+                            },
                             TRIAGE_TIMEOUT_MS,
                         );
                         const answer = answers?.shot;
