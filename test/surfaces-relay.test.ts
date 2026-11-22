@@ -188,7 +188,8 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
         sent.text,
         /^Ship it\? \(s1\)\. Reply with numbers:\n1 \[ \] Agree\n2 \[ \] Public\n3 Note: \(empty\)\n4 Go\nReply "1" to toggle Agree, "4" to press Go, "3: your text" to fill Note\.$/,
     );
-    assert.equal((await surface())!.relay?.msgId, "m1");
+    // The message id is stored once the send returns, a moment after the chat has the text.
+    await until(async () => (await surface())!.relay?.msgId === "m1", "the card's message id");
 
     const before = (await userTexts()).length;
 
