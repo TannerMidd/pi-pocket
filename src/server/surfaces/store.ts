@@ -28,6 +28,18 @@ export function findByCall(
     );
 }
 
+const MAX_CALLS = 20;
+
+/** The revision a call made when it changed this card, or none: a call that runs again must not change it twice. */
+export function callDone(surface: Surface, key: string): number | undefined {
+    return surface.calls?.find((each) => each.key === key)?.rev;
+}
+
+/** Record that a call changed the card (bounded: a call that ran again does so soon after the first). */
+export function rememberCall(surface: Surface, key: string, rev: number): void {
+    surface.calls = [...(surface.calls ?? []), { key, rev }].slice(-MAX_CALLS);
+}
+
 /** Surface ids by their number, oldest first. */
 function ordered(state: SurfacesState): Surface[] {
     return Object.values(state.items).sort((a, b) => a.createdAt - b.createdAt);
@@ -38,11 +50,14 @@ function makeRoom(state: SurfacesState): void {
     const all = ordered(state);
 
     if (all.length >= LIMITS.surfaces) {
-        const gone = all.find((surface) => surface.status !== "open");
+        // A card with an action not yet delivered stays: its answer would be lost with it.
+        const gone = all.find(
+            (surface) => surface.status !== "open" && (surface.pending?.length ?? 0) === 0,
+        );
 
         if (gone === undefined) {
             throw new SurfaceError(
-                `This conversation holds ${LIMITS.surfaces} open surfaces: close one first`,
+                `This conversation holds ${LIMITS.surfaces} surfaces that are open or have an answer not yet delivered: close one first`,
             );
         }
 

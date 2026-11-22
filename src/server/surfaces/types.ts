@@ -58,6 +58,10 @@ export type Surface = {
     fallbacks?: Record<string, string>;
     /** Actions waiting to reach the session as a message: written with the action, cleared when delivered. */
     pending?: PendingDelivery[];
+    /** The `ui` calls that changed this card (`<task>/<call>`, newest last) and the revision each made: a call that runs again after a restart returns its first result. */
+    calls?: { key: string; rev: number }[];
+    /** The chat messages (relay event ids, newest last) whose action this card took, with its result: a message tried again returns it. */
+    seen?: { key: string; result: ActResult }[];
     /** The latest action delivered. */
     last?: { name: string; by: string; at: number };
     /** Set when the status leaves `open`: the text the transcript, an export, and a fork show. */
@@ -87,6 +91,15 @@ export type PendingDelivery = {
 };
 
 export type SurfacesState = { seq: number; items: Record<string, Surface> };
+
+/** What the `act` route answers (`act.ts`). */
+export type ActResult = {
+    ok: true;
+    status: SurfaceStatus;
+    rev: number;
+    /** `woke`: a waiting call took it; `message`: it went to the session; `none`: only values were set. */
+    delivered: "woke" | "message" | "none";
+};
 
 /** What an action delivers to the parked tool, and what the session reads. */
 export type Acted = {

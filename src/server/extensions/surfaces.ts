@@ -11,9 +11,11 @@ import { SurfaceActed } from "../surfaces/signal.ts";
 import {
     actedResult,
     addSurface,
+    callDone,
     detailsOf,
     endSurface,
     findByCall,
+    rememberCall,
     replaceParts,
     startWait,
 } from "../surfaces/store.ts";
@@ -170,6 +172,7 @@ export default function createSurfaces(host: PocketHost) {
 
             const cid = api.conversationId;
             const taskId = String(api.taskId);
+            const callKey = `${taskId}/${api.callId}`;
             const read = async (): Promise<SurfacesState> =>
                 (await api.snapshot(SurfacesDoc, cid, context)) ?? { seq: 0, items: {} };
             const park = (wait: Park) => ({
@@ -344,6 +347,11 @@ export default function createSurfaces(host: PocketHost) {
                                 throw new SurfaceError(`No surface ${args.id} to replace`);
                             }
 
+                            // A call that runs again after a restart has done this already.
+                            if (callDone(existing, callKey) !== undefined) {
+                                return JSON.parse(JSON.stringify(existing)) as Surface;
+                            }
+
                             if (existing.status !== "open") {
                                 throw new SurfaceError(
                                     `Surface ${args.id} has ended: show a new one`,
@@ -357,13 +365,10 @@ export default function createSurfaces(host: PocketHost) {
                                 throw new SurfaceError(REPLACED);
                             }
 
+                            // The card stays with the call that made it: the transcript draws it there, and an update is a step.
                             replaceParts(existing, parts!, now);
                             existing.title = title;
-
-                            if (!keepWait) {
-                                existing.taskId = taskId;
-                                existing.callId = api.callId;
-                            }
+                            rememberCall(existing, callKey, existing.rev);
                         }
 
                         const made =
@@ -417,6 +422,16 @@ export default function createSurfaces(host: PocketHost) {
                 }
 
                 if (args.action === "patch") {
+                    const done = callDone(current, callKey);
+
+                    // This call patched the card before a restart cut it off: its first result stands.
+                    if (done !== undefined) {
+                        return {
+                            output: text(`Surface ${id} patched (revision ${done}).`),
+                            details: detailsOf(current),
+                        };
+                    }
+
                     if (current.status !== "open") {
                         throw new SurfaceError(
                             `Surface ${id} has ended (${current.status}): show a new one`,
@@ -467,6 +482,7 @@ export default function createSurfaces(host: PocketHost) {
                         }
 
                         surface.updatedAt = api.now();
+                        rememberCall(surface, callKey, surface.rev);
 
                         return JSON.parse(JSON.stringify(surface)) as Surface;
                     }, context);
@@ -494,10 +510,19 @@ export default function createSurfaces(host: PocketHost) {
                     const minutes = minutesOf(undefined, args.minutes ?? DEFAULT_MINUTES);
                     const wait = await api.commit(async (tx) => {
                         const doc = await tx.doc(SurfacesDoc, cid);
-                        const surface = doc.items[id]!;
+                        const surface = doc.items[id];
+
+                        // Checked again here: the read above may be older than the card.
+                        if (surface === undefined || surface.status !== "open") {
+                            throw new SurfaceError(`Surface ${id} has ended: show a new one`);
+                        }
 
                         if (surface.wait?.taskId === taskId) {
                             return surface.wait;
+                        }
+
+                        if (surface.wait !== undefined) {
+                            throw new SurfaceError(REPLACED);
                         }
 
                         const now = api.now();
