@@ -187,6 +187,34 @@ export function relayErrorOf(error: unknown): { retryAfter?: number; fatal: bool
 }
 
 /**
+ * One reply an outbound hook screens, before it leaves: the connector it goes through, where, and the text as it
+ * will be sent. Never a secret of the connector's fields.
+ */
+export interface RelayOutboundEvent {
+    /** The connector's name and kind, as the reply's tool names them. */
+    connector: string;
+    kind: string;
+    /** Where it goes (the event's channel), when the reply answers one. */
+    channel?: string;
+    /** The reply's text, as it will be sent. */
+    text: string;
+    /** Files it sends, by name only: never their content. */
+    files: readonly { name: string }[];
+}
+
+/** What an outbound hook says about one reply about to leave: send it, or hold it back. */
+export type RelayOutboundVerdict = "send" | "block";
+
+/**
+ * Screens one reply before it leaves, the path the `relay_reply` tool takes. `"send"` sends it as it is; `"block"`
+ * holds it back, with one line in the server's log and an error to the tool's caller, so the agent knows its reply was
+ * held and nothing went out. Failures and timeouts send as if no hook was set: the relay caps one call at ten seconds.
+ */
+export type RelayOutbound = (
+    event: RelayOutboundEvent,
+) => Promise<RelayOutboundVerdict> | RelayOutboundVerdict;
+
+/**
  * One delivery a triage hook screens, before it reaches the session: the connector it came through, who wrote it,
  * and the message as it will go. Never a secret of the connector's fields.
  */
@@ -216,9 +244,9 @@ export type RelayTriage = (
     event: RelayTriageEvent,
 ) => Promise<RelayTriageVerdict> | RelayTriageVerdict;
 
-/** The service `pocket-relay` offers to modules through `web.provide` (api 2). */
+/** The service `pocket-relay` offers to modules through `web.provide` (api 3). */
 export interface RelayService {
-    /** The service's version: 2 adds `triage`. */
+    /** The service's version: 3 adds `outbound` to 2's `triage`. */
     api: number;
     /** Add a kind of connector. The return removes it again. */
     register: (connector: RelayConnector) => () => void;
@@ -227,4 +255,9 @@ export interface RelayService {
      * return unsets it, and the hook goes with the relay when its module reloads.
      */
     triage: (hook: RelayTriage) => () => void;
+    /**
+     * Set the hook that screens each reply before it leaves, the path the `relay_reply` tool takes (api 3). The last
+     * set wins; the return unsets it, and the hook goes with the relay when its module reloads.
+     */
+    outbound: (hook: RelayOutbound) => () => void;
 }

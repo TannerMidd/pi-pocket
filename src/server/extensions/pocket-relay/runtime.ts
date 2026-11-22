@@ -16,6 +16,7 @@ import {
     type RelayField,
     type RelayFile,
     type RelayOutFile,
+    type RelayOutbound,
     type RelayTriage,
     type RelayTriageVerdict,
     type RelayValues,
@@ -565,6 +566,8 @@ export class Relay {
     readonly #replying = new Map<string, Promise<string>>();
     /** The triage hook a module set, or none: deliveries from untrusted senders pass it first. */
     #triage?: RelayTriage;
+    /** The outbound hook a module set, or none: every reply passes it before it leaves. */
+    #outbound?: RelayOutbound;
     /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
     readonly #ended: Promise<void>;
     #end: () => void = () => {};
@@ -620,6 +623,21 @@ export class Relay {
         return () => {
             if (this.#triage === hook) {
                 this.#triage = undefined;
+            }
+        };
+    }
+
+    /**
+     * Set the hook that screens each reply before it leaves, the path the `relay_reply` tool takes. The last set
+     * wins; the return unsets it. One call gets `TRIAGE_CAP_MS` at most: past it, or when it fails, the reply goes
+     * on as if no hook was set.
+     */
+    setOutbound(hook: RelayOutbound): () => void {
+        this.#outbound = hook;
+
+        return () => {
+            if (this.#outbound === hook) {
+                this.#outbound = undefined;
             }
         };
     }
@@ -1091,6 +1109,37 @@ export class Relay {
         }
     }
 
+    /**
+     * One reply through the outbound hook, with a triage call's cap: a hook that fails or runs long sends, so a
+     * screen never holds a send back on its own account.
+     */
+    async #screenOutbound(
+        config: ConnectorConfig,
+        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        channel: string | undefined,
+    ): Promise<"send" | "block"> {
+        let timer: NodeJS.Timeout | undefined;
+
+        try {
+            return await Promise.race([
+                this.#outbound!({
+                    connector: config.name,
+                    kind: config.kind,
+                    ...(channel === undefined ? {} : { channel }),
+                    text: request.text,
+                    files: (request.files ?? []).map((file) => ({ name: file.name })),
+                }),
+                new Promise<"send">((resolve) => {
+                    timer = setTimeout(() => resolve("send"), TRIAGE_CAP_MS);
+                }),
+            ]);
+        } catch {
+            return "send";
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     instructions(config: ConnectorConfig): string {
         const kind = this.#kinds.get(config.kind);
         const own = config.instructions.trim() || RELAY_INSTRUCTIONS;
@@ -1212,6 +1261,21 @@ export class Relay {
                       ...(heard.thread === undefined ? {} : { thread: heard.thread }),
                   };
         const values = valuesOf(config, connector.fields);
+
+        // An outbound hook a module set screens the reply before it leaves. A block throws, so the caller hears that
+        // nothing was sent; a hook that fails or runs long sends as if no hook was set.
+        if (this.#outbound !== undefined) {
+            if ((await this.#screenOutbound(config, request, to?.channel)) === "block") {
+                this.log(
+                    `held a reply on ${config.name}: its screen read it as holding something the owner would not want outside`,
+                );
+
+                throw new Error(
+                    `The relay held this reply: its screen read it as holding something the owner would not want outside. Nothing was sent. Send it again without that, or ask the owner to turn the relay's screening off.`,
+                );
+            }
+        }
+
         let answer: { id?: string } | void;
 
         state.replies[request.key] = { at: this.now(), sending: true };
