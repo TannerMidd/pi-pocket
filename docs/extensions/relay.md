@@ -4,7 +4,7 @@ The relay is a built-in extension, **Relay**, that is off by default. It connect
 
 A **connector** is one kind of connection: `discord`, `telegram`, `slack`, `matrix`, `http`, and `rss` come with Pi Pocket. A drop-in extension can add a kind of its own. This page tells how. A drop-in that only needs to deliver data to a session, without a connection that the owner sets up, uses [`host.inbox`](inbox.md) instead.
 
-**Experimental, since 0.29.0.** The service has `api: 1`. It can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)).
+**Experimental, since 0.29.0.** The service has `api: 2` (api 2, since 0.31.0, adds `triage`). It can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)).
 
 ## How it works
 
@@ -258,11 +258,13 @@ A drop-in registers its connector with the relay's service:
 const service = web.use("pocket-relay");
 ```
 
-The service is an object: `{ api: 1, register, RelayError }`. `register(connector)` returns a function that removes the connector. A connector that is removed stops, and the owner's connectors of that kind show as not available until the kind comes back. They keep their settings and their state.
+The service is an object: `{ api: 2, register, triage, RelayError }` (`triage` since 0.31.0; an older relay has `api: 1` and no `triage`). `register(connector)` returns a function that removes the connector. A connector that is removed stops, and the owner's connectors of that kind show as not available until the kind comes back. They keep their settings and their state.
+
+`triage(hook)` (api 2) sets a hook that screens each delivery from a sender the owner did not mark as trusted, before it reaches the session. The hook gets `{ connector, kind, author, channel?, text, files }` and answers `"deliver"` (as it came), `"drop"` (dropped, with one line in the connector's status), or `{ label }` (delivered with a `Triage: <label>` line first, inside the fence). A hook that throws or hangs delivers as if no hook was set: the relay caps one call at ten seconds. The last hook set wins; the return unsets it, and the rules for a connector (check the service, register again when the relay loads again, remove it when you go) are the rules for a hook. Pi Pocket's own **Relay triage** module uses this, so turn it off if you write your own.
 
 Three rules for a drop-in:
 
-- **Check the service.** Check that `api` is 1 and that `register` is a function before you call it. The relay can be off, or load later, or be a newer one.
+- **Check the service.** Check that `api` is 2 (or 1, when you do not need `triage`) and that `register` is a function before you call it. The relay can be off, or load later, or be a newer one.
 - **Register again when the relay loads again.** The relay's connectors are gone when it reloads. Listen with `web.onService("pocket-relay", …)`, remove your old registration, and register again. The listener runs when the service comes, changes, or goes. It does not run for a service that is there already, so also register when your module loads.
 - **Remove it when you go.** Pass the removing function to `web.onDispose`, so an edit of your module does not leave an old connector.
 

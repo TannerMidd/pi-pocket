@@ -12,6 +12,12 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
+/**
+ * The classifier Pi Pocket's own modules name by default: OpenRouter's route of TypeSafe's Jev. The owner's OpenRouter
+ * sign-in is enough for it.
+ */
+export const DEFAULT_CLASSIFY_MODEL = "openrouter/~typesafe/jev-latest";
+
 /** One classifier call: what the model judges, and what it answers. `host.classify` takes this. */
 export interface ClassifyRequest {
     /**
@@ -30,6 +36,27 @@ export type ClassifyRuntime = Pick<
     ModelRuntime,
     "getModelOfType" | "getModelsOfType" | "hasConfiguredAuth" | "classify"
 >;
+
+/** Run one call with a deadline: its value, or undefined when it failed or ran out of time, so the caller goes on. */
+export async function withDeadline<T>(
+    run: () => Promise<T>,
+    timeoutMs: number,
+): Promise<T | undefined> {
+    let timer: NodeJS.Timeout | undefined;
+
+    try {
+        return await Promise.race([
+            run(),
+            new Promise<undefined>((resolve) => {
+                timer = setTimeout(() => resolve(undefined), timeoutMs);
+            }),
+        ]);
+    } catch {
+        return undefined;
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 const SHAPE =
     'Expected: { model: "provider/modelId", state: { ... }, questions: { <id>: { type: "choice" | "score" | "bool", instructions, criteria } } }.';

@@ -185,3 +185,46 @@ export function relayErrorOf(error: unknown): { retryAfter?: number; fatal: bool
         fatal: fatal === true,
     };
 }
+
+/**
+ * One delivery a triage hook screens, before it reaches the session: the connector it came through, who wrote it,
+ * and the message as it will go. Never a secret of the connector's fields.
+ */
+export interface RelayTriageEvent {
+    /** The connector's name and kind, as the delivery shows them. */
+    connector: string;
+    kind: string;
+    author: { name: string; id: string };
+    /** Where it came (a channel, a chat, a room). */
+    channel?: string;
+    /** The message's text, as it will be delivered. */
+    text: string;
+    /** Its attachments, by name and type: never their content. */
+    files: readonly { name: string; type: string }[];
+}
+
+/** What a triage hook says about one delivery: send it as it is, drop it, or send it with one label line. */
+export type RelayTriageVerdict = "deliver" | "drop" | { label: string };
+
+/**
+ * Screens one delivery from a sender the owner did not mark as trusted, before it reaches the session. `"deliver"`
+ * sends it as it is; `"drop"` drops it with one line in the connector's status; `{ label }` sends it with a
+ * `Triage: <label>` line first inside the fence, so the model knows what arrived. Failures and timeouts deliver as
+ * is: never hold a delivery back on a hook's account, and never hang (the relay caps one call at ten seconds).
+ */
+export type RelayTriage = (
+    event: RelayTriageEvent,
+) => Promise<RelayTriageVerdict> | RelayTriageVerdict;
+
+/** The service `pocket-relay` offers to modules through `web.provide` (api 2). */
+export interface RelayService {
+    /** The service's version: 2 adds `triage`. */
+    api: number;
+    /** Add a kind of connector. The return removes it again. */
+    register: (connector: RelayConnector) => () => void;
+    /**
+     * Set the hook that screens each delivery from a sender the owner did not mark (api 2). The last set wins; the
+     * return unsets it, and the hook goes with the relay when its module reloads.
+     */
+    triage: (hook: RelayTriage) => () => void;
+}
