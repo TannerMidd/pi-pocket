@@ -143,7 +143,13 @@ import { Providers } from "./providers.ts";
 import { CustomProviders } from "./custom-providers.ts";
 import { type EmbedderMessage, PushStore } from "./push.ts";
 import { writeDropInConfig } from "./dropin-config.ts";
-import { type ExtensionInfo, ExtensionLoader, linkTypes, prepareDropInFolder } from "./reload.ts";
+import {
+    type ExtensionInfo,
+    ExtensionLoader,
+    linkTypes,
+    prepareDropInFolder,
+    watchTree,
+} from "./reload.ts";
 import { ResendTask } from "./resend.ts";
 import {
     type Client,
@@ -563,6 +569,8 @@ export class PocketApp {
             npmRollback: process.env.PI_POCKET_NPM_ROLLBACK === "1",
             restart: () => options.restart?.(),
             quiesce: (paused) => this.pauseReloads(paused),
+            // An npm update renames the live package while this server runs: its own watchers must let go of it first.
+            closeOwnWatchers: (closed) => this.closeOwnWatchers(closed),
             busy: () => this.#busy.size,
             log: (line) => this.#log(line),
             // Releases from somewhere else: a fork's, or a copy of Pi Pocket's repository to try updates on.
@@ -831,6 +839,47 @@ export class PocketApp {
         this.reloadsPaused = paused;
         this.loader?.pause(paused);
         this.themes?.pause(paused);
+    }
+
+    /** The stop of the `web/` watcher that `watchLiveFiles` made; the loader, the themes, and the browser modules
+     * hold their own watchers. */
+    #stopWebWatch: (() => void) | undefined;
+
+    /** Whether the live-edit watchers were started (`watchLiveFiles`), so `closeOwnWatchers` makes them again only
+     * then. */
+    #watchingLive = false;
+
+    /**
+     * Start the live-edit watchers: the web files a browser reloads, the extension modules' folder, the themes, and
+     * the browser modules' folders. `main.ts` calls this once the server serves; each watcher's owner is here, so
+     * `closeOwnWatchers` below can close them all.
+     */
+    watchLiveFiles(): void {
+        if (this.#stopWebWatch) {
+            return;
+        }
+
+        this.#stopWebWatch = watchTree(join(APP_ROOT, "web"), (file) => {
+            if (!this.reloadsPaused) {
+                this.reloadClients(file);
+            }
+        });
+        this.#watchingLive = true;
+        this.loader?.watch();
+        this.themes?.watch();
+    }
+
+    /** Release handles before the package swap; restore them only if this server watched files before. */
+    closeOwnWatchers(closed: boolean): void {
+        if (closed) {
+            this.#stopWebWatch?.();
+            this.#stopWebWatch = undefined;
+            this.webs.stopWatching();
+            this.loader?.stopWatching();
+            this.themes?.close();
+        } else if (this.#watchingLive) {
+            this.watchLiveFiles();
+        }
     }
 
     /** Write a line to the server log. */
@@ -4456,6 +4505,7 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
+            this.#stopWebWatch?.();
             this.alerts.close();
             this.surfacePending.close();
             this.themes.close();

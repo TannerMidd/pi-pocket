@@ -1147,6 +1147,19 @@ export class ExtensionWebs {
         }
     }
 
+    /** Release directory handles without disposing the installed browser modules. */
+    stopWatching(): void {
+        this.#watching = false;
+
+        for (const part of this.#parts.values()) {
+            for (const watcher of part.watchers.values()) {
+                watcher.close();
+            }
+
+            part.watchers.clear();
+        }
+    }
+
     /** Something changed in a folder of modules: a browser module that is that file or folder has a new version. */
     touched(directory: string, name: string): void {
         for (const part of this.#parts.values()) {

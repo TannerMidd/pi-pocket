@@ -973,6 +973,15 @@ export class ExtensionLoader {
         }
     }
 
+    /** Release directory handles without unloading the extensions. */
+    stopWatching(): void {
+        for (const watcher of this.#watchers) {
+            watcher.close();
+        }
+
+        this.#watchers.length = 0;
+    }
+
     #changed(file: string, directory: string): void {
         if (this.#paused) {
             return;
@@ -1071,9 +1080,7 @@ export class ExtensionLoader {
             stop();
         }
 
-        for (const watcher of this.#watchers) {
-            watcher.close();
-        }
+        this.stopWatching();
 
         for (const timer of this.#timers.values()) {
             clearTimeout(timer);

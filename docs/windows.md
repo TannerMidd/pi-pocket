@@ -56,6 +56,8 @@ Some enterprise policies refuse links and junctions. Drop-in extensions work the
 
 Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts; it needs npm's registry. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js and its own package; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
 
+The updater closes its file watchers before it moves the running package. Windows can refuse the move if a process still holds files in that folder. If an older install reports `EPERM` when renaming `pi-pocket` to `previous`, it has not switched to the new version. Finish active work, choose **Quit Pi Pocket** from the tray, then run the newer official Setup for the same Windows account. Do not uninstall Pi Pocket or delete the data folder.
+
 The desktop app checks the package before it starts it: when `app\` holds an older `pi-pocket` than the app itself (an install that did not finish), it says so in a message and starts nothing. Run the same Setup again to put its package back.
 
 ## Uninstall
