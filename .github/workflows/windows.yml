@@ -543,6 +543,7 @@ jobs:
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/launcher-desktop.test.ts
+                  test/launcher-stop-watchdog.test.ts
                   test/lock.test.ts
                   test/npm-install.test.ts
                   test/npm-package.test.ts
