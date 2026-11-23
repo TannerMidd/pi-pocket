@@ -30,6 +30,14 @@ const stillOff = ["guard.ts", "anthropic-subscription.ts", "session-tags.ts", "a
 
 after(cleanUp);
 
+function messageTexts(serialized: string): string[] {
+    const content = JSON.parse(serialized) as string | { type: string; text?: string }[];
+
+    return typeof content === "string"
+        ? [content]
+        : content.filter((part) => part.type === "text").map((part) => part.text ?? "");
+}
+
 function checkModules(app: App, files: string[], enabled: boolean): void {
     for (const file of files) {
         const module = app.loader.list().find((each) => each.file === file)!;
@@ -288,6 +296,17 @@ test("enabled workflows with no chosen classifier leave non-owner relay traffic 
 
         assert.match(inbound, /Unchanged inbound\./);
         assert.doesNotMatch(inbound, /Triage:/);
+        const payloads = (await modelTexts(app, id)).flatMap(messageTexts).flatMap((text) => {
+            const payload = /<relay-message[^>]*>\n([\s\S]*?)\n<\/relay-message>/.exec(text)?.[1];
+
+            return payload === undefined ? [] : [payload];
+        });
+
+        assert.deepEqual(
+            payloads,
+            ["event: non-owner-event\nchannel: (test-channel)\n\nUnchanged inbound."],
+            "the actual non-owner payload arrives unchanged",
+        );
         await say(app, id, "REPLY_TEST");
         assert.deepEqual(replies, [{ text: "Unchanged reply.", author: "not-the-owner" }]);
         await say(app, id, "START_TEAM_TEST");
@@ -302,13 +321,7 @@ test("enabled workflows with no chosen classifier leave non-owner relay traffic 
             "the linked-session report",
         );
         const reports = (await modelTexts(app, id))
-            .flatMap((text) => {
-                const content = JSON.parse(text) as string | { type: string; text?: string }[];
-
-                return typeof content === "string"
-                    ? [content]
-                    : content.filter((part) => part.type === "text").map((part) => part.text ?? "");
-            })
+            .flatMap(messageTexts)
             .filter((text) => text.includes("<linked-session-message>"));
 
         assert.ok(
