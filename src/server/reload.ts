@@ -66,6 +66,7 @@ const ORDER = [
     "ask.ts",
     "ask-someone.ts",
     "updates.ts",
+    "restart.ts",
     "design.ts",
     "tool-search.ts",
 ];
@@ -84,6 +85,7 @@ const OFF_BY_DEFAULT = new Set([
     "session-tags.ts",
     "ask-someone.ts",
     "pocket-relay.ts",
+    "restart.ts",
 ]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
@@ -109,6 +111,7 @@ const TITLES: Record<string, string> = {
     "ask.ts": "Ask",
     "ask-someone.ts": "Ask someone",
     "updates.ts": "Pi Pocket updates",
+    "restart.ts": "Restart tool",
     "design.ts": "Design",
     "tool-search.ts": "Tool search",
 };
@@ -155,6 +158,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "design_export",
     "design_system",
     "relay_reply",
+    "restart_server",
 ]);
 
 /** Pi Pocket's own modules, or the owner's from the drop-in folder. */

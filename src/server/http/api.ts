@@ -721,6 +721,8 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
                 limitWaitHours?: unknown;
+                restart?: unknown;
+                restartDeadlineMinutes?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
@@ -731,6 +733,8 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     body.pipCompactAt,
                     body.subagentModels,
                     body.limitWaitHours,
+                    body.restart,
+                    body.restartDeadlineMinutes,
                 ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
@@ -748,6 +752,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // How long a run waits for a provider's limit to clear: the owner's (checked in `app.ts`).
             if (body.limitWaitHours !== undefined) {
                 await app.setLimitWaitHours(user, body.limitWaitHours);
+            }
+
+            // What Menu → Restart server does, and how long a restart that waits waits: the owner's (`app.ts`).
+            if (body.restart !== undefined || body.restartDeadlineMinutes !== undefined) {
+                await app.setRestartSettings(user, body.restart, body.restartDeadlineMinutes);
             }
 
             if (body.approvalRule !== undefined) {
@@ -1005,20 +1014,34 @@ export function createApi(options: HttpOptions, auth: Auth) {
             });
         }
 
-        if (first === "restart" && method === "POST") {
+        // What Menu → Restart server does, and a restart that waits now, or null: for scripts as the owner.
+        if (first === "restart" && second === undefined && method === "GET") {
             requireOwner(user);
 
-            if (!app.supervised) {
-                throw new HttpError(
-                    409,
-                    "Start Pi Pocket with bin/pi-pocket.js to restart from the app.",
-                );
-            }
+            return json(response, 200, {
+                supervised: app.supervised,
+                restart: app.config.restart,
+                restartDeadlineMinutes: app.config.restartDeadlineMinutes,
+                pending: app.restarts.pending() ?? null,
+            });
+        }
 
-            json(response, 200, { ok: true });
-            setTimeout(() => options.restart(), 100);
+        // A restart that waits ends: what it held goes on.
+        if (first === "restart" && second === "cancel" && method === "POST") {
+            requireOwner(user);
 
-            return;
+            return json(response, 200, { ok: true, cancelled: app.cancelRestart(user) });
+        }
+
+        // No body: as the owner's setting says (`restart` in config.json). `now`: at once, also over one that waits.
+        // `when-safe`: once no call runs that the restart would cut off (`restart.ts`).
+        if (first === "restart" && second === undefined && method === "POST") {
+            requireOwner(user);
+
+            const body = await readJson<{ mode?: unknown }>(request);
+            const answer = await app.askRestart(user, body.mode);
+
+            return json(response, 200, { ok: true, ...answer });
         }
 
         throw new HttpError(404, "Unknown API route");

@@ -281,6 +281,8 @@ export type ClientLimit = {
 export type ClientLive = {
     busy: boolean;
     limit?: ClientLimit;
+    /** Its model request waits for a restart of the server that waits for other calls (`restart.ts`). */
+    restart?: { since: number; deadline?: number };
     generation?: {
         attempt: number;
         message?: { blocks: ClientBlock[] };

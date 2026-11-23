@@ -733,6 +733,23 @@ export interface PocketHost {
     >;
     /** The names of the tools that the modules that are on install now, built-in and drop-in. */
     toolNames(): string[];
+    /**
+     * Restart the server once no call runs that a restart would cut off, the asking call aside (`restart.ts`), for the
+     * restart module's tool. Only for a conversation in which Pi works for the owner; it throws otherwise, and when Pi
+     * Pocket runs without its launcher. Undefined on a server from before it.
+     */
+    restartWhenSafe?(
+        conversationId: ConversationId,
+        callId: string,
+        reason?: string,
+    ): Promise<{
+        restarting: boolean;
+        pending?: {
+            since: number;
+            deadline?: number;
+            blockers: { callId: string; tool: string }[];
+        };
+    }>;
 }
 
 /**

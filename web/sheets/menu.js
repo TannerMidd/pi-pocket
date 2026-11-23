@@ -10,6 +10,7 @@ import { filesAvailable, setFilesOpen } from "../files-panel.js";
 import { peeksOn, togglePeeks } from "../peeks.js";
 import { modelRefreshAvailable, refreshModels } from "../model-refresh.js";
 import { openPip, pipAvailable, pipUnread } from "../pip.js";
+import { restartItems } from "../restart.js";
 import { setArchived } from "../sessions.js";
 import { openSubagent } from "../subagents.js";
 import {
@@ -580,20 +581,7 @@ export function MenuSheet({ places = true }) {
             ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
             ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
             ${item("Extensions", () => openSheet({ type: "extensions" }), extensionsHint())}
-            ${
-                me?.role === "owner" &&
-                server?.supervised &&
-                item(
-                    "Restart server",
-                    () =>
-                        attempt(async () => {
-                            await api("restart", {});
-                            closeSheet();
-                            notify("info", "Restarting. Running work continues after the restart.");
-                        }),
-                    "running work resumes",
-                )
-            }
+            ${restartItems({ done: closeSheet }).map((each) => item(each.label, each.run, each.hint))}
             ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
         </div>
         ${

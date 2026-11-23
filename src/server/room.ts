@@ -1091,7 +1091,13 @@ export class Room {
     #projectLive(live: LiveState | undefined): ClientLive {
         // The wait for a provider's limit is not in the run's documents: it comes from the app's limit gate.
         const wait = this.#app.limits.waitFor(Number(this.id));
-        const limit = wait === undefined ? "" : JSON.stringify(wait);
+        // Its model request waits for a restart of the server (`restart.ts`): not in its documents either.
+        const restart = this.#app.restarts.holds(Number(this.id))
+            ? this.#app.restarts.pending()
+            : undefined;
+        const limit =
+            (wait === undefined ? "" : JSON.stringify(wait)) +
+            (restart === undefined ? "" : `restart:${restart.since}`);
 
         if (this.#live === undefined || this.#live.from !== live || this.#live.limit !== limit) {
             const projected = projectLive(live);
@@ -1099,8 +1105,20 @@ export class Room {
             this.#live = {
                 from: live,
                 limit,
-                projected:
-                    wait === undefined ? projected : { ...projected, limit: projectLimit(wait) },
+                projected: {
+                    ...projected,
+                    ...(wait === undefined ? {} : { limit: projectLimit(wait) }),
+                    ...(restart === undefined
+                        ? {}
+                        : {
+                              restart: {
+                                  since: restart.since,
+                                  ...(restart.deadline === undefined
+                                      ? {}
+                                      : { deadline: restart.deadline }),
+                              },
+                          }),
+                },
             };
         }
 

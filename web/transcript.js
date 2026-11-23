@@ -3345,6 +3345,9 @@ function LiveLine({ live, approvals, start, entries, conversationId }) {
               : "Waiting for approval";
     } else if (limit) {
         state = "Waiting to retry";
+    } else if (live.restart) {
+        // Its next request waits until the server restarts, once nothing runs that the restart would cut off.
+        state = "Waiting for the server to restart";
     } else if (retry) {
         state = "Retrying";
     } else if ((live.compactions ?? []).length > 0) {
