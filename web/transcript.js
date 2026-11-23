@@ -1440,6 +1440,7 @@ function ToolStep({
     const lesson =
         call.name === "memory" &&
         typeof details?.lesson === "string" &&
+        lessonCardAt(details.lesson, call.id) &&
         memoryAvailable(conversationId)
             ? details.lesson
             : null;
@@ -1551,6 +1552,19 @@ function ToolStep({
         ${body}
     </div>`;
 }
+
+/**
+ * Which memory calls show a lesson's card. Pi can name one lesson in several calls (it saves it, then changes it), and
+ * each call shows the lesson as it is now: by default (`newestOnly` false) every one does, and any of them approves it.
+ * Set `newestOnly` to true to show it at the newest call that names it alone, folded or open.
+ */
+export const LESSON_CARDS = { newestOnly: false };
+/** Each lesson's newest call in the transcript shown, by the lesson's id: `Transcript` fills it from the results. */
+let newestLessonCall = new Map();
+
+/** Whether call `callId` shows the card of `lesson`. */
+const lessonCardAt = (lesson, callId) =>
+    !LESSON_CARDS.newestOnly || newestLessonCall.get(lesson) === callId;
 
 /** Groups opened or closed by hand, per conversation and group, for as long as the page is open. */
 const openedGroups = new Map();
@@ -1697,7 +1711,9 @@ function ActivityGroup({
                             slots.get(step.block.id)?.details?.lesson)
                           : undefined;
 
-                  return typeof lesson === "string" ? [{ lesson, index }] : [];
+                  return typeof lesson === "string" && lessonCardAt(lesson, step.block.id)
+                      ? [{ lesson, index }]
+                      : [];
               });
     const lessons = lessonAt.map((each) => each.lesson);
     const lessonBadge = prefs().foldedLessons === "badge";
@@ -2922,6 +2938,14 @@ function callDeps(block, results, slots, approvals) {
         deps.push(agentsKey(view));
     }
 
+    // With `LESSON_CARDS.newestOnly`, a later call that names the same lesson takes its card away.
+    if (block.name === "memory") {
+        deps.push(
+            LESSON_CARDS.newestOnly,
+            LESSON_CARDS.newestOnly && newestLessonCall.get(results.get(block.id)?.details?.lesson),
+        );
+    }
+
     // Whether the browser is there to watch (`browserAvailable`), and open already.
     if (block.name === "browser") {
         deps.push(store.state.browserOpen, store.state.server);
@@ -3714,6 +3738,19 @@ export function Transcript() {
         () => new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot])),
         [view.live.tools],
     );
+
+    // Each lesson's newest call, oldest results first: the steps read it as they draw (`lessonCardAt`).
+    newestLessonCall = useMemo(() => {
+        const map = new Map();
+
+        for (const [callId, entry] of results) {
+            if (entry.name === "memory" && typeof entry.details?.lesson === "string") {
+                map.set(entry.details.lesson, callId);
+            }
+        }
+
+        return map;
+    }, [results]);
     const [fetching, setFetching] = useState(false);
     // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
     // function returns), to keep it there after.

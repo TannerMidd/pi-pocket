@@ -43,6 +43,15 @@ const route: FauxResponseStep = (request) => {
         );
     }
 
+    if (text.startsWith("relesson ")) {
+        const [, id = "", ...rest] = text.split(" ");
+
+        return fauxAssistantMessage(
+            [fauxToolCall("memory", { action: "update", id, text: rest.join(" ") })],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (text === "ask me") {
         const options = [
             { label: "Postgres", description: "One server" },
@@ -783,6 +792,76 @@ test(
         } finally {
             await setLook("card");
             // The tests after this one count the project's lessons.
+            await app.memory
+                .change(
+                    id,
+                    work,
+                    { userId: owner(app).id, byPi: false, name: "Owner" },
+                    lesson.id,
+                    "remove",
+                )
+                .catch(() => undefined);
+        }
+    },
+);
+
+test(
+    "a lesson named by two calls shows at both by default, and at the newest alone with LESSON_CARDS.newestOnly",
+    real,
+    async () => {
+        const id = await newSession(app);
+        // Each turn ends with Pi's words: after a memory call, the echo of its result.
+        const turn = async (text: string, requestId: string, ends: string) => {
+            await app.commands.submit(id, owner(app), { text, requestId });
+            await until(
+                async () => (await modelTexts(app, id)).join().includes(ends),
+                `the turn "${text}"`,
+                20_000,
+            );
+        };
+
+        await fresh();
+        await goTo(id);
+        await turn("remember Twice named lesson.", "twice-1", "echo: Saved [");
+
+        const lesson = (await app.memory.view(id, owner(app))).lessons.find(
+            (each) => each.text === "Twice named lesson.",
+        )!;
+
+        // Pi changes it while it waits: the same lesson, a second call.
+        await turn(
+            `relesson ${lesson.id} Twice named lesson, changed.`,
+            "twice-2",
+            "echo: Updated [",
+        );
+        await turn("again", "twice-3", "echo: again");
+
+        const cards = () =>
+            inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".activity .lesson-call.waiting").length)`,
+            );
+        const newestOnly = (on: boolean) =>
+            page.evaluate(`(async () => {
+                (await import("/transcript.js")).LESSON_CARDS.newestOnly = ${on};
+                const { store } = await import("/store.js");
+
+                store.set({ memoryRev: (store.state.memoryRev ?? 0) + 1 });
+            })()`);
+
+        try {
+            await until(async () => (await cards()) === 2, "a card under each folded group");
+            await newestOnly(true);
+            await until(async () => (await cards()) === 1, "one card, at the newest call");
+            assert.equal(
+                await inPage<string>(`
+                    const groups = [...document.querySelectorAll(".activity")];
+
+                    return JSON.stringify(groups.findIndex((each) => each.querySelector(".lesson-call.waiting")) === groups.length - 1 ? "newest" : "older");
+                `),
+                "newest",
+            );
+        } finally {
+            await newestOnly(false);
             await app.memory
                 .change(
                     id,
