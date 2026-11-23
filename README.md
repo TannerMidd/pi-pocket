@@ -22,7 +22,7 @@ Start a coding session on your computer, check its diff on your phone, and invit
 - **Agent orchestration.** Give a subagent a focused job while you keep working. Enable **Agent Teams** when a task needs its own session: the parent can send follow-ups, and the linked session reports back. **PiP** can follow several sessions and tell you which one needs you.
 - **Durable work.** Restart the server and [Pi Durable](https://earendil.com/posts/pi-durable/) resumes the run. Schedule a check for tomorrow or watch a pull request so failed checks and reviews come back to the session.
 - **Multiplayer.** Invite a teammate to watch or steer. Review a diff on your phone, put a follow-up in the queue, or talk in a side chat Pi doesn’t read.
-- **Tools you can see.** Watch Pi use a real browser, open an interactive artifact, or fork a session into a separate git worktree. Choose models per session and add tools or themes from the [extension gallery](docs/extensions/publishing.md).
+- **Browser and artifacts.** Watch Pi test a page in Chromium or open a diagram beside the conversation. To try another approach without changing the original files, fork the session into a git worktree.
 
 **In the [0.31 beta](https://github.com/TannerMidd/pi-pocket/releases/tag/v0.31.0-beta.4): optional classification.** Relay triage can screen messages from unmarked senders and replies to them. Run outcomes can label a subagent’s or linked session’s report without replacing its answer. Both send text to the classifier provider you choose; with no classifier selected, neither makes a call. Jev Hub shows classifier activity. These features aren’t in the stable install below.
 
