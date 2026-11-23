@@ -303,51 +303,8 @@ function npmPending(appRoot: string): PendingUpdate {
     return pending;
 }
 
-/** How a package swap may be made to wait, and how tests drive its renames. */
-export type SwapOptions = {
-    /** The renames, `renameSync` by default: a test can refuse one as Windows does. */
-    rename?: (from: string, to: string) => void;
-    /** The wait between tries of a refused rename, a resolved promise by default in tests. */
-    sleep?: (ms: number) => Promise<void>;
-};
-
-/** How long each try of a refused rename waits before the next: about half a minute of trying in all. */
-const RENAME_WAITS_MS = [1000, 2000, 4000, 8000, 16_000];
-
-/** The errors that say another program holds a handle in the folder: Windows' refusal of the rename. */
-function held(error: unknown): boolean {
-    const code = (error as NodeJS.ErrnoException).code;
-
-    return code === "EPERM" || code === "EBUSY";
-}
-
-/**
- * Rename `from` to `to`, waiting out a momentary refusal: another program can hold a handle in the folder for a
- * moment (an antivirus scanning what npm just wrote, the search index). Only the errors that say so are retried,
- * each step of the swap as a whole: one that keeps being refused fails, and the caller puts the packages back.
- */
-async function renameUnheld(from: string, to: string, options: SwapOptions): Promise<void> {
-    const rename = options.rename ?? renameSync;
-    const sleep =
-        options.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-
-    for (let attempt = 0; ; attempt++) {
-        try {
-            rename(from, to);
-
-            return;
-        } catch (error) {
-            if (attempt >= RENAME_WAITS_MS.length || !held(error)) {
-                throw error;
-            }
-
-            await sleep(RENAME_WAITS_MS[attempt]!);
-        }
-    }
-}
-
 /** Swap whole packages on the same file system. The global bin link keeps its original target. */
-export async function swapInPackage(appRoot: string, options: SwapOptions = {}): Promise<void> {
+export function swapInPackage(appRoot: string): void {
     const pending = npmPending(appRoot);
     const paths = updatePaths(appRoot);
     const fresh = stagedPackagePath(appRoot);
@@ -379,14 +336,13 @@ export async function swapInPackage(appRoot: string, options: SwapOptions = {}):
 
     writePending(appRoot, { ...pending, phase: "switching" });
 
-    // Keep these renames adjacent: only a whole-process stop can interrupt them. Each one waits out a momentary
-    // refusal (a watcher of this server's own must be closed before the first of them: `updates.ts`).
+    // Keep these renames synchronous and adjacent: only a whole-process stop can interrupt them.
     try {
-        await renameUnheld(appRoot, paths.previous, options);
-        await renameUnheld(fresh, appRoot, options);
+        renameSync(appRoot, paths.previous);
+        renameSync(fresh, appRoot);
     } catch (error) {
         if (!existsSync(appRoot) && existsSync(paths.previous)) {
-            await renameUnheld(paths.previous, appRoot, options);
+            renameSync(paths.previous, appRoot);
         }
 
         throw error;

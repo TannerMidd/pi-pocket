@@ -1147,12 +1147,10 @@ export class ExtensionWebs {
         }
     }
 
-    /**
-     * Close every browser-module folder watcher, keeping what is installed: `watch()` makes them again. An npm
-     * update calls this before the live package is renamed (`updates.ts`): on Windows, no folder can be renamed
-     * while this process holds a handle in it, and a built-in module's browser module sits inside the package.
-     */
+    /** Release directory handles without disposing the installed browser modules. */
     stopWatching(): void {
+        this.#watching = false;
+
         for (const part of this.#parts.values()) {
             for (const watcher of part.watchers.values()) {
                 watcher.close();

@@ -973,11 +973,7 @@ export class ExtensionLoader {
         }
     }
 
-    /**
-     * Close the folder watchers, keeping everything installed: `watch()` makes them again. An npm update calls this
-     * before the live package is renamed (`updates.ts`): on Windows, no folder can be renamed while this process
-     * holds a handle in it, and these watchers are this process's own such handles inside the package.
-     */
+    /** Release directory handles without unloading the extensions. */
     stopWatching(): void {
         for (const watcher of this.#watchers) {
             watcher.close();
@@ -1084,9 +1080,7 @@ export class ExtensionLoader {
             stop();
         }
 
-        for (const watcher of this.#watchers) {
-            watcher.close();
-        }
+        this.stopWatching();
 
         for (const timer of this.#timers.values()) {
             clearTimeout(timer);

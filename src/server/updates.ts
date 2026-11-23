@@ -110,12 +110,7 @@ export interface UpdatesOptions {
      * running server does not load the new version's files; false starts again after an update that failed.
      */
     quiesce?: (paused: boolean) => void;
-    /**
-     * Close this server's own live-reload watchers, which hold folders inside the npm package, just before the
-     * update renames it: Windows renames no folder while any process holds a handle in it, and these are this
-     * process's own. The restart that follows makes new ones; false, after a swap that failed, makes them again.
-     * Git updates rename no watched folder, so they do not call this.
-     */
+    /** Release file watchers before an npm swap; resume them only after a safe rollback. */
     closeOwnWatchers?: (closed: boolean) => void;
     /** Tests say how this copy was installed, rather than asking npm (`npmInstallKind`). */
     installKind?: (appRoot: string) => Promise<InstallKind>;
@@ -1388,12 +1383,9 @@ export class Updates {
 
             this.#setStep(`Switching to ${latest.tag}`);
             this.#options.quiesce?.(true);
-            // The live package is renamed while this server still runs. On Windows no folder can be renamed while
-            // any process holds a handle in it, and the live-reload watchers are this process's own such handles
-            // inside the package (`closeOwnWatchers`). The restart that follows makes new ones.
             this.#options.closeOwnWatchers?.(true);
             watchClosed = true;
-            await swapInPackage(this.#root);
+            swapInPackage(this.#root);
         } catch (error) {
             // No new server ran yet, so even a warning release can safely restore the package here.
             // If restoration fails, keep the pending state and closed watchers for launcher recovery.

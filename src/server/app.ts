@@ -855,7 +855,10 @@ export class PocketApp {
      * `closeOwnWatchers` below can close them all.
      */
     watchLiveFiles(): void {
-        this.#stopWebWatch?.();
+        if (this.#stopWebWatch) {
+            return;
+        }
+
         this.#stopWebWatch = watchTree(join(APP_ROOT, "web"), (file) => {
             if (!this.reloadsPaused) {
                 this.reloadClients(file);
@@ -866,19 +869,14 @@ export class PocketApp {
         this.themes?.watch();
     }
 
-    /**
-     * Close the live-edit watchers, which hold folders inside the package that an npm update renames, or make them
-     * again (`updates.ts` calls this around the swap). Windows renames no folder while any process holds a handle in
-     * it, and these are this server's own. A swap that failed makes them again; one that succeeded needs none, with
-     * the restart that follows making its own.
-     */
+    /** Release handles before the package swap; restore them only if this server watched files before. */
     closeOwnWatchers(closed: boolean): void {
         if (closed) {
             this.#stopWebWatch?.();
             this.#stopWebWatch = undefined;
             this.webs.stopWatching();
             this.loader?.stopWatching();
-            this.themes?.stopWatching();
+            this.themes?.close();
         } else if (this.#watchingLive) {
             this.watchLiveFiles();
         }
