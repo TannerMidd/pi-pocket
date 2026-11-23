@@ -595,7 +595,8 @@ const waits = (lesson) => lesson?.pending === true || lesson?.proposal !== undef
 export function FoldedLessons({ lessonIds, conversationId, badge = false }) {
     const id = conversationId ?? store.state.conversationId;
     const data = useMemory(id);
-    const waiting = lessonIds.filter((lessonId) =>
+    // A lesson saved, then changed, in the same group shows once.
+    const waiting = [...new Set(lessonIds)].filter((lessonId) =>
         waits(data?.lessons.find((each) => each.id === lessonId)),
     );
 
