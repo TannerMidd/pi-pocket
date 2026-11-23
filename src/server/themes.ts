@@ -380,6 +380,17 @@ export class Themes {
         }
     }
 
+    /**
+     * Stop the theme watchers, keeping the themes as they are: `watch()` makes them again. An npm update calls this
+     * before the live package is renamed (`updates.ts`): the built-in themes sit inside it, and on Windows no
+     * folder can be renamed while this process holds a handle in it.
+     */
+    stopWatching(): void {
+        for (const stop of this.#stops.splice(0)) {
+            stop();
+        }
+    }
+
     close(): void {
         clearTimeout(this.#timer);
 

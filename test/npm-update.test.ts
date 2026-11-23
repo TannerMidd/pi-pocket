@@ -29,6 +29,66 @@ import {
     writePending,
     type PendingUpdate,
 } from "../src/server/update-state.ts";
+import { Updates, type UpdatesOptions } from "../src/server/updates.ts";
+
+/** An `EPERM` as Windows answers a rename of a folder that another process holds a handle in. */
+function refusal(from: string, to: string): never {
+    const error = new Error(`EPERM: rename '${from}' -> '${to}'`) as NodeJS.ErrnoException;
+
+    error.code = "EPERM";
+
+    throw error;
+}
+
+/** A global package fixture, no npm: the updater's own checks and renames run on it. */
+function globalPackage() {
+    const dir = mkdtempSync(join(tmpdir(), "pocket-npm-apply-"));
+    const root =
+        process.platform === "win32"
+            ? join(dir, "prefix", "node_modules", "pi-pocket")
+            : join(dir, "prefix", "lib", "node_modules", "pi-pocket");
+
+    manifest(root, "1.0.0");
+
+    return { dir, root };
+}
+
+/** An `Updates` for the global package fixture, with the npm parts stubbed and the hooks recorded. */
+function npmUpdater(root: string, overrides: Partial<UpdatesOptions> = {}) {
+    const released: boolean[] = [];
+    const paused: boolean[] = [];
+    const restarts: number[] = [];
+    const updates = new Updates({
+        appRoot: root,
+        version: "1.0.0",
+        supervised: true,
+        rollback: true,
+        npmRollback: true,
+        restart: () => restarts.push(Date.now()),
+        busy: () => 0,
+        log: () => {},
+        releases: async () => ({
+            tag: "v2.0.0",
+            version: "2.0.0",
+            name: "Pi Pocket 2.0.0",
+            notes: "Fixes.",
+            url: "https://example.com/release",
+            warning: false,
+        }),
+        installKind: async () => "npm-global",
+        quiesce: (on) => paused.push(on),
+        closeOwnWatchers: (closed) => released.push(closed),
+        ...overrides,
+    });
+
+    const settled = async () => {
+        for (let tries = 0; tries < 100 && restarts.length === 0; tries++) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+    };
+
+    return { updates, released, paused, restarts, settled };
+}
 
 function manifest(root: string, version: string): void {
     mkdirSync(root, { recursive: true });
@@ -156,7 +216,7 @@ test("npm stages a real offline tarball, swaps whole packages, and rolls back wi
     await stageNpmUpdate(root, "2.0.0", { spec: fresh, env });
     assert.equal(version(root), "1.0.0");
     assert.equal(version(stagedPackagePath(root)), "2.0.0");
-    swapInPackage(root);
+    await swapInPackage(root);
     assert.equal(version(root), "2.0.0");
     assert.equal(version(paths.previous), "1.0.0");
     assert.equal(readPending(root)?.phase, "switching");
@@ -249,7 +309,7 @@ test("npm ignores the dot sibling during ls, another global install, and uninsta
     );
 });
 
-test("npm state remembers a canonical global root without node_modules in its path", (t) => {
+test("npm state remembers a canonical global root without node_modules in its path", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "pocket-npm-alias-"));
     const root = join(dir, "packages", "pi-pocket");
 
@@ -266,7 +326,7 @@ test("npm state remembers a canonical global root without node_modules in its pa
         "an npm marker does not change a nearby checkout's paths",
     );
     manifest(stagedPackagePath(root), "2.0.0");
-    swapInPackage(root);
+    await swapInPackage(root);
     assert.equal(version(root), "2.0.0");
     renameSync(root, paths.failed);
     assert.equal(
@@ -312,7 +372,7 @@ test("startup repairs the state between package renames before loading the live 
     assert.equal(version(paths.previous), "1.0.0");
 });
 
-test("npm state handles interrupted swaps and restores, one-way releases, and changed packages", (t) => {
+test("npm state handles interrupted swaps and restores, one-way releases, and changed packages", async (t) => {
     const { dir, root } = sandbox();
 
     t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -333,7 +393,7 @@ test("npm state handles interrupted swaps and restores, one-way releases, and ch
     assert.equal(version(root), "1.0.0");
 
     reset();
-    swapInPackage(root);
+    await swapInPackage(root);
     renameSync(root, paths.failed);
     assert.equal(restorePackage(root), true, "resume between the restore renames");
     assert.equal(restorePackage(root), true, "resume after the final restore rename");
@@ -342,7 +402,7 @@ test("npm state handles interrupted swaps and restores, one-way releases, and ch
 
     reset();
     pending(root, { oneWay: true });
-    swapInPackage(root);
+    await swapInPackage(root);
     assert.match(rollBackUpdate(root) ?? "", /cannot be undone/);
     assert.equal(version(root), "2.0.0");
     assert.equal(version(paths.previous), "1.0.0");
@@ -354,7 +414,7 @@ test("npm state handles interrupted swaps and restores, one-way releases, and ch
     assert.equal(version(root), "1.0.0", "no new package ran in the rename gap");
 
     reset();
-    swapInPackage(root);
+    await swapInPackage(root);
     manifest(root, "9.0.0");
     assert.throws(() => rollBackUpdate(root), /live package changed/);
     assert.equal(readPending(root)?.kind, "npm-global", "recovery can retry after the error");
@@ -365,14 +425,14 @@ test("npm state handles interrupted swaps and restores, one-way releases, and ch
     assert.equal(version(paths.previous), "1.0.0", "manual recovery keeps the backup");
 
     reset();
-    swapInPackage(root);
+    await swapInPackage(root);
     assert.equal(finishNpmPending(root, readPending(root)!).ok, true);
     assert.equal(readPending(root), undefined);
 
     reset();
     cpSync(root, paths.previous, { recursive: true });
     manifest(paths.failed, "0.9.0");
-    swapInPackage(`${root}/`);
+    await swapInPackage(`${root}/`);
     assert.equal(version(root), "2.0.0");
     assert.equal(readPending(`${root}/`)?.phase, "switching");
     assert.equal(updatePaths(`${root}/`).dir, paths.dir, "launcher roots can end with a slash");
@@ -416,4 +476,160 @@ test("a manual target install clears staging state without replacing packages", 
             assert.equal(version(paths.previous), backup);
         }
     }
+});
+
+test("the package swap waits out a rename that another program refuses, as Windows does", async (t) => {
+    const { dir, root } = sandbox();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const paths = updatePaths(root);
+
+    manifest(root, "1.0.0");
+    pending(root);
+    manifest(stagedPackagePath(root), "2.0.0");
+
+    // As Windows answers the first rename while a watcher of this process holds a handle in the
+    // folder: twice, then the handle is gone and the rename goes through.
+    let refusals = 2;
+    const waits: number[] = [];
+
+    await swapInPackage(root, {
+        rename: (from, to) => {
+            if (from === root && refusals > 0) {
+                refusals--;
+
+                refusal(from, to);
+            }
+
+            renameSync(from, to);
+        },
+        sleep: (ms) => {
+            waits.push(ms);
+
+            return Promise.resolve();
+        },
+    });
+
+    assert.equal(version(root), "2.0.0");
+    assert.equal(version(paths.previous), "1.0.0");
+    assert.deepEqual(waits, [1000, 2000], "each refusal is waited out before the next try");
+    assert.equal(readPending(root)?.phase, "switching");
+    assert.match(rollBackUpdate(root) ?? "", /went back to 1\.0\.0/);
+});
+
+test("a rename that keeps being refused fails the swap with the packages as they were", async (t) => {
+    const { dir, root } = sandbox();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const paths = updatePaths(root);
+
+    manifest(root, "1.0.0");
+    pending(root);
+    manifest(stagedPackagePath(root), "2.0.0");
+
+    let tries = 0;
+
+    await assert.rejects(
+        swapInPackage(root, {
+            rename: (from, to) => {
+                if (from === root) {
+                    tries++;
+
+                    refusal(from, to);
+                }
+
+                renameSync(from, to);
+            },
+            sleep: () => Promise.resolve(),
+        }),
+        /EPERM/,
+    );
+
+    assert.equal(tries, 6, "six tries before the swap gives up");
+    assert.equal(version(root), "1.0.0", "the live package never moved");
+    assert.equal(existsSync(paths.previous), false);
+    assert.equal(version(stagedPackagePath(root)), "2.0.0", "the staged package stays for a retry");
+    assert.equal(readPending(root)?.phase, "switching", "the swap had already begun in its record");
+    assert.equal(
+        restorePackage(root),
+        true,
+        "the caller's recovery finds the live package as it was",
+    );
+});
+
+test("a refusal between the two renames puts the live package back", async (t) => {
+    const { dir, root } = sandbox();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const paths = updatePaths(root);
+
+    manifest(root, "1.0.0");
+    pending(root);
+    manifest(stagedPackagePath(root), "2.0.0");
+
+    await assert.rejects(
+        swapInPackage(root, {
+            rename: (from, to) => {
+                if (from === stagedPackagePath(root)) {
+                    refusal(from, to);
+                }
+
+                renameSync(from, to);
+            },
+            sleep: () => Promise.resolve(),
+        }),
+        /EPERM/,
+    );
+
+    assert.equal(version(root), "1.0.0", "the package before is back in place");
+    assert.equal(existsSync(paths.previous), false, "nothing is left in the recovery folder");
+    assert.equal(finishNpmPending(root, readPending(root)!).ok, false);
+    assert.equal(version(root), "1.0.0");
+    assert.equal(readPending(root), undefined);
+});
+
+test("the updater closes the server's own watchers around the package swap", async (t) => {
+    const { dir, root } = globalPackage();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { updates, released, paused, restarts, settled } = npmUpdater(root, {
+        stage: async () => manifest(stagedPackagePath(root), "2.0.0"),
+    });
+
+    const answer = await updates.apply({ by: "test" });
+
+    assert.deepEqual(answer, { restarting: true, version: "2.0.0" });
+    await settled();
+    assert.equal(restarts.length, 1, "the server is restarted on the new package");
+    assert.equal(version(root), "2.0.0");
+    assert.deepEqual(paused, [true], "the running version stops loading edited files");
+    assert.deepEqual(
+        released,
+        [true],
+        "the watchers inside the package are closed for the swap, and only the restart makes new ones",
+    );
+    assert.equal(readPending(root)?.phase, "switching");
+});
+
+test("a failed swap keeps the old package, notes why, and watches again", async (t) => {
+    const { dir, root } = globalPackage();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { updates, released, paused, restarts } = npmUpdater(root, {
+        // The staged package does not match what was asked for: the swap refuses to run.
+        stage: async () => manifest(stagedPackagePath(root), "9.9.9"),
+    });
+
+    await assert.rejects(updates.apply(), /The npm update failed/);
+
+    assert.equal(version(root), "1.0.0");
+    assert.equal(readPending(root), undefined);
+    assert.match(readOutcome(root)?.message ?? "", /stays at 1\.0\.0/);
+    assert.deepEqual(paused, [true, false], "the running version loads edited files again");
+    assert.deepEqual(
+        released,
+        [true, false],
+        "the watchers are closed for the swap and made again once the old package is back",
+    );
+    assert.equal(restarts.length, 0);
 });
