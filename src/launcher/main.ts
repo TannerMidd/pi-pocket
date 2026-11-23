@@ -34,6 +34,7 @@ import {
 import { RUNNING_FILE, removeRunning, writeRunning } from "./desktop.ts";
 import { fail, parseArgs } from "./options.ts";
 import { removeStaleServe, TailscaleServe } from "./serve.ts";
+import { createStopWatchdog, type StopWatchdog } from "./stop-watchdog.ts";
 // The two server modules the launcher runs itself: both import only Node's own, so an update cannot break the launcher.
 import { takeLock } from "../server/lock.ts";
 import {
@@ -403,6 +404,7 @@ const state = {
 };
 
 let child: ChildProcess | undefined;
+let childStopWatchdog: StopWatchdog | undefined;
 let tunnel: CloudflareTunnel | undefined;
 let serve: TailscaleServe | undefined;
 let quitting = false;
@@ -648,12 +650,45 @@ function startServer(first: boolean): void {
               }
           }, UPDATE_START_LIMIT_MS)
         : undefined;
+    // A server whose exit hangs after closing (or after a restart signal) would keep the launcher waiting forever.
+    const stopWatchdog = createStopWatchdog({
+        kill(reason) {
+            if (child !== proc) {
+                return;
+            }
+
+            if (!quitting) {
+                log(
+                    yellow(
+                        reason === "post-stop"
+                            ? "  The server did not finish exiting after closing: stopping it."
+                            : "  The server did not stop for a restart: stopping it.",
+                    ),
+                );
+            }
+
+            proc.kill("SIGKILL");
+        },
+    });
 
     child = proc;
+    childStopWatchdog = stopWatchdog;
     pipeLines(proc.stdout, (line) => log(line));
     pipeLines(proc.stderr, (line) => log(line));
-    proc.on("message", (message: { type?: string; loginPath?: string }) => {
-        if (message?.type !== "ready" || child !== proc) {
+    proc.on("message", (message: { type?: string; loginPath?: string; code?: number }) => {
+        if (child !== proc) {
+            return;
+        }
+
+        if (message?.type === "stopping") {
+            if (typeof message.code === "number" && Number.isInteger(message.code)) {
+                stopWatchdog.noteStopping(message.code);
+            }
+
+            return;
+        }
+
+        if (message?.type !== "ready") {
             return;
         }
 
@@ -681,14 +716,19 @@ function startServer(first: boolean): void {
         }
     });
 
-    const exited = (code: number | null, signal: NodeJS.Signals | null) => {
+    const exited = (rawCode: number | null, rawSignal: NodeJS.Signals | null) => {
         clearTimeout(watchdog);
 
         if (child !== proc) {
+            stopWatchdog.dispose();
+
             return;
         }
 
+        const { code, signal } = stopWatchdog.resolveExit(rawCode, rawSignal);
+
         child = undefined;
+        childStopWatchdog = undefined;
         state.serverReady = false;
 
         if (quitting) {
@@ -797,12 +837,15 @@ function restartServer(): void {
         const proc = child;
 
         child = undefined;
+        childStopWatchdog?.dispose();
+        childStopWatchdog = undefined;
         proc.kill();
 
         return;
     }
 
     child.kill("SIGUSR2");
+    childStopWatchdog?.noteRestartSignal(RESTART_CODE);
 }
 
 // ─── The tunnel ─────────────────────────────────────────────────────────
@@ -1123,6 +1166,7 @@ async function quit(code: number): Promise<void> {
     // Before the server goes: the tailnet should never point at a port with nothing behind it.
     stopServe();
     const proc = child;
+    const stopWatchdog = childStopWatchdog;
 
     if (proc !== undefined && proc.exitCode === null) {
         proc.kill("SIGTERM");
@@ -1132,6 +1176,7 @@ async function quit(code: number): Promise<void> {
         clearTimeout(timer);
     }
 
+    stopWatchdog?.dispose();
     restoreTerminal();
     process.exit(code);
 }
