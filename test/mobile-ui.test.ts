@@ -36,6 +36,13 @@ const real = {
 const route: FauxResponseStep = (request) => {
     const { text } = lastText(request as never);
 
+    if (text.startsWith("remember ")) {
+        return fauxAssistantMessage(
+            [fauxToolCall("memory", { action: "add", text: text.slice(9), scope: "project" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
     if (text === "ask me") {
         const options = [
             { label: "Postgres", description: "One server" },
@@ -693,42 +700,33 @@ test(
     "a folded group keeps a lesson that waits in sight, as a card or a badge, until it is decided",
     real,
     async () => {
-        const lesson = await app.memory.add(
-            first,
-            work,
-            { userId: owner(app).id, byPi: true, name: "Pi" },
-            { text: "Folded lesson that waits.", scope: "project" },
+        // A real run: the model calls the memory tool, and the server stores and sends the call and its result.
+        const id = await newSession(app);
+
+        await fresh();
+        await goTo(id);
+        await app.commands.submit(id, owner(app), {
+            text: "remember Folded lesson that waits.",
+            requestId: "fold-lesson-1",
+        });
+        await until(
+            async () => (await modelTexts(app, id)).join().includes("echo:"),
+            "the run that saved the lesson",
+            20_000,
         );
+        // A later turn: the group is no longer the newest, so it folds.
+        await app.commands.submit(id, owner(app), { text: "again", requestId: "fold-lesson-2" });
+        await until(
+            async () => (await modelTexts(app, id)).join().includes("echo: again"),
+            "the later turn",
+            20_000,
+        );
+
+        const lesson = (await app.memory.view(id, owner(app))).lessons.find(
+            (each) => each.text === "Folded lesson that waits.",
+        )!;
 
         assert.equal(lesson.pending, true);
-        await fresh();
-        await goTo(first);
-        await until(
-            async () =>
-                await inPage<boolean>(`
-                return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${first});
-            `),
-            "the session view",
-        );
-        await page.evaluate(`
-        const { store } = await import("/store.js");
-        const blocks = [{ type: "toolCall", id: "mem1", name: "memory",
-            args: { action: "add", text: "Folded lesson that waits." } }];
-        const entries = [{ id: 940000, kind: "user", text: "go", images: 0, at: Date.now() },
-            { id: 940001, kind: "assistant", stopReason: "toolUse", at: Date.now(), blocks },
-            { id: 940002, kind: "toolResult", callId: "mem1", text: "saved", at: Date.now(),
-                details: { lesson: ${JSON.stringify(lesson.id)} } },
-            { id: 940003, kind: "assistant", stopReason: "stop", at: Date.now(),
-                blocks: [{ type: "text", text: "Done." }] },
-            { id: 940004, kind: "user", text: "again", images: 0, at: Date.now() },
-            { id: 940005, kind: "assistant", stopReason: "stop", at: Date.now(),
-                blocks: [{ type: "text", text: "Yes." }] }];
-
-        store.set({ view: { ...store.state.view,
-            entries: new Map(entries.map((entry) => [entry.id, entry])),
-            order: entries.map((entry) => entry.id),
-        } });
-    `);
 
         const shown = () =>
             inPage<{ open: boolean; cards: string[]; badge: string | null }>(`
@@ -770,7 +768,7 @@ test(
             await until(async () => (await shown()).cards.length === 1, "the card again");
             // Decided elsewhere: the server's word takes it away, with no polling.
             await app.memory.change(
-                first,
+                id,
                 work,
                 { userId: owner(app).id, byPi: false, name: "Owner" },
                 lesson.id,
@@ -787,7 +785,7 @@ test(
             // The tests after this one count the project's lessons.
             await app.memory
                 .change(
-                    first,
+                    id,
                     work,
                     { userId: owner(app).id, byPi: false, name: "Owner" },
                     lesson.id,

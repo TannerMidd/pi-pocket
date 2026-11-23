@@ -1685,19 +1685,21 @@ function ActivityGroup({
             decisionOf(store.state.view.decisions, step.block, result)?.allow !== false
         );
     }).length;
-    // The lessons Pi saved, changed, or forgot here: folded, those that still wait show on or under its line.
-    const lessons =
+    // The lessons Pi saved, changed, or forgot in the steps it draws, by step: folded, those that still wait show on or
+    // under its line, as opened they show at their steps. `item.before`'s are in rows not shown, as opened.
+    const lessonAt =
         open || lone || !memoryAvailable(conversationId)
             ? []
-            : all.flatMap((step) => {
+            : item.steps.flatMap((step, index) => {
                   const lesson =
                       step.block.type === "toolCall" && step.block.name === "memory"
                           ? (results.get(step.block.id)?.details?.lesson ??
                             slots.get(step.block.id)?.details?.lesson)
                           : undefined;
 
-                  return typeof lesson === "string" ? [lesson] : [];
+                  return typeof lesson === "string" ? [{ lesson, index }] : [];
               });
+    const lessons = lessonAt.map((each) => each.lesson);
     const lessonBadge = prefs().foldedLessons === "badge";
     const first = all[0];
     let start = first.entry?.at === undefined ? undefined : fromServer(first.entry.at);
@@ -1769,8 +1771,8 @@ function ActivityGroup({
                 unrolled.current = open ? -Infinity : performance.now();
                 keep(openedGroups, id, !open);
 
-                // A lesson that waits shows at its step, also when that step is among the earlier ones.
-                if (lessons.length > 0) {
+                // A lesson that waits shows at its step, also when that step is among the earlier ones not drawn.
+                if (lessonAt.some((each) => each.index < hidden)) {
                     keep(wholeGroups, id, true);
                 }
 
