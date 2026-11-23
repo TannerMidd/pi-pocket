@@ -1,4 +1,4 @@
-/** Run outcomes labels completion notifications and PiP follow reports from Pi's final answer. */
+/** Run outcomes labels parent reports, completion notifications, and PiP follow reports from Pi's final answer. */
 import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
@@ -40,7 +40,7 @@ const QUESTIONS: ClassifyRequest["questions"] = {
             completed:
                 "It reports that the requested work is done, or gives the requested answer without a remaining blocker or required decision.",
             needs_input:
-                "It explicitly needs an answer, decision, or information from the person before the work can continue.",
+                "It explicitly needs an answer, decision, or information from the person or orchestrating parent before the work can continue. A required branch choice is needs_input even when the run ended normally.",
             blocked:
                 "It reports that the work could not finish due to an obstacle, error, or missing prerequisite, without a specific decision or answer it needs from the person.",
             unclear:
@@ -62,7 +62,7 @@ export default function createRunOutcomes(host: PocketHost, web?: ExtensionWeb):
             name: "classifyModel",
             label: "Classify model",
             description:
-                "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, pushes keep plain titles. Sends the start (1,000) and end (3,000 characters) of Pi's final answer to its provider and delays the push up to 1.5 s.",
+                "Own classifier (provider/modelId), else Providers choice; neither: unchanged. Sends final-answer head (1,000) and tail (3,000 chars), including linked sessions and subagents even without watchers or notifications. Reports/pushes wait up to 1.5 s. Labels are not proof of success.",
             type: "text",
             default: "",
         },

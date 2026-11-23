@@ -86,7 +86,8 @@ type Internal =
     | "toolNames"
     | "stopToolCall"
     | "waitsForLimit"
-    | "alertOwner";
+    | "alertOwner"
+    | "classifyRunOutcome";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 

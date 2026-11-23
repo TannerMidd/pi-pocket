@@ -441,7 +441,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         failure: string | undefined,
     ): Promise<void> {
         const app = this.#app;
-        const { last, answer } = await app.harness.commit(async (tx) => {
+        const { last, answer, answerId } = await app.harness.commit(async (tx) => {
             const latest = await tx.latestEntryId(id);
 
             if (outcome !== "done" || latest === undefined) {
@@ -455,6 +455,7 @@ export class LinkedSessions implements LinkedSessionsApi {
 
             return {
                 last: latest,
+                answerId: found?.id,
                 answer: found?.model?.[0] as AssistantMessage | undefined,
             };
         }, context);
@@ -477,6 +478,10 @@ export class LinkedSessions implements LinkedSessionsApi {
                 : outcome === "failed"
                   ? (failure ?? "its run failed")
                   : "its run was stopped";
+        const label =
+            outcome === "done" && answer?.stopReason === "stop" && answerId !== undefined
+                ? await app.classifyRunOutcome(id, answerId, text)
+                : undefined;
         const user = this.#person(id);
 
         await this.#deliver(
@@ -490,6 +495,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             undefined,
             undefined,
             outcome,
+            label,
         );
     }
 
@@ -1389,6 +1395,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         actor?: RequestActor,
         approved?: StartSettings,
         ended?: "done" | "failed" | "aborted",
+        outcomeLabel?: string,
     ): Promise<void> {
         const app = this.#app;
 
@@ -1440,7 +1447,7 @@ export class LinkedSessions implements LinkedSessionsApi {
                   : ended === "failed"
                     ? `Linked session ${replyTo} failed: its run gave up, and the message it was working on was not answered. Below is why. Do not start it again on another model: tell the person, or send it the work again once the cause is fixed.`
                     : `Linked session ${replyTo} was stopped before it answered. Send it the work again if it is still needed.`;
-        const text = `${preface}\n<linked-session-message>\n${defang(message)}\n</linked-session-message>`;
+        const text = `${preface}\n<linked-session-message>\n${defang(message)}\n</linked-session-message>${outcomeLabel === undefined ? "" : `\nReported outcome (Run outcomes classifier; not proof of success): ${outcomeLabel}.`}`;
 
         let closeAdmission = () => {};
 
