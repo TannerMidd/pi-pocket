@@ -689,6 +689,115 @@ test("an open activity group draws a thought step", real, async () => {
     );
 });
 
+test(
+    "a folded group keeps a lesson that waits in sight, as a card or a badge, until it is decided",
+    real,
+    async () => {
+        const lesson = await app.memory.add(
+            first,
+            work,
+            { userId: owner(app).id, byPi: true, name: "Pi" },
+            { text: "Folded lesson that waits.", scope: "project" },
+        );
+
+        assert.equal(lesson.pending, true);
+        await fresh();
+        await goTo(first);
+        await until(
+            async () =>
+                await inPage<boolean>(`
+                return JSON.stringify((await import("/store.js")).store.state.view.conversation?.id === ${first});
+            `),
+            "the session view",
+        );
+        await page.evaluate(`
+        const { store } = await import("/store.js");
+        const blocks = [{ type: "toolCall", id: "mem1", name: "memory",
+            args: { action: "add", text: "Folded lesson that waits." } }];
+        const entries = [{ id: 940000, kind: "user", text: "go", images: 0, at: Date.now() },
+            { id: 940001, kind: "assistant", stopReason: "toolUse", at: Date.now(), blocks },
+            { id: 940002, kind: "toolResult", callId: "mem1", text: "saved", at: Date.now(),
+                details: { lesson: ${JSON.stringify(lesson.id)} } },
+            { id: 940003, kind: "assistant", stopReason: "stop", at: Date.now(),
+                blocks: [{ type: "text", text: "Done." }] },
+            { id: 940004, kind: "user", text: "again", images: 0, at: Date.now() },
+            { id: 940005, kind: "assistant", stopReason: "stop", at: Date.now(),
+                blocks: [{ type: "text", text: "Yes." }] }];
+
+        store.set({ view: { ...store.state.view,
+            entries: new Map(entries.map((entry) => [entry.id, entry])),
+            order: entries.map((entry) => entry.id),
+        } });
+    `);
+
+        const shown = () =>
+            inPage<{ open: boolean; cards: string[]; badge: string | null }>(`
+            const group = document.querySelector(".activity");
+
+            return JSON.stringify({
+                open: group?.classList.contains("open") ?? false,
+                cards: [...document.querySelectorAll(".activity > .activity-lessons .lesson-text")]
+                    .map((each) => each.textContent),
+                badge: document.querySelector(".activity-head .activity-lessons-badge")?.textContent.trim() ?? null,
+            });
+        `);
+        const setLook = (value: string) =>
+            page.evaluate(`(async () => {
+            (await import("/theme.js")).setPrefs({ foldedLessons: "${value}" });
+        })()`);
+
+        try {
+            await until(async () => {
+                const now = await shown();
+
+                return !now.open && now.cards.join() === "Folded lesson that waits.";
+            }, "the folded group, with the lesson's card under its line");
+            await setLook("badge");
+            await until(async () => {
+                const now = await shown();
+
+                return now.cards.length === 0 && now.badge === "1 lesson waits";
+            }, "the badge on the line instead of the card");
+            // Opened, the card shows at its step alone.
+            await tap(".activity-head");
+            await until(async () => {
+                const now = await shown();
+
+                return now.open && now.badge === null && now.cards.length === 0;
+            }, "the open group, without the badge");
+            await tap(".activity-head");
+            await setLook("card");
+            await until(async () => (await shown()).cards.length === 1, "the card again");
+            // Decided elsewhere: the server's word takes it away, with no polling.
+            await app.memory.change(
+                first,
+                work,
+                { userId: owner(app).id, byPi: false, name: "Owner" },
+                lesson.id,
+                "approve",
+                { text: lesson.text },
+            );
+            await until(async () => {
+                const now = await shown();
+
+                return now.cards.length === 0 && now.badge === null;
+            }, "no card once the lesson is approved");
+        } finally {
+            await setLook("card");
+            // The tests after this one count the project's lessons.
+            await app.memory
+                .change(
+                    first,
+                    work,
+                    { userId: owner(app).id, byPi: false, name: "Owner" },
+                    lesson.id,
+                    "remove",
+                )
+                .catch(() => undefined);
+        }
+    },
+);
+
 test("earlier history does not repeat a message kept after compaction", real, async () => {
     await compactedView();
     await page.evaluate(`

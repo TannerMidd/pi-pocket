@@ -75,7 +75,7 @@ import {
     splitAttachments,
     Thumb,
 } from "./ui.js";
-import { LessonCall, memoryAvailable } from "./sheets/memory.js";
+import { FoldedLessons, LessonCall, memoryAvailable } from "./sheets/memory.js";
 
 const REPORT = /^\[subagent (\S+) (answered|failed|stopped|stalled)([^\]]*)\]\s?([\s\S]*)$/;
 /** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
@@ -1685,6 +1685,20 @@ function ActivityGroup({
             decisionOf(store.state.view.decisions, step.block, result)?.allow !== false
         );
     }).length;
+    // The lessons Pi saved, changed, or forgot here: folded, those that still wait show on or under its line.
+    const lessons =
+        open || lone || !memoryAvailable(conversationId)
+            ? []
+            : all.flatMap((step) => {
+                  const lesson =
+                      step.block.type === "toolCall" && step.block.name === "memory"
+                          ? (results.get(step.block.id)?.details?.lesson ??
+                            slots.get(step.block.id)?.details?.lesson)
+                          : undefined;
+
+                  return typeof lesson === "string" ? [lesson] : [];
+              });
+    const lessonBadge = prefs().foldedLessons === "badge";
     const first = all[0];
     let start = first.entry?.at === undefined ? undefined : fromServer(first.entry.at);
 
@@ -1754,14 +1768,34 @@ function ActivityGroup({
             onClick=${() => {
                 unrolled.current = open ? -Infinity : performance.now();
                 keep(openedGroups, id, !open);
+
+                // A lesson that waits shows at its step, also when that step is among the earlier ones.
+                if (lessons.length > 0) {
+                    keep(wholeGroups, id, true);
+                }
+
                 redraw((n) => n + 1);
             }}
         >
             <${Icon} name="chevron" size=${14} class="chev" part="activity-chevron" />
             <span class="activity-summary">${summarize(all, thinking)}</span>
             ${failed > 0 && html`<span class="activity-failed">${failed} failed</span>`}
+            ${
+                lessons.length > 0 &&
+                lessonBadge &&
+                html`<${FoldedLessons}
+                    lessonIds=${lessons}
+                    conversationId=${conversationId}
+                    badge=${true}
+                />`
+            }
             <${GroupTime} id=${id} start=${start} end=${end} live=${live} />
         </button>
+        ${
+            lessons.length > 0 &&
+            !lessonBadge &&
+            html`<${FoldedLessons} lessonIds=${lessons} conversationId=${conversationId} />`
+        }
         ${
             open &&
             lone &&
@@ -3037,6 +3071,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             prefs().showThinking === true,
             // Keep activity folded: a group drawn before the switch moved opens or folds with it.
             prefs().foldActivity === true,
+            // Lessons in folded activity: cards under the line, or a badge on it.
+            prefs().foldedLessons === "badge",
         ];
 
         // The calls before the rows shown count in the group's line: their results, for its time.
