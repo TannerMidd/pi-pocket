@@ -92,6 +92,32 @@ function newestPrompt(view, history) {
     );
 }
 
+/**
+ * Whether Pi's answer to the newest prompt failed: its last reply after `entryId` ended in an error (the request did
+ * not go through), or the run failed. Undo then reads as Retry: the same action, named for what the person wants.
+ */
+function answerFailed(view, entryId) {
+    const at = view.order.indexOf(entryId);
+
+    if (at === -1) {
+        return false;
+    }
+
+    const reply = view.order
+        .slice(at + 1)
+        .map((id) => view.entries.get(id))
+        .findLast((each) => each?.kind === "assistant");
+
+    // A run can also fail with no answer that says so (its compaction failed, say): the session's row says it, and
+    // the conversation shows its "Run failed" line.
+    return (
+        reply?.stopReason === "error" ||
+        store.state.sessions.some(
+            (each) => each.id === view.conversation.id && each.failed === true,
+        )
+    );
+}
+
 /** An undo on its way: a second tap waits for it. */
 let undoing = false;
 
@@ -99,7 +125,7 @@ let undoing = false;
  * Open a copy of the session without its last message `entryId`, archive the session, and put the message back in the
  * box. A second tap while the first is on its way does nothing.
  */
-const undo = (entryId) => {
+const undo = (entryId, retry = false) => {
     if (undoing) {
         return;
     }
@@ -110,7 +136,12 @@ const undo = (entryId) => {
 
         navigate(id);
         insertIntoComposer(text, [], { attachments });
-        notify("info", "Undid your last message. The original is archived.");
+        notify(
+            "info",
+            retry
+                ? "Your message is back in the box to send again. The original is archived."
+                : "Undid your last message. The original is archived.",
+        );
 
         if (attachmentsOmitted) {
             notify("warning", "Some attachments could not be restored.");
@@ -274,6 +305,7 @@ export function MessageSheet({ entryId }) {
         !view.live.compactions?.length &&
         view.inbox.length === 0 &&
         newestPrompt(view, store.state.history) === entry.id;
+    const retry = canUndo && answerFailed(view, entry.id);
 
     const copy = () => {
         closeSheet();
@@ -343,7 +375,11 @@ export function MessageSheet({ entryId }) {
         ${
             canUndo &&
             html`<div class="message-minors">
-                <${Minor} label="Undo" hint="Unsend and edit" run=${() => undo(entry.id)} />
+                <${Minor}
+                    label=${retry ? "Retry" : "Undo"}
+                    hint=${retry ? "Unsend and try again" : "Unsend and edit"}
+                    run=${() => undo(entry.id, retry)}
+                />
                 ${!filesAlone && html`<${Minor} label="Copy text" hint="As written" run=${copy} />`}
             </div>`
         }
