@@ -971,6 +971,8 @@ export class PocketApp {
             stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
             waitsForLimit: (conversationId) =>
                 this.limits.waits().some((wait) => wait.conversationId === Number(conversationId)),
+            classifyRunOutcome: (id, answerId, answer) =>
+                this.classifyRunOutcome(id, answerId, answer),
             alertOwner: (conversationId, title, body) =>
                 this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),

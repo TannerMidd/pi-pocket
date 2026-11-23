@@ -22,6 +22,7 @@ import {
     AgentDoc,
     AssistantEntry,
     type ConversationId,
+    type EntryId,
     configure,
     defineExtension,
     defineTask,
@@ -121,7 +122,7 @@ type ReporterInput = {
  */
 type ReporterState =
     | { phase: "deliver" }
-    | { phase: "report"; report?: string }
+    | { phase: "report"; report?: string; answerId?: EntryId }
     | { phase: "follow"; request: string; key: string; held?: boolean };
 
 /** How a message to a subagent ended: settled, or dropped by a person from the queue a Stop held it in. */
@@ -158,7 +159,10 @@ async function heldAgain(
 }
 
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent, through `Courier`. */
-function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
+function reporterFor(
+    Courier: CourierTask,
+    host: Pick<PocketHost, "notice" | "classifyRunOutcome">,
+) {
     /**
      * Report how a message ended, or follow it when a Stop held it to go again (`sent`: its submission and request).
      * A stop is no failure: it says who stopped it. The stall watch reported its own stop already.
@@ -195,8 +199,15 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
                 : await heldAgain(runtime, conversationId, String(sent!.id), context);
 
         await runtime.commit(async (tx) => {
-            const next = (report?: string) =>
-                ({ status: "running", checkpoint: { phase: "report", report } }) as const;
+            const next = (report?: string, answerId?: EntryId) =>
+                ({
+                    status: "running",
+                    checkpoint: {
+                        phase: "report",
+                        report,
+                        ...(answerId === undefined ? {} : { answerId }),
+                    },
+                }) as const;
             // Reads first: a commit reads the tables only before it writes one.
             const resent =
                 again === undefined
@@ -280,7 +291,10 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
             const answer = (await tx.entry(AssistantEntry, settled.answer))?.model?.[0] as
                 AssistantMessage | undefined;
 
-            return next(`${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`);
+            return next(
+                `${REPORT_PREFIX}${name} answered, no reply needed] ${textOf(answer)}`,
+                answer?.stopReason === "stop" ? settled.answer : undefined,
+            );
         }, context);
 
         // The people in the session see it at once, as well as in its report.
@@ -411,9 +425,34 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
             // The report waits with the others for the courier, which this starts when none is at work. A batch still in the
             // parent's queue takes it too: it is taken back out, and goes again with this one, so the queue holds one
             // message of reports, with all of them.
-            report: (reporter, runtime, context) =>
-                runtime.commit(async (tx) => {
-                    const report = reporter.state.checkpoint.report;
+            report: async (reporter, runtime, context) => {
+                const checkpoint = reporter.state.checkpoint;
+                let label: string | undefined;
+
+                if (checkpoint.answerId !== undefined && host.classifyRunOutcome !== undefined) {
+                    let answer: AssistantMessage | undefined;
+
+                    await runtime.commit(async (tx) => {
+                        const entry = await tx.entry(AssistantEntry, checkpoint.answerId!);
+
+                        answer = entry?.model?.[0] as AssistantMessage | undefined;
+
+                        return undefined;
+                    }, context);
+
+                    try {
+                        label = await host.classifyRunOutcome(
+                            reporter.input.conversationId,
+                            checkpoint.answerId,
+                            textOf(answer),
+                        );
+                    } catch {
+                        // A verdict must never prevent the original report from reaching the parent.
+                    }
+                }
+
+                return runtime.commit(async (tx) => {
+                    const report = checkpoint.report;
 
                     // Before 0.12 a reporter sent its report itself, under this request: one stopped by a restart (an
                     // upgrade) after sending it, and before it ended, has nothing left to send.
@@ -426,12 +465,16 @@ function reporterFor(Courier: CourierTask, host: Pick<PocketHost, "notice">) {
 
                     if (report !== undefined && !sentBefore) {
                         await putReports(tx, runtime.conversationId, Courier, [
-                            { name: reporter.input.name, text: report },
+                            {
+                                name: reporter.input.name,
+                                text: `${report}${label === undefined ? "" : `\nReported outcome (Run outcomes classifier; not proof of success): ${label}.`}`,
+                            },
                         ]);
                     }
 
                     return { status: "terminal", outcome: { status: "completed", result: null } };
-                }, context),
+                }, context);
+            },
         },
         abort: (_reporter, runtime, context) =>
             runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),

@@ -644,6 +644,12 @@ export interface PocketHost {
     waitsForLimit(conversationId: ConversationId): boolean;
     /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
     alertOwner(conversationId: ConversationId, title: string, body: string): void;
+    /** Internal: optional final-answer verdict shared by parent reports and notifications. */
+    classifyRunOutcome?(
+        conversationId: ConversationId,
+        answerId: number,
+        answer: string,
+    ): Promise<string | undefined>;
     /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.
