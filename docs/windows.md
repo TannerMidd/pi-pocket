@@ -56,6 +56,16 @@ Some enterprise policies refuse links and junctions. Drop-in extensions work the
 
 Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts; it needs npm's registry. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js and its own package; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
 
+While the server still runs, it stops watching its own files (the web app, the themes, the extension modules) before it renames the package folder: Windows does not let a program rename a folder that any process has open, and the server's own watching was what made the rename fail before (0.31.0-beta.5 and earlier, the update reported `EPERM` and stayed on the old version). A rename that something else still holds (an antivirus, the search index) is tried again for about half a minute, with nothing half-replaced: an update that cannot swap the folder stays on the old version and says why.
+
+**Updating to a version with this fix needs the fix to run.** An install that still runs a version before it (0.31.0-beta.5 or earlier) cannot update itself in-app: its own updater holds the folder it is renaming. For that one update, quit Pi Pocket and run the newer Setup over the install (it stops what runs and replaces the package), or use the installer's own npm while Pi Pocket is quit:
+
+```powershell
+& "$env:LOCALAPPDATA\Pi Pocket\node\npm.cmd" install -g --prefix "$env:LOCALAPPDATA\Pi Pocket\app" pi-pocket@<version>
+```
+
+From that version on, in-app updates work.
+
 The desktop app checks the package before it starts it: when `app\` holds an older `pi-pocket` than the app itself (an install that did not finish), it says so in a message and starts nothing. Run the same Setup again to put its package back.
 
 ## Uninstall
