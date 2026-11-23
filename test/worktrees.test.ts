@@ -136,6 +136,27 @@ test("a session in its own worktree starts with the folder as it is, on a branch
     assert.match(gitIn(repo, "branch", "--list", worktree.branch), new RegExp(worktree.branch));
 });
 
+test("Undo keeps the existing worktree, including changes Pi made there", async () => {
+    const user = owner(app);
+    const { id } = await app.commands.createSession(user, {
+        cwd: join(repo, "app"),
+        worktree: true,
+    });
+
+    await app.commands.configure(id, user, { model: { provider: "faux", modelId: "faux-1" } });
+    await say(app, id, "write the plan");
+    const cwd = app.cwdOf(id);
+    const treeList = gitIn(repo, "worktree", "list", "--porcelain");
+    const page = await (await app.conversation(id)).entries({}, 50, undefined, context);
+    const entry = page.items.find((each) => each.kind === "pi.user")!;
+    const back = await app.commands.undo(id, user, { entryId: Number(entry.id) });
+
+    assert.equal(app.cwdOf(back.id), cwd);
+    assert.deepEqual(app.sessionMeta(back.id)?.worktree, app.sessionMeta(id)?.worktree);
+    assert.equal(gitIn(repo, "worktree", "list", "--porcelain"), treeList);
+    assert.equal(readFileSync(join(cwd, "plan.md"), "utf8"), "approach B\n");
+});
+
 test("a worktree Pi is working in stays until Pi stops", async () => {
     const { id } = await app.commands.createSession(owner(app), {
         cwd: join(repo, "app"),

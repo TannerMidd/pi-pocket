@@ -1,12 +1,14 @@
 /**
  * What people ask of Pi: start and rename sessions, send messages (steer or queue), stop, withdraw, and change the
  * model, thinking level, or folder of a conversation; compact or reset its context and set its instructions; fork it,
- * or send a message again; set plan mode, a goal, or scheduled messages; and remove a session's worktree. Every
+ * undo or send a message again; set plan mode, a goal, or scheduled messages; and remove a session's worktree. Every
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
+import { open, rm } from "node:fs/promises";
 import { basename, extname, join, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { Context } from "@earendil-works/chord/context";
 import { copyJson, type JsonValue } from "@earendil-works/chord/json";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -39,6 +41,7 @@ import {
     type UserInput,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import { openNoFollow } from "./no-follow.ts";
 import type { User } from "./config.ts";
 import {
     AuthorsDoc,
@@ -105,6 +108,7 @@ import {
 const context = BACKGROUND_CONTEXT;
 
 export type Attachment = { path: string; name: string; mime: string; size: number };
+export const MAX_UPLOAD = 50 * 1024 * 1024;
 
 // A name can hold " (", so the path is the part that ends with "-name".
 function attachedFile(line: string, uploads: string): Attachment[] {
@@ -128,6 +132,49 @@ function attachedFile(line: string, uploads: string): Attachment[] {
     }
 
     return [];
+}
+
+/** Copy a stored upload to a new session's upload directory. Missing or changed files leave no attachment. */
+async function restoreUpload(file: Attachment, uploads: string): Promise<Attachment | undefined> {
+    const path = join(uploads, basename(file.path));
+    let created = false;
+
+    try {
+        const input = await openNoFollow(file.path);
+
+        try {
+            const stat = await input.stat();
+
+            if (!stat.isFile() || stat.size !== file.size || stat.size > MAX_UPLOAD) {
+                return undefined;
+            }
+
+            const output = await open(path, "wx", 0o600);
+
+            created = true;
+
+            try {
+                if (stat.size > 0) {
+                    await pipeline(
+                        input.createReadStream({ end: stat.size - 1 }),
+                        output.createWriteStream(),
+                    );
+                }
+            } finally {
+                await output.close();
+            }
+
+            return { ...file, path };
+        } finally {
+            await input.close();
+        }
+    } catch {
+        if (created) {
+            await rm(path, { force: true }).catch(() => {});
+        }
+
+        return undefined;
+    }
 }
 
 export interface SubmitRequest {
@@ -2780,6 +2827,197 @@ export class Commands {
         return { id: forked };
     }
 
+    /** Replace the session with a fork just before its newest message to Pi, and give the message back as a draft. */
+    async undo(
+        id: ConversationId,
+        user: User,
+        request: { entryId?: unknown },
+    ): Promise<{
+        id: ConversationId;
+        text: string;
+        attachments: Attachment[];
+        attachmentsOmitted: boolean;
+    }> {
+        const app = this.#app;
+
+        this.#requireForkable(id, user);
+        await app.requireDriver(id, user);
+        const entryId = entryIdOf(request.entryId);
+
+        // Check the queue and newest message on the same commit that makes the fork and archives its source.
+        const { forked, entry, wasArchived } = await app.harness.commit(async (tx) => {
+            const live = await tx.doc(LiveDoc, id);
+            const inbox = await tx.doc(InboxDoc, id);
+
+            if (live.run !== undefined || live.compactions?.length || inbox.items.length > 0) {
+                throw new HttpError(
+                    409,
+                    "Wait for Pi to finish and the queue to empty, or stop it first.",
+                );
+            }
+
+            const entry = await this.#newestUserMessage(tx, id, entryId as unknown as EntryId);
+
+            if (entry === undefined || Number(entry.id) !== entryId) {
+                throw new HttpError(400, "Only the last message to Pi can be undone.");
+            }
+
+            const [previous] = (
+                await tx.scanEntries(
+                    {
+                        conversationId: id,
+                        maxEntryId: (entryId - 1) as unknown as EntryId,
+                    },
+                    1,
+                )
+            ).items;
+            const source = (await tx.doc(SessionsDoc)).items[String(id)];
+
+            if (source === undefined) {
+                throw new HttpError(400, "Only sessions can be forked");
+            }
+
+            const agent = await tx.doc(AgentDoc, id);
+            const cwd = agent.cwd ?? source.cwd;
+            const ownership = { kind: "ownerless" } as const;
+            const fork =
+                previous === undefined
+                    ? await tx.createConversation({ ownership })
+                    : await tx.forkConversation(id, previous.id, { ownership });
+            const next = await tx.doc(AgentDoc, fork.id);
+
+            // A fork normally gets the agent from the fork point. Undo keeps the settings in use now.
+            next.cwd = cwd;
+
+            if (agent.model === undefined) {
+                delete next.model;
+            } else {
+                next.model = { ...agent.model };
+            }
+
+            if (agent.thinkingLevel === undefined) {
+                delete next.thinkingLevel;
+            } else {
+                next.thinkingLevel = agent.thinkingLevel;
+            }
+
+            if (previous === undefined && agent.instructions !== undefined) {
+                next.instructions = agent.instructions;
+            }
+
+            await this.#initFork(tx, id, user, fork.id, {
+                at: previous === undefined ? undefined : Number(previous.id),
+                title: source.title,
+                cwd,
+                worktree: source.worktree === undefined ? undefined : { ...source.worktree },
+            });
+            const wasArchived = source.archived === true;
+
+            source.archived = true;
+
+            return { forked: fork.id, entry, wasArchived };
+        }, context);
+        const message = entry.model?.[0];
+        const original = userContent(message);
+        const [text, files] = splitAttachments(original.text.replace(FROM_PREFIX, ""));
+        const attachments: Attachment[] = [];
+        const lines = files?.split("\n") ?? [];
+
+        if (lines.length > 0) {
+            // An inherited message's uploads belong to the session where the entry was written, and a message sent
+            // again keeps the paths of the session it came from. Submit accepts only uploads of the new session, so
+            // restore them there rather than loosening that check.
+            try {
+                const sources = this.#uploadLineage(entry.conversationId, user);
+                const to = app.workspace.uploadDirectory(forked);
+
+                for (const line of lines) {
+                    for (const from of sources) {
+                        const [file] = attachedFile(line, from);
+
+                        if (file === undefined || file.path !== join(from, basename(file.path))) {
+                            continue;
+                        }
+
+                        const restored = await restoreUpload(file, to);
+
+                        if (restored !== undefined) {
+                            attachments.push(restored);
+                        }
+
+                        break;
+                    }
+                }
+            } catch {
+                // A draft can still be restored if its files are no longer available.
+            }
+        }
+
+        await app.collab.activity(forked, user, "undid a message", false);
+
+        if (!wasArchived) {
+            await app.collab.activity(id, user, "archived the session", false);
+        }
+
+        // Inline files not stored as uploads cannot go back as attachments. Mentions remain in the draft text.
+        const inlineTextFiles =
+            Array.isArray(message?.content) &&
+            message.content.some(
+                (part, index) =>
+                    index > 0 && part.type === "text" && part.text.startsWith(FILE_BLOCK),
+            );
+        const uploadedImages = attachments.filter((file) => forModel(file.mime, file.size)).length;
+
+        return {
+            id: forked,
+            text,
+            attachments,
+            attachmentsOmitted:
+                attachments.length < lines.length ||
+                inlineTextFiles ||
+                original.images.length > uploadedImages,
+        };
+    }
+
+    /**
+     * The upload folders a message of session `id` can name: its own, then each session it was forked from, as long as
+     * `user` may see that session.
+     */
+    #uploadLineage(id: ConversationId, user: User): string[] {
+        const app = this.#app;
+        const folders: string[] = [];
+        const seen = new Set<number>();
+        let current: ConversationId | undefined = id;
+
+        while (current !== undefined && !seen.has(Number(current)) && app.canSee(user, current)) {
+            seen.add(Number(current));
+            folders.push(app.workspace.uploadDirectory(current));
+            const parent: number | undefined = app.sessionMeta(current)?.forkedFrom?.id;
+
+            current = parent === undefined ? undefined : (parent as unknown as ConversationId);
+        }
+
+        return folders;
+    }
+
+    /** Only the newest input can be undone; skip replies, tools and notes after it. */
+    async #newestUserMessage(tx: Tx, conversationId: ConversationId, minEntryId: EntryId) {
+        let cursor: Cursor | undefined;
+
+        do {
+            const page = await tx.scanEntries({ conversationId, minEntryId }, 64, cursor);
+            const entry = page.items.find((each) => each.kind === "pi.user");
+
+            if (entry !== undefined) {
+                return entry;
+            }
+
+            cursor = page.next;
+        } while (cursor !== undefined);
+
+        return undefined;
+    }
+
     /** A reply that called tools is not finished: a fork from it would wait for their results. */
     async #latestReply(id: ConversationId): Promise<number | undefined> {
         const conversation = await this.#app.conversation(id);
@@ -2878,75 +3116,14 @@ export class Commands {
             ...fork.agent,
             ...(place.worktree === undefined ? {} : { cwd: place.cwd }),
         };
-        const now = Date.now();
-        // A new session rather than a fork gets plan mode and the notes by hand.
-        const plan =
-            at === undefined ? await app.harness.snapshot(PlanDoc, id, context) : undefined;
-        const notes =
-            at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
-
-        const init: ConversationCreateOptions["init"] = async (tx, forked) => {
-            // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
-            if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
-                throw new HttpError(409, "That session was removed.");
-            }
-
-            const sessions = await tx.doc(SessionsDoc);
-
-            sessions.items[String(forked)] = {
-                cwd: place.cwd,
+        const init: ConversationCreateOptions["init"] = (tx, forked) =>
+            this.#initFork(tx, id, user, forked, {
+                at,
                 title,
-                createdAt: now,
-                updatedAt: now,
-                createdBy: user.id,
-                forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
-                ...(place.worktree === undefined ? {} : { worktree: place.worktree }),
-            };
-            await app.memory.forked(tx, id, forked, title);
-
-            if (fork.resend !== undefined) {
-                await tx.createTask(ResendTask, fork.resend, {
-                    ownership: { kind: "conversation" },
-                    background: true,
-                    conversationId: forked,
-                });
-            }
-
-            if (at === undefined) {
-                if (plan !== undefined) {
-                    Object.assign(await tx.doc(PlanDoc, forked), structuredClone(plan));
-                }
-
-                if (notes !== undefined) {
-                    Object.assign(await tx.doc(NotesDoc, forked), structuredClone(notes));
-                }
-
-                return;
-            }
-
-            // A fork copies its parent's documents. The chat is the parent's conversation, not this one's.
-            const chat = await tx.doc(ChatDoc, forked);
-
-            chat.messages.splice(0);
-            const pins = await tx.doc(PinsDoc, forked);
-
-            for (let index = pins.items.length - 1; index >= 0; index--) {
-                const pin = pins.items[index]!;
-
-                if (pin.entryId === undefined || pin.entryId > at) {
-                    pins.items.splice(index, 1);
-                }
-            }
-
-            // Authors of the parent's later messages did not take part here.
-            const authors = await tx.doc(AuthorsDoc, forked);
-
-            for (const entryId of Object.keys(authors.entries)) {
-                if (Number(entryId) > at) {
-                    delete authors.entries[entryId];
-                }
-            }
-        };
+                cwd: place.cwd,
+                worktree: place.worktree,
+                ...(fork.resend === undefined ? {} : { resend: fork.resend }),
+            });
 
         const ownership = { kind: "ownerless" } as const;
         const forked =
@@ -2987,6 +3164,81 @@ export class Commands {
         await app.collab.activity(id, user, `forked “${title}” from this session${where}`, false);
 
         return forked.id;
+    }
+
+    /** Register the new session and keep only the pins and authors of the messages it inherited. */
+    async #initFork(
+        tx: Tx,
+        id: ConversationId,
+        user: User,
+        forked: ConversationId,
+        fork: {
+            at: number | undefined;
+            title: string | undefined;
+            cwd: string;
+            worktree: Worktree | undefined;
+            resend?: Resend;
+        },
+    ): Promise<void> {
+        const { at, title, cwd, worktree, resend } = fork;
+
+        // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
+        if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
+            throw new HttpError(409, "That session was removed.");
+        }
+
+        const sessions = await tx.doc(SessionsDoc);
+        const now = Date.now();
+
+        sessions.items[String(forked)] = {
+            cwd,
+            ...(title === undefined ? {} : { title }),
+            createdAt: now,
+            updatedAt: now,
+            createdBy: user.id,
+            forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
+            ...(worktree === undefined ? {} : { worktree }),
+        };
+
+        await this.#app.memory.forked(tx, id, forked, title ?? "");
+
+        if (resend !== undefined) {
+            await tx.createTask(ResendTask, resend, {
+                ownership: { kind: "conversation" },
+                background: true,
+                conversationId: forked,
+            });
+        }
+
+        if (at === undefined) {
+            // A new session, rather than a fork with inherited documents, gets plan mode and notes by hand.
+            Object.assign(await tx.doc(PlanDoc, forked), copyJson(await tx.doc(PlanDoc, id)));
+            Object.assign(await tx.doc(NotesDoc, forked), copyJson(await tx.doc(NotesDoc, id)));
+
+            return;
+        }
+
+        // The copied chat is the parent's conversation, not this one's.
+        const chat = await tx.doc(ChatDoc, forked);
+
+        chat.messages.splice(0);
+        const pins = await tx.doc(PinsDoc, forked);
+
+        for (let index = pins.items.length - 1; index >= 0; index--) {
+            const pin = pins.items[index]!;
+
+            if (pin.entryId === undefined || pin.entryId > at) {
+                pins.items.splice(index, 1);
+            }
+        }
+
+        const authors = await tx.doc(AuthorsDoc, forked);
+
+        for (const entryId of Object.keys(authors.entries)) {
+            if (Number(entryId) > at) {
+                delete authors.entries[entryId];
+            }
+        }
     }
 
     async compact(id: ConversationId, user: User, instructions: string | undefined): Promise<void> {

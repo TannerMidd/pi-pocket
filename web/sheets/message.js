@@ -1,10 +1,11 @@
-// What a message's menu does: copy, fork from here, and send again (with this model or another).
+// What a message's menu does: copy, fork from here, send again (with this model or another), and undo the last one.
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
     actions,
     attempt,
     canSteer,
     closeSheet,
+    insertIntoComposer,
     navigate,
     notify,
     openSheet,
@@ -81,6 +82,54 @@ function lessonFrom(text) {
 
     return flat.length > 300 ? `${flat.slice(0, 299)}…` : flat;
 }
+
+/** The newest prompt, even if Pi's replies or a note came after it. */
+function newestPrompt(view, history) {
+    // Only pi.user entries project to user rows in this view.
+    return (
+        view.order.findLast((id) => view.entries.get(id)?.kind === "user") ??
+        history?.findLast((entry) => entry.kind === "user")?.id
+    );
+}
+
+/** An undo on its way: a second tap waits for it. */
+let undoing = false;
+
+/**
+ * Open a copy of the session without its last message `entryId`, archive the session, and put the message back in the
+ * box. A second tap while the first is on its way does nothing.
+ */
+const undo = (entryId) => {
+    if (undoing) {
+        return;
+    }
+
+    undoing = true;
+    attempt(async () => {
+        const { id, text, attachments, attachmentsOmitted } = await actions.undo(entryId);
+
+        navigate(id);
+        insertIntoComposer(text, [], { attachments });
+        notify("info", "Undid your last message. The original is archived.");
+
+        if (attachmentsOmitted) {
+            notify("warning", "Some attachments could not be restored.");
+        }
+    }).finally(() => {
+        undoing = false;
+    });
+};
+
+/** A small action beside another under the list, each taking an equal share of the row, with a hint below it. */
+const Minor = ({ label, hint, run }) => html`<button
+    type="button"
+    class="message-minor"
+    aria-label=${label}
+    onClick=${run}
+>
+    <span>${label}</span>
+    <span class="message-minor-hint">${hint}</span>
+</button>`;
 
 /** A fork or a send again on its way: a second tap waits for it. */
 let branching = false;
@@ -215,6 +264,16 @@ export function MessageSheet({ entryId }) {
     // A message of files alone has no words: its preview says so, and there is nothing to copy or remember.
     const filesAlone = toPi && text.trim() === "";
     const prompt = toPi ? entry : promptBefore(entryId, view);
+    // The last message to Pi, once Pi is idle and the queue is empty.
+    const canUndo =
+        canBranch &&
+        toPi &&
+        again &&
+        !waiting &&
+        !view.live.busy &&
+        !view.live.compactions?.length &&
+        view.inbox.length === 0 &&
+        newestPrompt(view, store.state.history) === entry.id;
 
     const copy = () => {
         closeSheet();
@@ -279,7 +338,14 @@ export function MessageSheet({ entryId }) {
                     "keep it as a lesson for Pi",
                 )
             }
-            ${!filesAlone && !waiting && item("Copy text", copy)}
+            ${!canUndo && !filesAlone && !waiting && item("Copy text", copy)}
         </div>
+        ${
+            canUndo &&
+            html`<div class="message-minors">
+                <${Minor} label="Undo" hint="Unsend and edit" run=${() => undo(entry.id)} />
+                ${!filesAlone && html`<${Minor} label="Copy text" hint="As written" run=${copy} />`}
+            </div>`
+        }
     <//>`;
 }

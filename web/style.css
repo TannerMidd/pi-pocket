@@ -9498,6 +9498,48 @@ div.group-head {
     display: none;
 }
 
+/* Undo and Copy text under the list: side by side, each an equal share of the row. */
+.message-minors {
+    display: flex;
+    gap: 4px;
+    margin-top: 10px;
+}
+
+.message-minor {
+    display: inline-flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--r-row);
+    background: none;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+}
+
+.message-minor-hint {
+    color: var(--faint);
+    font-size: 11.5px;
+    font-weight: 400;
+}
+
+@media (hover: hover) {
+    .message-minor:hover {
+        background: var(--hover);
+    }
+}
+
+.message-minor:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .message-model-search {
     padding: 8px 14px;
 }

@@ -9,7 +9,7 @@ import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { openNoFollow } from "../no-follow.ts";
-import type { Attachment, SubmitRequest } from "../commands.ts";
+import { type Attachment, MAX_UPLOAD, type SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
 import { prepareModelImage } from "../model-images.ts";
@@ -17,8 +17,6 @@ import { reveal } from "../reveal.ts";
 import { actOnSurface } from "../surfaces/act.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
-
-const MAX_UPLOAD = 50 * 1024 * 1024;
 
 const ENTRY_IMAGE_TYPES = new Set([
     "image/png",
@@ -421,6 +419,10 @@ export async function conversationRoutes(
 
     if (third === "fork" && method === "POST") {
         return json(response, 200, await app.commands.fork(id, user, await readJson(request)));
+    }
+
+    if (third === "undo" && fourth === undefined && method === "POST") {
+        return json(response, 200, await app.commands.undo(id, user, await readJson(request)));
     }
 
     if (third === "resend" && method === "POST") {
