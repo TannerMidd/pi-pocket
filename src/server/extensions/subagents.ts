@@ -1775,25 +1775,32 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                         ownership: { kind: "task", taskId: anchor },
                     });
 
+                    // A session on another computer has a fixed list (`remoteExtensions`): its subagent keeps that list,
+                    // less these, with or without a tool list, so nothing that works on this server's disk loads there.
+                    const remote = host.runnerOf(api.conversationId) !== undefined;
                     // With a tool list, keep a fixed list and this session's choices: the tools it names, and the
                     // marked ones, come from this session's extensions. Without one, the host's defaults, as before.
                     const inherited =
-                        tools === undefined
+                        tools === undefined || remote
                             ? undefined
                             : (await tx.doc(AgentDoc, child.id)).extensions;
-                    const extensions = Array.isArray(inherited)
-                        ? inherited
-                              .filter((name) => !removed.some((each) => each.name === name))
-                              .map((name) => ({ name }))
-                        : {
-                              ...(inherited?.add === undefined
-                                  ? {}
-                                  : { add: inherited.add.map((name) => ({ name })) }),
-                              remove: [
-                                  ...(inherited?.remove ?? []).map((name) => ({ name })),
-                                  ...removed,
-                              ],
-                          };
+                    const extensions = remote
+                        ? parent.extensions.filter(
+                              (extension) => !removed.some((each) => each.name === extension.name),
+                          )
+                        : Array.isArray(inherited)
+                          ? inherited
+                                .filter((name) => !removed.some((each) => each.name === name))
+                                .map((name) => ({ name }))
+                          : {
+                                ...(inherited?.add === undefined
+                                    ? {}
+                                    : { add: inherited.add.map((name) => ({ name })) }),
+                                remove: [
+                                    ...(inherited?.remove ?? []).map((name) => ({ name })),
+                                    ...removed,
+                                ],
+                            };
 
                     await configure(tx, child.id, {
                         extensions,

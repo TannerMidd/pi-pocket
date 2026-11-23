@@ -1,6 +1,8 @@
-/** Web servers running on this machine, for the Browser panel's start screen. */
+/** Web servers running on this machine, or ports another computer listens on, for the Browser panel's start screen. */
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
+import { BACKGROUND_CONTEXT as BACKGROUND } from "@earendil-works/chord/context";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
 /** TCP ports this machine listens on, from Linux's /proc; none elsewhere. `v6only`: listening on IPv6 alone. */
 function listeningPorts(): Map<number, { v6only: boolean }> {
@@ -121,4 +123,110 @@ export async function localServers(
             title: each.answer!.title,
         }))
         .sort((a, b) => a.port - b.port);
+}
+
+/** The command that lists the TCP ports a computer listens on, for its system (Node's or Rust's name of it). */
+function listCommand(os: string): string | undefined {
+    if (os === "darwin" || os === "macos") {
+        return "lsof -nP -iTCP -sTCP:LISTEN";
+    }
+
+    if (os === "linux") {
+        return "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null || ss -ltn";
+    }
+
+    if (os === "win32" || os === "windows") {
+        return "netstat -ano -p TCP";
+    }
+
+    return undefined;
+}
+
+/**
+ * The ports in what `listCommand` printed that the computer's own localhost reaches: listening on loopback or on every
+ * address. Reads `/proc/net/tcp`, `ss -ltn`, `lsof`, and `netstat` output.
+ */
+export function parseListening(text: string): number[] {
+    const ports = new Set<number>();
+    const local = (address: string) =>
+        /^(\*|0\.0\.0\.0|127\.\d+\.\d+\.\d+|\[?::1?\]?|\[?::ffff:127\.\d+\.\d+\.\d+\]?)$/i.test(
+            address,
+        );
+
+    for (const line of text.split(/\r?\n/)) {
+        const fields = line.trim().split(/\s+/);
+
+        // /proc/net/tcp(6): `sl local_address rem_address st …`, hex, state 0A is LISTEN.
+        if (/^\d+:$/.test(fields[0] ?? "") && fields[3] === "0A") {
+            const [address = "", hex = ""] = (fields[1] ?? "").split(":");
+            const port = Number.parseInt(hex, 16);
+            const loopback =
+                /^(00000000|[0-9A-F]{6}7F)$/i.test(address) ||
+                /^(0{32}|0{24}01000000|0{16}FFFF0000(0{8}|[0-9A-F]{6}7F))$/i.test(address);
+
+            if (loopback && Number.isInteger(port)) {
+                ports.add(port);
+            }
+
+            continue;
+        }
+
+        // lsof: `… TCP 127.0.0.1:5173 (LISTEN)`; ss: `LISTEN 0 511 127.0.0.1:5173 …`; netstat: `TCP 0.0.0.0:135 … LISTENING`.
+        const listening = /\(LISTEN\)|^LISTEN\b|\bLISTENING\b/.test(line.trim());
+
+        if (!listening) {
+            continue;
+        }
+
+        for (const field of fields) {
+            const match = /^(.*):(\d{1,5})$/.exec(field);
+
+            if (match !== null && local(match[1]!)) {
+                ports.add(Number(match[2]));
+                break;
+            }
+        }
+    }
+
+    return [...ports].sort((a, b) => a - b);
+}
+
+/**
+ * Ports from 1024 to 32767 that another computer listens on, for its own localhost, through its environment; none when
+ * that fails. Its pages are not probed: the list shows ports, not titles.
+ */
+export async function computerServers(
+    env: ExecutionEnv,
+    os: string,
+): Promise<{ port: number; url: string; title: string }[]> {
+    const command = listCommand(os);
+
+    if (command === undefined) {
+        return [];
+    }
+
+    let output = "";
+    const ran = await env
+        .exec(
+            command,
+            {
+                timeout: 5,
+                onOutput: (text, _context, info) => {
+                    if (info.stream === "stdout" && output.length < 1_000_000) {
+                        output += text;
+                    }
+                },
+            },
+            BACKGROUND,
+        )
+        .catch(() => undefined);
+
+    if (ran === undefined || !ran.ok) {
+        return [];
+    }
+
+    return parseListening(output)
+        .filter((port) => port >= 1024 && port <= 32767)
+        .slice(0, 40)
+        .map((port) => ({ port, url: `http://localhost:${port}/`, title: "" }));
 }

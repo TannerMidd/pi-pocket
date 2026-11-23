@@ -6,11 +6,9 @@
  * themselves as people type: typing never waits on the network.
  */
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { open, opendir, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
-import { git } from "./git.ts";
+import { type FolderAccess, localAccess, Unreachable } from "./folder-access.ts";
 
 const gzip = promisify(gzipCallback);
 
@@ -52,11 +50,14 @@ export type FileListing = FileList & { json: string; gzipped(): Promise<Buffer> 
 
 type Entry = { at: number; freshFor: number; listing: Promise<FileListing> };
 
-/** The files git lists in `cwd`, or undefined when it is not in a repository (or git is not installed, or failed). */
-async function gitFiles(cwd: string): Promise<string[] | undefined> {
+/**
+ * The files git lists in `cwd`, or undefined when it is not in a repository (or git is not installed, or failed). A
+ * computer that cannot be reached is no reason to walk instead: that throws.
+ */
+async function gitFiles(cwd: string, access: FolderAccess): Promise<string[] | undefined> {
     try {
         // Past this much, a walk (which stops at its own limits) does instead.
-        const out = await git(
+        const out = await access.git(
             cwd,
             ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             { timeoutMs: 10_000, maxBuffer: 32 * 1024 * 1024 },
@@ -66,7 +67,11 @@ async function gitFiles(cwd: string): Promise<string[] | undefined> {
 
         // A folder git ignores entirely, inside a repository, is still worth a walk.
         return files.length === 0 ? undefined : files;
-    } catch {
+    } catch (error) {
+        if (error instanceof Unreachable) {
+            throw error;
+        }
+
         return undefined;
     }
 }
@@ -74,39 +79,21 @@ async function gitFiles(cwd: string): Promise<string[] | undefined> {
 /** How many entries past what fits a walk reads of one folder: room for its subfolders. */
 const DIR_EXTRA = 1000;
 
-/**
- * At most `limit` entries of a folder, read as they come: a folder of a million files costs no more than `limit`.
- * `more` says some were left. Stops early, with `more`, past `deadline`.
- */
-async function readSome(
-    path: string,
-    limit: number,
-    deadline = Number.POSITIVE_INFINITY,
-): Promise<{ entries: Dirent[]; more: boolean }> {
-    const entries: Dirent[] = [];
-    const dir = await opendir(path, { bufferSize: 256 });
-
-    // Leaving the loop early closes the folder.
-    for await (const entry of dir) {
-        if (
-            entries.length >= limit ||
-            ((entries.length & 1023) === 1023 && Date.now() > deadline)
-        ) {
-            return { entries, more: true };
-        }
-
-        entries.push(entry);
-    }
-
-    return { entries, more: false };
-}
-
 /** The files under `cwd`, nearest first, without hidden folders or `SKIP`: at most `max`, found within `ms`. */
 async function walkFiles(
     cwd: string,
     max: number,
     ms: number,
+    access: FolderAccess,
 ): Promise<{ files: string[]; truncated: boolean }> {
+    // A computer that lists files itself does it there, in one round trip.
+    const listed = await access.listFiles?.(cwd, { exclude: [...SKIP], max, timeoutMs: ms });
+
+    if (listed !== undefined) {
+        return listed;
+    }
+
+    const paths = access.path;
     const deadline = Date.now() + ms;
     const files: string[] = [];
     const queue = [""];
@@ -121,12 +108,16 @@ async function walkFiles(
         let read;
 
         try {
-            read = await readSome(
-                dir === "" ? cwd : `${cwd}/${dir}`,
+            read = await access.list(
+                dir === "" ? cwd : paths.join(cwd, ...dir.split("/")),
                 max - files.length + DIR_EXTRA,
                 deadline,
             );
-        } catch {
+        } catch (error) {
+            if (error instanceof Unreachable) {
+                throw error;
+            }
+
             continue;
         }
 
@@ -140,7 +131,7 @@ async function walkFiles(
             const path = dir === "" ? entry.name : `${dir}/${entry.name}`;
 
             // Linked folders are not followed: they can lead back up, or anywhere. The queue holds no more than fits.
-            if (entry.isDirectory()) {
+            if (entry.dir) {
                 if (
                     !entry.name.startsWith(".") &&
                     !SKIP.has(entry.name) &&
@@ -185,12 +176,16 @@ function nearest(files: string[], max: number): { files: string[]; truncated: bo
     return { files: kept, truncated: true };
 }
 
-/** The files in `cwd`, as `FileList` says. */
-export async function listFiles(cwd: string, max = MAX_FILES): Promise<FileList> {
-    const listed = await gitFiles(cwd);
+/** The files in `cwd`, as `FileList` says, on the machine `access` reaches. */
+export async function listFiles(
+    cwd: string,
+    max = MAX_FILES,
+    access: FolderAccess = localAccess,
+): Promise<FileList> {
+    const listed = await gitFiles(cwd, access);
     const { files, truncated } =
         listed === undefined
-            ? await walkFiles(cwd, Math.min(max, WALK_FILES), WALK_MS)
+            ? await walkFiles(cwd, Math.min(max, WALK_FILES), WALK_MS, access)
             : nearest(listed, max);
     const version = createHash("sha1")
         .update(files.join("\0"))
@@ -210,9 +205,10 @@ export class FileLists {
         this.#now = now;
     }
 
-    /** The list for `cwd`: a fresh one kept here, the one being made, or a new one. */
-    get(cwd: string): Promise<FileListing> {
-        const kept = this.#lists.get(cwd);
+    /** The list for `cwd` on the machine `access` reaches: a fresh one kept here, the one being made, or a new one. */
+    get(cwd: string, access: FolderAccess = localAccess): Promise<FileListing> {
+        const key = `${access.id}\0${cwd}`;
+        const kept = this.#lists.get(key);
         const now = this.#now();
 
         if (kept !== undefined && now - kept.at < kept.freshFor) {
@@ -222,11 +218,11 @@ export class FileLists {
         const entry: Entry = {
             at: now,
             freshFor: Number.POSITIVE_INFINITY,
-            listing: this.#make(cwd),
+            listing: this.#make(cwd, access),
         };
 
-        this.#lists.delete(cwd);
-        this.#lists.set(cwd, entry);
+        this.#lists.delete(key);
+        this.#lists.set(key, entry);
 
         for (const key of this.#lists.keys()) {
             if (this.#lists.size <= KEEP) {
@@ -245,14 +241,14 @@ export class FileLists {
                 );
                 entry.at = this.#now();
             },
-            () => this.#lists.get(cwd) === entry && this.#lists.delete(cwd),
+            () => this.#lists.get(key) === entry && this.#lists.delete(key),
         );
 
         return entry.listing;
     }
 
-    async #make(cwd: string): Promise<FileListing> {
-        const list = await listFiles(cwd);
+    async #make(cwd: string, access: FolderAccess): Promise<FileListing> {
+        const list = await listFiles(cwd, MAX_FILES, access);
         const json = JSON.stringify(list);
         let compressed: Promise<Buffer> | undefined;
 
@@ -271,49 +267,45 @@ export type FileView =
     | { kind: "image" | "binary" | "other"; size: number }
     | { kind: "folder"; entries: { name: string; dir: boolean }[]; truncated: boolean };
 
-/** What the viewer shows of `file`. Throws when it is not there. */
-export async function viewFile(file: string): Promise<FileView> {
-    const info = await stat(file);
+/** What the viewer shows of `file`, on the machine `access` reaches. Throws when it is not there. */
+export async function viewFile(
+    file: string,
+    access: FolderAccess = localAccess,
+): Promise<FileView> {
+    // An image loads through the image route: only its size is needed here.
+    const peek = await access.peek(file, IMAGE_EXTENSIONS.test(file) ? 0 : VIEW_BYTES);
 
-    if (info.isDirectory()) {
-        const { entries, more } = await readSome(file, VIEW_ENTRIES);
-        const listed = entries
-            .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
-            .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+    if (peek.kind === "directory") {
+        const { entries, more } = await access.list(file, VIEW_ENTRIES);
+        const listed = entries.sort(
+            (a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name),
+        );
 
         return { kind: "folder", entries: listed, truncated: more };
     }
 
     // A pipe or a device would never finish reading: only regular files are opened.
-    if (!info.isFile()) {
-        return { kind: "other", size: info.size };
+    if (peek.kind !== "file") {
+        return { kind: "other", size: peek.size };
     }
 
     if (IMAGE_EXTENSIONS.test(file)) {
-        return { kind: "image", size: info.size };
+        return { kind: "image", size: peek.size };
     }
 
-    const handle = await open(file, "r");
+    const { bytes, size } = peek;
 
-    try {
-        const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        const bytes = buffer.subarray(0, bytesRead);
-
-        // Text files have no NUL bytes; nearly every other kind does, early on.
-        if (bytes.subarray(0, 8000).includes(0)) {
-            return { kind: "binary", size: info.size };
-        }
-
-        return {
-            kind: "text",
-            size: info.size,
-            text: bytes.toString("utf8"),
-            truncated: info.size > bytesRead,
-        };
-    } finally {
-        await handle.close();
+    // Text files have no NUL bytes; nearly every other kind does, early on.
+    if (bytes.subarray(0, 8000).includes(0)) {
+        return { kind: "binary", size };
     }
+
+    return {
+        kind: "text",
+        size,
+        text: bytes.toString("utf8"),
+        truncated: size > bytes.length,
+    };
 }
 
 /**

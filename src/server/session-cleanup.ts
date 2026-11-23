@@ -3,14 +3,15 @@
  * conversation yet. `pocket.deleted` keeps each removed session, the queue for such a purge. A removal is one commit,
  * then the files: after a restart, `resume` goes on with the files.
  */
-import { existsSync } from "node:fs";
 import { lstat, opendir, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import type { User } from "./config.ts";
 import {
     ArtifactSharesDoc,
+    BackgroundDoc,
     DeletedDoc,
     HooksDoc,
     MemoryDoc,
@@ -21,10 +22,10 @@ import {
     SessionsDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
-import { git } from "./git.ts";
+import { type FolderAccess, localAccess, Unreachable } from "./folder-access.ts";
 import { sessionKey } from "./memory.ts";
 import { isEnvFile } from "./secrets.ts";
-import { inWorktree, removeWorktree, type Worktree } from "./worktrees.ts";
+import { inWorktree, remoteWorktrees, removeWorktree, type Worktree } from "./worktrees.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -62,7 +63,32 @@ export type SessionPlan = {
 
 export type CleanupOutcome = { id: number; done: boolean; why?: string; bytes?: number };
 
-/** Links not followed; 0 when it is not there. */
+/**
+ * Where a session's folder is. `here`: this machine. `there`: its computer, online, with the session's approval there
+ * still valid, so a request does not make that computer ask. `away`: that cannot be said now, and `why`. `gone`: the
+ * computer is no longer linked, or the person who started the session may no longer use it: nothing there is reached.
+ */
+type Place =
+    | { at: "here"; access: FolderAccess }
+    | { at: "there"; runner: string; access: FolderAccess }
+    | { at: "away"; why: string }
+    | { at: "gone" };
+
+/** Whether a path is there. A computer that cannot be reached is an error, never "not there". */
+function exists(path: string, access: FolderAccess): Promise<boolean> {
+    return access.info(path).then(
+        () => true,
+        (error: unknown) => {
+            if (error instanceof Unreachable) {
+                throw error;
+            }
+
+            return false;
+        },
+    );
+}
+
+/** On this machine. Links not followed; 0 when it is not there. */
 async function sizeOf(path: string): Promise<number> {
     let bytes = 0;
     let counted = 0;
@@ -111,33 +137,39 @@ async function sizeOf(path: string): Promise<number> {
  * `git worktree remove` deletes such files with no word. Other ignored files (`dist`) do not count, and `node_modules`
  * folders are not read. A worktree with more ignored files than `MAX_COUNTED` counts as having one.
  */
-async function hasIgnoredEnv(path: string): Promise<boolean> {
-    const listed = await git(path, ["status", "--porcelain", "-z", "--ignored"]);
+async function hasIgnoredEnv(path: string, access: FolderAccess = localAccess): Promise<boolean> {
+    const listed = await access.git(path, ["status", "--porcelain", "-z", "--ignored"]);
     let counted = 0;
 
     const walk = async (folder: string): Promise<boolean> => {
-        let dir;
+        let listing;
 
         try {
-            dir = await opendir(folder);
-        } catch {
+            listing = await access.list(folder, MAX_COUNTED - counted + 1);
+        } catch (error) {
+            if (error instanceof Unreachable) {
+                throw error;
+            }
+
             return false;
         }
 
-        for await (const entry of dir) {
-            // Too many to read them all: one may still be there, so the worktree stays, as for a git error.
-            if (++counted > MAX_COUNTED) {
-                return true;
-            }
+        counted += listing.entries.length;
 
+        // Too many to read them all: one may still be there, so the worktree stays, as for a git error.
+        if (listing.more || counted > MAX_COUNTED) {
+            return true;
+        }
+
+        for (const entry of listing.entries) {
             if (isEnvFile(entry.name)) {
                 return true;
             }
 
             if (
-                entry.isDirectory() &&
+                entry.dir &&
                 entry.name !== "node_modules" &&
-                (await walk(join(folder, entry.name)))
+                (await walk(access.path.join(folder, entry.name)))
             ) {
                 return true;
             }
@@ -154,11 +186,15 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
         const name = entry.slice(3);
 
         // A package's own files: an install puts them back, and they are most of the files.
-        if (name.endsWith("/") && basename(name) === "node_modules") {
+        if (name.endsWith("/") && access.path.basename(name) === "node_modules") {
             continue;
         }
 
-        if (name.endsWith("/") ? await walk(join(path, name)) : isEnvFile(basename(name))) {
+        if (
+            name.endsWith("/")
+                ? await walk(access.path.join(path, name))
+                : isEnvFile(access.path.basename(name))
+        ) {
             return true;
         }
     }
@@ -173,10 +209,67 @@ export class SessionCleanup {
         this.#app = app;
     }
 
-    #requireOwner(userId: string): void {
-        if (this.#app.config.userById(userId)?.role !== "owner") {
+    #requireOwner(userId: string): User {
+        const user = this.#app.config.userById(userId);
+
+        if (user?.role !== "owner") {
             throw new HttpError(403, "Only the owner can clean up sessions.");
         }
+
+        return user;
+    }
+
+    /**
+     * A plan and a bulk action never make a computer ask: what the session has there is reached only while its
+     * approval there is valid, as that computer last said (`RunnerLink.state`, by its own clock).
+     */
+    async #place(id: ConversationId): Promise<Place> {
+        const app = this.#app;
+        const runner = app.runnerOf(id);
+
+        if (runner === undefined) {
+            return { at: "here", access: localAccess };
+        }
+
+        if (app.runners.stored(runner) === undefined) {
+            return { at: "gone" };
+        }
+
+        let scope;
+
+        try {
+            scope = app.runnerScope(id);
+        } catch {
+            return { at: "gone" };
+        }
+
+        const link = app.runners.link(runner);
+        const name = app.runners.name(runner);
+
+        if (!link.online) {
+            return { at: "away", why: `${name} is offline. Start its runner, then try again.` };
+        }
+
+        const approved = link.state?.sessions.some(
+            (each) =>
+                each.id === scope.id && (each.expiresAt === null || each.expiresAt > Date.now()),
+        );
+
+        if (approved !== true) {
+            return {
+                at: "away",
+                why: `Its approval on ${name} has ended. Unarchive it and continue it there, then try again.`,
+            };
+        }
+
+        return {
+            at: "there",
+            runner,
+            access: remoteWorktrees(
+                app.runners.env(runner, app.cwdOf(id), scope),
+                await link.info(),
+            ),
+        };
     }
 
     #ids(ids: readonly unknown[]): ConversationId[] {
@@ -233,28 +326,54 @@ export class SessionCleanup {
         return read;
     }
 
-    async #worktree(id: ConversationId, worktree: Worktree): Promise<SessionPlan["worktree"]> {
+    /** Undefined when it cannot be read, here or on a computer that is `gone`: it stays where it is. */
+    async #worktree(
+        id: ConversationId,
+        worktree: Worktree,
+        place: Place,
+    ): Promise<SessionPlan["worktree"]> {
+        if (place.at !== "here" && place.at !== "there") {
+            return undefined;
+        }
+
         const app = this.#app;
-        const inside = (cwd: string) => inWorktree(worktree, cwd);
+        const { access } = place;
+        const runner = app.runnerOf(id);
+        // The same path on another computer is another folder.
+        const anyInside = async (ids: readonly ConversationId[]) =>
+            (
+                await Promise.all(
+                    ids.map(
+                        async (each) =>
+                            app.runnerOf(each) === runner &&
+                            (await inWorktree(worktree, app.cwdOf(each), access)),
+                    ),
+                )
+            ).some(Boolean);
         const mine = new Set(app.conversationsOf(id).map(Number));
         let state: WorktreeState = "clean";
 
-        if (app.busyConversations().some((busy) => inside(app.cwdOf(busy)))) {
+        if (await anyInside(app.busyConversations())) {
             state = "busy";
         } else if (
-            app
-                .sessions()
-                .some(
-                    (session) =>
-                        !mine.has(session.id) &&
-                        inside(app.cwdOf(session.id as unknown as ConversationId)),
-                )
+            await anyInside(
+                app
+                    .sessions()
+                    .filter((session) => !mine.has(session.id))
+                    .map((session) => session.id as unknown as ConversationId),
+            )
         ) {
             state = "shared";
         } else {
-            const status = await git(worktree.path, ["status", "--porcelain"]).catch(
-                () => undefined,
-            );
+            const status = await access
+                .git(worktree.path, ["status", "--porcelain"])
+                .catch((error: unknown) => {
+                    if (error instanceof Unreachable) {
+                        throw error;
+                    }
+
+                    return undefined;
+                });
 
             if (status === undefined) {
                 return undefined;
@@ -262,7 +381,15 @@ export class SessionCleanup {
 
             if (status.trim() !== "") {
                 state = "changes";
-            } else if (await hasIgnoredEnv(worktree.path).catch(() => true)) {
+            } else if (
+                await hasIgnoredEnv(worktree.path, access).catch((error: unknown) => {
+                    if (error instanceof Unreachable) {
+                        throw error;
+                    }
+
+                    return true;
+                })
+            ) {
                 state = "env";
             }
         }
@@ -270,12 +397,14 @@ export class SessionCleanup {
         return {
             path: worktree.path,
             branch: worktree.branch,
-            bytes: await sizeOf(worktree.path),
+            // A worktree on another computer is not sized: that would read every file of it over the link.
+            bytes: place.at === "here" ? await sizeOf(worktree.path) : 0,
             state,
         };
     }
 
     async #plan(
+        user: User,
         id: ConversationId,
         readByForks: ReadonlySet<number>,
         docs: {
@@ -289,7 +418,9 @@ export class SessionCleanup {
         const app = this.#app;
         const meta = app.sessionMeta(id);
 
-        if (meta === undefined || meta.pip !== undefined) {
+        // A session the person may not see (one on another computer that is its starter's alone) is not theirs to
+        // remove, and a plan tells nothing of it.
+        if (meta === undefined || meta.pip !== undefined || !app.canSee(user, id)) {
             return undefined;
         }
 
@@ -302,29 +433,51 @@ export class SessionCleanup {
 
         for (const each of tree) {
             schedules += (await app.schedules.list(each)).length;
-            background += (await app.background.list(each)).filter(
-                (task) => task.status === "running" || task.status === "starting",
-            ).length;
+            // From what is saved: `background.list` would ask a session's computer for what its tasks left.
+            background += Object.values(
+                (await app.harness.snapshot(BackgroundDoc, each, context))?.items ?? {},
+            ).filter((task) => task.status === "running" || task.status === "starting").length;
             uploads += await sizeOf(this.#uploads(Number(each)));
             logs += await sizeOf(this.#logs(Number(each)));
         }
 
         const watch = await app.watches.get(id);
-        const worktree =
-            meta.worktree === undefined ? undefined : await this.#worktree(id, meta.worktree);
+        const place = await this.#place(id);
+        // What it has on a computer that cannot be reached now: it stays until that can be checked and removed.
+        let away =
+            place.at === "away" && (meta.worktree !== undefined || background > 0)
+                ? place.why
+                : undefined;
+        let worktree: SessionPlan["worktree"];
+
+        try {
+            worktree =
+                meta.worktree === undefined
+                    ? undefined
+                    : await this.#worktree(id, meta.worktree, place);
+        } catch (error) {
+            if (!(error instanceof Unreachable)) {
+                throw error;
+            }
+
+            away = `${app.runners.name(meta.runner ?? "")} could not be reached. Try again.`;
+        }
+
         const busy = tree.some((each) => app.isBusy(each));
         const blocked =
             meta.archived !== true
                 ? "Archive it first."
                 : busy
                   ? "Pi is working in it. Stop it first."
-                  : worktree?.state === "busy"
-                    ? "Pi is working in its worktree. Stop it first."
-                    : worktree?.state === "changes"
-                      ? "Its worktree has uncommitted changes. Commit or discard them first."
-                      : worktree?.state === "env"
-                        ? ENV_STAYS
-                        : undefined;
+                  : away !== undefined
+                    ? away
+                    : worktree?.state === "busy"
+                      ? "Pi is working in its worktree. Stop it first."
+                      : worktree?.state === "changes"
+                        ? "Its worktree has uncommitted changes. Commit or discard them first."
+                        : worktree?.state === "env"
+                          ? ENV_STAYS
+                          : undefined;
 
         return {
             id: Number(id),
@@ -365,14 +518,14 @@ export class SessionCleanup {
 
     /** Sessions that are not there, and PiP, are left out. */
     async plan(userId: string, ids: readonly unknown[]): Promise<SessionPlan[]> {
-        this.#requireOwner(userId);
+        const user = this.#requireOwner(userId);
         const chosen = this.#ids(ids);
         const readByForks = this.#readByForks(new Set(chosen.map(Number)));
         const docs = await this.#docs();
         const plans: SessionPlan[] = [];
 
         for (const id of chosen) {
-            const plan = await this.#plan(id, readByForks, docs);
+            const plan = await this.#plan(user, id, readByForks, docs);
 
             if (plan !== undefined) {
                 plans.push(plan);
@@ -384,14 +537,13 @@ export class SessionCleanup {
 
     /** Removes only the worktrees: the sessions and their transcripts stay. */
     async cleanUp(userId: string, ids: readonly unknown[]): Promise<CleanupOutcome[]> {
-        this.#requireOwner(userId);
-        const user = this.#app.config.userById(userId)!;
+        const user = this.#requireOwner(userId);
         const outcomes: CleanupOutcome[] = [];
 
         for (const id of this.#ids(ids)) {
             const meta = this.#app.sessionMeta(id);
 
-            if (meta?.archived !== true || meta.pip !== undefined) {
+            if (meta?.archived !== true || meta.pip !== undefined || !this.#app.canSee(user, id)) {
                 outcomes.push({ id: Number(id), done: false, why: "It is not archived." });
                 continue;
             }
@@ -401,17 +553,26 @@ export class SessionCleanup {
                 continue;
             }
 
-            if (
-                existsSync(meta.worktree.path) &&
-                (await hasIgnoredEnv(meta.worktree.path).catch(() => true))
-            ) {
-                outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
-                continue;
-            }
-
-            const bytes = await sizeOf(meta.worktree.path);
-
             try {
+                const place = await this.#place(id);
+
+                if (place.at === "away") {
+                    outcomes.push({ id: Number(id), done: false, why: place.why });
+                    continue;
+                }
+
+                // On a computer that is `gone`, `removeWorktree` says why it cannot.
+                if (
+                    place.at !== "gone" &&
+                    (await exists(meta.worktree.path, place.access)) &&
+                    (await hasIgnoredEnv(meta.worktree.path, place.access).catch(() => true))
+                ) {
+                    outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
+                    continue;
+                }
+
+                const bytes = place.at === "here" ? await sizeOf(meta.worktree.path) : 0;
+
                 await this.#app.commands.removeWorktree(id, user, false);
                 outcomes.push({ id: Number(id), done: true, bytes });
             } catch (error) {
@@ -424,7 +585,7 @@ export class SessionCleanup {
 
     /** Each is checked again first: one that cannot go now stays, with why. */
     async remove(userId: string, ids: readonly unknown[]): Promise<CleanupOutcome[]> {
-        this.#requireOwner(userId);
+        const user = this.#requireOwner(userId);
 
         const depth = (id: ConversationId) => {
             let count = 0;
@@ -446,7 +607,7 @@ export class SessionCleanup {
             let outcome: CleanupOutcome;
 
             try {
-                outcome = await this.#removeOne(userId, id, new Set([...removed, Number(id)]));
+                outcome = await this.#removeOne(user, id, new Set([...removed, Number(id)]));
             } catch (error) {
                 outcome = { id: Number(id), done: false, why: describe(error) };
             }
@@ -467,13 +628,39 @@ export class SessionCleanup {
         return named.map((id) => outcomes.get(Number(id))!);
     }
 
+    /**
+     * What a session has on its computer goes before the session does, while the session still says which computer
+     * and with which permission: its background tasks and their files, and its worktree when that is clean. A removal
+     * cut off after this leaves an archived session without its worktree, as a clean-up does.
+     */
+    async #clearThere(id: ConversationId, user: User, worktree: boolean): Promise<void> {
+        const app = this.#app;
+
+        for (const each of app.conversationsOf(id)) {
+            const tasks = await app.background.list(each);
+
+            for (const task of tasks) {
+                await app.background.stop(each, task.id);
+            }
+
+            await app.background.forgetFiles(
+                each,
+                tasks.map((task) => task.id),
+            );
+        }
+
+        if (worktree) {
+            await app.commands.removeWorktree(id, user, false);
+        }
+    }
+
     async #removeOne(
-        userId: string,
+        user: User,
         id: ConversationId,
         leaving: ReadonlySet<number>,
     ): Promise<CleanupOutcome> {
         const app = this.#app;
-        const plan = await this.#plan(id, this.#readByForks(leaving), await this.#docs());
+        const plan = await this.#plan(user, id, this.#readByForks(leaving), await this.#docs());
 
         if (plan === undefined) {
             return { id: Number(id), done: false, why: "There is no such session." };
@@ -485,14 +672,31 @@ export class SessionCleanup {
 
         const tree = app.conversationsOf(id).map(Number);
         const numbers = new Set(tree);
+        const runner = app.runnerOf(id);
+        // A worktree on another computer goes before the commit (`#clearThere`): after it, nothing says where it is.
         const worktree =
-            plan.worktree?.state === "clean" ? app.sessionMeta(id)?.worktree : undefined;
+            runner === undefined && plan.worktree?.state === "clean"
+                ? app.sessionMeta(id)?.worktree
+                : undefined;
         const watchTasks: TaskId[] = [];
         let keepUploads = false;
 
         // The plan took a while (sizes): a run that started meanwhile keeps the session.
         if (tree.some((each) => app.isBusy(each as unknown as ConversationId))) {
             return { id: Number(id), done: false, why: "Pi is working in it. Stop it first." };
+        }
+
+        if (runner !== undefined) {
+            const place = await this.#place(id);
+
+            if (place.at === "there") {
+                await this.#clearThere(id, user, plan.worktree?.state === "clean");
+            }
+
+            // Tasks on a computer that is `gone` cannot be stopped there, and must not be looked for here.
+            for (const each of tree) {
+                await app.background.abandon(each as unknown as ConversationId);
+            }
         }
 
         await app.harness.commit(async (tx) => {
@@ -511,8 +715,9 @@ export class SessionCleanup {
                 cwd: meta.cwd,
                 ...(meta.forkedFrom === undefined ? {} : { forkedFrom: meta.forkedFrom }),
                 conversations: tree,
-                by: userId,
+                by: user.id,
                 at: Date.now(),
+                ...(runner === undefined ? {} : { runner }),
                 ...(worktree === undefined ? {} : { worktree }),
                 ...(keepUploads ? { keepUploads: [Number(id)] } : {}),
             };
@@ -570,7 +775,7 @@ export class SessionCleanup {
             await this.#finish(id, record);
         }
 
-        const worktreeGone = worktree !== undefined && !existsSync(worktree.path);
+        const worktreeGone = worktree !== undefined && !(await exists(worktree.path, localAccess));
 
         return {
             id: Number(id),
@@ -609,11 +814,17 @@ export class SessionCleanup {
                     await app.schedules.cancel(conversation, schedule.id);
                 }
             });
-            await step("its background tasks", async () => {
-                for (const task of await app.background.list(conversation)) {
-                    await app.background.stop(conversation, task.id);
-                }
-            });
+
+            // A session that was on another computer has no unfinished task left (`#removeOne`), and none of its
+            // tasks' processes are this machine's.
+            if (record.runner === undefined) {
+                await step("its background tasks", async () => {
+                    for (const task of await app.background.list(conversation)) {
+                        await app.background.stop(conversation, task.id);
+                    }
+                });
+            }
+
             await step("its browser page", () => app.browsers.close(each));
         }
 
@@ -623,7 +834,7 @@ export class SessionCleanup {
             await step(`its worktree ${record.worktree.path}`, async () => {
                 // One may have come since the plan, or before a restart.
                 if (
-                    existsSync(record.worktree!.path) &&
+                    (await exists(record.worktree!.path, localAccess)) &&
                     (await hasIgnoredEnv(record.worktree!.path).catch(() => true))
                 ) {
                     throw new Error(ENV_STAYS);

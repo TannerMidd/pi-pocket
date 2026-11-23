@@ -30,6 +30,7 @@ import {
     mentionsPi,
     originRepo,
     parsePr,
+    parseRepo,
     prUrl,
     repoArgs,
     repoOfUrl,
@@ -42,9 +43,40 @@ import {
 
 export { type Gh, runGh } from "./github.ts";
 import { snippet } from "./projection.ts";
+import { git } from "./git.ts";
+import { remoteGit } from "./repo.ts";
 import { clientKey, requestFor } from "./requests.ts";
 
 const context = BACKGROUND_CONTEXT;
+
+/** The origin and branch of the asking conversation, looked up on the computer that owns its folder. */
+async function checkoutOf(
+    app: PocketApp,
+    asking: ConversationId,
+): Promise<{ repo?: string; branch?: string }> {
+    const cwd = app.cwdOf(asking);
+    const runner = app.runnerOf(asking);
+
+    if (runner === undefined) {
+        const [repo, branch] = await Promise.all([
+            originRepo(cwd),
+            git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
+                (out) => out.trim(),
+                () => undefined,
+            ),
+        ]);
+
+        return { repo, branch };
+    }
+
+    const env = app.runners.env(runner, cwd, app.runnerScope(asking));
+    const [url, branch] = await Promise.all([
+        remoteGit(env, cwd, ["remote", "get-url", "origin"], context),
+        remoteGit(env, cwd, ["rev-parse", "--abbrev-ref", "HEAD"], context),
+    ]);
+
+    return { repo: url === undefined ? undefined : parseRepo(url), branch };
+}
 
 /** The extension with PR watches and webhooks; while it is off, watches wait and webhooks answer 503. */
 export const TRIGGERS_EXTENSION = "pocket-triggers";
@@ -342,6 +374,8 @@ export class Watches {
             throw new HttpError(403, "A watch works for someone who can steer here.");
         }
 
+        const checkout = await checkoutOf(app, asking);
+        const remote = app.runnerOf(asking) !== undefined;
         let asked = request.pr?.trim() ?? "";
 
         // Pi (and PiP) may watch a PR in this folder's repository by its number, or one elsewhere by its address only
@@ -359,7 +393,7 @@ export class Watches {
 
             // Off github.com, only on the folder's own host: another host could answer as GitHub.
             const host = repoArgs(named.repo).host?.toLowerCase();
-            const home = repoArgs((await originRepo(app.cwdOf(asking))) ?? "").host?.toLowerCase();
+            const home = repoArgs(checkout.repo ?? "").host?.toLowerCase();
 
             if (host !== undefined && host !== home) {
                 throw new HttpError(
@@ -404,17 +438,30 @@ export class Watches {
         };
 
         try {
+            if (remote && checkout.repo === undefined) {
+                throw new Error("no git remotes found");
+            }
+
+            if (remote && asked === "" && !checkout.branch) {
+                throw new Error("no pull requests found");
+            }
+
             found = JSON.parse(
                 await this.gh(
                     [
                         "pr",
                         "view",
+                        ...(remote ? ["--repo", checkout.repo!] : []),
                         "--json",
                         "number,url,title,state,headRefName,isCrossRepository,headRepository,headRepositoryOwner",
                         // What follows is the PR, never an option, whatever it starts with.
-                        ...(asked === "" ? [] : ["--", asked.replace(/^#/, "")]),
+                        ...(remote
+                            ? ["--", (asked || checkout.branch!).replace(/^#/, "")]
+                            : asked === ""
+                              ? []
+                              : ["--", asked.replace(/^#/, "")]),
                     ],
-                    app.cwdOf(asking),
+                    remote ? undefined : app.cwdOf(asking),
                 ),
             ) as typeof found;
         } catch (error) {
@@ -460,7 +507,7 @@ export class Watches {
             found.isCrossRepository === true && owner && name
                 ? `${host === undefined ? "" : `${host}/`}${owner}/${name}`
                 : repo;
-        const origin = await originRepo(app.cwdOf(asking));
+        const origin = checkout.repo;
         // A PR of another repository than the folder's: Pi has to work in a checkout of it to push a fix.
         const elsewhere = !sameRepo(origin, repo) && !sameRepo(origin, head);
         // GitHub tells who can write to a repository only to an account that can push to it: elsewhere (a fork's PR

@@ -80,6 +80,7 @@ export const SIDEBAR = [
             ["docs/macos.md", "macOS package"],
             ["docs/desktop-app.md", "Desktop apps"],
             ["docs/embedders.md", "Embedders"],
+            ["docs/runners.md", "Sessions on another computer"],
             ["docs/self-editing.md", "Changing the code"],
             ["docs/map.md", "Project map"],
             ["docs/architecture.md", "Architecture"],

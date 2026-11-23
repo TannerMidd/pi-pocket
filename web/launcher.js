@@ -466,6 +466,13 @@ function actionItems() {
             icon: "key",
             run: () => openSheet({ type: "providers" }),
         },
+        me?.role === "owner" && {
+            label: "Runners",
+            detail: "link a computer, start sessions on it",
+            keywords: "computers runner remote machine link laptop server",
+            icon: "monitor",
+            run: () => openSheet({ type: "computers" }),
+        },
         modelRefreshAvailable() && {
             label: "Refresh models",
             detail: store.state.modelRefresh.loading
@@ -575,7 +582,7 @@ function sessionItems() {
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
             rank: session.archived ? -20 : -number * 0.01,
             run: () => navigate(session.id),
-            folder: folderColor(session.cwd),
+            folder: folderColor(session.cwd, session.runner),
             tone: session.waiting ? "waiting" : session.busy ? "working" : "quiet",
         };
     });

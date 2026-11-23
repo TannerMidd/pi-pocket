@@ -149,7 +149,7 @@ function enabledBy(files: string[], entries: string[], base: string, home: strin
 export type TrustChoice = "trust" | "trust-parent" | "distrust";
 
 /** A decision in Pi's trust store: the folder it was saved for, and whether Pi trusts it and the folders in it. */
-type Saved = { path: string; trusted: boolean };
+export type Saved = { path: string; trusted: boolean };
 
 /** Whether Pi trusts a session's project, and the project skills that load only while it does. */
 export type ProjectTrust = {
@@ -201,9 +201,12 @@ function savedDecision(cwd: string, agentDir: string): Saved | null | undefined 
  * What Pi decided about a project, as it decides without asking: trusted, not trusted (a saved "no", or
  * `defaultProjectTrust` "never"), or nothing yet, which includes a trust store that cannot be read.
  */
-type Decision = "trusted" | "distrusted" | "undecided";
+export type Decision = "trusted" | "distrusted" | "undecided";
 
-function decides(saved: Saved | null | undefined, sources: SkillSources): Decision {
+export function decides(
+    saved: Saved | null | undefined,
+    sources: Pick<SkillSources, "defaultProjectTrust">,
+): Decision {
     if (saved === undefined) {
         return "undecided";
     }

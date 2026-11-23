@@ -82,38 +82,41 @@ const stampOf = (info: { mtimeMs: number; size: number }) => `${info.mtimeMs}:${
  * size in the words of Pi's read tool.
  */
 function make(path: string, mimeType: string, first: boolean): Promise<ModelImage> {
-    return inTurn(async () => {
-        let bytes: Uint8Array = await readFile(path);
-        let type = mimeType;
+    return inTurn(async () => modelImageOf(await readFile(path), mimeType), first);
+}
 
-        if (HEIC_TYPES.has(mimeType)) {
-            bytes = await heicToJpeg(bytes);
-            type = "image/jpeg";
-        }
+/** An image for the model from its bytes: also one read from another computer, which has no path on this server. */
+export async function modelImageOf(original: Uint8Array, mimeType: string): Promise<ModelImage> {
+    let bytes = original;
+    let type = mimeType;
 
-        const image = await resizeImage(bytes, type);
+    if (HEIC_TYPES.has(mimeType)) {
+        bytes = await heicToJpeg(bytes);
+        type = "image/jpeg";
+    }
 
-        if (image === null) {
-            throw new Error("it could not be made small enough for the model");
-        }
+    const image = await resizeImage(bytes, type);
 
-        const notes: string[] = [];
+    if (image === null) {
+        throw new Error("it could not be made small enough for the model");
+    }
 
-        if (image.mimeType !== mimeType) {
-            notes.push(`[Image: shown to you as ${image.mimeType.split("/")[1]!.toUpperCase()}.]`);
-        }
+    const notes: string[] = [];
 
-        const size = formatDimensionNote(image);
+    if (image.mimeType !== mimeType) {
+        notes.push(`[Image: shown to you as ${image.mimeType.split("/")[1]!.toUpperCase()}.]`);
+    }
 
-        if (size !== undefined) {
-            notes.push(size);
-        }
+    const size = formatDimensionNote(image);
 
-        return {
-            image: { type: "image", mimeType: image.mimeType, data: image.data },
-            note: notes.length === 0 ? undefined : notes.join(" "),
-        };
-    }, first);
+    if (size !== undefined) {
+        notes.push(size);
+    }
+
+    return {
+        image: { type: "image", mimeType: image.mimeType, data: image.data },
+        note: notes.length === 0 ? undefined : notes.join(" "),
+    };
 }
 
 /** Start making an uploaded image ready for the model, if it is one: its failure shows when a message sends it. */

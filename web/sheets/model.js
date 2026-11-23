@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { useDragToClose } from "../gestures.js";
 import { favoriteModels } from "../model-favorites.js";
+import { chooseLevel, chooseModel, copyDraft, modelOf } from "../copy-draft.js";
+import { goBack } from "../back.js";
 import {
     anchorStyle,
     BOTTOM_SHEETS,
@@ -62,7 +64,9 @@ const matches = (model, query) => {
  * and how hard Pi thinks below, then, for the owner, Make default. Arrows and Enter pick, and Tab switches between the
  * scoped models (Pi's `enabledModels`) and all of them; a search box shows when there are many models, or when
  * `/model son` opened it already searching. Opened for the default (`forDefault`, from the menu), it picks the model
- * and thinking level new sessions start with instead, and stays open for both.
+ * and thinking level new sessions start with instead, and stays open for both. Opened to choose (`choose`, from the
+ * copy sheet, `copy.js`), it changes no session: it gives the model and level to the copy sheet, and a model picked
+ * goes back to it.
  */
 export function ModelPicker() {
     const { models, server, me } = store.state;
@@ -80,6 +84,12 @@ export function ModelPicker() {
     // While the picker animates out, the store has no sheet any more.
     const [query, setQuery] = useState(store.state.sheet?.query ?? "");
     const [forDefault] = useState(() => store.state.sheet?.forDefault === true);
+    const [choosing] = useState(() => store.state.sheet?.choose === true);
+    // What the copy sheet has chosen so far (it changes as a level is picked here).
+    const draft = choosing ? copyDraft() : null;
+    const close = choosing ? goBack : closeSheet;
+    // The copy's level is no store state: picking one draws the picker again.
+    const [, redraw] = useState(0);
     const scopedModels = models.filter((model) => model.scoped);
     // Opened already searching (`/model gem`) for models only outside the scope: it starts with all of them.
     const [showAll, setShowAll] = useState(
@@ -92,9 +102,9 @@ export function ModelPicker() {
     // Decided once: a search box that went away when emptied would take the caret with it.
     const [searchable] = useState(() => models.length > MODEL_SEARCH_AT || query !== "");
     const [picked, setPicked] = useState(0);
-    const [anchor, setAnchor] = useState(() =>
-        forDefault || pipId !== undefined ? null : modelAnchor(),
-    );
+    // The default's picker and the copy sheet's have no chip to open from: they stay in the middle.
+    const free = forDefault || choosing || pipId !== undefined;
+    const [anchor, setAnchor] = useState(() => (free ? null : modelAnchor()));
     const box = useRef(null);
     const search = useRef(null);
     const list = useRef(null);
@@ -105,7 +115,7 @@ export function ModelPicker() {
     // On a phone, a swipe away from where it opens closes it, as a sheet's does.
     useDragToClose(box, {
         dir: anchor?.down ? "up" : "down",
-        onClose: closeSheet,
+        onClose: close,
         enabled: BOTTOM_SHEETS.matches,
     });
     const owner = me?.role === "owner";
@@ -113,16 +123,27 @@ export function ModelPicker() {
     const isDefault = (model) =>
         chosen?.provider === model?.provider && chosen?.modelId === (model?.id ?? model?.modelId);
     const defaultModel = models.find(isDefault);
-    // The model and thinking level this picker sets: the session's, or the default's.
-    const current = forDefault ? chosen : agent?.model;
+    // The model and thinking level this picker sets: the session's, the default's, or the copy's.
+    const current = choosing ? draft?.model : forDefault ? chosen : agent?.model;
     const isCurrent = (model) =>
         current?.provider === model.provider && current?.modelId === model.id;
-    const levels = (forDefault ? defaultModel?.levels : agent?.levels) ?? ["off"];
+    const chosenModel = choosing ? modelOf(current) : undefined;
+    const levels = (choosing
+        ? chosenModel?.levels
+        : forDefault
+          ? defaultModel?.levels
+          : agent?.levels) ?? ["off"];
     // Before there is a default, the first one picked thinks as hard as this session does.
-    const level = forDefault
-        ? (chosen?.thinkingLevel ?? agent?.thinkingLevel ?? "off")
-        : agent?.thinkingLevel;
-    const reasoning = forDefault ? defaultModel?.reasoning : agent?.reasoning;
+    const level = choosing
+        ? (draft?.thinkingLevel ?? "off")
+        : forDefault
+          ? (chosen?.thinkingLevel ?? agent?.thinkingLevel ?? "off")
+          : agent?.thinkingLevel;
+    const reasoning = choosing
+        ? chosenModel?.reasoning
+        : forDefault
+          ? defaultModel?.reasoning
+          : agent?.reasoning;
     const shown = choices
         .filter((model) => (!favoritesOnly || isFavorite(model)) && matches(model, query))
         .sort(
@@ -135,6 +156,7 @@ export function ModelPicker() {
     // The session's model and level are the default already.
     const sessionIsDefault =
         !forDefault &&
+        !choosing &&
         isDefault(agent?.model) &&
         (chosen?.thinkingLevel ?? "off") === (agent?.thinkingLevel ?? "off");
     const setDefault = (model, thinkingLevel) =>
@@ -148,8 +170,8 @@ export function ModelPicker() {
 
     useEffect(() => {
         // The default's picker has no chip to open from: it stays in the middle.
-        const place = () => setAnchor(forDefault || pipId !== undefined ? null : modelAnchor());
-        const onKey = (event) => event.key === "Escape" && closeSheet();
+        const place = () => setAnchor(free ? null : modelAnchor());
+        const onKey = (event) => event.key === "Escape" && close();
 
         addEventListener("resize", place);
         visualViewport?.addEventListener("resize", place);
@@ -179,6 +201,14 @@ export function ModelPicker() {
             return;
         }
 
+        // For the copy: back to its sheet with the model, at the nearest level it has.
+        if (choosing) {
+            chooseModel(model);
+            close();
+
+            return;
+        }
+
         // The default's picker stays open, for its thinking level.
         if (forDefault) {
             return isCurrent(model) ? undefined : setDefault(model, level);
@@ -194,9 +224,11 @@ export function ModelPicker() {
     };
 
     const think = (each) =>
-        forDefault
-            ? setDefault(defaultModel, each)
-            : attempt(() => configure({ thinkingLevel: each }));
+        choosing
+            ? (chooseLevel(each), redraw((n) => n + 1))
+            : forDefault
+              ? setDefault(defaultModel, each)
+              : attempt(() => configure({ thinkingLevel: each }));
 
     // Arrows and Enter move through the models, and Tab switches scoped and all, from the search box or the picker
     // itself, not from its other buttons: there Tab and Shift+Tab move the focus as anywhere else.
@@ -246,7 +278,7 @@ export function ModelPicker() {
 
     return html`<div
         class="overlay pop-overlay"
-        onMouseDown=${scrimPress(closeSheet)}
+        onMouseDown=${scrimPress(close)}
     >
         <section
             class=${`pop-menu model-menu ${anchor ? (anchor.down ? "down" : "") : "free"}`}
@@ -254,7 +286,7 @@ export function ModelPicker() {
             ref=${box}
             role="dialog"
             aria-modal="true"
-            aria-label=${forDefault ? "Default model" : "Model"}
+            aria-label=${forDefault ? "Default model" : choosing ? "Model for the copy" : "Model"}
             aria-keyshortcuts=${scopedModels.length > 0 ? "Tab" : undefined}
             tabindex="-1"
             onKeyDown=${onKeyDown}
@@ -264,6 +296,7 @@ export function ModelPicker() {
                 <span>
                     ${forDefault ? "Default model" : "Model"}
                     ${forDefault && html`<span class="pop-menu-head-sub">for new sessions</span>`}
+                    ${choosing && html`<span class="pop-menu-head-sub">for the copy</span>`}
                     ${
                         scopedModels.length > 0 &&
                         html`<span
@@ -402,7 +435,7 @@ export function ModelPicker() {
                 </div>`
             }
             ${
-                pipId !== undefined || !defaultsKept()
+                pipId !== undefined || choosing || !defaultsKept()
                     ? null
                     : forDefault
                       ? html`<div class="pop-menu-foot pop-menu-default">

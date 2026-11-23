@@ -27,6 +27,7 @@ import { designSystemTool } from "./system.ts";
 import type { CheckFinding, CheckReport, DesignSystem } from "./system-types.ts";
 import { loadDesignSystem } from "./tokens.ts";
 import { literal, record } from "../tool-schema.ts";
+import { remoteDesignTool } from "./mirror.ts";
 
 export { designGuide } from "./guide.ts";
 
@@ -469,7 +470,7 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
         },
     });
 
-    return [preview, exportTool, designSystemTool()];
+    return [preview, exportTool, designSystemTool()].map((tool) => remoteDesignTool(host, tool));
 }
 
 function exportMode(

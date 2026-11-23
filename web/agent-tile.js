@@ -32,10 +32,10 @@ function doingOf(agent, peek) {
 }
 
 /**
- * A subagent's sub-tile. `folder` is its session's folder color; `selected` marks it as the one the board shows.
+ * A subagent's sub-tile. `folder` and `runner` come from its session; `selected` marks the one the board shows.
  * `onActivate` takes a click (a peek tile opens it; the board picks it), and `onOpen` a double click or tap.
  */
-export function AgentTile({ agent, folder, selected = false, onActivate, onOpen }) {
+export function AgentTile({ agent, folder, runner, selected = false, onActivate, onOpen }) {
     const peek = agent.peek ?? store.state.peeks?.[agent.conversationId];
     const waiting = waitingOf(agent, peek);
     const state = waiting ? "waiting" : "working";
@@ -68,7 +68,7 @@ export function AgentTile({ agent, folder, selected = false, onActivate, onOpen 
     >
         <span class="agent-tile-head">
             <span
-                class=${`state-mark ${state}`}
+                class=${`state-mark ${runner ? "remote " : ""}${state}`}
                 style=${`--folder:${waiting ? "var(--warn)" : (folder ?? "var(--muted)")}`}
                 aria-hidden="true"
             ></span>

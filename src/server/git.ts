@@ -6,6 +6,20 @@
  */
 import { execFile } from "node:child_process";
 
+/** What every git command here starts with, before its own arguments. */
+export const GIT_ARGS = ["-c", "core.fsmonitor=false"] as const;
+
+/** What every git command here has in its environment, besides the usual. */
+export const GIT_ENV = {
+    GIT_LITERAL_PATHSPECS: "1",
+    GIT_OPTIONAL_LOCKS: "0",
+    LC_ALL: "C",
+} as const;
+
+/** How long a git command may take, and how much it may print, unless its caller says otherwise. */
+export const GIT_TIMEOUT_MS = 60_000;
+export const GIT_MAX_BUFFER = 16 * 1024 * 1024;
+
 export type GitOptions = {
     /** Exit codes besides 0 that still mean success. */
     allowExit?: number[];
@@ -26,22 +40,17 @@ export class GitError extends Error {
 
 /** Run git in `cwd` and return what it printed. */
 export function git(cwd: string, args: string[], options: GitOptions = {}): Promise<string> {
-    const { allowExit = [], timeoutMs = 60_000, maxBuffer = 16 * 1024 * 1024 } = options;
+    const { allowExit = [], timeoutMs = GIT_TIMEOUT_MS, maxBuffer = GIT_MAX_BUFFER } = options;
 
     return new Promise((resolve, reject) => {
         execFile(
             "git",
-            ["-c", "core.fsmonitor=false", ...args],
+            [...GIT_ARGS, ...args],
             {
                 cwd,
                 timeout: timeoutMs,
                 maxBuffer,
-                env: {
-                    ...process.env,
-                    GIT_LITERAL_PATHSPECS: "1",
-                    GIT_OPTIONAL_LOCKS: "0",
-                    LC_ALL: "C",
-                },
+                env: { ...process.env, ...GIT_ENV },
             },
             (error, stdout, stderr) => {
                 const code = typeof error?.code === "number" ? error.code : undefined;

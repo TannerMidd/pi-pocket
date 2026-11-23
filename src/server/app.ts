@@ -8,7 +8,7 @@
  */
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, posix, win32 } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
@@ -47,6 +47,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { CodingTools, createCodingTools } from "@earendil-works/pi-durable/tools";
+import { withRunnerRead } from "./runner-read.ts";
 import { Alerts } from "./alerts.ts";
 import { sweepAssets } from "./artifacts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
@@ -72,6 +73,7 @@ import {
     type ChatMessage,
     DecisionsDoc,
     DeletedDoc,
+    type FolderFavorites as FolderFavoritesValue,
     FolderFavoritesDoc,
     MemoryDoc,
     RunFailureDoc,
@@ -99,6 +101,7 @@ import {
     type WorkspaceProvider,
 } from "./host.ts";
 import { type GuardStatus, LancetGuard } from "./lancet.ts";
+import { withReveal } from "./local-browser.ts";
 import { takeLock } from "./lock.ts";
 import { pendingApprovalsFor } from "./pending-approvals.ts";
 import { Memory } from "./memory.ts";
@@ -165,6 +168,16 @@ import { Spend } from "./spend.ts";
 import { Transcripts } from "./transcripts.ts";
 import { Watches } from "./watches.ts";
 import { Workspace } from "./workspace.ts";
+import { REMOTE_EXTENSIONS, REMOTE_SUBAGENT_WITHOUT, Runners } from "./runners.ts";
+import {
+    changedThere,
+    type FolderScan,
+    knownScan,
+    latestScan,
+    projectThere,
+    readRemoteText,
+    saveTrust,
+} from "./remote-context.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -378,6 +391,8 @@ export interface OpenOptions {
 
 export class PocketApp {
     readonly config: ConfigStore;
+    /** Other computers that run sessions' tools (`runners.ts`): their links, keys, and environments. */
+    readonly runners: Runners;
     /** Push subscriptions and their keys; undefined until the server opened. */
     pushStore: PushStore | undefined;
     readonly approvals = new Approvals((id) => this.attribution.requesterOf(id));
@@ -483,6 +498,8 @@ export class PocketApp {
         { token: symbol; provider: WorkspaceProvider }[]
     >();
     readonly #busy = new Set<ConversationId>();
+    /** Copies of attached files on their way to a session's computer (`uploadsCopied`), by conversation. */
+    readonly #uploads = new Map<ConversationId, Promise<void>>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
     /**
@@ -516,6 +533,8 @@ export class PocketApp {
     #releaseLock: (() => void) | undefined;
     #openingStorage: Storage | undefined;
     #closing: Promise<void> | undefined;
+    /** A pending `#tuneRemote` after extensions changed (`#tuneRemoteSoon`). */
+    #tuneTimer: NodeJS.Timeout | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
     /** Request shapers from the extension modules the owner turned on (`host.shapeModelRequests`). */
@@ -555,6 +574,16 @@ export class PocketApp {
         this.config = new ConfigStore(options.dataDir);
         this.#lockFile = join(options.dataDir, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
+        this.runners = new Runners({
+            config: this.config,
+            log: (line) => this.#log(line),
+            onChange: () => this.#runnersChanged(),
+            // A runner's question names a session by its permission: who started that session answers it.
+            askerOf: (permission) =>
+                Object.entries(this.#sessions).find(
+                    ([id, meta]) => (meta.runnerPermission ?? id) === permission,
+                )?.[1].createdBy,
+        });
         this.cacheKeeper = new CacheKeeper({
             log: (line) => this.#log(line),
             conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
@@ -597,6 +626,36 @@ export class PocketApp {
             dataDir: options.dataDir,
             ...(options.browser === undefined ? {} : { executable: options.browser }),
             log: (line) => this.#log(line),
+            remote: {
+                runnerOf: (id) => this.runnerOf(id as unknown as ConversationId),
+                name: (runner) => this.runners.name(runner),
+                connect: (runner, host, port, socket, open) =>
+                    this.runners.link(runner).openNetwork(host, port, socket, {
+                        ...open,
+                        ...(open.conversationId === undefined
+                            ? {}
+                            : {
+                                  session: this.runnerScope(
+                                      open.conversationId as unknown as ConversationId,
+                                  ),
+                              }),
+                    }),
+                computer: async (runner, conversationId) => {
+                    const link = this.runners.link(runner);
+                    const info = await link.info();
+                    const id = conversationId as unknown as ConversationId;
+                    const scoped = conversationId === undefined ? undefined : this.runnerScope(id);
+
+                    return {
+                        name: this.runners.name(runner),
+                        env: this.runners.env(runner, scoped?.folder ?? info.home, scoped),
+                        tmpdir: info.tmpdir,
+                        separator: info.separator,
+                        ...(link.downloads === undefined ? {} : { folder: link.downloads }),
+                        session: scoped?.id ?? String(conversationId),
+                    };
+                },
+            },
             load: async (id) =>
                 (await this.harness.snapshot(
                     BrowserDoc,
@@ -885,9 +944,29 @@ export class PocketApp {
                 // Values extensions hide (`host.hide`) leave every tool's result before it is stored.
                 hooks: [
                     hook(ToolTask, {
-                        afterTool: (_call, result, api) => {
+                        afterTool: async (call, result, api) => {
                             // A secret that changed while the tool ran is hidden from its result too.
                             this.secrets.sync();
+
+                            // A context file or skill Pi wrote on another computer counts from the next request.
+                            if (
+                                (call.name === "write" || call.name === "edit") &&
+                                typeof call.arguments?.path === "string"
+                            ) {
+                                this.#projectFileChanged(api.conversationId, call.arguments.path);
+
+                                if (!result.isError) {
+                                    await this.workspace
+                                        .copyRunnerImage(api.conversationId, call.arguments.path)
+                                        .catch((error: unknown) => {
+                                            // A failed offline copy must not turn a successful write into a failed tool.
+                                            this.#log(
+                                                `Could not keep a runner image: ${describe(error)}`,
+                                            );
+                                        });
+                                }
+                            }
+
                             const cleaned = this.hidden.result(result, api.conversationId);
 
                             return cleaned === result ? undefined : cleaned;
@@ -932,6 +1011,8 @@ export class PocketApp {
             },
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
+            runnerOf: (conversationId) => this.runnerOf(conversationId),
+            envFor: (conversationId) => this.envFor(conversationId),
             roleOf: (personId) => this.config.userById(personId)?.role,
             on: (event, listener) => this.events.on(event, listener),
             ask: (request, askContext) => ask(this.approvals, request, askContext),
@@ -947,8 +1028,7 @@ export class PocketApp {
                 ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
-            waitsForLimit: (conversationId) =>
-                this.limits.waits().some((wait) => wait.conversationId === Number(conversationId)),
+            waitsForLimit: (conversationId) => this.waitsOutside(conversationId),
             alertOwner: (conversationId, title, body) =>
                 this.alerts.ownerAlert(conversationId, title, body),
             heldBack: (conversationId) => this.spend.heldBack(conversationId),
@@ -1020,7 +1100,12 @@ export class PocketApp {
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
             // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
-            { webs: this.webs, notify: (level, message) => this.ownerNotice(level, message) },
+            {
+                webs: this.webs,
+                notify: (level, message) => this.ownerNotice(level, message),
+                // A drop-in that says `remoteSessions` came or went: sessions on other computers get it, or lose it.
+                onChange: () => this.#tuneRemoteSoon(),
+            },
         );
         await this.themes.load().catch((error: unknown) => {
             this.#log(`Themes could not be read: ${describe(error)}`);
@@ -1043,8 +1128,19 @@ export class PocketApp {
                 registry,
                 settings: this.#harnessSettings(),
                 now: this.now,
-                env: ({ conversationId, cwd }) =>
-                    this.#wrapped(conversationId, cwd ?? this.defaultCwd),
+                env: async ({ conversationId, cwd }, context) => {
+                    // Offline is offline (`docs/runners.md`): a turn or tool call of a session on another computer waits
+                    // here until that computer is back, rather than failing. Stop ends the wait.
+                    const runner = this.runnerOf(conversationId);
+
+                    if (runner !== undefined) {
+                        await this.runners.link(runner).whenOnline(context.abortSignal);
+                        // The files its messages brought are there before Pi looks for them.
+                        await this.#uploads.get(conversationId as ConversationId);
+                    }
+
+                    return this.#wrapped(conversationId, cwd ?? this.defaultCwd);
+                },
                 conversationCreated: async (tx, conversation) => {
                     // Every conversation gets the app's documents up front, so views can read them from the start.
                     await tx.doc(AuthorsDoc, conversation.id);
@@ -1114,6 +1210,7 @@ export class PocketApp {
         // Core's secrets are hidden before any work goes on, with the settings the modules that loaded declare.
         this.secrets.sync();
         await this.pip.tuneAll((line) => this.#log(line));
+        await this.#tuneRemote();
         // Work a previous process left unfinished continues now.
         this.harness.resume();
         void this.sessionCleanup
@@ -1460,7 +1557,7 @@ export class PocketApp {
                 }
             }
         } else if (kind === FolderFavoritesDoc.definition.kind) {
-            this.folderFavorites.committed(value as { users: Record<string, string[]> } | null);
+            this.folderFavorites.committed(value as FolderFavoritesValue | null);
         } else if (kind === MemoryDoc.definition.kind) {
             this.memory.committed();
         } else if (ROOM_DOCS.has(kind) && id !== undefined) {
@@ -1687,21 +1784,224 @@ export class PocketApp {
         return canonical;
     }
 
-    /** Where a conversation's commands run: its folder here, or its workspace provider's env. */
+    /**
+     * Where a conversation's commands run: its folder here, its workspace provider's env, or the computer its session
+     * runs on.
+     */
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
     }
 
-    /** A folder's environment, with what extensions add to each command and hide from its output in this session. */
+    /**
+     * Whether a conversation's work waits on something that is not its own doing, which the stall watches count as no
+     * stall and no quiet time: a provider's limit that must clear (`limit-gate.ts`), or its linked computer being
+     * offline, where its tools wait until that computer is back (`runners.ts`).
+     */
+    waitsOutside(id: ConversationId): boolean {
+        if (this.limits.waits().some((wait) => wait.conversationId === Number(id))) {
+            return true;
+        }
+
+        const runner = this.runnerOf(id);
+
+        return runner !== undefined && !this.runners.link(runner).online;
+    }
+
+    /**
+     * The computer a conversation's tools run on: its session's runner, for the session and every subagent under it.
+     * Undefined: this machine.
+     */
+    runnerOf(id: ConversationId): string | undefined {
+        return this.#sessions[String(this.rootOf(id))]?.runner;
+    }
+
+    /**
+     * All subagents use their root session permission. A worktree keeps its source folder's permission: the worktree
+     * is in that permission's own runner folder. `cwd` checks a move before it is saved. Old sessions ask once.
+     */
+    /**
+     * A session's permission id on its computer (`runnerScope`), without the access check: for what shows or cleans up,
+     * never for what runs there.
+     */
+    runnerPermission(id: ConversationId): string {
+        const root = this.rootOf(id);
+
+        return this.#sessions[String(root)]?.runnerPermission ?? String(root);
+    }
+
+    runnerScope(id: ConversationId, cwd?: string) {
+        const root = this.rootOf(id);
+        const meta = this.#sessions[String(root)];
+
+        // Everything a session does on its computer goes through this scope, so it runs only while the person who
+        // started it may still use that computer (`Runners.mayUse`): a removed grant, a person made a viewer, or a
+        // removed person stops their sessions there, also ones already running, their subagents, and their schedules.
+        if (meta?.runner !== undefined) {
+            this.requireRunnerAccess(meta);
+        }
+
+        const folder = cwd ?? this.cwdOf(root);
+        const path =
+            meta?.runner !== undefined && this.runners.link(meta.runner).platform().os === "windows"
+                ? win32
+                : posix;
+        const relative =
+            meta?.worktree === undefined ? undefined : path.relative(meta.worktree.path, folder);
+        const inWorktree =
+            relative !== undefined &&
+            relative !== ".." &&
+            !relative.startsWith(".." + path.sep) &&
+            !path.isAbsolute(relative);
+
+        return {
+            id: meta?.runnerPermission ?? String(root),
+            folder: inWorktree ? meta!.worktree!.source : folder,
+            person: this.config.userById(meta?.createdBy ?? "")?.name ?? "The owner",
+        };
+    }
+
+    /**
+     * The extensions a session on another computer runs with: the built-in list (`REMOTE_EXTENSIONS`), then the drop-ins
+     * that say they work there (`export const remoteSessions = true`, `reload.ts`).
+     */
+    remoteExtensions(): string[] {
+        return [...new Set([...REMOTE_EXTENSIONS, ...this.loader.remoteNames()])];
+    }
+
+    /** What conversation `id` on another computer runs with: a subagent has its session's list, less its own. */
+    #remoteListOf(id: ConversationId): string[] {
+        const all = this.remoteExtensions();
+
+        return this.#parents.has(id)
+            ? all.filter((name) => !REMOTE_SUBAGENT_WITHOUT.includes(name))
+            : all;
+    }
+
+    /** `#tuneRemote` once a burst of extension changes settled (a reload of several drop-ins). */
+    #tuneRemoteSoon(): void {
+        // While the server starts, `open` tunes them once everything loaded.
+        if (this.harness === undefined || this.#closing !== undefined) {
+            return;
+        }
+
+        clearTimeout(this.#tuneTimer);
+        this.#tuneTimer = setTimeout(() => {
+            this.#tuneTimer = undefined;
+
+            if (this.#closing !== undefined) {
+                return;
+            }
+
+            void this.#tuneRemote().catch((error: unknown) => {
+                this.#log(
+                    `Sessions on other computers could not get their extensions: ${describe(error)}`,
+                );
+            });
+        }, 200);
+        this.#tuneTimer.unref();
+    }
+
+    /**
+     * Give every conversation on another computer the list it runs with now (`remoteExtensions`): drop-ins that came or
+     * went, and built-ins added to the list since it was made. One commit, only for those whose list differs.
+     */
+    async #tuneRemote(): Promise<void> {
+        const stale = [...this.#agents]
+            .filter(([id, agent]) => {
+                if (this.runnerOf(id) === undefined || !Array.isArray(agent.extensions)) {
+                    return false;
+                }
+
+                return JSON.stringify(agent.extensions) !== JSON.stringify(this.#remoteListOf(id));
+            })
+            .map(([id]) => id);
+
+        if (stale.length === 0) {
+            return;
+        }
+
+        await this.harness.commit(async (tx) => {
+            for (const id of stale) {
+                (await tx.doc(AgentDoc, id)).extensions = this.#remoteListOf(id);
+            }
+        }, context);
+    }
+
+    /**
+     * Note that files a message brought are being copied to session `id`'s computer (`commands.ts`): its turns and
+     * tool calls wait for the copy (the Harness's `env`). Copies of one session run one after another.
+     */
+    uploadsCopied(id: ConversationId, copy: Promise<void>): void {
+        const before = this.#uploads.get(id) ?? Promise.resolve();
+        const after = before.then(() => copy).catch(() => {});
+
+        this.#uploads.set(id, after);
+        void after.then(() => {
+            if (this.#uploads.get(id) === after) {
+                this.#uploads.delete(id);
+            }
+        });
+    }
+
+    /**
+     * A folder's environment, with what extensions add to each command and hide from its output in this session. A
+     * session on another computer gets that computer's, never this machine's: when it is offline, what uses it waits.
+     */
     #wrapped(id: ConversationId, cwd: string): ExecutionEnv {
         // Each command hides core's secrets as they are now.
         this.secrets.sync();
 
+        const runner = this.runnerOf(id);
+        const base =
+            runner === undefined
+                ? this.#env(cwd)
+                : this.runners.env(runner, cwd, this.runnerScope(id));
+
         return withQuietLimit(
-            wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
+            wrapEnv(base, Number(id), cwd, this.commandEnvs, this.hidden),
             () => this.background.commandQuietMs,
+            // An offline computer's command waits (`runners.ts`): that wait is no quiet time.
+            runner === undefined ? undefined : () => !this.runners.link(runner).online,
         );
     }
+
+    /**
+     * The computers list changed (linked, removed, online, away, access): tell each person their list, and when one came or went,
+     * everyone who sees its sessions (the session list's offline mark, a session's "offline, reconnecting…").
+     */
+    #runnersChanged(): void {
+        const list = this.runners.list();
+
+        for (const client of this.#clients) {
+            // An empty list also clears computers this person can no longer use.
+            client.send("runners", this.runners.list(client.user));
+        }
+
+        const online = new Set(list.filter((runner) => runner.online).map((runner) => runner.id));
+        const before = this.#runnersOnline;
+
+        this.#runnersOnline = online;
+
+        if (before.size === online.size && [...online].every((id) => before.has(id))) {
+            return;
+        }
+
+        this.#scheduleSessions();
+
+        for (const pending of this.#rooms.values()) {
+            void pending.then(
+                (room) => {
+                    if (this.runnerOf(room.id) !== undefined) {
+                        room.schedule();
+                    }
+                },
+                () => {},
+            );
+        }
+    }
+
+    /** Which computers were online when the list last changed (`#runnersChanged`). */
+    #runnersOnline = new Set<string>();
 
     #env(cwd: string): ExecutionEnv {
         const scheme = this.workspaceScheme(cwd);
@@ -2315,6 +2615,7 @@ export class PocketApp {
     rename(user: User, name: string): void {
         this.config.updateUser(user.id, { name });
         this.#peopleChanged();
+        this.runners.changed();
 
         for (const pending of this.#rooms.values()) {
             void pending.then(
@@ -2422,6 +2723,49 @@ export class PocketApp {
     }
 
     /**
+     * Whether `user` may have session `meta` as far as its computer goes: not on one, theirs, or shared by the owner
+     * (`sharedRunnerSessions`). Then the usual rules decide, as for any session.
+     */
+    runnerSessionOpen(meta: SessionMeta | undefined, user: User): boolean {
+        return (
+            meta?.runner === undefined ||
+            meta.createdBy === user.id ||
+            this.config.sharedRunnerSessions
+        );
+    }
+
+    /**
+     * A session on another computer acts there as the person who started it: only while they may still use it
+     * (`Runners.mayUse`): the linker, or a person the linker chose.
+     */
+    requireRunnerAccess(meta: SessionMeta): void {
+        const runner = meta.runner;
+
+        if (runner === undefined) {
+            return;
+        }
+
+        if (this.config.runnerById(runner) === undefined) {
+            throw new HttpError(
+                403,
+                "The computer this session ran on was removed from this server, so it cannot run there.",
+            );
+        }
+
+        const starter =
+            meta.createdBy === undefined ? undefined : this.config.userById(meta.createdBy);
+
+        if (starter !== undefined && this.runners.mayUse(runner, starter)) {
+            return;
+        }
+
+        throw new HttpError(
+            403,
+            `${starter?.name ?? "The person who started this session"} can no longer use ${this.runners.name(runner)}, so this session cannot run there. The person who linked it can choose them again in Runners.`,
+        );
+    }
+
+    /**
      * People invited to one session see only that session and its subagents. A PiP is its own person's alone: its tools
      * act as them, so anyone else who could write to it would act as them too.
      */
@@ -2432,9 +2776,16 @@ export class PocketApp {
             return false;
         }
 
-        const pip = this.#sessions[String(root)]?.pip;
+        const meta = this.#sessions[String(root)];
+        const pip = meta?.pip;
 
         if (pip !== undefined && pip !== user.id) {
+            return false;
+        }
+
+        // A session on another computer is its creator's alone, as PiP is: its tools run there, as that person. The
+        // owner can share them like any other (`sharedRunnerSessions`).
+        if (!this.runnerSessionOpen(meta, user)) {
             return false;
         }
 
@@ -2599,7 +2950,8 @@ export class PocketApp {
         const all: SubagentEntry[] = [];
 
         for (const [id, list] of this.#subagentsBySession()) {
-            if (user?.sessions !== undefined && !user.sessions.includes(id)) {
+            // Whom the session is shown to: invited to others, a private session on another computer, PiP.
+            if (user !== undefined && !this.canSee(user, Number(id) as ConversationId)) {
                 continue;
             }
 
@@ -2707,11 +3059,18 @@ export class PocketApp {
     }
 
     async hello(user: User) {
+        const models = await this.modelList();
+        const guard = await this.guardStatus();
+        // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
+        const folderFavorites = await this.folderFavorites.list(user);
+        const runnerFavorites = await this.folderFavorites.runners(user);
+        const runners = this.runners.list(user);
+
         return {
             user: helloUser(user),
             users: this.people(user),
-            models: await this.modelList(),
-            guard: await this.guardStatus(),
+            models,
+            guard,
             server: {
                 pocketVersion: pocketVersion(),
                 supervised: this.supervised,
@@ -2752,6 +3111,8 @@ export class PocketApp {
                 collab: 2,
                 reactions: REACTIONS,
                 approvalRule: this.config.approvalRule,
+                // Sessions on linked computers: shared like any other, or their creators' alone (the default).
+                sharedRunnerSessions: this.config.sharedRunnerSessions,
                 // The model and thinking level new sessions start with, or null for the last one picked.
                 defaultModel: this.config.defaultModel ?? null,
                 // The theme and colors of browsers that have not chosen their own, or null for the app's own.
@@ -2767,8 +3128,11 @@ export class PocketApp {
                 // The most hours a run waits for a provider's limit to clear; 0: it does not wait (`limit-gate.ts`).
                 limitWaitHours: this.config.limitWaitHours,
             },
-            // Read after the guard's wait, so a connecting device does not replace a live update with an older list.
-            folderFavorites: await this.folderFavorites.list(user),
+            folderFavorites,
+            // The same, on each computer they may use (`runners.ts`), by its id.
+            runnerFavorites,
+            // Linked computers (`runners.ts`), for the owner's Runners sheet and New session's Runs on.
+            ...(user.role === "owner" || runners.length > 0 ? { runners } : {}),
             // Every theme folder, for Appearance and for the look this tab uses (`theme.js`).
             themes: this.themes.list(user.role === "owner"),
         };
@@ -2791,7 +3155,11 @@ export class PocketApp {
 
     /** A tab's hello: what everyone gets, and the id of its own connection, which its peek lists name. */
     #helloFor(client: Client, hello: Awaited<ReturnType<PocketApp["hello"]>>) {
-        return { ...hello, connection: client.connection };
+        return withReveal(
+            { ...hello, connection: client.connection },
+            client.user,
+            client.local === true,
+        );
     }
 
     #scheduleSessions(): void {
@@ -2803,12 +3171,16 @@ export class PocketApp {
             this.#sessionsTimer = undefined;
             const all = this.sessions();
             const allJson = JSON.stringify(all);
+            // Sessions on other computers are their creators' alone: then each person gets their own list.
+            const personal =
+                !this.config.sharedRunnerSessions &&
+                all.some((session) => session.runner !== undefined);
             let board: SubagentEntry[] | undefined;
 
             for (const client of this.#clients) {
                 const scope = client.user.sessions;
 
-                if (scope === undefined) {
+                if (scope === undefined && !personal) {
                     this.#sendSessions(client, all, allJson);
                 } else {
                     // Scoped lists need their own metadata projection, not just a filter over the global list.
@@ -2821,9 +3193,7 @@ export class PocketApp {
                     board ??= this.subagents();
                     this.#sendBoard(
                         client,
-                        scope === undefined
-                            ? board
-                            : board.filter((entry) => scope.includes(String(entry.id))),
+                        scope === undefined && !personal ? board : this.subagents(client.user),
                     );
                 }
             }
@@ -2905,6 +3275,8 @@ export class PocketApp {
                 ([id, meta]) =>
                     // PiP is not a session people pick: it shows in its own panel (`pip.ts`).
                     meta.pip === undefined &&
+                    // A session on another computer: its creator's alone, unless shared (`canSee`).
+                    (user === undefined || this.runnerSessionOpen(meta, user)) &&
                     (user?.sessions === undefined || user.sessions.includes(id)),
             )
             .map(([id, meta]) => {
@@ -2944,6 +3316,10 @@ export class PocketApp {
                     ...linkage,
                     busy,
                     waiting: waiting.has(id),
+                    // Its computer is offline: the list marks it, and its work waits for it.
+                    ...(meta.runner !== undefined && !this.runners.link(meta.runner).online
+                        ? { offline: true }
+                        : {}),
                     ...(limited.has(id) ? { limited: limited.get(id)! } : {}),
                     ...(endedAt === undefined ? {} : { endedAt }),
                     ...(failure === undefined ? {} : { failed: true, failure }),
@@ -2982,6 +3358,25 @@ export class PocketApp {
                 ? { other: true as const }
                 : {}),
         };
+    }
+
+    /**
+     * The folders of the newest sessions `user` sees on one computer (`runner`; undefined: this server), newest first,
+     * at most 8: the folder picker's Recent for that computer.
+     */
+    recentFolders(user: User, runner: string | undefined): string[] {
+        return [
+            ...new Set(
+                this.sessions(user)
+                    // A workspace URI is not a folder the picker can open: its provider's module starts sessions there.
+                    .filter(
+                        (session) =>
+                            session.runner === runner &&
+                            this.workspaceScheme(session.cwd) === undefined,
+                    )
+                    .map((session) => session.cwd),
+            ),
+        ].slice(0, 8);
     }
 
     isBusy(id: ConversationId): boolean {
@@ -3166,9 +3561,19 @@ export class PocketApp {
                 ? {}
                 : { worktree: { branch: meta.worktree.branch, source: meta.worktree.source } }),
             // Whether a fork could get a worktree of its own.
-            ...(meta === undefined
-                ? {}
-                : { inRepository: this.workspace.inRepository(agent.cwd ?? meta.cwd) }),
+            // A session on another computer: its folder and repository are read there, never here.
+            ...(this.runnerOf(room.id) === undefined
+                ? meta === undefined
+                    ? {}
+                    : { inRepository: this.workspace.inRepository(agent.cwd ?? meta.cwd) }
+                : {
+                      runner: this.runnerOf(room.id)!,
+                      runnerName: this.runners.name(this.runnerOf(room.id)!),
+                      // Read, not checked: a view that throws would end the room's push (`room.ts`).
+                      runnerPermission: this.runnerPermission(room.id),
+                      // Offline is offline: the view says so, and what is sent waits for it.
+                      runnerOnline: this.runners.link(this.runnerOf(room.id)!).online,
+                  }),
         };
     }
 
@@ -3358,6 +3763,7 @@ export class PocketApp {
 
         void this.#refreshUser(userId);
         this.#peopleChanged();
+        this.runners.changed();
     }
 
     removeUser(owner: User, userId: string): void {
@@ -3393,6 +3799,7 @@ export class PocketApp {
 
     #forget(userId: string): void {
         this.config.removeUser(userId);
+        this.runners.changed();
         removeAvatar(this.dataDir, userId);
         this.pushStore?.removeUser(userId);
 
@@ -3651,6 +4058,12 @@ export class PocketApp {
             throw new HttpError(403, "Only the owner decides which projects Pi trusts.");
         }
 
+        const runner = this.runnerOf(id);
+
+        if (runner !== undefined) {
+            return projectThere(this.#knownFolder(id), runner, this.#remoteDirs()).trust;
+        }
+
         const cwd = this.cwdOf(id);
 
         if (this.workspaceScheme(cwd) !== undefined) {
@@ -3658,6 +4071,40 @@ export class PocketApp {
         }
 
         return readProjectTrust(cwd, this.#skillSources());
+    }
+
+    /** Where trust decisions and Pi's settings are, for a folder on another computer (`remote-context.ts`). */
+    #remoteDirs(): { dataDir: string; agentDir: string } {
+        return { dataDir: this.dataDir, agentDir: getAgentDir() };
+    }
+
+    /** The environment there of a session on another computer, unwrapped: what `remote-context.ts` reads through. */
+    #remoteEnv(id: ConversationId) {
+        return this.runners.env(this.runnerOf(id)!, this.cwdOf(id), this.runnerScope(id));
+    }
+
+    /** Pi wrote or edited `path`: on another computer, a context file or skill there is read again (`changedThere`). */
+    #projectFileChanged(id: ConversationId, path: string): void {
+        if (this.runnerOf(id) !== undefined) {
+            changedThere(this.#remoteEnv(id), path);
+        }
+    }
+
+    /**
+     * What is known of a session's folder on another computer, at once, for what answers without waiting (the trust
+     * routes): read again in the background when old. 409 before its first reading ends.
+     */
+    #knownFolder(id: ConversationId): FolderScan {
+        const scan = knownScan(this.#remoteEnv(id), this.cwdOf(id));
+
+        if (scan === undefined) {
+            throw new HttpError(
+                409,
+                `Pi Pocket is still reading this folder on ${this.runners.name(this.runnerOf(id)!)}. Try again in a moment.`,
+            );
+        }
+
+        return scan;
     }
 
     /** The owner's answer to "trust this project?", saved where Pi's CLI keeps its own, as its `/trust` does. */
@@ -3676,13 +4123,33 @@ export class PocketApp {
             throw new HttpError(400, "This folder has no folder above it.");
         }
 
-        saveProjectTrust(this.cwdOf(id), getAgentDir(), choice);
+        const runner = this.runnerOf(id);
+
+        if (runner === undefined) {
+            saveProjectTrust(this.cwdOf(id), getAgentDir(), choice);
+        } else {
+            // Kept here, by computer and path there: Pi's own store names this server's folders.
+            const { folder, paths } = this.#knownFolder(id);
+
+            saveTrust(this.dataDir, runner, folder, paths, choice);
+        }
 
         return this.projectTrust(id, user);
     }
 
-    /** Pi's skills in a conversation's folder, to run as `/skill:name`. */
+    /**
+     * Pi's skills in a conversation's folder, to run as `/skill:name`. For a session on another computer, those there, as
+     * last read (`remote-context.ts`): none before the first reading ends.
+     */
     skillCommands(id: ConversationId): SkillCommand[] {
+        const runner = this.runnerOf(id);
+
+        if (runner !== undefined) {
+            const scan = knownScan(this.#remoteEnv(id), this.cwdOf(id));
+
+            return scan === undefined ? [] : this.#remoteSkills(scan, runner);
+        }
+
         try {
             return this.skills(this.cwdOf(id)).map((skill) => ({
                 name: skill.name,
@@ -3695,6 +4162,37 @@ export class PocketApp {
         }
     }
 
+    #remoteSkills(scan: FolderScan, runner: string): SkillCommand[] {
+        return projectThere(scan, runner, this.#remoteDirs()).skills.map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            path: skill.filePath,
+            baseDir: skill.baseDir,
+        }));
+    }
+
+    /**
+     * `skillCommands` as they are now, and how to read a skill's file: for a session on another computer, its folder
+     * there read again when old (or as last read, when it cannot be reached), and the file read there.
+     */
+    async skillsToRun(
+        id: ConversationId,
+    ): Promise<{ skills: SkillCommand[]; read?: (path: string) => Promise<string> }> {
+        const runner = this.runnerOf(id);
+
+        if (runner === undefined) {
+            return { skills: this.skillCommands(id) };
+        }
+
+        const env = this.#remoteEnv(id);
+        const scan = await latestScan(env, this.cwdOf(id));
+
+        return {
+            skills: scan === undefined ? [] : this.#remoteSkills(scan, runner),
+            read: (path) => readRemoteText(env, path),
+        };
+    }
+
     /** Pi's prompt templates, as a conversation in its folder offers them. */
     promptTemplates(id: ConversationId): PromptTemplate[] {
         let paths: string[] = [];
@@ -3703,6 +4201,12 @@ export class PocketApp {
             paths = this.settings.getPromptTemplatePaths();
         } catch {
             // Unreadable settings: the default folders still count.
+        }
+
+        // A session on another computer: this server's own templates, in Pi's folder or where its settings say, with
+        // paths from Pi's folder. None of its project there: nothing here is read for its folder.
+        if (this.runnerOf(id) !== undefined) {
+            return loadPromptTemplates(getAgentDir(), getAgentDir(), paths, { project: false });
         }
 
         const cwd = this.cwdOf(id);
@@ -3879,6 +4383,51 @@ export class PocketApp {
             (error: unknown) =>
                 this.notice("warning", `The LANCET model download failed: ${describe(error)}`),
         ).finally(refresh);
+    }
+
+    /**
+     * The owner shares sessions on linked computers like any other session, or keeps each its creator's alone (the
+     * default). Off again: everyone else's tabs and peeks leave them at once, and their lists lose them.
+     */
+    async setSharedRunnerSessions(user: User, shared: unknown): Promise<void> {
+        if (user.role !== "owner") {
+            throw new HttpError(403, "Only the owner can do that");
+        }
+
+        if (typeof shared !== "boolean") {
+            throw new HttpError(400, "sharedRunnerSessions must be true or false");
+        }
+
+        if (shared === this.config.sharedRunnerSessions) {
+            return;
+        }
+
+        this.config.sharedRunnerSessions = shared;
+
+        for (const client of [...this.#clients]) {
+            if (
+                client.conversationId !== undefined &&
+                !this.canSee(client.user, client.conversationId)
+            ) {
+                this.#evict(client, "This session runs on someone's computer and is theirs alone.");
+            }
+
+            for (const id of client.peeks ?? []) {
+                if (!this.canSee(client.user, id)) {
+                    client.peeks?.delete(id);
+                    this.#unpeek(client, id);
+                }
+            }
+        }
+
+        await this.#refreshClients();
+        this.#scheduleSessions();
+        this.notice(
+            "info",
+            shared
+                ? `${user.name} shared sessions on linked computers like any other session.`
+                : `${user.name} made sessions on linked computers their creators' alone.`,
+        );
     }
 
     /** The owner changes who may allow risky calls. */
@@ -4311,6 +4860,8 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
+            // Runners reconnect to the next server; their daemons keep running meanwhile (offline is offline).
+            this.runners.close();
             this.alerts.close();
             this.themes.close();
             await this.cacheKeeper.close();
@@ -4431,16 +4982,20 @@ export function installRequestShaping(
  * idle. Without Photon's WebAssembly, `read` sends only images that fit the model's limits as they are.
  */
 async function codingTools(log: (line: string) => void) {
+    let coding = CodingTools;
+
     try {
         const node = import.meta.resolve("@earendil-works/pi-durable/images/node");
 
         // Where Pi Durable loads it from, so a missing package shows now and not on the first image.
         createRequire(node).resolve("@silvia-odwyer/photon/photon_rs_bg.wasm");
-
-        return createCodingTools({ images: await createNodePhotonImages() });
+        coding = createCodingTools({ images: await createNodePhotonImages() });
     } catch (error) {
         log(`read cannot shrink images, Photon is missing: ${describe(error)}`);
-
-        return CodingTools;
     }
+
+    return {
+        ...coding,
+        tools: coding.tools?.map((tool) => (tool.name === "read" ? withRunnerRead(tool) : tool)),
+    };
 }
