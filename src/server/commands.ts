@@ -80,6 +80,7 @@ import {
 } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
+import { newestOf } from "./room.ts";
 import {
     type Interrupt,
     interruptTask,
@@ -189,6 +190,8 @@ export const dealtWith = (name: string): string => {
 
 /** What dismissing a subagent's failure came to: `newer` when it failed again since the failure seen. */
 type Dismissal = { dismissed: boolean; newer?: true };
+/** What hiding a subagent from its parent's bar came to: `newer` when it did something since what was seen. */
+type Hiding = { hidden: boolean; newer?: true; failure?: number };
 /** The extension that makes plan mode block changes; without it, plan mode would do nothing. */
 const PLAN_EXTENSION = "pocket-plan";
 /** What Pi is told when someone approves its plan. */
@@ -1107,6 +1110,75 @@ export class Commands {
         }
 
         return this.#dismissFailure(id, user, at);
+    }
+
+    /**
+     * A person hid a finished subagent (`id`, its conversation) from its parent's subagents bar, for everyone, or showed
+     * it again (`hidden` false: they opened it). `at` is the newest thing they saw it do (its `askedAt` or `answeredAt`):
+     * it stays hidden until it does something newer, and one that did already is not hidden, which `newer` says. Hiding
+     * a failure deals with it too. Not hidden while it works. The board and Pi see it as before.
+     */
+    async hideSubagent(
+        id: ConversationId,
+        user: User,
+        hidden: unknown,
+        at: unknown,
+    ): Promise<Hiding> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        if (typeof hidden !== "boolean") {
+            throw new HttpError(400, "hidden must be true or false");
+        }
+
+        if (hidden && (typeof at !== "number" || !Number.isFinite(at))) {
+            throw new HttpError(400, "at must be the time of the newest thing seen");
+        }
+
+        const parent = app.parentOf(id);
+
+        if (parent === undefined) {
+            throw new HttpError(404, "Not a subagent");
+        }
+
+        if (hidden && app.isBusy(id)) {
+            return { hidden: false };
+        }
+
+        const answer = await app.harness.commit(async (tx): Promise<Hiding> => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+            const record = Object.values(agents).find((each) => each.conversationId === id);
+
+            if (record === undefined) {
+                return { hidden: false };
+            }
+
+            if (!hidden) {
+                delete record.hiddenAt;
+
+                return { hidden: false };
+            }
+
+            if (newestOf(record) !== at) {
+                return { hidden: false, newer: true };
+            }
+
+            record.hiddenAt = at;
+
+            return {
+                hidden: true,
+                ...(record.failed === true ? { failure: record.answeredAt ?? 0 } : {}),
+            };
+        }, context);
+
+        // A failure hidden needs nobody either; a stop has no failure to deal with, and `#dismissFailure` knows it.
+        if (answer.failure !== undefined) {
+            await this.#dismissFailure(id, user, answer.failure);
+        }
+
+        return { hidden: answer.hidden, ...(answer.newer ? { newer: true } : {}) };
     }
 
     /**

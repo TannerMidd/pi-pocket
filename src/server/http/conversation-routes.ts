@@ -181,6 +181,13 @@ export async function conversationRoutes(
         return json(response, 200, await app.commands.dismissSubagent(id, user, body.at));
     }
 
+    // A finished subagent hidden from its parent's bar, or shown again: `at` says what the person saw it do last.
+    if (third === "hidden" && method === "POST") {
+        const body = await readJson<{ hidden?: unknown; at?: unknown }>(request);
+
+        return json(response, 200, await app.commands.hideSubagent(id, user, body.hidden, body.at));
+    }
+
     if (third === "withdraw" && method === "POST") {
         const body = await readJson<{ submissionId?: number }>(request);
 

@@ -14,7 +14,7 @@ import {
     offerSubagents,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -101,6 +101,20 @@ const says = (selector: string, pattern: RegExp, timeoutMs?: number) =>
         timeoutMs,
     );
 
+/** Where to save screenshots of the bar, for a review; none without it. */
+const SHOTS = process.env.SUBAGENT_SHOTS;
+
+async function shot(name: string) {
+    if (SHOTS === undefined) {
+        return;
+    }
+
+    mkdirSync(SHOTS, { recursive: true });
+    const { data } = await page.screenshot();
+
+    writeFileSync(join(SHOTS, `${name}.jpg`), Buffer.from(data, "base64"));
+}
+
 /** Past what slides in, as a person's next tap is (`back.js` lets go of a tap that lands on something just moved). */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 450));
 
@@ -183,6 +197,57 @@ test("the bar says what works; Stop stops one", real, async () => {
 
     assert.equal(app.isBusy(slow.conversationId), false, "the subagent stopped");
 });
+
+test(
+    "a finished row hides for everyone with its ×, and shows again once opened",
+    real,
+    async () => {
+        const id = await started(0);
+
+        await says(".agents-count", /^1 working · 1 done$/);
+        await settled();
+        await page.click({ selector: '.topbar [title="Subagents working"]' });
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".agent-row").length === 2)`,
+            "a row each",
+        );
+        // Only the finished one has ×; the working one has Stop.
+        assert.equal(
+            await inPage<string[]>(
+                `return JSON.stringify([...document.querySelectorAll(".agent-hide")].map((button) => button.getAttribute("aria-label")))`,
+            ).then((labels) => labels.join()),
+            "Hide quick",
+        );
+        await shot("1-before");
+        await settled();
+        await page.click({ label: "Hide quick" });
+        await says(".agents-count", /^1 subagent working$/);
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".agent-row").length === 1)`,
+            "the finished row gone",
+        );
+        await shot("2-hidden");
+        const quick = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.quick!;
+
+        assert.equal(typeof quick.hiddenAt, "number", "hidden on the server, for everyone");
+        // Opened from the board, it shows in the bar again.
+        await page.evaluate(
+            `(await import("/subagents.js")).openSubagent(${Number(quick.conversationId)}); return "true"`,
+        );
+        await until(
+            async () =>
+                (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.quick!.hiddenAt ===
+                undefined,
+            "shown again",
+        );
+        await page.navigate(`${base}/s/${id}`);
+        await says(".agents-count", /^1 working · 1 done$/);
+        await shot("3-back");
+        const slow = (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.slow!;
+
+        await app.commands.abort(slow.conversationId, owner(app));
+    },
+);
 
 test("the board shows a sub-tile for each subagent at work, with what it does", real, async () => {
     await started(0);
