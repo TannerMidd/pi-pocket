@@ -73,6 +73,7 @@ export const SIDEBAR = [
         items: [
             ["docs/index.md", "Documentation map"],
             ["CONTRIBUTING.md", "Contributing"],
+            ["docs/running.md", "Launcher and remote access"],
             ["docs/docker.md", "Docker and Podman"],
             ["docs/systemd.md", "systemd service"],
             ["docs/windows.md", "Windows installer"],
