@@ -1,13 +1,15 @@
 /**
  * The files in a session's folder, for `@` mentions in the message box. In a git repository the list is git's: the
- * tracked files and the untracked ones it does not ignore. Elsewhere it is a walk of the folder that skips hidden and
- * dependency folders. A list is kept for a few seconds and shared by every tab, carries a version so a browser that
- * has the newest one hears only that, and is compressed once, however many browsers fetch it. Browsers match the list
- * themselves as people type: typing never waits on the network.
+ * tracked files and the untracked ones it does not ignore. Elsewhere it is a walk of the folder that skips hidden,
+ * dependency, and OS system or app-data folders. A list is kept for a few seconds and shared by every tab, carries a
+ * version so a browser that has the newest one hears only that, and is compressed once, however many browsers fetch it.
+ * Browsers match the list themselves as people type: typing never waits on the network.
  */
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { open, opendir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
 import { git } from "./git.ts";
@@ -37,6 +39,83 @@ const SKIP = new Set([
     "target",
     "dist-newstyle",
 ]);
+/** Apple media library packages whose internals hold huge databases or trigger macOS privacy prompts. */
+const DARWIN_BUNDLE = /\.(?:photoslibrary|photolibrary|musiclibrary|tvlibrary|aplibrary)$/i;
+const WIN32_HOME_SKIP = ["AppData", "Application Data", "Local Settings"];
+const WIN32_ROOT_SKIP = new Set([
+    "windows",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+    "recovery",
+]);
+const LINUX_ROOT_SKIP = new Set(["/proc", "/sys", "/dev", "/run"]);
+
+function normalizeDarwin(path: string): string {
+    return (
+        posix
+            .resolve(path)
+            .replace(/^\/System\/Volumes\/Data(?=\/|$)/i, "")
+            .toLowerCase() || "/"
+    );
+}
+
+/**
+ * Whether a walk outside git skips folder `name` inside `cwd`/`dir`: hidden and dependency folders
+ * everywhere, plus OS library, app-data, system, and virtual folders that hold huge or protected trees.
+ */
+export function skipWalkDirectory(
+    cwd: string,
+    dir: string,
+    name: string,
+    platform: string = process.platform,
+    home = homedir(),
+): boolean {
+    if (name.startsWith(".") || SKIP.has(name)) {
+        return true;
+    }
+
+    if (platform === "darwin") {
+        if (DARWIN_BUNDLE.test(name)) {
+            return true;
+        }
+
+        const full = normalizeDarwin(posix.resolve(cwd, dir, name));
+
+        if (full === "/library" || full === "/system") {
+            return true;
+        }
+
+        return home !== "" && full === normalizeDarwin(posix.resolve(home, "Library"));
+    }
+
+    if (platform === "win32") {
+        const full = win32.resolve(cwd, dir, name).toLowerCase();
+
+        if (
+            home !== "" &&
+            WIN32_HOME_SKIP.some((folder) => full === win32.resolve(home, folder).toLowerCase())
+        ) {
+            return true;
+        }
+
+        const parsed = win32.parse(full);
+
+        return (
+            parsed.root !== "" &&
+            win32.dirname(full) === parsed.root.toLowerCase() &&
+            WIN32_ROOT_SKIP.has(parsed.base)
+        );
+    }
+
+    if (platform === "linux") {
+        const full = posix.resolve(cwd, dir, name);
+
+        return LINUX_ROOT_SKIP.has(full);
+    }
+
+    return false;
+}
 
 export type FileList = {
     /** Paths relative to the folder, with `/` between parts. */
@@ -101,13 +180,14 @@ async function readSome(
     return { entries, more: false };
 }
 
-/** The files under `cwd`, nearest first, without hidden folders or `SKIP`: at most `max`, found within `ms`. */
+/** The files under `cwd`, nearest first, without skipped folders: at most `max`, found within `ms`. */
 async function walkFiles(
     cwd: string,
     max: number,
     ms: number,
 ): Promise<{ files: string[]; truncated: boolean }> {
     const deadline = Date.now() + ms;
+    const home = homedir();
     const files: string[] = [];
     const queue = [""];
     let truncated = false;
@@ -142,8 +222,7 @@ async function walkFiles(
             // Linked folders are not followed: they can lead back up, or anywhere. The queue holds no more than fits.
             if (entry.isDirectory()) {
                 if (
-                    !entry.name.startsWith(".") &&
-                    !SKIP.has(entry.name) &&
+                    !skipWalkDirectory(cwd, dir, entry.name, process.platform, home) &&
                     queue.length - index <= max
                 ) {
                     queue.push(path);
