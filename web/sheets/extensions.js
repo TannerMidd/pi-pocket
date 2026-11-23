@@ -72,6 +72,7 @@ export function ExtensionsContent({
     onSelectGallery,
     onBack,
     onChanged,
+    getThemes,
     renderThemes,
     renderGalleryDetail,
     galleryProblem,
@@ -204,14 +205,36 @@ export function ExtensionsContent({
         : selectedGallery
           ? rows.find((row) => row.installed?.name === selectedGallery)
           : wide && visible[0];
-    const item = row?.installed ?? galleryInstalled?.find((each) => each.name === selectedGallery);
+    const themesFor = (query, filter) => (filter === "All" && getThemes?.(query)) || [];
+    const themes = themesFor(query, filter);
+    const theme =
+        selectedGallery ??
+        (wide && !selectedFile && !row ? themes.find((each) => !each.own)?.name : null);
+    const item = row?.installed ?? galleryInstalled?.find((each) => each.name === theme);
     const changed = () => Promise.all([load(), item && onChanged?.()]);
-    const themes =
-        filter === "All" &&
-        renderThemes?.(query, (name) => {
-            remember(`[data-theme-name="${CSS.escape(name)}"]`);
-            onSelectGallery(name);
-        });
+
+    function changeList(nextQuery, nextFilter) {
+        if (nextQuery === query && nextFilter === filter) {
+            return;
+        }
+
+        setQuery(nextQuery);
+        setFilter(nextFilter);
+
+        // Only a list edit dismisses a hidden selection. A toggle keeps its own result in view.
+        if (wide && selected) {
+            const stillVisible = row
+                ? matchesRow(row, nextQuery, nextFilter)
+                : themesFor(nextQuery, nextFilter).some((each) => each.name === selectedGallery);
+
+            if (!stillVisible) {
+                delete position.from;
+                onBack();
+            } else if (position.from) {
+                Object.assign(position.from, { query: nextQuery, filter: nextFilter, top: 0 });
+            }
+        }
+    }
 
     function remember(selector) {
         position.from = { query, filter, selector, top: groups.current.scrollTop };
@@ -266,7 +289,7 @@ export function ExtensionsContent({
                         value=${query}
                         placeholder="Find an extension…"
                         aria-label="Search installed extensions and themes"
-                        onInput=${(event) => setQuery(event.currentTarget.value)}
+                        onInput=${(event) => changeList(event.currentTarget.value, filter)}
                     />
                     <kbd aria-hidden="true">/</kbd>
                 </label>
@@ -275,7 +298,7 @@ export function ExtensionsContent({
                         (value) => html`<button
                         key=${value}
                         aria-pressed=${value === filter}
-                        onClick=${() => setFilter(value)}
+                        onClick=${() => changeList(query, value)}
                     >${value}</button>`,
                     )}
                 </div>
@@ -302,8 +325,14 @@ export function ExtensionsContent({
                     </section>`
                     );
                 })}
-                ${themes}
-                ${data && !visible.length && !themes && html`<p class="library-empty">No installed extensions match.</p>`}
+                ${
+                    themes.length > 0 &&
+                    renderThemes(themes, theme, (name) => {
+                        remember(`[data-theme-name="${CSS.escape(name)}"]`);
+                        onSelectGallery(name);
+                    })
+                }
+                ${data && !visible.length && !themes.length && html`<p class="library-empty">No installed extensions match.</p>`}
                 ${galleryProblem}
                 ${
                     owner &&
@@ -311,7 +340,14 @@ export function ExtensionsContent({
                     html`<details class="library-guide">
                     <summary>Add your own extension</summary>
                     <p>Put a <code>.ts</code> module in <code>${shortPath(data.dropIns, store.state.server?.home)}</code>. It stays off until you enable it.</p>
-                    <a class="link" href=${GUIDE} target="_blank" rel="noopener noreferrer">Extension guide <${Icon} name="external" size=${13} /></a>
+                    <a
+                        class="link"
+                        href=${GUIDE}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Extension guide <${Icon} name="external" size=${13} />
+                    </a>
                 </details>`
                 }
             </div>

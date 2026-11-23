@@ -9,7 +9,7 @@ import { after, test, type TestContext } from "node:test";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
-import { parseEntry, pinOf } from "../src/server/gallery/entry.ts";
+import { parseEntry, parseThemeEntry, pinOf } from "../src/server/gallery/entry.ts";
 import { createHandler } from "../src/server/http.ts";
 
 const INDEX = "https://raw.githubusercontent.com/TannerMidd/pi-pocket-extensions/HEAD/index.json";
@@ -157,15 +157,17 @@ test(
         await page.evaluate(`${filter("On")}.focus()`);
         await page.press("Space");
         await see(
-            `${rows}.length > 0 && !document.querySelector('${row("anthropic-subscription.ts")}')`,
-            "On excludes the off match",
+            `${rows}.length > 0 && !document.querySelector('${row("anthropic-subscription.ts")}') && ${rows}[0].getAttribute('aria-current') === 'true' && document.querySelector('.library-detail').getAttribute('aria-label') === ${rows}[0].querySelector('.library-name').textContent`,
+            "On removes the off selection and inspects its first result",
         );
+        await hub.settle();
         await page.type({ selector: query }, "Relay triage");
         await page.click({ selector: row("relay-triage.ts") });
         await see(
             `document.querySelector('.library-detail')?.textContent.includes('including secrets in reply text')`,
             "privacy note before changing the classifier",
         );
+        await hub.settle();
         await page.click({ selector: ".ext-inspector-details summary" });
         const field = "#ext-setting-relay-triage-confidenceThreshold";
 
@@ -177,6 +179,63 @@ test(
             "setting saved to the isolated server",
         );
         assert.deepEqual(await states(), before);
+    },
+);
+
+test(
+    "Desktop: changing search or filter reconciles the inspector without toggling a hidden module",
+    real,
+    async (t) => {
+        const hub = await openHub(t);
+        const { app, page, enter, see, click } = hub;
+        const states = async () =>
+            (await app.extensions(owner(app))).modules.map(({ file, enabled }) => [file, enabled]);
+        const current = `document.querySelector('.library-row[aria-current="true"]')`;
+        const action = `document.querySelector('.ext-inspector-toggle [role="switch"]')`;
+
+        await enter(VIEWPORTS.desktop);
+        await menu(hub);
+        const before = await states();
+
+        await page.click({ selector: row("agent-teams.ts") });
+        await hub.settle();
+        await page.type({ selector: query }, "Relay");
+        await see(
+            `${current} === ${rows}[0] && ${current}?.dataset.file === 'pocket-relay.ts' && ${action}?.getAttribute('aria-label') === 'Relay: on'`,
+            "the first Relay result owns the inspector action",
+        );
+        await hub.settle();
+        await see(`document.activeElement === document.querySelector('${query}')`, "search focus");
+        await page.click({ selector: row("relay-triage.ts") });
+        await hub.settle();
+        await page.type({ selector: query }, "Rel");
+        await see(
+            `${current}?.dataset.file === 'relay-triage.ts' && ${action}?.getAttribute('aria-label') === 'Relay triage: on'`,
+            "a visible explicit selection stays current",
+        );
+        await page.type({ selector: query }, "No such extension");
+        await see(
+            `${rows}.length === 0 && !${action} && document.querySelector('.library-detail .library-empty') !== null`,
+            "zero matches leave no extension actions",
+        );
+        await page.type({ selector: query }, "Agent Teams");
+        await hub.settle();
+        await page.click({ selector: row("agent-teams.ts") });
+        await click("Off");
+        await see(`${rows}.length === 0 && !${action}`, "Off removes the hidden module's action");
+        assert.deepEqual(await states(), before);
+
+        await click("On");
+        await page.click({ selector: row("agent-teams.ts") });
+        await click("Agent Teams: on");
+        await see(
+            `${rows}.length === 0 && ${action}?.getAttribute('aria-label') === 'Agent Teams: off'`,
+            "the explicit inspector shows the result of the intentional toggle",
+        );
+        assert.deepEqual(
+            await states(),
+            before.map(([file, on]) => [file, file === "agent-teams.ts" ? false : on]),
+        );
     },
 );
 
@@ -333,6 +392,75 @@ ${body}export default (_host, web) => {
 
     return { source, pin: pinOf(parseEntry(entry)) };
 }
+
+test("Desktop: a matching installed theme keeps its gallery details", real, async (t) => {
+    const name = "paper";
+    const commit = "d".repeat(40);
+    const repo = "someone/pocket-paper";
+    const files = {
+        "paper/theme.json": JSON.stringify({ themeApi: 1, name: "Paper" }),
+        "paper/theme.css": ":root { --accent: #c2410c; }",
+    };
+    const entry = {
+        kind: "theme",
+        themeApi: 1,
+        name,
+        title: "Paper",
+        description: "A paper theme.",
+        tags: ["print"],
+        version: "1.0.0",
+        minPocket: "0.14.0",
+        author: { name: "Someone" },
+        source: { repo, commit },
+        files: Object.entries(files).map(([path, body]) => {
+            served.set(`https://raw.githubusercontent.com/${repo}/${commit}/${path}`, body);
+
+            return {
+                name: path,
+                sha256: createHash("sha256").update(body).digest("hex"),
+                size: body.length,
+            };
+        }),
+    };
+
+    served.set(INDEX, JSON.stringify({ format: 1, extensions: [entry] }));
+    const hub = await openHub(t);
+    const { app, page, enter, see } = hub;
+    const theme = '.ext-theme[data-theme-name="paper"]';
+
+    await app.gallery.install(name, pinOf(parseThemeEntry(entry)));
+    await enter(VIEWPORTS.desktop);
+    await menu(hub);
+    await page.click({ selector: row("agent-teams.ts") });
+    await hub.settle();
+    await page.type({ selector: query }, "Paper");
+    await see(
+        `document.querySelector('${theme}')?.getAttribute('aria-current') === 'true' && document.querySelector('.library-detail')?.textContent.includes('Use it in this browser')`,
+        "the matching theme and its gallery inspector",
+    );
+    await hub.settle();
+    await page.click({ selector: theme });
+    await hub.settle();
+    await page.type({ selector: query }, "Pape");
+    await see(
+        `document.querySelector('.library-detail')?.getAttribute('aria-label') === 'Paper'`,
+        "the selected theme still matches",
+    );
+    await hub.click("View source");
+    await see(`document.querySelector('[data-sheet="gallery-source"]') !== null`, "theme source");
+    await hub.settle();
+    await page.evaluate(`history.back()`);
+    await see(
+        `document.querySelector('${query}')?.value === 'Pape' && document.querySelector('.library-detail')?.getAttribute('aria-label') === 'Paper'`,
+        "Back returns to the selected gallery detail with the edited search",
+    );
+    await hub.settle();
+    await page.type({ selector: query }, "Relay");
+    await see(
+        `!document.querySelector('${theme}') && document.querySelector('.ext-inspector-toggle [aria-label="Relay: on"]') !== null`,
+        "no hidden theme action after search",
+    );
+});
 
 test(
     "Menu opens Installed; Discover installs off and Updates approves the exact pin",

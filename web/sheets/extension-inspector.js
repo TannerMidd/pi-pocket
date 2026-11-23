@@ -193,7 +193,10 @@ function ModuleSettings({ module, onChanged }) {
             return html`<div class="setting wrap" key=${field.name}>
                 <div class="grow">
                     <label class="small" for=${id}>${field.label}</label>
-                    ${field.description && html`<div class="muted small">${field.description}</div>`}
+                    ${
+                        field.description &&
+                        html`<div class="muted small">${field.description}</div>`
+                    }
                 </div>
                 ${
                     field.type === "boolean"
@@ -430,7 +433,9 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
                 module.file === "agent-teams.ts" &&
                 html`<svg class="ext-team-branches" viewBox="0 0 160 72" aria-hidden="true">
                 <path stroke-dasharray="2 5" opacity=".45" d="M0 12h160M0 36h160M0 60h160" />
-                <path d="M8 36h28q9 0 17-9l5-6q8-9 17-9h48M8 36h142M37 36q9 0 17 9l5 6q8 9 17 9h47" />
+                <path
+                    d="M8 36h28q9 0 17-9l5-6q8-9 17-9h48M8 36h142M37 36q9 0 17 9l5 6q8 9 17 9h47"
+                />
                 <g fill="var(--card)">
                     <circle cx="8" cy="36" r="4" />
                     <rect x="119" y="8" width="8" height="8" rx="2" />
@@ -474,7 +479,11 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
             <button class="button small" onClick=${() => attempt(onChanged)}>Refresh</button>
         </div>`
         }
-        ${!galleryManaged && installed?.revoked != null && html`<p class="error-box small">The gallery revoked this version: ${installed.revoked}</p>`}
+        ${
+            !galleryManaged &&
+            installed?.revoked != null &&
+            html`<p class="error-box small">The gallery revoked this version: ${installed.revoked}</p>`
+        }
         ${
             showConfirm &&
             html`<div
@@ -502,7 +511,11 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
                 <button class="button small" ref=${cancel} onClick=${() => setConfirm(false)}>
                     ${guardOff ? "Keep it on" : "Not now"}
                 </button>
-                <button class="button small primary" disabled=${busy} onClick=${() => mutate(path, { enabled: !guardOff })}>
+                <button
+                    class="button small primary"
+                    disabled=${busy}
+                    onClick=${() => mutate(path, { enabled: !guardOff })}
+                >
                     ${guardOff ? "Turn off" : "Turn on"}
                 </button>
             </div>
@@ -533,30 +546,72 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
             <summary><${Icon} name="command" size=${15} /> Settings</summary>
             ${guard && html`<${ApprovalRule} owner=${owner} onChanged=${onChanged} />`}
             ${pip && html`<${PipCompactAt} owner=${owner} onChanged=${onChanged} />`}
-            ${owner && module.web?.settings && html`<${ModuleSettings} module=${slug} onChanged=${onChanged} />`}
+            ${
+                owner &&
+                module.web?.settings &&
+                html`<${ModuleSettings} module=${slug} onChanged=${onChanged} />`
+            }
         </details>`
         }
         <details class="ext-inspector-details">
             <summary><${Icon} name="terminal" size=${15} /> Technical details</summary>
-            <div class="small mono">${module.path ? shortPath(module.path, store.state.server?.home) : module.file}</div>
+            <div class="small mono">${
+                module.path ? shortPath(module.path, store.state.server?.home) : module.file
+            }</div>
             <${WebPart} module=${module} />
-            ${module.enabled && ["loading", "off"].includes(here?.status) && html`<div class="small muted">Browser module: ${here.status} in this tab</div>`}
+            ${
+                module.enabled &&
+                ["loading", "off"].includes(here?.status) &&
+                html`<div class="small muted">Browser module: ${here.status} in this tab</div>`
+            }
             ${(module.extensions ?? []).map(
                 (ext) => html`<div class="small muted mono" key=${ext.name}>
                 ${ext.name}
-                ${["tools", "hooks", "sections", "wraps"].filter((key) => ext[key]?.length).map((key) => html`<div>${key}: ${ext[key].join(", ")}</div>`)}
+                ${["tools", "hooks", "sections", "wraps"]
+                    .filter((key) => ext[key]?.length)
+                    .map((key) => html`<div>${key}: ${ext[key].join(", ")}</div>`)}
             </div>`,
             )}
             <div class="ext-step-actions">
                 ${
                     owner &&
                     module.enabled &&
-                    html`<button class="button small" disabled=${busy} onClick=${() => mutate(`${path}/reload`, {})}>
-                    <${Icon} name="reload" size=${14} /> Reload
-                </button>`
+                    html`<button
+                        class="button small"
+                        disabled=${busy}
+                        onClick=${() => mutate(`${path}/reload`, {})}
+                    >
+                        <${Icon} name="reload" size=${14} /> Reload
+                    </button>`
                 }
-                ${owner && !galleryManaged && dropIn && installed === null && galleryAvailable() && html`<button class="button small" onClick=${() => openSheet({ type: "gallery-share", id: module.file })}>Share…</button>`}
-                ${!galleryManaged && html`<a class="link small" href=${dropIn ? "https://tannermidd.github.io/pi-pocket/docs/extensions/modules/" : "https://tannermidd.github.io/pi-pocket/docs/features/"} target="_blank" rel="noopener noreferrer">${dropIn ? "Module guide" : "Feature guide"} <${Icon} name="external" size=${13} /></a>`}
+                ${
+                    owner &&
+                    !galleryManaged &&
+                    dropIn &&
+                    installed === null &&
+                    galleryAvailable() &&
+                    html`<button
+                        class="button small"
+                        onClick=${() => openSheet({ type: "gallery-share", id: module.file })}
+                    >
+                        Share…
+                    </button>`
+                }
+                ${
+                    !galleryManaged &&
+                    html`<a
+                        class="link small"
+                        href=${
+                            dropIn
+                                ? "https://tannermidd.github.io/pi-pocket/docs/extensions/modules/"
+                                : "https://tannermidd.github.io/pi-pocket/docs/features/"
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        ${dropIn ? "Module guide" : "Feature guide"} <${Icon} name="external" size=${13} />
+                    </a>`
+                }
             </div>
         </details>
     </div>`;

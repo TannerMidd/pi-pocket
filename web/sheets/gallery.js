@@ -851,7 +851,12 @@ export function GallerySheet({
         onOpen=${(event) => select(entry.name, event.currentTarget)}
     />`;
 
-    const tabs = html`<div class="ext-tabs" role="tablist" aria-label="Extensions" onKeyDown=${moveTab}>
+    const tabs = html`<div
+        class="ext-tabs"
+        role="tablist"
+        aria-label="Extensions"
+        onKeyDown=${moveTab}
+    >
         ${TABS.map(
             ([value, label]) => html`<button
                 key=${value}
@@ -871,9 +876,10 @@ export function GallerySheet({
         )}
     </div>`;
 
-    const renderThemes = (query = "", onSelectTheme = select) => {
+    const getThemes = (query) => {
         const words = query.trim().toLowerCase();
-        const themes = [
+
+        return [
             ...installed
                 .filter(isTheme)
                 .map((item) => offered.find((entry) => entry.name === item.name) ?? item),
@@ -885,26 +891,36 @@ export function GallerySheet({
                 word?.toLowerCase().includes(words),
             ),
         );
+    };
 
-        if (!themes.length) {
-            return null;
-        }
-
-        return html`<${Section} title="Themes" count=${themes.length}>
-            <div class="ext-themes">
-                ${themes.map(
-                    (entry) => html`<${ThemeCard}
+    const renderThemes = (themes, current, onSelectTheme) => html`<${Section}
+        title="Themes"
+        count=${themes.length}
+    >
+        <div class="ext-themes">
+            ${themes.map(
+                (entry) => html`<${ThemeCard}
                     key=${entry.name}
                     entry=${entry}
-                    palette=${entry.own ? entry.colors && { colors: entry.colors, colorsLight: entry.colorsLight } : paletteOf(entry, foundOf(entry))}
-                    selected=${selected === entry.name}
+                    palette=${
+                        entry.own
+                            ? entry.colors && {
+                                  colors: entry.colors,
+                                  colorsLight: entry.colorsLight,
+                              }
+                            : paletteOf(entry, foundOf(entry))
+                    }
+                    selected=${current === entry.name}
                     state=${entry.own ? "Yours" : "Installed"}
-                    onOpen=${entry.own ? () => openSheet({ type: "appearance" }) : (event) => onSelectTheme(entry.name, event.currentTarget)}
+                    onOpen=${
+                        entry.own
+                            ? () => openSheet({ type: "appearance" })
+                            : () => onSelectTheme(entry.name)
+                    }
                 />`,
-                )}
-            </div>
-        <//>`;
-    };
+            )}
+        </div>
+    <//>`;
 
     if (tab === "installed") {
         return html`<${Sheet}
@@ -924,8 +940,12 @@ export function GallerySheet({
                 onSelect=${onSelect}
                 onSelectGallery=${select}
                 onBack=${onBack}
+                getThemes=${getThemes}
                 renderThemes=${renderThemes}
-                galleryProblem=${(problem || data?.error) && html`<div class="error-box small">${problem ?? data.error}</div>`}
+                galleryProblem=${
+                    (problem || data?.error) &&
+                    html`<div class="error-box small">${problem ?? data.error}</div>`
+                }
                 onChanged=${load}
                 renderGalleryDetail=${(item, module, management) => html`<${InstalledGalleryDetail}
                     key=${item.name}
@@ -1067,7 +1087,13 @@ export function GallerySheet({
                     </details>`
                 }
             </div>
-            <div class="extension-hub-detail" ref=${detail} tabindex="-1" role="region" aria-label="Gallery details">
+            <div
+                class="extension-hub-detail"
+                ref=${detail}
+                tabindex="-1"
+                role="region"
+                aria-label="Gallery details"
+            >
                 ${
                     detailName
                         ? html`${
