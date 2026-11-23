@@ -416,6 +416,17 @@ const ICONS = {
     "anthropic-subscription.ts": "key",
 };
 
+const NEW_PROFILE_NOTES = {
+    "agent-teams.ts":
+        "Pi can start linked sessions when work needs them. Turning this on does not start a session or make a model call.",
+    "pocket-relay.ts":
+        "No connection starts until you add a connector in Menu → Relay. Installation adds no connectors and uses no credentials.",
+    "relay-triage.ts":
+        "No screening or classifier calls happen until you choose a classifier in Providers or here. A provider sign-in alone selects nothing. Then messages from unmarked senders and replies to them go to its provider, including secrets in reply text. Screening is best effort, not a boundary.",
+    "run-outcomes.ts":
+        "Reports and notifications stay unchanged, with no classifier calls, until you choose a classifier in Providers or here. A provider sign-in alone selects nothing. Then final-answer excerpts go to its provider, including linked-session and subagent reports without watchers. Labels are not proof of success.",
+};
+
 /** A module's summary without the name it starts with ("Browser: Pi opens…" → "Pi opens…"), as its row shows the name. */
 function summaryOf(module) {
     const name = module.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -689,6 +700,13 @@ export function ExtensionsContent({
                 isOpen &&
                 html`<div class="ext-row-more ext-row-under" id=${id}>
                     ${note && !note.warn && html`<div class="small ok">${note.text}</div>`}
+                    ${
+                        module.source === "built-in" &&
+                        NEW_PROFILE_NOTES[module.file] &&
+                        html`<p class="small muted workflow-default-note">
+                            ${`On for new profiles. Existing profiles keep their previous setting. You can turn it off here; restarts and updates keep your choice. ${NEW_PROFILE_NOTES[module.file]}`}
+                        </p>`
+                    }
                     ${guard && module.enabled && html`<${ApprovalRule} owner=${owner} />`}
                     ${module.file === "pip.ts" && module.enabled && html`<${PipCompactAt} owner=${owner} />`}
                     <${WebPart} module=${module} />

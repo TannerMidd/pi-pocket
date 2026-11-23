@@ -1,6 +1,8 @@
 # Relay connectors
 
-The relay is a built-in extension, **Relay**, that is off by default. It connects a chat service or a feed to a session: what people write there reaches Pi as fenced data, and Pi answers with the `relay_reply` tool. The owner turns it on in Menu → **Extensions** → **Relay** and adds connectors in Menu → **Relay**.
+The relay is a built-in extension, **Relay**, on for new profiles created after 0.31.0-beta.3. Existing profiles keep their previous setting, including off when never enabled. It connects a chat service or a feed to a session: what people write there reaches Pi as fenced data, and Pi answers with the `relay_reply` tool. The owner can turn it off or on in Menu → **Extensions** → **Relay** and adds connectors in Menu → **Relay**. Restarts and updates keep that choice. Installation adds no connectors, uses no credentials, and starts no connections.
+
+**Relay triage** and **Run outcomes** also start on only for these new profiles. Without a shared or module classifier selected, they leave messages, replies, reports, and notifications unchanged. A provider sign-in alone selects nothing; there are no classifier calls, charges, warnings, or model prompts. Choosing a shared classifier later activates these modules while they are on. Relay triage then sends unmarked senders' message data and outbound replies to that provider, including secrets in reply text. Run outcomes sends final-answer excerpts. See [classifier setup and privacy](../features.md) before choosing one.
 
 A **connector** is one kind of connection: `discord`, `telegram`, `slack`, `matrix`, `http`, and `rss` come with Pi Pocket. A drop-in extension can add a kind of its own. This page tells how. A drop-in that only needs to deliver data to a session, without a connection that the owner sets up, uses [`host.inbox`](inbox.md) instead.
 
