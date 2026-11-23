@@ -10,6 +10,8 @@ Start a coding session on your computer, check its diff on your phone, and invit
 [![Node.js 22.19+](https://img.shields.io/badge/node-%E2%89%A5%2022.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![MIT license](https://img.shields.io/badge/license-MIT-ff9e64)](LICENSE)
 
+<a name="documentation"></a>
+
 [Quick start](#quick-start) · [Highlights](#highlights) · [Feature tour](docs/features.md) · [Website](https://tannermidd.github.io/pi-pocket/) · [Docs](https://tannermidd.github.io/pi-pocket/docs/)
 
 <img src="https://tannermidd.github.io/pi-pocket/shots/desktop.webp" alt="Desktop: review a test diff while another session waits for approval to push." width="74%"> <img src="https://tannermidd.github.io/pi-pocket/shots/pip-phone.webp" alt="Phone: check in on other sessions with PiP." width="21%">
@@ -39,9 +41,9 @@ Or try `npx pi-pocket`. Choose how your devices should connect, then open the la
 
 **Prefer a desktop app?** Download the [latest stable release](https://github.com/TannerMidd/pi-pocket/releases/latest). Both installers include Node.js and install for your account without admin rights. They are unsigned; the platform guides cover verification and first launch.
 
-- **Windows:** [`Pi-Pocket-Setup-<version>.exe`](docs/windows.md). Install Git for Windows if you need Pi’s shell tools and don’t already have Bash.
-- **macOS:** [`Pi-Pocket-<version>.pkg`](docs/macos.md) for Apple silicon or Intel, macOS 13.5 or newer.
-- **Other setups:** [Android with Termux](docs/running.md#android-termux) · [Docker or Podman](docs/docker.md) · [Nix](flake.nix) (`nix run github:TannerMidd/pi-pocket`) · [Linux systemd service](docs/systemd.md).
+- <a name="windows-installer"></a>**Windows:** [`Pi-Pocket-Setup-<version>.exe`](docs/windows.md). Install Git for Windows if you need Pi’s shell tools and don’t already have Bash.
+- <a name="macos-package"></a>**macOS:** [`Pi-Pocket-<version>.pkg`](docs/macos.md) for Apple silicon or Intel, macOS 13.5 or newer.
+- <a name="other-ways-to-run-it"></a>**Other setups:** [Android with Termux](docs/running.md#android-termux) · [Docker or Podman](docs/docker.md) · [Nix](flake.nix) (`nix run github:TannerMidd/pi-pocket`) · [Linux systemd service](docs/systemd.md).
 
 **Updates:** Menu → **Update Pi Pocket** handles supported installs. For local npm installs, `npx`, or rollback precautions, see [updates and backups](docs/running.md#updates-and-backups).
 
