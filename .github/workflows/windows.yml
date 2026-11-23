@@ -6,6 +6,16 @@
 #   that signed in with a one-time link, one instance only, and Quit that stops it all. An older package makes the app
 #   show its error and start nothing, and Setup puts its own package back; a newer one stays. It uninstalls while the
 #   app runs, which must stop it and keep the data folder.
+# - update: the installed desktop app updates itself, as Menu → Update Pi Pocket does. It builds the installer, makes a
+#   synthetic new version with packaging/windows/update-fixture.mjs (the checkout with the next major version, its
+#   production dependencies bundled inside, packed as a release is packed) and serves it as registry.npmjs.org on
+#   this PC: a hosts entry
+#   sends the registry's names to 127.0.0.1, and the app's Node.js trusts only the fixture's CA, so the production
+#   release check and npm's staging install read the fixture and nothing else. It installs silently, opens the app,
+#   checks for the release, and applies it with the owner's confirmation. The app must stage the package through npm,
+#   switch to it, restart, serve the new version, keep the data folder working (the owner token and sign-in of before),
+#   and keep the desktop wrapper working (one instance, Quit, and a start of the updated package). It publishes
+#   nothing, uses no secret, and prints no credential: the owner token of the test's own install stays in memory.
 # - checks: the type check and the part of the test suite that is known to pass on Windows, with the background task
 #   and quiet-limit tests.
 name: Windows
@@ -382,6 +392,419 @@ jobs:
                   Get-ChildItem $env:TEMP -Filter "Setup Log*.txt" -ErrorAction SilentlyContinue | Get-Content
                   Get-Content (Join-Path $env:RUNNER_TEMP "pi-pocket.out.log"), (Join-Path $env:RUNNER_TEMP "pi-pocket.err.log") -ErrorAction SilentlyContinue
                   Get-Content (Join-Path $env:APP "launcher.log") -ErrorAction SilentlyContinue
+
+    update:
+        name: Installed update (the desktop app updates itself)
+        runs-on: windows-latest
+        timeout-minutes: 45
+        defaults:
+            run:
+                shell: pwsh
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 26
+
+            - name: Read the version
+              run: |
+                  $version = node -p "require('./package.json').version"
+                  "VERSION=$version" >> $env:GITHUB_ENV
+                  "APP=$(Join-Path $env:LOCALAPPDATA 'Pi Pocket')" >> $env:GITHUB_ENV
+                  "SETUP=$(Join-Path $env:RUNNER_TEMP "setup\Pi-Pocket-Setup-$version.exe")" >> $env:GITHUB_ENV
+                  "MANIFEST=$(Join-Path $env:LOCALAPPDATA 'Pi Pocket\app\node_modules\pi-pocket\package.json')" >> $env:GITHUB_ENV
+                  "FIXTURE=$(Join-Path $env:RUNNER_TEMP 'fixture')" >> $env:GITHUB_ENV
+
+            - name: Build the installer
+              run: |
+                  ./packaging/windows/build.ps1 -Version $env:VERSION -OutDir (Join-Path $env:RUNNER_TEMP "setup")
+                  Write-Host "Setup is $([math]::Round((Get-Item $env:SETUP).Length / 1MB, 1)) MB"
+
+            # A synthetic new version: the checkout with the next major version, its production dependencies
+            # installed as the installer installs them and bundled into the package. Packed as a release is packed,
+            # here while the network still works: after this step the job needs no npm and no network.
+            - name: Prepare the synthetic offline update
+              run: |
+                  node packaging/windows/update-fixture.mjs prepare $env:FIXTURE .
+                  node packaging/windows/update-fixture.mjs cert $env:FIXTURE
+                  $synthetic = (Get-Content -Raw (Join-Path $env:FIXTURE "version.txt")).Trim()
+                  "SYNTHETIC=$synthetic" >> $env:GITHUB_ENV
+                  # The app's Node.js (its launcher, its server, its npm) trusts only this CA: the production release
+                  # check and npm's staging install then read the fixture at the registry's own address.
+                  "NODE_EXTRA_CA_CERTS=$(Join-Path $env:FIXTURE 'ca.pem')" >> $env:GITHUB_ENV
+
+            - name: Block npm, as a company network can
+              run: |
+                  $hosts = Join-Path $env:WINDIR "System32\drivers\etc\hosts"
+                  Add-Content -Path $hosts -Value "`r`n127.0.0.1 registry.npmjs.org`r`n127.0.0.1 registry.npmjs.com`r`n::1 registry.npmjs.org`r`n::1 registry.npmjs.com`r`n"
+                  ipconfig /flushdns | Out-Null
+                  # No NPM_CONFIG_REGISTRY here, unlike the installer job: the updater must work with npm's own default
+                  # registry address, which now answers only on this PC. A name the fixture does not hold (left-pad)
+                  # gets the fixture's 404, which proves that no other registry answers.
+                  $view = npm view left-pad version --fetch-retries=0 --prefer-online 2>&1 | Out-String
+                  if ($LASTEXITCODE -eq 0) { throw "npm still reaches a registry: $view" }
+                  Write-Host "npm gets the fixture's 404 for left-pad, as it must."
+
+            # One process for the rest of the job: the fixture's registry, on the address the hosts file gave it.
+            - name: Serve the synthetic registry
+              run: |
+                  $out = Join-Path $env:FIXTURE "serve.out.log"
+                  $err = Join-Path $env:FIXTURE "serve.err.log"
+                  $serve = Start-Process -FilePath node `
+                      -ArgumentList @("packaging/windows/update-fixture.mjs", "serve", $env:FIXTURE) `
+                      -WorkingDirectory "$PWD" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+                  "FIXTURE_PID=$($serve.Id)" >> $env:GITHUB_ENV
+                  # PowerShell does not trust the fixture's CA, so the check runs on Node, as the app will.
+                  $script = "const b = await (await fetch('https://registry.npmjs.org/pi-pocket')).json();" +
+                      "if (b['dist-tags'].latest !== process.env.SYNTHETIC) process.exit(1);" +
+                      "console.log('the fixture serves pi-pocket ' + b['dist-tags'].latest);"
+                  $ready = $false
+                  for ($try = 0; $try -lt 60 -and -not $ready; $try++) {
+                      if ($serve.HasExited) {
+                          Get-Content $out, $err -ErrorAction SilentlyContinue
+                          throw "The fixture server exited with $($serve.ExitCode)"
+                      }
+                      node -e $script 2>$null
+                      if ($LASTEXITCODE -eq 0) { $ready = $true } else { Start-Sleep -Seconds 1 }
+                  }
+                  if (-not $ready) {
+                      Get-Content $out, $err -ErrorAction SilentlyContinue
+                      throw "The fixture server did not answer in 60 seconds"
+                  }
+                  Write-Host "registry.npmjs.org answers with the synthetic release, after about $try seconds."
+
+            - name: Install silently
+              run: |
+                  $log = Join-Path $env:RUNNER_TEMP "setup.log"
+                  $run = Start-Process -FilePath $env:SETUP -Wait -PassThru -ArgumentList @(
+                      "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$log"
+                  )
+                  if ($run.ExitCode -ne 0) {
+                      Get-Content $log
+                      throw "Setup exited with $($run.ExitCode)"
+                  }
+                  $expected = @(
+                      "node\node.exe",
+                      "node\npm.cmd",
+                      "pi-pocket.cmd",
+                      "Pi Pocket.exe",
+                      "app\node_modules\pi-pocket\bin\pi-pocket.js",
+                      "app\setup-finished.txt",
+                      "unins000.exe"
+                  )
+                  foreach ($file in $expected) {
+                      if (-not (Test-Path (Join-Path $env:APP $file))) { throw "Setup did not install $file" }
+                  }
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne $env:VERSION) { throw "Setup installed pi-pocket $installed, not $env:VERSION" }
+                  $shell = New-Object -ComObject WScript.Shell
+                  $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+                  foreach ($each in @(@("Pi Pocket.lnk", "Pi Pocket.exe"), @("Pi Pocket (console).lnk", "pi-pocket.cmd"))) {
+                      $shortcut = Join-Path $menu $each[0]
+                      if (-not (Test-Path $shortcut)) { throw "No Start menu shortcut at $shortcut" }
+                      $target = $shell.CreateShortcut($shortcut).TargetPath
+                      if ($target -ne (Join-Path $env:APP $each[1])) { throw "$($each[0]) opens $target" }
+                  }
+                  $startup = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Pi Pocket.lnk"
+                  if (Test-Path $startup) { throw "The sign-in shortcut is there, but its task is off by default" }
+                  Write-Host "Setup installed pi-pocket $installed."
+
+            - name: Open the desktop app as the Start menu does
+              run: |
+                  $data = Join-Path $env:USERPROFILE ".pi-pocket"
+                  $running = Join-Path $data "launcher-running.json"
+                  Start-Process -FilePath (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Pi Pocket.lnk")
+                  $info = $null
+                  for ($try = 0; $try -lt 180 -and $null -eq $info; $try++) {
+                      Start-Sleep -Seconds 1
+                      if (Test-Path $running) {
+                          $candidate = Get-Content -Raw $running | ConvertFrom-Json
+                          if ($candidate.desktop) { $info = $candidate }
+                      }
+                  }
+                  if ($null -eq $info) {
+                      Get-Content (Join-Path $env:APP "launcher.log") -ErrorAction SilentlyContinue
+                      throw "The app's launcher did not get ready in 180 seconds"
+                  }
+                  if ($info.url -ne "http://127.0.0.1:8787") { throw "The app's server is at $($info.url), not on this PC only" }
+                  $answer = Invoke-WebRequest -Uri "http://127.0.0.1:8787/" -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck
+                  if ($answer.StatusCode -ge 500) { throw "GET / answers $($answer.StatusCode)" }
+                  if (@(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -ne 1) { throw "Not exactly one Pi Pocket.exe runs" }
+                  $nodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.ExecutablePath -like "$env:APP\*" })
+                  if ($nodes.Count -lt 2) { throw "The launcher and the server do not both run" }
+                  foreach ($node in $nodes) {
+                      if ((Get-Process -Id $node.ProcessId).MainWindowHandle -ne 0) { throw "node.exe $($node.ProcessId) has a window" }
+                  }
+                  $edge = Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" |
+                      Where-Object { $_.CommandLine -like "*--app=*" -and $_.CommandLine -like "*Pi Pocket\Edge profile*" } |
+                      Select-Object -First 1
+                  if ($null -eq $edge) { throw "The app opened no Edge app window" }
+                  Write-Host "The app runs at $($info.url) after about $try seconds, with its window."
+                  # The user data of before the update, to compare with after it: fingerprints, not contents.
+                  "CONFIG_SHA256=$((Get-FileHash -Algorithm SHA256 (Join-Path $data 'config.json')).Hash)" >> $env:GITHUB_ENV
+                  $database = Get-Item (Join-Path $data "pocket.sqlite") -ErrorAction Stop
+                  "SQLITE_BYTES=$($database.Length)" >> $env:GITHUB_ENV
+                  Write-Host "The data folder holds config.json and pocket.sqlite ($($database.Length) bytes)."
+
+            # Menu → Update Pi Pocket: the production updater must stage the synthetic package with npm, switch the
+            # installed prefix to it, and restart the server under the app. The owner token of this test's own install
+            # stays in this step's memory; no step or log prints it.
+            - name: Update Pi Pocket through the app, as the owner does
+              run: |
+                  $data = Join-Path $env:USERPROFILE ".pi-pocket"
+                  $app = $env:APP
+                  $base = "http://127.0.0.1:8787"
+                  $token = (Get-Content -Raw (Join-Path $data "config.json") | ConvertFrom-Json).ownerToken
+                  $headers = @{ Authorization = "Bearer $token"; "X-Pocket" = "1" }
+                  $state = Join-Path $app "app\node_modules\.pi-pocket-update"
+
+                  function Show-Why {
+                      param($what)
+                      Write-Host "=== $what"
+                      foreach ($log in @("launcher.log", "launcher.old.log")) {
+                          $text = Get-Content -Raw (Join-Path $app $log) -ErrorAction SilentlyContinue
+                          if ($null -ne $text) {
+                              $text = $text.Replace($token, "<owner token>")
+                              $text = $text -replace "token=[A-Za-z0-9_-]+", "token=<masked>"
+                              Write-Host "--- $log"
+                              Write-Host $text
+                          }
+                      }
+                      Get-ChildItem $state -ErrorAction SilentlyContinue | ForEach-Object {
+                          Write-Host "--- $($_.Name)"
+                          Get-Content $_.FullName -ErrorAction SilentlyContinue
+                      }
+                      Write-Host "--- the installed package is $((Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version)"
+                      $own = Get-CimInstance Win32_Process -Filter "Name = 'node.exe' OR Name = 'Pi Pocket.exe'" |
+                          Where-Object { $_.ExecutablePath -like "$app\*" }
+                      $own | Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap
+                      # What each of the app's own node processes has mapped of native addons, by file name only:
+                      # a mapped .node file can keep a package folder from being renamed.
+                      foreach ($one in $own) {
+                          $modules = @()
+                          try {
+                              $modules = @(Get-Process -Id $one.ProcessId -Module -ErrorAction Stop |
+                                  Where-Object { $_.FileName -like "*.node" })
+                          } catch {}
+                          $names = ($modules | ForEach-Object { Split-Path -Leaf $_.FileName } | Select-Object -Unique) -join ", "
+                          Write-Host "pid $($one.ProcessId) maps: $(if ($names) { $names } else { "no .node module" })"
+                      }
+                      Write-Host "--- the fixture answered these last requests"
+                      Get-Content (Join-Path $env:FIXTURE "requests.log") -Tail 25 -ErrorAction SilentlyContinue
+                  }
+
+                  # The check, as the app does it on its own timer.
+                  $checked = Invoke-RestMethod -Method Post -Uri "$base/api/x/updates/check" -Headers $headers `
+                      -Body "{}" -ContentType "application/json" -TimeoutSec 120
+                  if ($checked.installKind -ne "npm-global") {
+                      Show-Why "the install is a $($checked.installKind) one, not a global npm install"
+                      throw "This install is a $($checked.installKind) install, not a global npm one."
+                  }
+                  if (-not $checked.available) {
+                      Show-Why "the app does not see $env:SYNTHETIC"
+                      $why = if ($checked.error) { $checked.error } else { "it is up to date at $($checked.version)" }
+                      throw "The app does not see $env:SYNTHETIC: $why"
+                  }
+                  if ($checked.blockers.Count -gt 0) {
+                      Show-Why "the update to $env:SYNTHETIC is blocked"
+                      throw "The update is blocked: $($checked.blockers -join ' | ')"
+                  }
+                  $notes = if ($checked.latest.unread) { "unread" } else { "read" }
+                  Write-Host "The app sees $env:SYNTHETIC (notes $notes) with no blocker."
+
+                  # The owner read the notes and chose Update and restart, as the sheet's button does.
+                  $applied = Invoke-RestMethod -Method Post -Uri "$base/api/x/updates/apply" -Headers $headers `
+                      -Body '{"confirmWarning": true, "allowBusy": true}' -ContentType "application/json" -TimeoutSec 1500
+                  if ($applied.version -ne $env:SYNTHETIC) {
+                      Show-Why "the app applied $($applied.version)"
+                      throw "The app applied $($applied.version), not $env:SYNTHETIC."
+                  }
+                  Write-Host "Applied. The server restarts onto $env:SYNTHETIC."
+
+                  # The restart: the port stops answering, then the new version answers.
+                  $back = $null
+                  for ($try = 0; $try -lt 300 -and $null -eq $back; $try++) {
+                      Start-Sleep -Seconds 1
+                      try { $back = Invoke-WebRequest -Uri "$base/" -UseBasicParsing -TimeoutSec 5 -SkipHttpErrorCheck } catch {}
+                  }
+                  if ($null -eq $back) {
+                      Show-Why "nothing answers on $base after the update"
+                      throw "The server did not answer again within 300 seconds of the update."
+                  }
+                  $status = $null
+                  for ($try = 0; $try -lt 120; $try++) {
+                      try {
+                          $status = Invoke-RestMethod -Uri "$base/api/x/updates/status" -Headers $headers -TimeoutSec 10
+                      } catch {
+                          $status = $null
+                      }
+                      if ($null -ne $status -and $status.version -eq $env:SYNTHETIC) { break }
+                      Start-Sleep -Seconds 1
+                  }
+                  if ($null -eq $status -or $status.version -ne $env:SYNTHETIC) {
+                      $serves = if ($null -ne $status) { $status.version } else { "no readable status" }
+                      Show-Why "the app serves $serves, not $env:SYNTHETIC"
+                      throw "After the update the app serves $serves, not $env:SYNTHETIC."
+                  }
+                  Write-Host "The app serves $env:SYNTHETIC again, after about $try seconds."
+
+                  # The outcome the new version wrote, and the package it runs from.
+                  if ($status.last.ok -ne $true -or $status.last.toVersion -ne $env:SYNTHETIC) {
+                      Show-Why "the outcome of the update is not a success"
+                      throw "The update's outcome is not a success: ok=$($status.last.ok) to=$($status.last.toVersion) ($($status.last.message))"
+                  }
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne $env:SYNTHETIC) {
+                      Show-Why "the installed package is $installed"
+                      throw "The installed package is $installed, not $env:SYNTHETIC."
+                  }
+                  if (Test-Path (Join-Path $state "pending.json")) {
+                      Show-Why "an update is still pending"
+                      throw "pending.json is still there: the update did not finish."
+                  }
+                  $missed = @(Select-String -Path (Join-Path $env:FIXTURE "requests.log") -Pattern " 404" -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Line -notmatch "left-pad" })
+                  if ($missed.Count -gt 0) {
+                      Show-Why "npm asked the fixture for packages it does not hold"
+                      throw "The staged install asked for $($missed.Count) package(s) the fixture does not hold."
+                  }
+                  Write-Host "The update is noted as a success, and no update is pending."
+
+                  # The user data of before still works: the same owner token signs in on the new version.
+                  $after = (Get-FileHash -Algorithm SHA256 (Join-Path $data "config.json")).Hash
+                  if ($after -ne $env:CONFIG_SHA256) { throw "config.json changed during the update." }
+                  $database = Get-Item (Join-Path $data "pocket.sqlite") -ErrorAction SilentlyContinue
+                  if ($null -eq $database -or $database.Length -lt [long]$env:SQLITE_BYTES) {
+                      throw "pocket.sqlite is gone or smaller than before the update."
+                  }
+                  $path = (Invoke-RestMethod -Method Post -Uri "$base/api/sign-in-link" -Headers $headers `
+                      -Body "{}" -ContentType "application/json" -TimeoutSec 10).path
+                  $signed = Invoke-WebRequest -Uri "$base$path" -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck -SessionVariable cookies
+                  if ($signed.StatusCode -ne 200 -or $cookies.Cookies.GetCookies($base)["pocket_auth"] -eq $null) {
+                      Show-Why "the one-time sign-in of the new version failed"
+                      throw "The one-time sign-in answered $($signed.StatusCode), without the cookie."
+                  }
+                  $me = Invoke-WebRequest -Uri "$base/api/me" -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck -WebSession $cookies
+                  if ($me.StatusCode -ne 200) { throw "GET /api/me answered $($me.StatusCode) after the update." }
+                  Write-Host "The data of before the update still signs in on the new version."
+
+                  # The desktop wrapper kept working through the restart.
+                  if (@(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -ne 1) {
+                      Show-Why "the app process did not survive the update"
+                      throw "Not exactly one Pi Pocket.exe runs after the update."
+                  }
+                  $nodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.ExecutablePath -like "$app\*" })
+                  if ($nodes.Count -lt 2) {
+                      Show-Why "the launcher and the server do not both run after the update"
+                      throw "The launcher and the server do not both run after the update."
+                  }
+                  $edge = Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" |
+                      Where-Object { $_.CommandLine -like "*--app=*" -and $_.CommandLine -like "*Pi Pocket\Edge profile*" } |
+                      Select-Object -First 1
+                  if ($null -eq $edge) { throw "The app's window is gone after the update." }
+                  $running = Get-Content -Raw (Join-Path $data "launcher-running.json") | ConvertFrom-Json
+                  if (-not $running.desktop) { throw "launcher-running.json no longer says the desktop app runs the server." }
+
+                  # What the log says, and what it must never hold.
+                  $text = (Get-Content -Raw (Join-Path $app "launcher.log")) + "`n" +
+                      ((Get-Content -Raw (Join-Path $app "launcher.old.log") -ErrorAction SilentlyContinue) ?? "")
+                  if ($text.Contains($token) -or $text -match "login\?token=" -or $text -match "login\?once=") {
+                      throw "The launcher log holds a sign-in link or the owner token."
+                  }
+                  if ($text -notmatch [regex]::Escape("Pi Pocket updated from $env:VERSION to $env:SYNTHETIC.")) {
+                      Show-Why "the log does not say the update happened"
+                      throw "The log does not say that Pi Pocket updated to $env:SYNTHETIC."
+                  }
+                  Write-Host "The update is complete: staged, switched, restarted, and noted."
+
+            # The wrapper on the updated package: a second start opens the first, Quit stops it all, and a fresh
+            # start of the app runs the new package (the app accepts a newer package, never an older one).
+            - name: The desktop app on the updated package (Quit and a fresh start)
+              run: |
+                  $shortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Pi Pocket.lnk"
+                  $second = Start-Process -FilePath (Join-Path $env:APP "Pi Pocket.exe") -PassThru -Wait
+                  if ($second.ExitCode -ne 0) { throw "A second start exited with $($second.ExitCode)" }
+                  if (@(Get-Process -Name "Pi Pocket").Count -ne 1) { throw "A second app runs" }
+                  $quit = Start-Process -FilePath (Join-Path $env:APP "Pi Pocket.exe") -ArgumentList "--quit" -PassThru -Wait
+                  if ($quit.ExitCode -ne 0) { throw "--quit exited with $($quit.ExitCode)" }
+                  for ($try = 0; $try -lt 40 -and @(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -gt 0; $try++) {
+                      Start-Sleep -Seconds 1
+                  }
+                  if (@(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -gt 0) { throw "The app did not quit" }
+                  Start-Sleep -Seconds 2
+                  $left = @(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$env:APP\*" })
+                  if ($left.Count -gt 0) { throw "Quit left $($left.Count) node.exe processes" }
+                  $edges = @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | Where-Object { $_.CommandLine -like "*Pi Pocket\Edge profile*" })
+                  if ($edges.Count -gt 0) { throw "Quit left the Edge window" }
+                  if (Test-Path (Join-Path $env:USERPROFILE ".pi-pocket\launcher-running.json")) { throw "Quit left launcher-running.json" }
+                  try {
+                      Invoke-WebRequest -Uri "http://127.0.0.1:8787/" -UseBasicParsing -TimeoutSec 5 | Out-Null
+                      throw "Port 8787 still answers after Quit"
+                  } catch [System.Net.Http.HttpRequestException] {}
+                  Get-Content (Join-Path $env:APP "launcher.log") -ErrorAction SilentlyContinue
+
+                  Start-Process -FilePath $shortcut
+                  $answer = $null
+                  for ($try = 0; $try -lt 180 -and $null -eq $answer; $try++) {
+                      Start-Sleep -Seconds 1
+                      try { $answer = Invoke-WebRequest -Uri "http://127.0.0.1:8787/" -UseBasicParsing -TimeoutSec 5 } catch {}
+                  }
+                  if ($null -eq $answer) {
+                      Get-Content (Join-Path $env:APP "launcher.log") -ErrorAction SilentlyContinue
+                      throw "The app did not start the updated package in 180 seconds"
+                  }
+                  $installed = (Get-Content -Raw $env:MANIFEST | ConvertFrom-Json).version
+                  if ($installed -ne $env:SYNTHETIC) { throw "A fresh start runs pi-pocket $installed, not $env:SYNTHETIC" }
+                  Write-Host "The app starts the updated package ($env:SYNTHETIC) after about $try seconds."
+                  $quit = Start-Process -FilePath (Join-Path $env:APP "Pi Pocket.exe") -ArgumentList "--quit" -PassThru -Wait
+                  if ($quit.ExitCode -ne 0) { throw "The second --quit exited with $($quit.ExitCode)" }
+                  for ($try = 0; $try -lt 40 -and @(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -gt 0; $try++) {
+                      Start-Sleep -Seconds 1
+                  }
+                  if (@(Get-Process -Name "Pi Pocket" -ErrorAction SilentlyContinue).Count -gt 0) { throw "The app did not quit the second time" }
+
+            # Only on failure, and masked: the fixture's answers, the launcher's words, and the update's state.
+            - name: Keep the logs of the update
+              if: failure()
+              run: |
+                  $out = Join-Path $env:RUNNER_TEMP "update-logs"
+                  New-Item -ItemType Directory -Force $out | Out-Null
+                  $data = Join-Path $env:USERPROFILE ".pi-pocket"
+                  $token = (Get-Content -Raw (Join-Path $data "config.json") | ConvertFrom-Json).ownerToken
+                  foreach ($log in @("launcher.log", "launcher.old.log")) {
+                      $text = Get-Content -Raw (Join-Path $env:APP $log) -ErrorAction SilentlyContinue
+                      if ($null -ne $text) {
+                          $text = $text.Replace($token, "<owner token>")
+                          $text = $text -replace "token=[A-Za-z0-9_-]+", "token=<masked>"
+                          $text = $text -replace "once=[A-Za-z0-9_-]+", "once=<masked>"
+                          Set-Content -Path (Join-Path $out $log) -Value $text
+                      }
+                  }
+                  Copy-Item (Join-Path $env:APP "app\node_modules\.pi-pocket-update\*.json") $out -ErrorAction SilentlyContinue
+                  Copy-Item (Join-Path $env:FIXTURE "requests.log") $out -ErrorAction SilentlyContinue
+                  Copy-Item (Join-Path $env:FIXTURE "serve.out.log") $out -ErrorAction SilentlyContinue
+                  Copy-Item (Join-Path $env:FIXTURE "serve.err.log") $out -ErrorAction SilentlyContinue
+                  Get-ChildItem $out
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              if: failure()
+              continue-on-error: true
+              with:
+                  name: windows-update-logs
+                  path: ${{ runner.temp }}/update-logs
+                  if-no-files-found: ignore
+                  retention-days: 7
+
+            - name: Stop the fixture's registry
+              if: always()
+              run: |
+                  if ($env:FIXTURE_PID) {
+                      Stop-Process -Id $env:FIXTURE_PID -Force -ErrorAction SilentlyContinue
+                      Write-Host "Stopped the fixture server (pid $env:FIXTURE_PID)."
+                  }
 
     checks:
         name: Type check and tests
