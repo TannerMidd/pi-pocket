@@ -4,42 +4,59 @@
 
 **Your Pi coding agent, in your pocket.**
 
-A durable, multiplayer, mobile-first web app for Pi agents, built on [Pi Durable](https://earendil.com/posts/pi-durable/).<br>
-Runs on your own machine or directly on your phone. No cloud VM.
+Start a coding session on your computer, check its diff on your phone, and invite a teammate to the same conversation. Pi runs on your machine, in your project, with your models. No cloud VM required.
 
-[![Release](https://img.shields.io/github/v/release/TannerMidd/pi-pocket?color=7aa2f7)](https://github.com/TannerMidd/pi-pocket/releases)
+[![Release](https://img.shields.io/github/v/release/TannerMidd/pi-pocket?color=7aa2f7)](https://github.com/TannerMidd/pi-pocket/releases/latest)
 [![Node.js 22.19+](https://img.shields.io/badge/node-%E2%89%A5%2022.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![MIT license](https://img.shields.io/badge/license-MIT-ff9e64)](LICENSE)
 
-[Website](https://tannermidd.github.io/pi-pocket/) · [Quick start](#quick-start) · [Feature tour](docs/features.md) · [Docs](https://tannermidd.github.io/pi-pocket/docs/)
+[Quick start](#quick-start) · [Feature tour](docs/features.md) · [Website](https://tannermidd.github.io/pi-pocket/) · [Docs](https://tannermidd.github.io/pi-pocket/docs/)
 
-<img src="docs/showcase-0.12.1.png" alt="Pi Pocket in the Tokyo Night theme, on a desktop and a phone. On the desktop, the session list beside a conversation where Pi has fixed a sign-in redirect loop, its edits and a passing run of 48 tests folded into a timeline. On the phone, the same session after a teammate, Alex, asks for the push: Lancet Guard waits for approval before git push." width="100%">
+<img src="https://tannermidd.github.io/pi-pocket/shots/desktop.webp" alt="Desktop: review a test diff while another session waits for approval to push." width="74%"> <img src="https://tannermidd.github.io/pi-pocket/shots/pip-phone.webp" alt="Phone: check in on other sessions with PiP." width="21%">
 
 </div>
 
-## Highlights
-
-- **Durable.** Every model call, tool call, and subagent is stored as it happens. Restart the server mid-run, and the work continues.
-- **Multiplayer.** Share a live session with presence, a side chat Pi does not see, invites, and roles.
-- **Made for phones.** Push notifications, dictation, sharing into Pi from other apps, and a home-screen app.
-- **PiP.** An assistant that starts, follows, and reports on your other sessions, and watches GitHub for you.
-- **Your models.** Pi's own providers, sign-ins, skills, and prompt templates, with the model chosen per session.
-- **Live-editable.** No build step. Pi can change Pi Pocket while it runs, and you can add your own extensions.
-
-The [feature tour](docs/features.md) covers everything else, from plan mode and peek tiles to the built-in browser.
-
 ## Quick start
 
-Requires Node.js 22.19 or newer. Runs on Linux, macOS, Windows, and Android (Termux); Linux is the most tested. Sign in to a provider with Pi first (`pi`, then `/login`), or later from the app's Providers sheet.
+With **Node.js 22.19 or newer**:
 
 ```bash
 npm install -g pi-pocket
 pi-pocket
 ```
 
-Newer npm may print "install-scripts ... not yet covered by allowScripts" for `@google/genai` and `protobufjs`, which come from Pi's model library. The warning is expected: Pi Pocket needs neither script. `npm config set allow-scripts=@google/genai,protobufjs --location=user` quiets it by letting both run, which does no harm.
+Or try `npx pi-pocket`. Choose how your devices should connect, then open the launcher’s sign-in link or scan its QR code. **Keep that link private: it signs you in as the owner.** In the app, open **Providers** to connect a model provider, or use an existing Pi sign-in. Start a session in the folder you want Pi to work in.
 
-Or try it with `npx pi-pocket`. To change Pi Pocket's code, run a git checkout instead:
+**Prefer a desktop app?** Download the [latest stable release](https://github.com/TannerMidd/pi-pocket/releases/latest). Both installers include Node.js and install for your account without admin rights. They are unsigned; the platform guides cover verification and first launch.
+
+- **Windows:** [`Pi-Pocket-Setup-<version>.exe`](docs/windows.md). Install Git for Windows if you need Pi’s shell tools and don’t already have Bash.
+- **macOS:** [`Pi-Pocket-<version>.pkg`](docs/macos.md) for Apple silicon or Intel, macOS 13.5 or newer.
+- **Other setups:** [Android with Termux](docs/running.md#android-termux) · [Docker or Podman](docs/docker.md) · [Nix](flake.nix) (`nix run github:TannerMidd/pi-pocket`) · [Linux systemd service](docs/systemd.md).
+
+**Updates:** Menu → **Update Pi Pocket** handles supported installs. For local npm installs, `npx`, or rollback precautions, see [updates and backups](docs/running.md#updates-and-backups).
+
+## Highlights
+
+- **Pick up where you left off.** [Pi Durable](https://earendil.com/posts/pi-durable/) stores runs as they happen. Restart the server and the run continues; a tool call that can’t safely repeat is reported as interrupted.
+- **Know which session needs you.** The Priority view separates approvals and unread results from work still running. PiP can follow sessions and report back; push notifications let you put the phone away.
+- **Work together.** Invite someone to watch or steer a session. The side chat stays between people. Queue a message for Pi, steer the current run, or interrupt to change direction.
+- **Inspect the work.** Read files and diffs, watch Pi use the built-in browser, or open an interactive artifact beside the conversation. Fork a session into a separate git worktree to try another approach.
+- **Use your own setup.** Choose a model per session. Bring Pi’s sign-ins, skills, and prompt templates. Add tools or themes from the extension gallery, or [write your own extension](docs/extensions.md).
+
+The [feature tour](docs/features.md) also covers subagents, scheduled messages, optional chat relays, and cleaning up archived sessions.
+
+## Remote access
+
+Choose `local` for this machine, `lan` for a trusted local network (plain HTTP), `tailscale` or `tailscale-serve` for your tailnet, or `cloudflare` for a public HTTPS tunnel that still requires sign-in. The [launcher guide](docs/running.md#remote-access) lists prerequisites and flags. In the desktop app, use **Menu → Sign in another device**.
+
+> [!WARNING]
+> Anyone who can steer Pi can run commands as your user. A session invite limits what someone sees in the app, not which files Pi can reach. Give steering access only to people you would trust at your keyboard. [Security model](SECURITY.md).
+
+### Behind a reverse proxy on a Unix socket
+
+On a shared host, use `--socket` in a protected directory rather than proxying to a TCP port another user could claim during a restart. See [socket permissions, Caddy, and nginx examples](docs/running.md#behind-a-reverse-proxy-on-a-unix-socket).
+
+## Development
 
 ```bash
 git clone https://github.com/TannerMidd/pi-pocket.git
@@ -48,133 +65,12 @@ npm install
 npm start
 ```
 
-The launcher asks how your devices should connect, then prints a sign-in link and a QR code. The link is the owner's key: keep it private. `--rotate-token` replaces it and signs out every device that used it.
-
-While it runs: **q** quit · **r** restart server · **a** change access · **o** open in browser · **s** show QR code.
-
-**Updating:** Menu → **Update Pi Pocket** updates a git checkout run with `npm start`, or a global npm install (`npm install -g pi-pocket`) that your user can write, and restarts. It goes back by itself if the new version does not start ([features](docs/features.md)). A local install (`npm install pi-pocket` in a project) and `npx pi-pocket` do not update from the app: the sheet says what to run, `npm install pi-pocket@latest` or `npx pi-pocket@latest`. By hand: stop the server, back up `~/.pi-pocket`, pull, run `npm install`, and start again; for a global install, run `npm install -g pi-pocket@latest`. If the machine stops at the very moment of the switch, `pi-pocket` may not start; `npm install -g pi-pocket` restores it. Read the [release notes](https://github.com/TannerMidd/pi-pocket/releases) first: 0.21.0 and 0.28.0 upgrade the data one way, so going back needs the backup.
-
-### Windows installer
-
-Download `Pi-Pocket-Setup-<version>.exe` from the [releases](https://github.com/TannerMidd/pi-pocket/releases) and run it. It needs no admin rights and no Node.js: it installs its own Node.js and Pi Pocket in `%LOCALAPPDATA%\Pi Pocket`, adds **Pi Pocket** to the Start menu, and can start it when you sign in. Pi Pocket opens as a desktop app: a window of its own, already signed in, and an icon in the notification area, with no console window. **Pi Pocket (console)** has the access modes, tunnels, and the sign-in QR code. The installer is not code-signed yet, so SmartScreen warns: select **More info**, then **Run anyway**. Menu → **Update Pi Pocket** updates it. The uninstaller asks before it deletes your data. See [docs/windows.md](docs/windows.md) and [docs/desktop-app.md](docs/desktop-app.md).
-
-### macOS package
-
-Download `Pi-Pocket-<version>.pkg` from the [releases](https://github.com/TannerMidd/pi-pocket/releases) and open it. It needs no admin password and no Node.js: it installs its own Node.js and Pi Pocket in `~/Library/Application Support/Pi Pocket` for your user only, adds **Pi Pocket.app** to `~/Applications`, and can start it when you sign in. Pi Pocket.app opens a window of its own, already signed in, with an item in the menu bar and no Terminal window. **Pi Pocket (console).app** has the access modes, tunnels, and the sign-in QR code. The package is not signed yet, so Gatekeeper blocks it: open System Settings → Privacy & Security, then select **Open Anyway**. Menu → **Update Pi Pocket** updates it. Its uninstaller asks before it deletes your data. See [docs/macos.md](docs/macos.md) and [docs/desktop-app.md](docs/desktop-app.md).
-
-### Other ways to run it
-
-- **Docker or Podman:** `docker compose up -d --build`. See [docs/docker.md](docs/docker.md).
-- **Nix:** `nix run github:TannerMidd/pi-pocket`, or the NixOS module `services.pi-pocket.enable = true;` ([nix/module.nix](nix/module.nix)).
-- **Android (Termux):**
-
-    ```bash
-    pkg update && pkg upgrade && pkg install nodejs git
-    npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-    pi    # /login, then quit
-    git clone https://github.com/TannerMidd/pi-pocket.git
-    cd pi-pocket && npm install --ignore-scripts && termux-wake-lock && npm start
-    ```
-
-    Lancet Guard may not load on Android. If it is on but fails, start with `PI_POCKET_GUARD=off`.
-
-## Remote access
-
-Choose a mode in the launcher, or pass `--access`:
-
-| Mode              | Who can connect      | Notes                                                      |
-| ----------------- | -------------------- | ---------------------------------------------------------- |
-| `local`           | This machine         | `127.0.0.1`; bring your own tunnel to port 8787            |
-| `lan`             | Your local network   | Plain http                                                 |
-| `cloudflare`      | Anyone with the link | Free https quick tunnel, no account; needs `cloudflared`   |
-| `tailscale`       | Your tailnet         | Plain http on the tailnet address                          |
-| `tailscale-serve` | Your tailnet         | https at the tailnet name; needs `tailscale` 1.52 or newer |
-
-`tailscale-serve` needs the `tailscale` command on your `PATH`, signed in, with MagicDNS and HTTPS certificates enabled in the tailnet, and, when the launcher does not run as root, that user as tailscaled's operator (`sudo tailscale set --operator=$USER`). It serves port 443 at the machine's tailnet name, and a server restart keeps the address. When the launcher quits it takes down the mount it made; one it found already in place is left where it is. Without the command the launcher says so and stops rather than falling back to this device only when nobody is there to pick another mode. `--host` cannot be combined with it: serve always listens on `127.0.0.1` and lets tailscaled reach it. For another tunnel (ngrok), choose `local` and point it at port 8787.
-
-Other options: `--port` (8787), `--cwd`, `--data` (`~/.pi-pocket`), `--host`, `--socket` ([below](#behind-a-reverse-proxy-on-a-unix-socket)), and `-y` to reuse the last access choice. `--host` overrides the address a named mode would listen on, and one launcher runs per data folder (a second one says which pid holds it). `npm start -- --help` lists them all. `PI_POCKET_BROWSER` and `PI_POCKET_BROWSER_ARGS` pick the built-in browser and its flags when Chromium or Chrome is not found by itself. `PI_POCKET_PROMPT_DATE=1` puts today's date in Pi's system prompt; it is left out by default, so the prompt cache does not start over when the date changes. `PI_POCKET_SESSION_CACHE=off` keeps browsers from saving the sessions they open on the device (IndexedDB), so that they keep them in each tab's memory only; it is on by default. `PI_POCKET_CACHE_KEEPER=off` turns off the prompt cache keeper, which keeps a model's prompt cache warm while a run waits on a tool call ([features](docs/features.md)). `PI_POCKET_KEEPALIVE_SECONDS` (default `5`, from `1` to `3600`) is how long the server keeps an idle connection open for its next request. Behind a reverse proxy of your own (Caddy, nginx, a load balancer), set it above the proxy's idle timeout, or set the proxy's below it: otherwise the proxy can send a request on a connection as the server closes it, and answers with a 502. Caddy keeps idle connections for 2 minutes by default, so `PI_POCKET_KEEPALIVE_SECONDS=125`, or `keepalive 4s` in Caddy's `transport http` block.
-
-> [!WARNING]
-> Anyone who can steer a session can make Pi run commands on this machine, as you. That reaches your files, Pi Pocket's own settings and tokens, and its code. Invite only people you would trust at your keyboard. View-only users cannot make Pi act. [SECURITY.md](SECURITY.md) says what is protected and what is not.
-
-### Behind a reverse proxy on a Unix socket
-
-`--socket PATH` (or `PI_POCKET_SOCKET`) makes the server listen on a Unix socket instead of a TCP port, for a reverse proxy on the same machine, such as Caddy or nginx. Use it on a machine that other people use too: while the server restarts, any user can take a free TCP port and get the requests meant for Pi Pocket, sign-in cookies too. A socket's folder keeps them out.
-
-`--socket` replaces `--access`, `--host`, and `--port`: it cannot be combined with them, and their environment variables are ignored. The launcher starts no tunnel and runs no `tailscale serve`, and its `a` and `o` keys do nothing. It prints the owner's sign-in path (`/login?token=…`): open it at the proxy's address.
-
-The folder is the security boundary. Pi Pocket checks it before it listens, and does not start when:
-
-- the folder is a symlink, or the path goes through one;
-- another user than the server's (or root) owns the folder, or its group or others can write to it;
-- another user can write to a folder above it, unless that folder is sticky, as `/tmp` is;
-- the path is a file, a folder, or a symlink: Pi Pocket never follows or removes one;
-- a server answers on the socket already.
-
-A socket that nothing answers on, as a killed server leaves, is replaced. The new socket gets mode `0660`, so the folder's group can connect. Give the folder the proxy's group and mode `2750`: then only the server's user and the proxy can reach the socket. Pi Pocket removes the socket when it stops.
-
-An example on Linux, with the server as `alice` and Caddy as `caddy`:
-
-```bash
-# /run is empty after a reboot: a tmpfiles.d line (d /run/pi-pocket 2750 alice caddy -) makes the folder again.
-sudo install -d -o alice -g caddy -m 2750 /run/pi-pocket
-pi-pocket --socket /run/pi-pocket/pocket.sock
-```
-
-```caddyfile
-pocket.example.com {
-    reverse_proxy unix//run/pi-pocket/pocket.sock
-}
-```
-
-Caddy keeps idle connections longer than Pi Pocket does: also set `PI_POCKET_KEEPALIVE_SECONDS=125`, as [Remote access](#remote-access) says.
-
-With nginx (as the user `www-data`, in that group):
-
-```nginx
-location / {
-    proxy_pass http://unix:/run/pi-pocket/pocket.sock:;
-    proxy_http_version 1.1;
-    # Uploads: nginx takes only 1 MB by default.
-    client_max_body_size 50m;
-    # $http_host keeps a port that is not the default one.
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Forwarded-Host $http_host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
-Sign-in works as it does on a port: the owner's link, invites, the `HttpOnly` cookie, and the `X-Pocket` header on every change. Pi Pocket trusts no client address, on a port or on a socket, so the socket lets nobody past sign-in. Invite links and the cookie's `Secure` flag come from the `X-Forwarded-Host` (else `Host`) and `X-Forwarded-Proto` headers. Caddy sets them by itself, and nginx needs the lines above. Let the proxy set them, and not pass on a client's: a wrong value gives wrong invite links, not access.
-
-## Documentation
-
-- [Feature tour](docs/features.md): every feature, in full.
-- [Docs site](https://tannermidd.github.io/pi-pocket/docs/): customizing Pi without code, and writing extensions.
-- [Engineering](https://tannermidd.github.io/pi-pocket/engineering.html) and [code map](docs/map.md): how Pi Pocket is built.
-
-## Development
-
-```bash
-npm run check   # type-check
-npm test        # server tests with a scripted model
-npm run format  # ESLint's layout fixes, then Prettier
-npm run lint    # check the layout rules
-```
-
-`web/` changes reload every open browser, and extensions reload into the running server. `node test/serve.ts` runs a throwaway copy to check a change on. [AGENTS.md](AGENTS.md) covers editing Pi Pocket safely from inside itself, and [CONTRIBUTING.md](CONTRIBUTING.md) how to send a change.
+There’s no build step. Run `npm run check` for types and API references, `npm run lint` for style, and `npm test` for the test suite. Use `node test/serve.ts` to try changes on an isolated copy. See [Contributing](CONTRIBUTING.md), the [code map](docs/map.md), and [safe self-editing](docs/self-editing.md).
 
 ## Limitations
 
-- Pi Durable is experimental, and its API can change between releases. Versions are pinned in `package.json`.
-- Only one server process can use the database at a time.
-- Pi's own extensions are not supported. Pi Pocket runs its own, on Pi Durable.
-- A git worktree keeps a session's files apart; it is not a sandbox.
-- The built-in browser needs Chromium, Chrome, Brave, or Edge on the server. It is tested on Linux and macOS.
-
-The [full list](docs/features.md#limitations) has the details.
+One server process owns the database. Git worktrees separate files; they are not sandboxes. The built-in browser needs a Chromium-based browser on the host. Pi Pocket has its own extension API; Pi CLI extensions do not run unchanged. [Full limitations](docs/features.md#limitations).
 
 ## Credits and license
 
-Inspired by [Mario Zechner's demo](https://x.com/badlogicgames/status/2106452296087302173) of his own Pi app. Pi Pocket is an independent project, not affiliated with Earendil. The bundled fonts keep their own licenses, which are beside them in [web/fonts/](web/fonts/). Dependencies keep their own licenses too; one is not MIT: HEIC photos are decoded with [libheif-js](https://github.com/catdad-experiments/libheif-js) (LGPL-3.0), installed as an ordinary npm package that you can replace.
-
-[MIT](LICENSE). To report a security problem, see [SECURITY.md](SECURITY.md).
+Inspired by [Mario Zechner’s Pi app demo](https://x.com/badlogicgames/status/2106452296087302173). Pi Pocket is an independent project, not affiliated with Earendil. [MIT](LICENSE); the [bundled fonts](web/fonts/) and dependencies retain their own licenses, including [libheif-js](https://github.com/catdad-experiments/libheif-js) (LGPL-3.0). [Report a security problem privately](SECURITY.md#reporting-a-problem).
