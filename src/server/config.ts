@@ -105,7 +105,7 @@ interface PocketConfig {
     themeDefault?: ThemeDefault;
     /** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
     disabledExtensions?: string[];
-    /** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
+    /** Extension modules enabled at profile creation or by the owner; overrides the loader's legacy defaults. */
     enabledExtensions?: string[];
     /** "others": a guest cannot allow a risky call that their own message led to. Absent: anyone who can steer may. */
     approvals?: ApprovalRule;
@@ -171,6 +171,13 @@ export class ConfigStore {
             this.#config = {
                 version: 1,
                 ownerToken,
+                // Seed new profiles only. Missing flags in an existing profile must keep their old meaning.
+                enabledExtensions: [
+                    "agent-teams.ts",
+                    "pocket-relay.ts",
+                    "relay-triage.ts",
+                    "run-outcomes.ts",
+                ],
                 users: [
                     {
                         id: randomUUID(),

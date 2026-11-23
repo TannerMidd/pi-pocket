@@ -4,11 +4,12 @@ import { test } from "node:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 
 /**
- * About 5,000 tokens: tool schemas and this plain prose run at about 2.75 characters a token (Anthropic's count, Claude
+ * About 5,500 tokens: tool schemas and this plain prose run at about 2.75 characters a token (Anthropic's count, Claude
  * Opus 5.5), not 4. A guard against a prompt that grows by accident, not a squeeze: a rule that makes the work better
  * is worth its tokens, and the pull request that needs more raises it.
  */
-const LIMIT = 14_000;
+// Agent Teams is now on for new profiles, including its tool schema and guide.
+const LIMIT = 15_000;
 /** Pi's own tools, and the owner's AGENTS.md and skills: not Pi Pocket's to count. */
 const NOT_OURS = new Set(["read", "bash", "edit", "write", "project_context", "skills"]);
 

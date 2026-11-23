@@ -80,7 +80,7 @@ export const BUILT_IN_MODULES: ReadonlySet<string> = new Set(
 );
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
-/** Built-in modules that stay off until the owner turns them on. Drop-ins all do. */
+/** Fallback for profiles with no saved choice. ConfigStore seeds new-profile defaults; drop-ins stay off. */
 const OFF_BY_DEFAULT = new Set([
     "guard.ts",
     "agent-teams.ts",
