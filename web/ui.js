@@ -1939,7 +1939,15 @@ export const scrimPress = (close) => (event) =>
     close();
 
 /** A bottom sheet on phones, a centered dialog on wide screens. */
-export function Sheet({ title, onClose, children, wide = false, actions = null, className = "" }) {
+export function Sheet({
+    title,
+    onClose,
+    children,
+    wide = false,
+    actions = null,
+    className = "",
+    eyebrow = null,
+}) {
     const ref = useRef(null);
     const onBack = useContext(SheetBack);
     const info = useContext(SheetInfo);
@@ -1997,6 +2005,7 @@ export function Sheet({ title, onClose, children, wide = false, actions = null, 
                         <${Icon} name="back" size=${18} />
                     </button>`
                 }
+                ${eyebrow && html`<div class="sheet-eyebrow"><${Icon} name="grid" size=${13} /> ${eyebrow}</div>`}
                 <h2>${title}</h2>
                 ${actions}
                 <button class="icon-button" onClick=${onClose} aria-label="Close">

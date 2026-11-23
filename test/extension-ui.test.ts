@@ -264,6 +264,7 @@ before(async () => {
     }
 
     app = await openApp(scriptedModel());
+    app.gallery.fetch = async () => Response.json({ format: 1, extensions: [] });
 
     // Broken is turned on in its own test: its notice would cover the top bar's buttons in the others.
     for (const file of ["meter.ts", "shared.ts"]) {
@@ -702,35 +703,36 @@ test(
                 await inPage(
                     `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
                 );
-                await until(
-                    () => has('.switch[aria-label="Agent Teams: on"]'),
-                    "the workflow switches",
-                );
+                await until(() => has(".library-row"), "the installed modules");
                 await settled();
 
                 for (const [index, file] of files.entries()) {
-                    assert.equal(await has(`.switch[aria-label="${titles[index]}: on"]`), true);
-                    const id = `ext-more-${file.replace(/[^a-z0-9]/gi, "-")}`;
-
-                    await inPage(
-                        `document.querySelector('[aria-controls="${id}"]').click(); return "null";`,
+                    await settled();
+                    await page.click({ selector: `.library-row[data-file="${file}"]` });
+                    await until(
+                        () => has(`.library-detail .switch[aria-label="${titles[index]}: on"]`),
+                        `${file} is on`,
                     );
-                    await until(() => has(`#${id} .workflow-default-note`), `${file} details`);
-                    const note = await text(`#${id} .workflow-default-note`);
+                    const note = await text(".library-detail");
 
                     assert.match(note, /On for new profiles/);
                     assert.match(note, /Existing profiles keep their previous setting/);
-                    assert.match(note, /restarts and updates keep your choice/);
+                    assert.match(note, /saved after restart/i);
+
+                    if (file === "relay-triage.ts") {
+                        assert.match(note, /including secrets in reply text/);
+                    }
+
+                    if (file === "run-outcomes.ts") {
+                        assert.match(note, /without watchers/);
+                    }
+
+                    if (viewport.mobile) {
+                        await settled();
+                        await page.click({ label: "Back to Installed" });
+                    }
                 }
 
-                assert.match(
-                    await text("#ext-more-relay-triage-ts .workflow-default-note"),
-                    /including secrets in reply text/,
-                );
-                assert.match(
-                    await text("#ext-more-run-outcomes-ts .workflow-default-note"),
-                    /without watchers/,
-                );
                 assert.equal(
                     await inPage<boolean>(
                         `return JSON.stringify(document.documentElement.scrollWidth <= innerWidth)`,
@@ -744,6 +746,60 @@ test(
     },
 );
 
+test(
+    "Local drop-ins offer Share to the owner; the guest inspector is read-only",
+    real,
+    async () => {
+        const inspect = async (tab: BrowserPage) => {
+            await inPage(
+                `(await import('/store.js')).openSheet({type:'extensions'}); return 'null'`,
+                tab,
+            );
+            const selector = '.library-row[data-file="meter.ts"]';
+
+            await until(() => has(selector, tab), "the local drop-in");
+            await settled(tab);
+            await tab.click({ selector });
+            await until(() => has(".library-detail .switch", tab), "the drop-in switch");
+        };
+
+        await page.navigate(`${base}/s/${session}`);
+        await until(() => has(".composer"), "the conversation");
+        await inspect(page);
+        await until(
+            async () => (await text(".library-detail")).includes("Share…"),
+            "the local share action",
+        );
+        assert.match(await text(".library-detail"), /Local drop-in/);
+        assert.doesNotMatch(await text(".library-detail"), /Uninstall/);
+        const guest = app.config.addUser("Library reader", "guest");
+        const other = await browsers.open(3);
+
+        try {
+            await other.navigate(`${base}/login?token=${encodeURIComponent(guest.token)}`);
+            await until(
+                () =>
+                    inPage<boolean>(
+                        `return JSON.stringify((await import('/store.js')).store.state.me?.role === 'guest')`,
+                        other,
+                    ),
+                "guest signed in",
+            );
+            await inspect(other);
+            assert.equal(await has('.library-detail button[role="switch"]:disabled', other), true);
+            const detail = await inPage<string>(
+                `return JSON.stringify(document.querySelector('.library-detail').textContent)`,
+                other,
+            );
+
+            assert.doesNotMatch(detail, /Share…|Reload|Uninstall/);
+            assert.match(detail, /Only the owner can change this/);
+        } finally {
+            app.config.removeUser(guest.user.id);
+        }
+    },
+);
+
 test("Lancet Guard stays on until its inline confirmation is accepted", real, async () => {
     await app.setExtensionEnabled(owner(app), "guard.ts", true);
     await page.navigate(`${base}/s/${session}`);
@@ -751,20 +807,19 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
     await inPage(
         `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
     );
-    await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
-    // Built in is the first section, open: its switches show without a tap.
-    assert.equal(
-        await inPage<boolean>(
-            `return JSON.stringify(document.querySelector(".extension-management.hub > .ext-section")?.matches("section.ext-builtins") === true)`,
-        ),
-        true,
-    );
+    await until(() => has('.library-row[data-file="guard.ts"]'), "the guard module");
     await settled();
+    await page.click({ selector: '.library-row[data-file="guard.ts"]' });
+    await until(() => has('.switch[aria-label="Lancet Guard: on"]'), "the guard switch");
     await inPage(
         `document.querySelector('.switch[aria-label="Lancet Guard: on"]').focus(); return "null";`,
     );
     await page.press("Space");
     await until(() => has(".guard-confirm"), "the inline confirmation");
+    assert.match(
+        await text(".guard-confirm"),
+        /bash, background, write, and edit calls will run without checks in every session/,
+    );
     assert.equal(await has('.switch[aria-label="Lancet Guard: on"]'), true);
     await page.press("Enter");
     await until(async () => !(await has(".guard-confirm")), "Keep it on cancels");

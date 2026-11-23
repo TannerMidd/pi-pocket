@@ -6,6 +6,8 @@ The gallery lists drop-ins that other people wrote. This page tells how Pi Pocke
 
 Menu → **Extensions** opens a hub with **Discover**, **Installed**, and **Updates** tabs. **Discover** (also **Find extensions** in the launcher) lists drop-ins that other people wrote. Install from the list; select an entry to read its details beside the list on a wide screen, or in its place on a phone. **Updates** opens each update review directly, with the changes shown before you apply them. The list comes from an index of reviewed entries. By default, the index is the repository [TannerMidd/pi-pocket-extensions](https://github.com/TannerMidd/pi-pocket-extensions), whose `index.json` lists them.
 
+In **Installed**, select a gallery extension to inspect its source, pinned version, reach, and available actions. Selecting it does not turn it on. Installed gallery themes open their gallery details; local themes open Appearance. Installing a theme makes it available without choosing it for anyone.
+
 - The owner can read another index instead, at the bottom of that list: a GitHub repository as `owner/name`, or the https address of an `index.json`.
 - The gallery is the built-in module Extension gallery (`gallery.ts`, the extension `pocket-gallery`). Only the owner can use it. When it is off, it reads nothing.
 
@@ -61,7 +63,7 @@ The files of an entry belong to its drop-in, and have its name, so they never me
 ## Publish it
 
 1. Put the files in a public GitHub repository, with the same names as in your drop-in folder, at its top or in a folder. Commit them.
-2. In Menu → Extensions → **Installed**, tap **Share…** on your drop-in. Pi Pocket checks that the drop-in stands on its own, and writes a draft of its entry. The draft has the description from its comment, and the size and SHA-256 of each file. While the drop-in is on, it also has what the drop-in declares. Pi Pocket makes no GitHub calls for this.
+2. In Menu → Extensions → **Installed**, select your local drop-in and choose **Share…**. Pi Pocket checks that the drop-in stands on its own, and writes a draft of its entry. The draft has the description from its comment, and the size and SHA-256 of each file. While the drop-in is on, it also has what the drop-in declares. Pi Pocket makes no GitHub calls for this.
 3. Fill in what only you know: the repository (`owner/name`), the full ID of the commit with these files, the folder (if not the top), the tags, and your GitHub name.
 4. Tap **Open a pull request**. It shows when the entry would pass the index's checks. It opens GitHub's new-file page in the index repository, with the entry filled in as `entries/<name>.json`. The index's [CONTRIBUTING](https://github.com/TannerMidd/pi-pocket-extensions/blob/main/CONTRIBUTING.md) tells the rest.
 
