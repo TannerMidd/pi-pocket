@@ -10,11 +10,21 @@ Start a coding session on your computer, check its diff on your phone, and invit
 [![Node.js 22.19+](https://img.shields.io/badge/node-%E2%89%A5%2022.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![MIT license](https://img.shields.io/badge/license-MIT-ff9e64)](LICENSE)
 
-[Quick start](#quick-start) · [Feature tour](docs/features.md) · [Website](https://tannermidd.github.io/pi-pocket/) · [Docs](https://tannermidd.github.io/pi-pocket/docs/)
+[Quick start](#quick-start) · [Highlights](#highlights) · [Feature tour](docs/features.md) · [Website](https://tannermidd.github.io/pi-pocket/) · [Docs](https://tannermidd.github.io/pi-pocket/docs/)
 
 <img src="https://tannermidd.github.io/pi-pocket/shots/desktop.webp" alt="Desktop: review a test diff while another session waits for approval to push." width="74%"> <img src="https://tannermidd.github.io/pi-pocket/shots/pip-phone.webp" alt="Phone: check in on other sessions with PiP." width="21%">
 
 </div>
+
+## Highlights
+
+- **Relay.** Connect a Discord, Slack, Telegram, or Matrix conversation to a Pi session. Ask Pi about a failing build in chat and get its reply there. The connector opens the connection from your machine; you don’t need a public server. [Relay setup](docs/extensions/relay.md).
+- **Agent orchestration.** Give a subagent a focused job while you keep working. Enable **Agent Teams** when a task needs its own session: the parent can send follow-ups, and the linked session reports back. **PiP** can follow several sessions and tell you which one needs you.
+- **Durable work.** Restart the server and [Pi Durable](https://earendil.com/posts/pi-durable/) resumes the run. Schedule a check for tomorrow or watch a pull request so failed checks and reviews come back to the session.
+- **Multiplayer.** Invite a teammate to watch or steer. Review a diff on your phone, put a follow-up in the queue, or talk in a side chat Pi doesn’t read.
+- **Tools you can see.** Watch Pi use a real browser, open an interactive artifact, or fork a session into a separate git worktree. Choose models per session and add tools or themes from the [extension gallery](docs/extensions/publishing.md).
+
+**In the [0.31 beta](https://github.com/TannerMidd/pi-pocket/releases/tag/v0.31.0-beta.4): optional classification.** Relay triage can screen messages from unmarked senders and replies to them. Run outcomes can label a subagent’s or linked session’s report without replacing its answer. Both send text to the classifier provider you choose; with no classifier selected, neither makes a call. Jev Hub shows classifier activity. These features aren’t in the stable install below.
 
 ## Quick start
 
@@ -34,16 +44,6 @@ Or try `npx pi-pocket`. Choose how your devices should connect, then open the la
 - **Other setups:** [Android with Termux](docs/running.md#android-termux) · [Docker or Podman](docs/docker.md) · [Nix](flake.nix) (`nix run github:TannerMidd/pi-pocket`) · [Linux systemd service](docs/systemd.md).
 
 **Updates:** Menu → **Update Pi Pocket** handles supported installs. For local npm installs, `npx`, or rollback precautions, see [updates and backups](docs/running.md#updates-and-backups).
-
-## Highlights
-
-- **Pick up where you left off.** [Pi Durable](https://earendil.com/posts/pi-durable/) stores runs as they happen. Restart the server and the run continues; a tool call that can’t safely repeat is reported as interrupted.
-- **Know which session needs you.** The Priority view separates approvals and unread results from work still running. PiP can follow sessions and report back; push notifications let you put the phone away.
-- **Work together.** Invite someone to watch or steer a session. The side chat stays between people. Queue a message for Pi, steer the current run, or interrupt to change direction.
-- **Inspect the work.** Read files and diffs, watch Pi use the built-in browser, or open an interactive artifact beside the conversation. Fork a session into a separate git worktree to try another approach.
-- **Use your own setup.** Choose a model per session. Bring Pi’s sign-ins, skills, and prompt templates. Add tools or themes from the extension gallery, or [write your own extension](docs/extensions.md).
-
-The [feature tour](docs/features.md) also covers subagents, scheduled messages, optional chat relays, and cleaning up archived sessions.
 
 ## Remote access
 
