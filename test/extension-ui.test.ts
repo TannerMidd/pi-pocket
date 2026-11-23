@@ -687,6 +687,63 @@ test("safe mode: ?noext=1 loads no browser modules in the tab, across a reload",
     }
 });
 
+test(
+    "new-profile workflows show their switches and privacy notes on desktop and mobile",
+    real,
+    async () => {
+        const files = ["agent-teams.ts", "pocket-relay.ts", "relay-triage.ts", "run-outcomes.ts"];
+        const titles = ["Agent Teams", "Relay", "Relay triage", "Run outcomes"];
+
+        try {
+            for (const viewport of [DESKTOP, { width: 390, height: 844, scale: 2, mobile: true }]) {
+                await page.setViewport(viewport);
+                await page.navigate(`${base}/s/${session}`);
+                await until(() => has(".composer"), "the conversation");
+                await inPage(
+                    `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null";`,
+                );
+                await until(
+                    () => has('.switch[aria-label="Agent Teams: on"]'),
+                    "the workflow switches",
+                );
+                await settled();
+
+                for (const [index, file] of files.entries()) {
+                    assert.equal(await has(`.switch[aria-label="${titles[index]}: on"]`), true);
+                    const id = `ext-more-${file.replace(/[^a-z0-9]/gi, "-")}`;
+
+                    await inPage(
+                        `document.querySelector('[aria-controls="${id}"]').click(); return "null";`,
+                    );
+                    await until(() => has(`#${id} .workflow-default-note`), `${file} details`);
+                    const note = await text(`#${id} .workflow-default-note`);
+
+                    assert.match(note, /On for new profiles/);
+                    assert.match(note, /Existing profiles keep their previous setting/);
+                    assert.match(note, /restarts and updates keep your choice/);
+                }
+
+                assert.match(
+                    await text("#ext-more-relay-triage-ts .workflow-default-note"),
+                    /including secrets in reply text/,
+                );
+                assert.match(
+                    await text("#ext-more-run-outcomes-ts .workflow-default-note"),
+                    /without watchers/,
+                );
+                assert.equal(
+                    await inPage<boolean>(
+                        `return JSON.stringify(document.documentElement.scrollWidth <= innerWidth)`,
+                    ),
+                    true,
+                );
+            }
+        } finally {
+            await page.setViewport(DESKTOP);
+        }
+    },
+);
+
 test("Lancet Guard stays on until its inline confirmation is accepted", real, async () => {
     await app.setExtensionEnabled(owner(app), "guard.ts", true);
     await page.navigate(`${base}/s/${session}`);

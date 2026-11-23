@@ -182,6 +182,31 @@ test("the desktop app's launcher: a ready file, a window that signs in once, no 
                 ownerToken: string;
             }
         ).ownerToken;
+        const extensions = await fetch(`${running.url}/api/extensions`, {
+            headers: { authorization: `Bearer ${token}` },
+        });
+
+        assert.equal(extensions.status, 200);
+        const { modules } = (await extensions.json()) as {
+            modules: { file: string; enabled: boolean; error?: string }[];
+        };
+
+        for (const file of [
+            "agent-teams.ts",
+            "pocket-relay.ts",
+            "relay-triage.ts",
+            "run-outcomes.ts",
+        ]) {
+            const module = modules.find((each) => each.file === file);
+
+            assert.equal(
+                module?.enabled,
+                true,
+                `${file} on through the desktop installer's launcher`,
+            );
+            assert.equal(module?.error, undefined);
+        }
+
         const ask = (headers: Record<string, string>) =>
             fetch(`${running.url}/api/sign-in-link`, { method: "POST", headers });
 

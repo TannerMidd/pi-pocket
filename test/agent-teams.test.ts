@@ -37,7 +37,6 @@ before(async () => {
 
     app = await openApp(model);
     offerSubagents(app);
-    await app.setExtensionEnabled(owner(app), "agent-teams.ts", true);
 });
 after(async () => {
     await app?.close();
