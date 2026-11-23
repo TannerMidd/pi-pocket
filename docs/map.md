@@ -319,7 +319,7 @@ Plain ES modules, loaded as they are. `math.js` finds Markdown math delimiters; 
 
 Manual refresh lives in `src/server/model-refresh.ts`, owned by `Providers.modelRefresh`; `web/model-refresh.js` shares the refresh and its feedback between the menu, Providers, and the launcher. `test/model-refresh.test.ts` checks local configuration, external sign-ins, provider isolation, cancellation, session use, and endpoint access. `test/custom-providers.test.ts` checks OpenAI-compatible endpoints: the new file and folder, the key in `auth.json`, edits that keep hand-made fields, files left alone, and models' images, thinking levels, context windows, and prices.
 
-The Extensions hub in `sheets/gallery.js` shares one listing between Discover, Installed, Updates, and the selected entry. `sheets.js` maps its sheet routes to one retained hub; `sheets/extensions.js` supplies the built-in and local drop-in management controls for Installed, and the standalone sheet when the gallery is unavailable.
+`sheets.js` shares navigation between the Extensions hub and the standalone Installed library. `sheets/extensions.js` renders the library and its list; `sheets/extension-library-model.js` defines the purpose groups. `sheets/extension-inspector.js` supplies built-in and local module controls and settings for installed gallery extensions. `sheets/gallery.js` owns the hub and gallery entry details.
 
 PiP's `pip-window.js` handles pointer resize zones and the account/browser size preference.
 

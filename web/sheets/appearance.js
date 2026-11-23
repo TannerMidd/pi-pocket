@@ -628,6 +628,7 @@ export function AppearanceSheet() {
         <div class="look-grid">
             ${lookIds().map((id) => html`<${LookCard} key=${id} id=${id} />`)}
         </div>
+        ${galleryAvailable() && html`<button class="link small" onClick=${() => openSheet({ type: "gallery" })}>Browse the gallery</button>`}
         ${store.state.me?.role === "owner" && html`<${LookTools} />`}
         ${store.state.me?.role === "owner" && html`<${FontTools} />`}
         <div class="label">Colors</div>

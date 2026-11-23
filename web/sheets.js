@@ -41,18 +41,20 @@ import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/p
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
 import { addLayer, goBack, removeLayer } from "./back.js";
-import { actions, api, signOut, store } from "./store.js";
+import { actions, api, openSheet, signOut, store } from "./store.js";
 import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
 // Identity must not change when Installed turns the gallery module on or off.
-const isExtensionHub = (sheet) => ["extensions", "gallery", "gallery-entry"].includes(sheet.type);
+const isHubDetail = (sheet) => ["gallery-entry", "extension-detail"].includes(sheet.type);
+const isExtensionHub = (sheet) =>
+    ["extensions", "gallery"].includes(sheet.type) || isHubDetail(sheet);
 
 /** A hub selection is one step back, even when desktop browsing changes the selected entry. */
 const sheetKey = (sheet) =>
     isExtensionHub(sheet)
-        ? `extension-hub:${sheet.type === "gallery-entry" ? "entry" : "list"}`
+        ? `extension-hub:${isHubDetail(sheet) ? "entry" : "list"}`
         : `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
 
 /**
@@ -223,17 +225,39 @@ function sheetBody(sheet) {
         case "extensions":
         case "gallery":
         case "gallery-entry":
+
+        case "extension-detail": {
+            const origin =
+                sheet.origin ??
+                (["gallery", "gallery-entry"].includes(sheet.type) ? "gallery" : "extensions");
+            const tab = sheet.tab ?? (origin === "gallery" ? "discover" : "installed");
+            const selectedFile = sheet.type === "extension-detail" ? sheet.file : null;
+            // Source, review, and standalone management can remount the library. Its list step owns the return position.
+            const list = trail.find((step) => step.key === "extension-hub:list");
+            const bookmark = list && (list.library ??= {});
+            const onSelect = (file) => openSheet({ type: "extension-detail", file, tab, origin });
+            const onBack = () => openSheet({ type: origin, tab });
+
             body = galleryAvailable()
                 ? html`<${GallerySheet}
                       selected=${sheet.type === "gallery-entry" ? sheet.id : null}
-                      tab=${sheet.tab ?? "discover"}
-                      origin=${sheet.origin ?? (sheet.type === "gallery" ? "gallery" : "extensions")}
+                      selectedFile=${selectedFile}
+                      bookmark=${bookmark}
+                      tab=${tab}
+                      origin=${origin}
+                      onSelect=${onSelect}
+                      onBack=${onBack}
                       Management=${ExtensionsContent}
                   />`
-                : sheet.type === "extensions"
-                  ? html`<${ExtensionsSheet} />`
-                  : null;
+                : html`<${ExtensionsSheet}
+                      selectedFile=${selectedFile}
+                      bookmark=${bookmark}
+                      onSelect=${onSelect}
+                      onBack=${onBack}
+                  />`;
             break;
+        }
+
         case "gallery-source":
             body = galleryAvailable()
                 ? html`<${GallerySourceSheet} key=${sheet.id} name=${sheet.id} />`

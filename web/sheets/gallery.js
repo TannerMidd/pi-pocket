@@ -4,7 +4,7 @@
 // owner's alone; the server side is src/server/gallery.ts.
 //
 // Everything the index says is untrusted: it shows as text only, and links go only to addresses the server built.
-import { useContext, useEffect, useRef, useState } from "preact/hooks";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { personColor } from "../avatar.js";
 import { planAvailable } from "../commands.js";
 import { browserModuleState } from "../extension-ui.js";
@@ -509,7 +509,7 @@ function paletteStyle(colors) {
 function paletteOf(entry, found) {
     const listed = store.state.themeList?.find((each) => each.id === entry.name);
 
-    if (entry.installed && listed?.colors) {
+    if ((entry.installed || entry.listed === false) && listed?.colors) {
         return { colors: listed.colors, colorsLight: listed.colorsLight ?? null };
     }
 
@@ -541,6 +541,7 @@ const ThemeDesk = ({ colors, big = false }) =>
 function ThemeCard({ entry, palette, selected, state = null, onOpen }) {
     return html`<button
         class=${`ext-theme ${selected ? "selected" : ""}`}
+        data-theme-name=${entry.name}
         aria-current=${selected ? "true" : undefined}
         onClick=${onOpen}
     >
@@ -649,8 +650,8 @@ function IndexAddress({ address, onChanged }) {
 }
 
 const TABS = [
-    ["discover", "Discover"],
     ["installed", "Installed"],
+    ["discover", "Discover"],
     ["updates", "Updates"],
 ];
 
@@ -687,19 +688,59 @@ function wanted(entry, want) {
     return (d.hooks ?? []).length + (d.sections ?? []).length + (d.wraps ?? []).length > 0;
 }
 
+// The Installed list needs no code scan. Read reach when its inspector actually shows a gallery item,
+// including the first search match shown automatically in the desktop split.
+function InstalledGalleryDetail({ listing, ...props }) {
+    const { reach, problem } = useReach(listing.data);
+
+    return html`<${GalleryEntrySheet}
+        ...${props}
+        embedded=${true}
+        listing=${listing}
+        reach=${reach}
+        reachProblem=${problem}
+    />`;
+}
+
+function moveTab(event) {
+    const tabs = [...event.currentTarget.querySelectorAll('[role="tab"]')];
+    const at = tabs.indexOf(event.target);
+    const index = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: tabs.length - 1 }[
+        event.key
+    ];
+
+    if (at >= 0 && index !== undefined && !event.altKey && !event.metaKey && !event.ctrlKey) {
+        const next = tabs[(index + tabs.length) % tabs.length];
+
+        event.preventDefault();
+        next.focus();
+        next.click();
+    }
+}
+
 /** One hub, whether opened from Extensions or Appearance's gallery link. */
 export function GallerySheet({
     selected = null,
     tab = "discover",
     origin = "extensions",
+    selectedFile,
+    bookmark,
+    onSelect,
+    onBack,
     Management,
 }) {
     const listing = useListing();
     const { data, problem, loading, load } = listing;
-    const { reach, problem: reachProblem } = useReach(data);
+    const { reach, problem: reachProblem } = useReach(tab === "installed" ? null : data);
     // The sheet's own Back returns to the list on a phone; this one is for an entry opened on its own.
     const sheetBack = useContext(SheetBack);
-    const modules = useModules(tab !== "discover" || selected !== null, data);
+    const modules = useModules(
+        tab === "updates" || (tab === "discover" && selected !== null),
+        data,
+    );
+    const list = useRef(null);
+    const detail = useRef(null);
+    const returnTo = useRef(null);
     const [query, setQuery] = useState("");
     const [kind, setKind] = useState("all");
     const [want, setWant] = useState(null);
@@ -732,26 +773,49 @@ export function GallerySheet({
     );
     const extensionMatches = matches.filter((entry) => !isTheme(entry));
     const themeMatches = matches.filter(isTheme);
-    const ownThemes =
-        tab === "installed"
-            ? (store.state.themeList ?? []).filter(
-                  (look) =>
-                      !look.builtIn &&
-                      !installed.some((item) => item.name === look.id) &&
-                      (needle === "" ||
-                          `${look.name} ${look.description ?? ""}`.toLowerCase().includes(needle)),
-              )
-            : [];
-    const detailName =
-        selected ??
-        extensionMatches[0]?.name ??
-        (tab === "discover" ? themeMatches[0]?.name : null);
+    const detailName = selected ?? extensionMatches[0]?.name ?? themeMatches[0]?.name;
     const hidden = data?.hidden ?? { incompatible: 0, invalid: [] };
-    const select = (name) => openSheet({ type: "gallery-entry", id: name, tab, origin });
+
+    const select = (name, button) => {
+        if (button && list.current) {
+            returnTo.current = {
+                button,
+                listTop: list.current.scrollTop,
+                bodyTop: list.current.closest(".sheet-body").scrollTop,
+            };
+        }
+
+        openSheet({ type: "gallery-entry", id: name, tab, origin });
+    };
+
+    useLayoutEffect(() => {
+        const saved = returnTo.current;
+        const body = list.current?.closest(".sheet-body");
+
+        if (!body) {
+            return;
+        }
+
+        if (selected) {
+            body.scrollTop = 0;
+            detail.current.scrollTop = 0;
+            detail.current.focus({ preventScroll: true });
+        } else if (saved) {
+            list.current.scrollTop = saved.listTop;
+            body.scrollTop = saved.bodyTop;
+            saved.button.focus({ preventScroll: true });
+            returnTo.current = null;
+        }
+    }, [selected]);
     const moduleOf = (entry) =>
         modules?.find((each) => each.file === (entry.installed ?? entry).file) ?? null;
 
     const changeTab = (next) => {
+        if (bookmark) {
+            delete bookmark.from;
+        }
+
+        returnTo.current = null;
         setQuery("");
         setKind("all");
         setWant(null);
@@ -774,7 +838,7 @@ export function GallerySheet({
         module=${moduleOf(entry)}
         tab=${tab}
         selected=${detailName === entry.name}
-        onOpen=${() => select(entry.name)}
+        onOpen=${(event) => select(entry.name, event.currentTarget)}
         onChanged=${load}
     />`;
 
@@ -784,16 +848,22 @@ export function GallerySheet({
         palette=${paletteOf(entry, foundOf(entry))}
         selected=${detailName === entry.name}
         state=${tab === "discover" && entry.installed ? "Installed" : null}
-        onOpen=${() => select(entry.name)}
+        onOpen=${(event) => select(entry.name, event.currentTarget)}
     />`;
 
-    const tabs = html`<div class="ext-tabs" role="tablist" aria-label="Extensions">
+    const tabs = html`<div
+        class="ext-tabs"
+        role="tablist"
+        aria-label="Extensions"
+        onKeyDown=${moveTab}
+    >
         ${TABS.map(
             ([value, label]) => html`<button
                 key=${value}
                 class=${tab === value ? "on" : ""}
                 role="tab"
                 aria-selected=${tab === value}
+                tabindex=${tab === value ? 0 : -1}
                 onClick=${() => changeTab(value)}
             >
                 ${label}
@@ -806,29 +876,90 @@ export function GallerySheet({
         )}
     </div>`;
 
-    const themesHere = [
-        ...themeMatches,
-        ...ownThemes.map((look) => ({ ...look, name: look.id, title: look.name, own: true })),
-    ];
-    const installedThemes =
-        themesHere.length > 0 &&
-        html`<${Section} title="Themes" count=${themesHere.length}>
-            <div class="ext-themes">
-                ${themesHere.map((entry) =>
-                    entry.own
-                        ? html`<${ThemeCard}
-                              key=${entry.name}
-                              entry=${entry}
-                              palette=${entry.colors ? { colors: entry.colors, colorsLight: entry.colorsLight ?? null } : null}
-                              state="Yours"
-                              onOpen=${() => openSheet({ type: "appearance" })}
-                          />`
-                        : card(entry),
-                )}
-            </div>
+    const getThemes = (query) => {
+        const words = query.trim().toLowerCase();
+
+        return [
+            ...installed
+                .filter(isTheme)
+                .map((item) => offered.find((entry) => entry.name === item.name) ?? item),
+            ...(store.state.themeList ?? [])
+                .filter((look) => !look.builtIn && !installed.some((item) => item.name === look.id))
+                .map((look) => ({ ...look, name: look.id, title: look.name, own: true })),
+        ].filter((entry) =>
+            [entry.name, entry.title, entry.description, ...(entry.tags ?? [])].some((word) =>
+                word?.toLowerCase().includes(words),
+            ),
+        );
+    };
+
+    const renderThemes = (themes, current, onSelectTheme) => html`<${Section}
+        title="Themes"
+        count=${themes.length}
+    >
+        <div class="ext-themes">
+            ${themes.map(
+                (entry) => html`<${ThemeCard}
+                    key=${entry.name}
+                    entry=${entry}
+                    palette=${
+                        entry.own
+                            ? entry.colors && {
+                                  colors: entry.colors,
+                                  colorsLight: entry.colorsLight,
+                              }
+                            : paletteOf(entry, foundOf(entry))
+                    }
+                    selected=${current === entry.name}
+                    state=${entry.own ? "Yours" : "Installed"}
+                    onOpen=${
+                        entry.own
+                            ? () => openSheet({ type: "appearance" })
+                            : () => onSelectTheme(entry.name)
+                    }
+                />`,
+            )}
+        </div>
+    <//>`;
+
+    if (tab === "installed") {
+        return html`<${Sheet}
+            eyebrow="Pi Pocket / Settings"
+            title="Extensions"
+            onClose=${closeSheet}
+            wide=${true}
+            className="extension-hub gallery"
+            actions=${tabs}
+        >
+            <${Management}
+                galleryInstalled=${data?.installed}
+                galleryEntries=${data?.entries}
+                bookmark=${bookmark}
+                selectedFile=${selectedFile}
+                selectedGallery=${selected}
+                onSelect=${onSelect}
+                onSelectGallery=${select}
+                onBack=${onBack}
+                getThemes=${getThemes}
+                renderThemes=${renderThemes}
+                galleryProblem=${
+                    (problem || data?.error) &&
+                    html`<div class="error-box small">${problem ?? data.error}</div>`
+                }
+                onChanged=${load}
+                renderGalleryDetail=${(item, module, management) => html`<${InstalledGalleryDetail}
+                    key=${item.name}
+                    name=${item.name}
+                    listing=${listing}
+                    module=${module}
+                    management=${management}
+                />`}
+            />
         <//>`;
+    }
 
     return html`<${Sheet}
+        eyebrow="Pi Pocket / Settings"
         title="Extensions"
         onClose=${closeSheet}
         wide=${true}
@@ -836,7 +967,7 @@ export function GallerySheet({
         actions=${tabs}
     >
         <div class=${`extension-hub-layout ${tab} ${selected ? "has-selection" : ""}`}>
-            <div class="extension-hub-list">
+            <div class="extension-hub-list" ref=${list}>
                 <div class="ext-toolbar">
                     <div class="extension-hub-toolbar">
                         <label class="ext-search">
@@ -844,32 +975,27 @@ export function GallerySheet({
                             <input
                                 type="search"
                                 placeholder=${
-                                    tab === "installed"
-                                        ? "Search installed"
-                                        : tab === "updates"
-                                          ? "Search updates"
-                                          : `Search ${offered.length || ""} extensions and themes`.replace(
-                                                "  ",
-                                                " ",
-                                            )
+                                    tab === "updates"
+                                        ? "Search updates"
+                                        : `Search ${offered.length || ""} extensions and themes`.replace(
+                                              "  ",
+                                              " ",
+                                          )
                                 }
                                 aria-label="Search extensions and themes"
                                 value=${query}
                                 onInput=${(event) => setQuery(event.currentTarget.value)}
                             />
                         </label>
-                        ${
-                            tab !== "installed" &&
-                            html`<button
-                                class="button small ext-icon-button"
-                                aria-label="Refresh"
-                                title="Read the index again"
-                                disabled=${loading}
-                                onClick=${() => load(true)}
-                            >
-                                <${Icon} name="reload" size=${15} />
-                            </button>`
-                        }
+                        <button
+                            class="button small ext-icon-button"
+                            aria-label="Refresh"
+                            title="Read the index again"
+                            disabled=${loading}
+                            onClick=${() => load(true)}
+                        >
+                            <${Icon} name="reload" size=${15} />
+                        </button>
                     </div>
                     ${
                         tab === "discover" &&
@@ -916,7 +1042,6 @@ export function GallerySheet({
                 ${
                     data &&
                     matches.length === 0 &&
-                    tab !== "installed" &&
                     html`<div class="extension-hub-empty">
                         ${
                             tab === "updates" && !needle
@@ -927,19 +1052,6 @@ export function GallerySheet({
                                   : "The index has nothing for this Pi Pocket yet."
                         }
                     </div>`
-                }
-                ${
-                    tab === "installed" &&
-                    Management &&
-                    html`<${Management}
-                        galleryInstalled=${installed}
-                        query=${query}
-                        onChanged=${load}
-                        hub=${true}
-                        before=${extensionMatches.length > 0 && html`<div class="ext-list">${extensionMatches.map(row)}</div>`}
-                        beforeCount=${extensionMatches.length}
-                        between=${installedThemes}
-                    />`
                 }
                 ${
                     tab === "discover" &&
@@ -975,7 +1087,13 @@ export function GallerySheet({
                     </details>`
                 }
             </div>
-            <div class="extension-hub-detail">
+            <div
+                class="extension-hub-detail"
+                ref=${detail}
+                tabindex="-1"
+                role="region"
+                aria-label="Gallery details"
+            >
                 ${
                     detailName
                         ? html`${
@@ -1392,6 +1510,7 @@ export function GalleryEntrySheet({
     reach = null,
     reachProblem = null,
     module = null,
+    management = null,
     embedded = false,
 }) {
     const { data, problem, load } = useListing(listing);
@@ -1550,7 +1669,9 @@ export function GalleryEntrySheet({
                       ? html`<button class="button small" disabled=${busy} onClick=${() => toggle(false)}>
                                 Turn off
                             </button>
-                            <button
+                            ${
+                                !management &&
+                                html`<button
                                 class="button small"
                                 disabled=${busy}
                                 onClick=${() =>
@@ -1562,7 +1683,8 @@ export function GalleryEntrySheet({
                                     )}
                             >
                                 <${Icon} name="reload" size=${14} /> Reload
-                            </button>
+                            </button>`
+                            }
                             ${source} ${askPi}`
                       : html`${
                             installed.revoked === null &&
@@ -1573,6 +1695,7 @@ export function GalleryEntrySheet({
                         ${source} ${askPi}`
             }
         </div>
+        ${management}
         <${Changed} installed=${installed} />
         <${ReachSection}
             declares=${declares}

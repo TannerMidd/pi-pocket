@@ -51,7 +51,7 @@ This page is the map. Read all of it, then only the pages that your task needs.
 **A drop-in** is a file in the drop-in folder, `~/.pi-pocket/extensions/` (the `extensions/` folder in the data folder). Use a drop-in for all that one person or one machine wants.
 
 - It stays when Pi Pocket updates.
-- It starts off. The owner turns it on in Menu → Extensions.
+- It starts off. In Menu → Extensions → **Installed**, select its name to inspect it. Only the owner can turn it on; selecting it does not run its code.
 - Drop-ins that other people wrote come from the gallery, and the owner can share their own there ([Publishing to the gallery](extensions/publishing.md)).
 
 A drop-in runs inside the server, with the owner's rights. It can read `config.json`, with the owner's token, and each session. Lancet Guard never sees what its code does. Its browser module, if it has one, runs in the app's own page, with the rights of the person whose tab loads it. Before you ask the owner to turn on a drop-in, show the owner the whole module, its browser files too, and say what it does.
