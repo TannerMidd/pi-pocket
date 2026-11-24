@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { sessionActions } from "../extension-ui.js";
 import { deselectInList, selectedInList, selectFromList, setArchived } from "../sessions.js";
 import {
@@ -169,8 +170,7 @@ function SessionMenu({ title, groups, at }) {
     }, [at.x, at.y]);
 
     useEffect(() => {
-        const onKey = (event) =>
-            event.key === "Escape" && !event.isComposing && event.keyCode !== 229 && closeSheet();
+        const onKey = (event) => event.key === "Escape" && !isComposingKey(event) && closeSheet();
 
         addEventListener("keydown", onKey);
 
@@ -179,7 +179,7 @@ function SessionMenu({ title, groups, at }) {
 
     const onKeyDown = (event) => {
         // Here as well as on the window: the menu has the focus from its first frame, before effects run.
-        if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
+        if (event.key === "Escape" && !isComposingKey(event)) {
             event.preventDefault();
             closeSheet();
 

@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar } from "./avatar.js";
 import { useBack } from "./back.js";
-import { boxKey, keyBox } from "./box-keys.js";
+import { boxKey, isComposingKey, keyBox } from "./box-keys.js";
 import { chatUnread, TypingLine } from "./chat.js";
 import {
     loadTemplates,
@@ -433,7 +433,7 @@ function ModePick({ mode, onPick }) {
 
         // Esc closes the menu, and does not count as the first of the two presses that stop Pi (`app.js`).
         const onKey = (event) => {
-            if (event.key === "Escape" && !event.isComposing) {
+            if (event.key === "Escape" && !isComposingKey(event)) {
                 event.preventDefault();
                 event.stopPropagation();
                 close();
@@ -884,6 +884,7 @@ export function Composer() {
     const [searching, setSearching] = useState(false);
     const [inlineFiles, setInlineFiles] = useState(() => localStorage.getItem(INLINE_KEY) === "1");
     const box = useRef(null);
+    const compositionEndedAt = useRef(null);
     // While the box makes an edit of its own (`rewrite`), its `beforeinput` is not checked again.
     const rewriting = useRef(false);
     // The box as it comes and goes (taking the wheel shows it, with the draft in it): fitted to its text at once, and
@@ -1570,6 +1571,18 @@ export function Composer() {
     };
 
     const onKey = (event) => {
+        const endedAt = compositionEndedAt.current;
+
+        compositionEndedAt.current = null;
+
+        if (isComposingKey(event, endedAt)) {
+            if (!event.isComposing && event.keyCode !== 229 && event.key !== "Process") {
+                event.preventDefault();
+            }
+
+            return;
+        }
+
         // A quote marked by a first Backspace waits only for the second.
         if (event.key !== "Backspace" && !/^(Shift|Control|Alt|Meta)$/.test(event.key)) {
             setMarked(null);
@@ -1602,7 +1615,7 @@ export function Composer() {
         }
 
         // While searching, these keys are the search's: with nothing found, Enter must not send the search words.
-        if (searching && !event.isComposing) {
+        if (searching) {
             const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
 
             if (move !== undefined) {
@@ -1639,7 +1652,7 @@ export function Composer() {
             }
         }
 
-        if (matches.length > 0 && !event.isComposing) {
+        if (matches.length > 0) {
             const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
 
             if (move !== undefined) {
@@ -1672,7 +1685,7 @@ export function Composer() {
             }
         }
 
-        if (suggestions.length > 0 && !event.isComposing) {
+        if (suggestions.length > 0) {
             const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
 
             if (move !== undefined) {
@@ -1708,7 +1721,6 @@ export function Composer() {
 
         if (
             (event.key === "ArrowUp" || event.key === "ArrowDown") &&
-            !event.isComposing &&
             !event.shiftKey &&
             !event.altKey &&
             !event.ctrlKey &&
@@ -1723,11 +1735,7 @@ export function Composer() {
 
         const chord = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
 
-        if (
-            event.key === "Enter" &&
-            !event.isComposing &&
-            (chord || (!event.shiftKey && !coarse))
-        ) {
+        if (event.key === "Enter" && (chord || (!event.shiftKey && !coarse))) {
             event.preventDefault();
             send(chord);
         }
@@ -2419,6 +2427,12 @@ export function Composer() {
                             }
                         }}
                         onBeforeInput=${onBeforeInput}
+                        onCompositionStart=${() => {
+                            compositionEndedAt.current = null;
+                        }}
+                        onCompositionEnd=${(event) => {
+                            compositionEndedAt.current = event.timeStamp;
+                        }}
                         onKeyDown=${onKey}
                         onKeyUp=${(event) => setCaret(event.currentTarget.selectionStart)}
                         onClick=${(event) => {

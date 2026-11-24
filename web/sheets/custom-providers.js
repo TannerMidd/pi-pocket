@@ -4,6 +4,7 @@
 // thinking levels it has, its context window and maximum output, and its price. The server keeps
 // each in Pi's models.json, and its key in Pi's sign-ins.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { api, attempt, notify, store } from "../store.js";
 import { formatTokens, html, Icon, MODEL_SEARCH_AT } from "../ui.js";
 
@@ -620,7 +621,8 @@ export function EndpointForm({ editing, onDone, onCancel }) {
                         aria-label="Model ID"
                         placeholder="Add a model ID by hand"
                         onInput=${(event) => setTyped(event.currentTarget.value)}
-                        onKeyDown=${(event) => event.key === "Enter" && addTyped()}
+                        onKeyDown=${(event) =>
+                            event.key === "Enter" && !isComposingKey(event) && addTyped()}
                     />
                     <button
                         class="button small"

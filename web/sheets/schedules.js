@@ -1,5 +1,6 @@
 // Scheduled messages of this session: what is coming, and an editor to set one up or change it.
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import {
     actions,
     attempt,
@@ -747,7 +748,10 @@ export function SchedulesSheet() {
                     value=${quickText}
                     onInput=${(event) => setQuickText(event.currentTarget.value)}
                     onKeyDown=${(event) =>
-                        event.key === "Enter" && quickText.trim() !== "" && add()}
+                        event.key === "Enter" &&
+                        !isComposingKey(event) &&
+                        quickText.trim() !== "" &&
+                        add()}
                 />
             </div>`
         }

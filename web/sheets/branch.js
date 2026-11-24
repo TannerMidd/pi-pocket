@@ -1,6 +1,7 @@
 // The branch picker: the git branch this session's folder has checked out, and the others to switch to or make, in a
 // menu down from the branch in the top bar.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { actions, attempt, canSteer, closeSheet, notify, scoped, store } from "../store.js";
 import { useDragToClose } from "../gestures.js";
 import {
@@ -122,7 +123,7 @@ export function BranchPicker() {
 
     useEffect(() => {
         const place = () => setAnchor(branchAnchor());
-        const onKey = (event) => event.key === "Escape" && closeSheet();
+        const onKey = (event) => event.key === "Escape" && !isComposingKey(event) && closeSheet();
 
         addEventListener("resize", place);
         visualViewport?.addEventListener("resize", place);
@@ -239,7 +240,7 @@ export function BranchPicker() {
     // Arrows and Enter move through the rows from the search box or the picker itself, not from its other buttons.
     const onKeyDown = (event) => {
         if (
-            event.isComposing ||
+            isComposingKey(event) ||
             rows.length === 0 ||
             (event.target !== search.current && event.target !== box.current)
         ) {

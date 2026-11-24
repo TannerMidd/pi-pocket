@@ -1,5 +1,6 @@
 // Find in session: messages, commands, and files, through the whole history.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { jumpToEntry } from "../chat.js";
 import { actions, closeSheet, isRow, loadEarlier, store } from "../store.js";
 import { html, Icon, Marked, plainText, Sheet, Spinner, writtenText } from "../ui.js";
@@ -234,6 +235,10 @@ export function FindSheet({ initial }) {
     const chosen = results[Math.min(pick, results.length - 1)];
 
     const onKey = (event) => {
+        if (isComposingKey(event)) {
+            return;
+        }
+
         const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
 
         if (move !== undefined && results.length > 0) {

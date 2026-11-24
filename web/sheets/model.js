@@ -1,6 +1,7 @@
 // The model picker: a menu over the model chip, searchable once there are many models; and the same menu for the model
 // and thinking level new sessions start with.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { actions, api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { useDragToClose } from "../gestures.js";
 import { favoriteModels } from "../model-favorites.js";
@@ -149,7 +150,7 @@ export function ModelPicker() {
     useEffect(() => {
         // The default's picker has no chip to open from: it stays in the middle.
         const place = () => setAnchor(forDefault || pipId !== undefined ? null : modelAnchor());
-        const onKey = (event) => event.key === "Escape" && closeSheet();
+        const onKey = (event) => event.key === "Escape" && !isComposingKey(event) && closeSheet();
 
         addEventListener("resize", place);
         visualViewport?.addEventListener("resize", place);
@@ -202,7 +203,7 @@ export function ModelPicker() {
     // itself, not from its other buttons: there Tab and Shift+Tab move the focus as anywhere else.
     const onKeyDown = (event) => {
         if (
-            event.isComposing ||
+            isComposingKey(event) ||
             (event.target !== search.current && event.target !== box.current)
         ) {
             return;

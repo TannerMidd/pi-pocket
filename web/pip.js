@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { followUpText } from "./artifact-bridge.js";
 import { useBack } from "./back.js";
-import { boxKey, keyBox } from "./box-keys.js";
+import { boxKey, isComposingKey, keyBox } from "./box-keys.js";
 import { useDragToClose } from "./gestures.js";
 import { createPipDraft } from "./pip-attachments.js";
 import { personStorage } from "./person-storage.js";
@@ -876,6 +876,7 @@ function Composer({ id, busy, board = false }) {
     const { text, files, pending } = saved;
     const ref = useRef(null);
     const picker = useRef(null);
+    const compositionEndedAt = useRef(null);
     const draft = store.state.pipDraft;
     // A passage to ask about (Ask PiP by a selection): it goes quoted before the next message.
     const quote = store.state.pipQuote;
@@ -1116,7 +1117,29 @@ function Composer({ id, busy, board = false }) {
                 enterkeyhint="send"
                 onInput=${(event) => change(event.currentTarget.value)}
                 onPaste=${onPaste}
+                onCompositionStart=${() => {
+                    compositionEndedAt.current = null;
+                }}
+                onCompositionEnd=${(event) => {
+                    compositionEndedAt.current = event.timeStamp;
+                }}
                 onKeyDown=${(event) => {
+                    const endedAt = compositionEndedAt.current;
+
+                    compositionEndedAt.current = null;
+
+                    if (isComposingKey(event, endedAt)) {
+                        if (
+                            !event.isComposing &&
+                            event.keyCode !== 229 &&
+                            event.key !== "Process"
+                        ) {
+                            event.preventDefault();
+                        }
+
+                        return;
+                    }
+
                     // A module's key (`pocket.composerKey`) comes first, as in the session's box.
                     const keyed = keyBox(event.currentTarget, "pip", (value, start, end) => {
                         change(value);
@@ -1129,12 +1152,7 @@ function Composer({ id, busy, board = false }) {
                         return;
                     }
 
-                    if (
-                        event.key === "Enter" &&
-                        !event.shiftKey &&
-                        !event.isComposing &&
-                        event.keyCode !== 229
-                    ) {
+                    if (event.key === "Enter" && !event.shiftKey) {
                         submit(event);
                     }
                 }}
