@@ -53,6 +53,73 @@ export async function keepAssets(tx: Tx, hashes: Iterable<string>): Promise<void
 /** Ends after the delete answers. */
 export let sweeping: Promise<unknown> = Promise.resolve();
 
+/** Retires one artifact, or all artifacts of this conversation, in the caller's commit. */
+export async function retireArtifacts(
+    tx: Tx,
+    conversation: ConversationId,
+    only: string | null,
+): Promise<number> {
+    const index = await tx.doc(ArtifactsDoc, conversation);
+
+    if (only !== null && !Object.hasOwn(index.items, only)) {
+        throw new HttpError(404, "No such artifact");
+    }
+
+    const hashes = new Set<string>();
+    let count = 0;
+
+    for (const artifact of only === null ? Object.keys(index.items) : [only]) {
+        const meta = index.items[artifact]!;
+        const last = nextVersion(index, artifact) - 1;
+
+        for (const each of meta.versions) {
+            for (const asset of Object.values(each.assets ?? {})) {
+                hashes.add(asset.hash);
+            }
+
+            await tx.retireDoc(ArtifactBodyDoc, conversation, `${artifact}@${each.version}`);
+            count++;
+        }
+
+        delete index.items[artifact];
+        // An own key of `items`, so a slug the tool made: never `__proto__`.
+        index.ended ??= {};
+        index.ended[artifact] = last;
+
+        const state = await tx.doc(ArtifactStateDoc, conversation);
+        const design = await tx.doc(DesignCommentsDoc, conversation);
+
+        delete state.items[artifact];
+        delete design.items[artifact];
+    }
+
+    const shares = await tx.doc(ArtifactSharesDoc);
+
+    for (const [token, share] of Object.entries(shares.items)) {
+        if (share.conversation === String(conversation) && (only === null || share.id === only)) {
+            delete shares.items[token];
+        }
+    }
+
+    if (hashes.size > 0) {
+        const sweep = await tx.doc(ArtifactSweepDoc);
+
+        for (const hash of hashes) {
+            sweep.seq += 1;
+            sweep.hashes[hash] = sweep.seq;
+        }
+    }
+
+    return count;
+}
+
+/** After the commit: it reads every conversation's index, and it runs again at start if cut off. */
+export function startAssetSweep(app: PocketApp): void {
+    sweeping = sweepAssets(app).catch((error: unknown) => {
+        console.error("Unused artifact assets could not be removed:", error);
+    });
+}
+
 /** Anyone who sees the session and steers may: the API checked the seeing. */
 export async function deleteArtifact(
     app: PocketApp,
@@ -61,66 +128,12 @@ export async function deleteArtifact(
     artifact: string,
 ): Promise<{ versions: number }> {
     app.requireSteer(user);
+    const versions = await app.harness.commit(
+        (tx) => retireArtifacts(tx, conversation, artifact),
+        context,
+    );
 
-    const versions = await app.harness.commit(async (tx) => {
-        const index = await tx.doc(ArtifactsDoc, conversation);
-        const meta = Object.hasOwn(index.items, artifact) ? index.items[artifact] : undefined;
-
-        if (meta === undefined) {
-            throw new HttpError(404, "No such artifact");
-        }
-
-        const last = nextVersion(index, artifact) - 1;
-        const hashes = new Set(
-            meta.versions.flatMap((each) => Object.values(each.assets ?? {}).map((a) => a.hash)),
-        );
-        const count = meta.versions.length;
-
-        for (const each of meta.versions) {
-            await tx.retireDoc(ArtifactBodyDoc, conversation, `${artifact}@${each.version}`);
-        }
-
-        delete index.items[artifact];
-        // An own key of `items`, so a slug the tool made: never `__proto__`.
-        index.ended ??= {};
-        index.ended[artifact] = last;
-
-        const shares = await tx.doc(ArtifactSharesDoc);
-
-        for (const [token, share] of Object.entries(shares.items)) {
-            if (share.conversation === String(conversation) && share.id === artifact) {
-                delete shares.items[token];
-            }
-        }
-
-        const state = await tx.doc(ArtifactStateDoc, conversation);
-
-        if (Object.hasOwn(state.items, artifact)) {
-            delete state.items[artifact];
-        }
-
-        const design = await tx.doc(DesignCommentsDoc, conversation);
-
-        if (Object.hasOwn(design.items, artifact)) {
-            delete design.items[artifact];
-        }
-
-        if (hashes.size > 0) {
-            const sweep = await tx.doc(ArtifactSweepDoc);
-
-            for (const hash of hashes) {
-                sweep.seq += 1;
-                sweep.hashes[hash] = sweep.seq;
-            }
-        }
-
-        return count;
-    }, context);
-
-    // After the answer: it reads every conversation's index, and it runs again at start if cut off.
-    sweeping = sweepAssets(app).catch((error: unknown) => {
-        console.error("Unused artifact assets could not be removed:", error);
-    });
+    startAssetSweep(app);
 
     return { versions };
 }
