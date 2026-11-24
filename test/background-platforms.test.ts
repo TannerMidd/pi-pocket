@@ -1,6 +1,6 @@
 import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -62,7 +62,30 @@ async function pidIn(item: BackgroundTask, file: string): Promise<number> {
     return Number(readFileSync(path, "utf8"));
 }
 
-test("a task runs, prints, and ends with its exit code", async () => {
+// The Darwin Nix builder can deny /bin/ps. Outside that builder, a broken ps must fail the tests.
+const psDenied =
+    process.platform === "darwin" &&
+    process.env.NIX_BUILD_TOP !== undefined &&
+    (
+        spawnSync("/bin/ps", ["-p", String(process.pid)], { stdio: "ignore" }).error as
+            NodeJS.ErrnoException | undefined
+    )?.code === "EPERM";
+const processTest = (name: string, run: () => Promise<void>) =>
+    test(name, { skip: psDenied && "the Nix sandbox denies /bin/ps" }, run);
+
+if (psDenied) {
+    test("a denied process table prevents a task from starting", async () => {
+        const id = await newSession(app);
+
+        await assert.rejects(
+            app.background.start(id, { command: "echo started" }),
+            /ps: spawn EPERM/,
+        );
+        assert.equal(await one(id), undefined);
+    });
+}
+
+processTest("a task runs, prints, and ends with its exit code", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
         command: "echo one; sleep 0.3; echo two; exit 3",
@@ -77,7 +100,7 @@ test("a task runs, prints, and ends with its exit code", async () => {
     assert.equal((await app.background.read(id, item.id))?.text, "one\ntwo\n");
 });
 
-test("a stop ends the task and a child it started, also one its shell left", async () => {
+processTest("a stop ends the task and a child it started, also one its shell left", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
         command: `${child("waits.pid")} & first=$!; ${child("left.pid")} > /dev/null 2>&1 & echo started; wait $first`,
@@ -96,7 +119,7 @@ test("a stop ends the task and a child it started, also one its shell left", asy
     assert.equal(await app.background.aliveNow(id, item), false);
 });
 
-test("a task whose shell exits runs while its child runs", async () => {
+processTest("a task whose shell exits runs while its child runs", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
         command: `${child("daemon.pid")} > /dev/null 2>&1 & exit 0`,
@@ -110,7 +133,7 @@ test("a task whose shell exits runs while its child runs", async () => {
     await until(() => !running(daemon), "the child to be ended", 15_000);
 });
 
-test("a stop never ends a process that took the task's pid", async () => {
+processTest("a stop never ends a process that took the task's pid", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, { command: child("real.pid"), notify: false });
     const real = await pidIn(item, "real.pid");
@@ -134,7 +157,7 @@ test("a stop never ends a process that took the task's pid", async () => {
     await until(() => !running(real), "the task's own process to be ended", 15_000);
 });
 
-test("a task quiet for its limit is stopped, with what it printed", async () => {
+processTest("a task quiet for its limit is stopped, with what it printed", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
         command: `echo begun; ${child("quiet.pid")}`,
@@ -150,7 +173,7 @@ test("a task quiet for its limit is stopped, with what it printed", async () => 
     await until(() => !running(quiet), "its process to be ended", 15_000);
 });
 
-test("a restarted server finds a task's processes, and its stop ends them", async () => {
+processTest("a restarted server finds a task's processes, and its stop ends them", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
         command: `${child("restart.pid")} > /dev/null 2>&1 & while [ ! -f release ]; do sleep 0.1; done; ${child("after.pid")} > /dev/null 2>&1 & echo released`,

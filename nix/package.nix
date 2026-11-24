@@ -17,6 +17,7 @@
   dejavu_fonts,
   fontconfig,
   util-linux,
+  jq,
 }:
 let
   package = lib.importJSON ../package.json;
@@ -81,6 +82,7 @@ stdenv.mkDerivation {
   doCheck = true;
   nativeCheckInputs =
     runtimePackages
+    ++ [ (lib.getBin jq) ]
     ++ lib.optionals stdenv.hostPlatform.isLinux [
       (lib.getBin fontconfig)
       (lib.getBin util-linux)
@@ -94,9 +96,7 @@ stdenv.mkDerivation {
       export FONTCONFIG_FILE=${makeFontsConf { fontDirectories = [ dejavu_fonts ]; }}
     ''}
     ${lib.optionalString stdenv.hostPlatform.isDarwin ''
-      # nixpkgs has no Chromium for macOS, and Nix does not sandbox builds there: the tests would find the Chrome in
-      # /Applications, which cannot start with the build's home folder. A browser that is not there makes the browser
-      # tests skip.
+      # nixpkgs has no Chromium for macOS. Do not use Chrome from the host's /Applications.
       export PI_POCKET_BROWSER=/no-browser-in-the-nix-build
     ''}
     npm run check

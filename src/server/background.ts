@@ -1183,13 +1183,6 @@ export class BackgroundTasks {
 
         this.#check(conversationId);
 
-        // Where a task's processes cannot be told from others that took their ids, a stop could hit those: none starts.
-        const unsupported = await this.#procs.unsupported();
-
-        if (unsupported !== undefined) {
-            throw new HttpError(501, unsupported);
-        }
-
         const command = request.command.trim();
 
         if (command === "") {
@@ -1205,6 +1198,13 @@ export class BackgroundTasks {
         // A workspace URI (`ssh://…`) names another machine: a process here cannot run there.
         if (app.workspaceScheme(cwd) !== undefined) {
             throw new HttpError(400, "Background tasks are not available for remote workspaces.");
+        }
+
+        // Where a task's processes cannot be told from others that took their ids, a stop could hit those: none starts.
+        const unsupported = await this.#procs.unsupported();
+
+        if (unsupported !== undefined) {
+            throw new HttpError(501, unsupported);
         }
 
         if (!existsSync(cwd)) {
