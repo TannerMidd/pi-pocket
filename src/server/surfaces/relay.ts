@@ -332,12 +332,12 @@ function plan(
 
         if (target.kind === "text") {
             if (fill === undefined) {
-                return `${number} takes a text: write "${number}: your text".`;
+                return `${number} takes a text: write "${surface.id} ${number}: your text".`;
             }
 
             set[target.path] = fill;
         } else if (fill !== undefined) {
-            return `${number} takes no text: write just "${number}".`;
+            return `${number} takes no text: write "${surface.id} ${number}".`;
         } else if (target.kind === "toggle") {
             const before = derive[target.path];
 

@@ -63,11 +63,11 @@ export function render(
         map[String(number)] = target;
 
         if (hint === "first") {
-            hints.first ??= `"${number}" to toggle ${label}`;
+            hints.first ??= `"${surface.id} ${number}" to toggle ${label}`;
         } else if (hint === "press") {
-            hints.press ??= `"${number}" to press ${label}`;
+            hints.press ??= `"${surface.id} ${number}" to press ${label}`;
         } else if (hint === "text") {
-            hints.text ??= `"${number}: your text" to fill ${label}`;
+            hints.text ??= `"${surface.id} ${number}: your text" to fill ${label}`;
         }
 
         return `${number} `;
@@ -235,7 +235,7 @@ export function render(
 
     if (numbered) {
         out.push(
-            `${surface.title} (${surface.id}).${live ? " Reply to this message with numbers:" : ""}`,
+            `${surface.title} (${surface.id}).${live ? " Reply with the card ID and number:" : ""}`,
         );
     } else {
         out.push(surface.title);

@@ -182,6 +182,26 @@ test("a card acts only on its confirmed instance, revision and destination", asy
     assert.equal((await act({ thread: "thread", text: "1", replyTo: "m1" })).handled, true);
 });
 
+test("the printed card command works when Slack identifies only the existing thread root", async () => {
+    const { card, act, prepare, confirm } = fixture();
+    const thread = "root";
+    const incoming = { thread, replyTo: "room:root" };
+    const prepared = await prepare({ ...route, thread });
+    const command = /Reply "([^"]+)" to toggle Agree/.exec(prepared.text)?.[1];
+
+    assert.equal(command, "s1 1");
+    await confirm(prepared, { channel: "room", thread, id: "room:card" });
+    assert.deepEqual(await act({ ...incoming, text: "1" }), { handled: false });
+    assert.deepEqual(await act({ ...incoming, text: command, thread: "other" }), {
+        handled: false,
+    });
+    const result = await act({ ...incoming, text: command });
+
+    assert.ok(result.handled);
+    assert.match(result.reply, /Reply "s1 1" to toggle Agree/);
+    assert.equal(card.data.agree, true);
+});
+
 test("a root message can start a reply thread, but unrelated threads cannot use that message or its echoes", async () => {
     const { app, id, sid, act, prepare, confirm } = fixture();
 

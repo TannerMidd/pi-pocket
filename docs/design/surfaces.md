@@ -118,13 +118,13 @@ Why a core route: extension routes are closed to session-invited guests (`mayUse
 `toText(surface, "transcript" | "relay" | "push")` is one pure function, golden-tested. Relay form:
 
 ```
-Cleanup dry run (s3). Reply to this message with numbers:
+Cleanup dry run (s3). Reply with the card ID and number:
 1 [x] /tmp/a  4.2 GB
 2 [ ] /tmp/b  9.7 GB
 3 Note: (empty)
 4.2 GB selected
 4 Delete   5 Refresh
-Reply "1" to toggle row 1, "4" to press Delete, "3: your text" to fill Note.
+Reply "s3 1" to toggle row 1, "s3 4" to press Delete, "s3 3: your text" to fill Note.
 ```
 
 (The golden file in `test/fixtures/surface-cleanup.relay.txt` is the form the code makes: one table row to a line, and the total follows the ticks.)
