@@ -20,7 +20,8 @@ import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { ScheduleDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
-import { mkdtempSync } from "node:fs";
+import { capture0281 } from "./main-0281-ui-evidence.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const chromium = findBrowser();
@@ -42,7 +43,20 @@ before(async () => {
         return;
     }
 
+    const extensions = join(root, "data", "extensions");
+
+    mkdirSync(extensions, { recursive: true });
+    writeFileSync(
+        join(extensions, "schedule-locale.ts"),
+        `/** Minimal locale for schedule skip regressions. */
+export default (_host, web) => web.uiLocales([{id:"zh-CN",label:"测试",messages:{
+    "web.running-board.release0281.skipped":" · 已跳过 {count} 次",
+    "web.sheets.schedules.release0281.skipped-once":"已跳过一次，最近一次为 {when}",
+    "web.sheets.schedules.release0281.skipped-many":"已跳过 {count} 次，最近一次为 {when}"
+}}]);\n`,
+    );
     app = await openApp(scriptedModel(() => fauxAssistantMessage([fauxText("done")])));
+    await app.setExtensionEnabled(owner(app), "schedule-locale.ts", true);
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -431,6 +445,75 @@ test("the Schedules sheet says how often a repeat skipped its time", real, async
         ),
         /Skipped 2 times, last .*: its last message still waits in the queue/,
     );
+    assert.ok(chromium, "Chromium is required for schedule skip locale acceptance");
+
+    for (const viewport of ["mobile", "desktop"] as const) {
+        await page.setViewport(VIEWPORTS[viewport]);
+        await page.navigate(`${base}/s/${id}`);
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    "return JSON.stringify(document.querySelector('.composer')!==null)",
+                ),
+            "the actual session",
+        );
+        await page.evaluate(
+            "(await import('/ui-locale.js')).setLocale('zh-CN');(await import('/store.js')).openSheet({type:'schedules'})",
+        );
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    "return JSON.stringify(/[\\u4e00-\\u9fff]/u.test(document.querySelector('[data-part=schedule-skipped]')?.textContent??''))",
+                ),
+            "the real Schedules skip line is Chinese",
+        );
+        const skipped = await inPage<string>(
+            "return JSON.stringify(document.querySelector('[data-part=schedule-skipped]').textContent)",
+        );
+
+        assert.ok(skipped.includes("2") && !skipped.includes("Skipped"), skipped);
+        await capture0281(
+            page,
+            viewport + "-schedule-skipped-chinese",
+            "Schedules → actual repeat with 2 persisted skips",
+            '[data-part="schedule-skipped"]',
+        );
+        await page.evaluate("(await import('/store.js')).openRunning()");
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    "const row=[...document.querySelectorAll('.rb-sched')].find(row=>row.querySelector('.rb-sched-text')?.textContent==='skipping');return JSON.stringify(Boolean(row?.querySelector('.rb-sched-rel')?.textContent.includes('2')))",
+                ),
+            "the actual Running board schedule",
+        );
+        const running = await inPage<{ text: string; zone: string }>(
+            "const row=[...document.querySelectorAll('.rb-sched')].find(row=>row.querySelector('.rb-sched-text')?.textContent==='skipping');return JSON.stringify({text:row.querySelector('.rb-sched-rel').textContent,zone:row.querySelector('.rb-sched-time').title})",
+        );
+
+        assert.match(running.text, /[\u4e00-\u9fff]/u);
+        assert.ok(running.text.includes("2") && !running.text.includes("skipped"), running.text);
+        assert.equal(running.zone, "UTC");
+        const state = await inPage<{ runs: number; skipped: number; zone: string }>(
+            `const board=await (await fetch('/api/running/board')).json();const item=board.schedules.find(item=>item.id===${JSON.stringify(repeat.id)});return JSON.stringify({runs:item.runs,skipped:item.skipped,zone:item.zone});`,
+        );
+        const stored = (await app.harness.snapshot(ScheduleDoc, id, context))!.items[repeat.id]!;
+
+        assert.deepEqual(state, { runs: stored.runs, skipped: 2, zone: "UTC" });
+        await capture0281(
+            page,
+            viewport + "-running-skipped-chinese",
+            "Running now → repeat keeps runs, skips, and original zone",
+            '[data-part="running-board"]',
+        );
+        await page.evaluate("(await import('/ui-locale.js')).setLocale('en')");
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    "const row=[...document.querySelectorAll('.rb-sched')].find(row=>row.querySelector('.rb-sched-text')?.textContent==='skipping');return JSON.stringify(row?.querySelector('.rb-sched-rel')?.textContent.includes('skipped 2'))",
+                ),
+            "the original English skip count returns",
+        );
+    }
 });
 
 test("the editor keeps a window, previews the server's next run, removes it", real, async () => {

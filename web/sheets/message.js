@@ -31,9 +31,14 @@ import {
     resendable,
 } from "../entry-presentation.js";
 import { memoryAvailable } from "./memory.js";
+import { t } from "../ui-locale.js";
 
 /** What each mode is called where a person chooses it. */
-const MODE_NAMES = { open: "Show", folded: "Fold", hidden: "Hide" };
+const modeNames = () => ({
+    open: t("web.sheets.message.release028.show", "Show"),
+    folded: t("web.sheets.message.release028.fold", "Fold"),
+    hidden: t("web.sheets.message.release028.hide", "Hide"),
+});
 
 /**
  * How this browser shows inputs of one kind a module presents: as messages, folded to a line, or hidden until Find.
@@ -55,12 +60,12 @@ function PresentationChoice({ presentation }) {
 
     return html`<div class="setting wrap presented-choice" data-part="presented-choice">
         <div class="grow">
-            <div class="small">Show inputs like this</div>
+            <div class="small">${t("web.sheets.message.release028.show-inputs", "Show inputs like this")}</div>
             <div class="muted small">
-                Every “${presentation.label}” in this browser. Pi still reads them in full.
+                ${t("web.sheets.message.release028.every-input", "Every “{label}” in this browser. Pi still reads them in full.", { label: presentation.label })}
             </div>
         </div>
-        <div class="segmented" role="group" aria-label=${`Show “${presentation.label}” inputs`}>
+        <div class="segmented" role="group" aria-label=${t("web.sheets.message.release028.show-label", "Show “{label}” inputs", { label: presentation.label })}>
             ${PRESENTATION_MODES.map(
                 (value) => html`<button
                     type="button"
@@ -68,7 +73,7 @@ function PresentationChoice({ presentation }) {
                     aria-pressed=${mode === value ? "true" : "false"}
                     onClick=${() => attempt(async () => choosePresentationMode(kind, value))}
                 >
-                    ${MODE_NAMES[value]}
+                    ${modeNames()[value]}
                 </button>`,
             )}
         </div>
@@ -96,7 +101,13 @@ const openBranch = (run) => {
         const created = await run();
 
         navigate(created.id);
-        notify("info", "Opened the new session. The original is unchanged.");
+        notify(
+            "info",
+            t(
+                "web.sheets.message.open-branch.opened-new-session-original",
+                "Opened the new session. The original is unchanged.",
+            ),
+        );
     }).finally(() => {
         branching = false;
     });
@@ -131,8 +142,17 @@ function SendAgain({ prompt, worktree }) {
                 `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(needle)),
     );
 
-    return html`<div class="group-title">Send again in a new session</div>
-    ${item(`With ${modelLabel(view.agent)}`, () => openBranch(() => actions.resend(prompt.id, { worktree })), "same model")}
+    return html`<div class="group-title">${t(
+        "web.sheets.message.send-again.div.send-again-new-session",
+        "Send again in a new session",
+    )}</div>
+    ${item(
+        t("web.sheets.message.send-again.text.content", "With {model}", {
+            model: modelLabel(view.agent),
+        }),
+        () => openBranch(() => actions.resend(prompt.id, { worktree })),
+        t("web.sheets.message.send-again.text.same-model", "same model"),
+    )}
     ${
         choosing
             ? html`<div class="message-model-search">
@@ -140,7 +160,10 @@ function SendAgain({ prompt, worktree }) {
                     <${Icon} name="search" size=${16} />
                     <input
                         ref=${search}
-                        placeholder="Search models"
+                        placeholder=${t(
+                            "web.sheets.message.send-again.placeholder.search-models",
+                            "Search models",
+                        )}
                         value=${query}
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
@@ -159,7 +182,10 @@ function SendAgain({ prompt, worktree }) {
                     html`<span class="mono">${model.provider}</span>`,
                 ),
             )}`
-            : item("With another model…", () => setChoosing(true))
+            : item(
+                  t("web.sheets.message.send-again.text.another-model", "With another model…"),
+                  () => setChoosing(true),
+              )
     }`;
 }
 
@@ -198,8 +224,14 @@ export function MessageSheet({ entryId }) {
     }, [entryId, clipped]);
 
     if (entry?.kind !== "user" && entry?.kind !== "assistant") {
-        return html`<${Sheet} title="Message" onClose=${closeSheet}>
-            <p class="muted">This message is not here anymore.</p>
+        return html`<${Sheet} title=${t(
+            "web.sheets.message.message-sheet.title.message",
+            "Message",
+        )} onClose=${closeSheet}>
+            <p class="muted">${t(
+                "web.sheets.message.message-sheet.p.message-not-anymore",
+                "This message is not here anymore.",
+            )}</p>
         <//>`;
     }
 
@@ -219,15 +251,22 @@ export function MessageSheet({ entryId }) {
     const copy = () => {
         closeSheet();
         copyText(text).then(
-            () => notify("info", "Copied."),
-            () => notify("error", "Could not copy."),
+            () => notify("info", t("web.chat.render.text.copied", "Copied.")),
+            () =>
+                notify(
+                    "error",
+                    t("web.sheets.message.message-sheet.copy.not-copy", "Could not copy."),
+                ),
         );
     };
 
     if (draft !== null) {
-        return html`<${Sheet} title="Edit and send again" onClose=${closeSheet}>
+        return html`<${Sheet} title=${t(
+            "web.sheets.message.message-sheet.title.edit-and-send-again",
+            "Edit and send again",
+        )} onClose=${closeSheet}>
             <p class="muted small">
-                Pi gets the edited message in a new session that forks just before the original. The original stays as it is.
+                ${t("web.sheets.message.message-sheet.p.pi-gets-edited-message", "Pi gets the edited message in a new session that forks just before the original. The original stays as it is.")}
             </p>
             <textarea
                 ref=${field}
@@ -236,37 +275,80 @@ export function MessageSheet({ entryId }) {
                 onInput=${(event) => setDraft(event.currentTarget.value)}
             ></textarea>
             <div class="row">
-                <button class="button" onClick=${() => setDraft(null)}>Back</button>
+                <button class="button" onClick=${() => setDraft(null)}>${t(
+                    "web.sheets.message.message-sheet.button.back",
+                    "Back",
+                )}</button>
                 <button
                     class="button primary grow"
                     onClick=${() => openBranch(() => actions.resend(entry.id, { text: draft, worktree }))}
                 >
-                    Send in a new session
+                    ${t(
+                        "web.sheets.message.message-sheet.button.send-new-session",
+                        "Send in a new session",
+                    )}
                 </button>
             </div>
         <//>`;
     }
 
-    return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
-        <div class="message-preview">${filesAlone ? "(attachments)" : text}</div>
+    return html`<${Sheet} title=${
+        toPi
+            ? t("web.sheets.message.message-sheet.title.message", "Message")
+            : t("web.sheets.message.message-sheet.title.reply", "Reply")
+    } onClose=${closeSheet}>
+        <div class="message-preview">${
+            filesAlone
+                ? t("web.sheets.message.message-sheet.text.attachments", "(attachments)")
+                : text
+        }</div>
         ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
         ${
             canBranch &&
             view.conversation.inRepository &&
             html`<div class="sheet-list">
                 <div class="extension message-worktree">
-                    <div class="extension-main">New sessions get a git worktree of their own</div>
+                    <div class="extension-main">${t(
+                        "web.sheets.message.message-sheet.div.new-sessions-get-git",
+                        "New sessions get a git worktree of their own",
+                    )}</div>
                     <${Switch}
                         on=${worktree}
-                        label="New sessions get a git worktree of their own"
+                        label=${t(
+                            "web.sheets.message.message-sheet.div.new-sessions-get-git",
+                            "New sessions get a git worktree of their own",
+                        )}
                         onChange=${() => setWorktree(!worktree)}
                     />
                 </div>
             </div>`
         }
         <div class="sheet-list message-actions">
-            ${canBranch && !toPi && item("Fork from here", () => openBranch(() => actions.fork(entry.id, { worktree })), "everything up to this reply")}
-            ${canBranch && toPi && again && !waiting && item("Edit and send again…", () => setDraft(text))}
+            ${
+                canBranch &&
+                !toPi &&
+                item(
+                    t("web.sheets.message.message-sheet.text.fork", "Fork from here"),
+                    () => openBranch(() => actions.fork(entry.id, { worktree })),
+                    t(
+                        "web.sheets.message.message-sheet.text.everything-up-reply",
+                        "everything up to this reply",
+                    ),
+                )
+            }
+            ${
+                canBranch &&
+                toPi &&
+                again &&
+                !waiting &&
+                item(
+                    t(
+                        "web.sheets.message.message-sheet.text.edit-send-again",
+                        "Edit and send again…",
+                    ),
+                    () => setDraft(text),
+                )
+            }
             ${canBranch && again && prompt && html`<${SendAgain} prompt=${prompt} worktree=${worktree} />`}
             ${
                 memoryAvailable() &&
@@ -274,12 +356,19 @@ export function MessageSheet({ entryId }) {
                 !filesAlone &&
                 !waiting &&
                 item(
-                    "Remember…",
+                    t("web.sheets.message.message-sheet.text.remember", "Remember…"),
                     () => openSheet({ type: "memory", draft: lessonFrom(text) }),
-                    "keep it as a lesson for Pi",
+                    t(
+                        "web.sheets.message.message-sheet.text.keep-lesson-pi",
+                        "keep it as a lesson for Pi",
+                    ),
                 )
             }
-            ${!filesAlone && !waiting && item("Copy text", copy)}
+            ${
+                !filesAlone &&
+                !waiting &&
+                item(t("web.sheets.message.message-sheet.text.copy-text", "Copy text"), copy)
+            }
         </div>
     <//>`;
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "preact/hooks";
 import { html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 export function SignIn() {
     const [value, setValue] = useState("");
@@ -36,14 +37,17 @@ export function SignIn() {
 
     return html`<div class="signin" data-part="sign-in">
         <div class="pi big">π</div>
-        <h1>Pi Pocket</h1>
+        <h1>${t("signin.title", "Pi Pocket")}</h1>
         <p class="muted">
-            Open the sign-in link Pi Pocket printed when it started, or an invite from a signed-in device. You can also paste the link, the token, or an invite code here.
+            ${t(
+                "signin.intro",
+                "Open the sign-in link Pi Pocket printed when it started, or an invite from a signed-in device. You can also paste the link, the token, or an invite code here.",
+            )}
         </p>
         <div class="row">
             <input
                 value=${value}
-                placeholder="Link, token, or invite code"
+                placeholder=${t("signin.field", "Link, token, or invite code")}
                 autocapitalize="none"
                 autocorrect="off"
                 autocomplete="off"
@@ -51,7 +55,7 @@ export function SignIn() {
                 onInput=${(event) => setValue(event.currentTarget.value)}
                 onKeyDown=${(event) => event.key === "Enter" && go()}
             />
-            <button class="button primary" onClick=${go}>Sign in</button>
+            <button class="button primary" onClick=${go}>${t("signin.sign-in", "Sign in")}</button>
         </div>
     </div>`;
 }

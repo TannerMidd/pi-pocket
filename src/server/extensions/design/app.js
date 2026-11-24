@@ -1,5 +1,4 @@
 // The workspace of Design: `index.js` loads this file when the panel first opens, not at the app's start.
-import { openSheet, store as app } from "/store.js";
 import { createData, designsOf } from "./data.js";
 import { clampSize } from "./devices.js";
 import { variationMessage } from "./messages.js";
@@ -12,6 +11,8 @@ const BOX_LIMIT = 90_000;
 
 /** `shell.style(name)` loads a stylesheet of the module and resolves when it applies. */
 export function createApp(pocket, store, shell) {
+    const { app } = shell;
+    const t = pocket.t;
     const data = createData(pocket, store);
     const systemData = createSystemData(pocket, store, data);
     const parts = createParts(pocket);
@@ -28,6 +29,7 @@ export function createApp(pocket, store, shell) {
         systemData,
         parts,
         app,
+        useArtifactBridge: shell.useArtifactBridge,
         /** The page's frame, for the parts that talk to it (the slide strip): `{ send, goto, supported }`, or null. */
         frame: { current: null },
         canEdit,
@@ -64,14 +66,23 @@ export function createApp(pocket, store, shell) {
             if (text.length > BOX_LIMIT) {
                 pocket.notify(
                     "error",
-                    "That is too much for one message. Mark some comments done, and send the rest.",
+                    t(
+                        "server.extensions.design.app.create-app.send-to-box.env.too-much-one-message",
+                        "That is too much for one message. Mark some comments done, and send the rest.",
+                    ),
                 );
 
                 return;
             }
 
             pocket.insertText(text);
-            pocket.notify("info", "In your message box: read it, then send it.");
+            pocket.notify(
+                "info",
+                t(
+                    "server.extensions.design.app.create-app.send-to-box.env.message-box-read-send",
+                    "In your message box: read it, then send it.",
+                ),
+            );
 
             if (!env.beside()) {
                 pocket.closePanel();
@@ -196,7 +207,7 @@ export function createApp(pocket, store, shell) {
             env.open(each.id);
         },
         share(id, version) {
-            openSheet({ type: "artifact-share", id, version, back: "design" });
+            shell.share(id, version);
         },
     };
 

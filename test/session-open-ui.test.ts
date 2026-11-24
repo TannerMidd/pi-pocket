@@ -166,9 +166,26 @@ async function ready(): Promise<void> {
     );
 }
 
+/** Let the real hello finish the account reload before the fixture navigates the shared page again. */
+async function restoreOwner(): Promise<void> {
+    const id = JSON.stringify(app.config.users[0]!.id);
+
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                const { store } = await import('/store.js');
+                return JSON.stringify(store.state.me?.id === ${id} && store.state.connection === 'open');
+            `),
+        "the real owner reconnects after the held hello is released",
+        20_000,
+    );
+}
+
 /** Open a new document, losing all tab memory. */
 async function openOn(id: ConversationId, text: string): Promise<void> {
-    await page.navigate(`${base}/s/${id}`);
+    const navigation = await page.navigate(`${base}/s/${id}`);
+
+    assert.equal(navigation.error, undefined, "the session navigation must not be interrupted");
     await until(async () => (await shown(text)).rows, text, 20_000);
     await ready();
 }
@@ -553,6 +570,8 @@ test(
             events.release();
             poll.release();
         }
+
+        await restoreOwner();
     },
 );
 
@@ -595,6 +614,10 @@ for (const changed of [false, true]) {
                 retryMe = undefined;
                 events.release();
                 poll.release();
+            }
+
+            if (changed) {
+                await restoreOwner();
             }
 
             await leave();

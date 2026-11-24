@@ -13,6 +13,7 @@ import { HttpError } from "../errors.ts";
 import { ARTIFACT_INSPECT, withDeck } from "./artifact-inspect.ts";
 import { conversationId, escapeHtml, send } from "./io.ts";
 import { ARTIFACT_CSP, artifactAssetResponse, assetRoot, assetUser } from "./artifact-assets.ts";
+import { localeCookie, requestLocale, type RequestLocale } from "../ui-locales.ts";
 
 /**
  * A Markdown artifact's look, from a few colors: the browser's light or dark by default, the app's theme when the
@@ -212,6 +213,20 @@ export const RUN_FRAME = `<!doctype html><html><head><meta charset="utf-8"><meta
 </script></body></html>`;
 
 /**
+ * `RUN_FRAME` with its title in the language of the request. Its title is the one fixed word of the frame's own page:
+ * the page it goes on to show is replaced by the HTML that the app sends it, never by a script of this one.
+ */
+function runFrame(app: PocketApp, response: ServerResponse): string {
+    const locale: RequestLocale = requestLocale(
+        app.webs.locales.snapshot(),
+        localeCookie(response.req?.headers.cookie),
+    );
+    const title = escapeHtml(locale.t("server.http.artifacts.title.preview", "Preview"));
+
+    return RUN_FRAME.replace("<title>Preview</title>", () => `<title>${title}</title>`);
+}
+
+/**
  * An artifact's body as its page: SVG as an image, Markdown rendered in the artifact's own look, HTML as it was written.
  * `/a/…` and a published one (`/pub/:token`) serve the same pages, in the same sandbox.
  */
@@ -297,7 +312,7 @@ export async function artifact(
     }
 
     if (parts.length === 1 && parts[0] === "frame") {
-        return send(response, 200, RUN_FRAME, "text/html; charset=utf-8", {
+        return send(response, 200, runFrame(app, response), "text/html; charset=utf-8", {
             "content-security-policy": ARTIFACT_CSP,
             "x-content-type-options": "nosniff",
             "referrer-policy": "no-referrer",

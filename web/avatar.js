@@ -3,6 +3,7 @@
 
 import { store } from "./store.js";
 import { html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
 // The theme's own colors, so people keep their colors in every theme and each one fits it.
 const COLORS = [
@@ -103,7 +104,14 @@ export async function avatarBlob(file, side = 192) {
 
     return await new Promise((resolve, reject) =>
         canvas.toBlob(
-            (blob) => (blob ? resolve(blob) : reject(new Error("That picture could not be read"))),
+            (blob) =>
+                blob
+                    ? resolve(blob)
+                    : reject(
+                          new Error(
+                              t("web.avatar.picture-unreadable", "That picture could not be read"),
+                          ),
+                      ),
             "image/png",
         ),
     );
@@ -112,9 +120,9 @@ export async function avatarBlob(file, side = 192) {
 export function Avatar({ person, size = 24 }) {
     const state = person.typing ? "typing" : person.away ? "away" : "";
     const title = person.typing
-        ? `${person.name} is typing`
+        ? t("web.avatar.avatar.title.is-typing", "{name} is typing", { name: person.name })
         : person.away
-          ? `${person.name} (away)`
+          ? t("web.avatar.avatar.title.away", "{name} (away)", { name: person.name })
           : person.name;
 
     const src = avatarSrc(person);

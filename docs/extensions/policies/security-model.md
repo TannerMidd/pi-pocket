@@ -60,6 +60,8 @@ People who were invited to one session never reach a module's routes or its brow
   _Reason:_ when a person cannot use one route, another route with a matching path can answer them (`items/:id` for `items/new`).
     - **S3.3. Check each `:name` part before you make a file path with it.** The server refuses `..`, `\`, and NUL, but nothing else.\
       _Reason:_ a path part is text from outside.
+      The app's UI catalog (`GET /ui-locales.json`, experimental since 0.28.0) is public in the same way: it answers before any sign-in, with no role check, because the sign-in pages show the same words. It holds the app's own text and each language's name, never a module's routes, settings, secrets, sessions, or paths. A module's languages do not inherit its routes' `access`, so registering them declares that anyone who reaches this server may read that text.
+
 - **S3.4. On a public page, show only what the link is for, escape all that you put in it, and give each link a short life and few uses.** Anyone on the internet who has the address reads the page and sends its form. The page runs no script, but HTML that you did not escape can still change what it says.\
   _Reason:_ a link travels further than the person who got it.
 

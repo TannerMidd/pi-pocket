@@ -59,7 +59,7 @@ export function spacingSection(ctx: Ctx): string | undefined {
             ? ""
             : `<h3 id="${id}">${title}</h3><p class="sub">${sub}</p><div class="rows">${list.map((token) => rowOf(ctx, token, sample(token))).join("")}</div>`;
 
-    return `<p class="intro">The steps and sizes that the layout is built of.</p>${part("spacing-steps", "Steps", "The steps that padding, margins, and gaps move in. Each bar is in proportion to the longest step.", space, bar)}${part("spacing-roles", "Roles", "Where the system uses a step.", roles, bar)}${part("sizes", "Sizes", "Heights and widths for controls, icons, and marks.", sizes, (token) => `<div class="box" style="width:${varOf(token, "0")};height:${varOf(token, "0")}"></div>`)}${note()}${moreTokens(ctx, "spacing")}`;
+    return `<p class="intro">${esc(ctx.locale.t("server.design.docsite-space.spacing-section.p.steps-sizes-layout-built", "The steps and sizes that the layout is built of."))}</p>${part("spacing-steps", "Steps", "The steps that padding, margins, and gaps move in. Each bar is in proportion to the longest step.", space, bar)}${part("spacing-roles", "Roles", "Where the system uses a step.", roles, bar)}${part("sizes", "Sizes", "Heights and widths for controls, icons, and marks.", sizes, (token) => `<div class="box" style="width:${varOf(token, "0")};height:${varOf(token, "0")}"></div>`)}${note()}${moreTokens(ctx, "spacing")}`;
 }
 
 export function radiiSection(ctx: Ctx): string | undefined {
@@ -87,7 +87,7 @@ export function radiiSection(ctx: Ctx): string | undefined {
     const roles = radii.filter((token) => token.tier === "semantic");
     const scale = radii.filter((token) => token.tier !== "semantic");
 
-    return `<p class="intro">Corners follow what they round: small for marks, more for controls, most for containers.</p>${grid("Roles", roles)}${grid(roles.length > 0 ? "Scale" : "Steps", scale)}${note()}${moreTokens(ctx, "radii")}`;
+    return `<p class="intro">${esc(ctx.locale.t("server.design.docsite-space.radii-section.p.corners-follow-they-round", "Corners follow what they round: small for marks, more for controls, most for containers."))}</p>${grid("Roles", roles)}${grid(roles.length > 0 ? "Scale" : "Steps", scale)}${note()}${moreTokens(ctx, "radii")}`;
 }
 
 export function shadowSection(ctx: Ctx): string | undefined {
@@ -102,7 +102,7 @@ export function shadowSection(ctx: Ctx): string | undefined {
         mine.filter((token) => token.type === "shadow" && token.tier !== "component"),
     );
 
-    return `<p class="intro">Shadows lift a surface off the page. The shadow color follows the mode.</p><div class="tiles wide">${shadows
+    return `<p class="intro">${esc(ctx.locale.t("server.design.docsite-space.shadow-section.p.shadows-lift-surface-off", "Shadows lift a surface off the page. The shadow color follows the mode."))}</p><div class="tiles wide">${shadows
         .map(
             (token) =>
                 `<div class="tile lift" data-s style="box-shadow:${varOf(token, "none")}">${copyName(token)}${descOf(token)}<span class="desc">${variants(ctx, (mode) => esc(plain("shadow", valueIn(token, mode))))}</span></div>`,
@@ -121,5 +121,5 @@ export function otherSection(ctx: Ctx): string | undefined {
         ctx.claimed.add(token);
     }
 
-    return `<p class="intro">Breakpoints, borders, layers, and the tokens that fit no other section.</p>${tokenTable(ctx, mine)}`;
+    return `<p class="intro">${esc(ctx.locale.t("server.design.docsite-space.other-section.p.breakpoints-borders-layers-tokens", "Breakpoints, borders, layers, and the tokens that fit no other section."))}</p>${tokenTable(ctx, mine)}`;
 }

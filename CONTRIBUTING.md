@@ -15,6 +15,13 @@ Thank you for your help. This page tells how to send a change.
 - Add one small test for each real risk that the change brings. The test must fail before the change.
 - Run `npm run format`, `npm run check`, `npm run lint`, and `npm test`.
 
+## Test prerequisites
+
+- Use the Node version in `package.json`, install the root packages with `npm ci`, and make a Chromium-based browser available. Browser locale tests require Chromium and use temporary app data and scripted models, not real credentials or network model requests.
+- The documentation build has its own packages: `cd docs-site && npm ci && npm run check`.
+- The original Guard status-line tests have an optional external prerequisite: a real installed `specpi-lancet-guard` package. Set `PI_POCKET_LOCALE_TEST_LANCET_DIR` to that package directory when running `npm test`. Without it, the 2 named Guard locale cases report a skip, not a verified pass. They do not download a model or alter global Guard settings; all test settings live in a temporary home.
+- The test fixtures are in the repository. No private migration notes or old Git objects are needed, including in a shallow checkout.
+
 ## Send it
 
 - Open a pull request with a short title, and a brief note: what changed, why, and what you tested.

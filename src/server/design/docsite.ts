@@ -36,6 +36,7 @@ import { escapeHtml as esc, plural, renderMarkdown } from "./docsite-markdown.ts
 import { codeSection, problemsHtml, referenceSection } from "./docsite-reference.ts";
 import { otherSection, radiiSection, shadowSection, spacingSection } from "./docsite-space.ts";
 import { motionSection, typographySection } from "./docsite-type.ts";
+import type { RequestLocale } from "../ui-locales.ts";
 import type { DesignSystem, ResolvedToken } from "./system-types.ts";
 
 export type { SystemDoc } from "./docsite-core.ts";
@@ -165,13 +166,14 @@ function tokenVars(ctx: Ctx): string {
     return rules.join("\n");
 }
 
-export function renderSystemDoc(system: DesignSystem): SystemDoc {
+/** The optional request snapshot stays fixed across every size-reduction pass; old callers use English. */
+export function renderSystemDoc(system: DesignSystem, locale?: RequestLocale): SystemDoc {
     let rows = MAX_TOKENS;
-    let doc = build(system, rows);
+    let doc = build(system, rows, locale);
 
     while (Buffer.byteLength(doc.html) > MAX_PAGE && rows > 25) {
         rows = Math.floor(rows / 2);
-        doc = build(system, rows);
+        doc = build(system, rows, locale);
     }
 
     return doc;
@@ -187,8 +189,24 @@ const TOKEN_SECTIONS: [SectionId, string, (ctx: Ctx) => string | undefined][] = 
     ["other", "Other", otherSection],
 ];
 
-function build(system: DesignSystem, referenceRows: number): SystemDoc {
-    const ctx = buildContext(system);
+function build(system: DesignSystem, referenceRows: number, locale?: RequestLocale): SystemDoc {
+    const ctx = buildContext(system, locale);
+    const t = ctx.locale.t;
+    const titles: Record<string, string> = {
+        color: t("server.design.docsite.section.color", "Color"),
+        typography: t("server.design.docsite.section.typography", "Typography"),
+        spacing: t("server.design.docsite.section.spacing", "Spacing"),
+        radii: t("server.design.docsite.section.radii", "Radii"),
+        shadows: t("server.design.docsite.section.shadows", "Shadows"),
+        motion: t("server.design.docsite.section.motion", "Motion"),
+        other: t("server.design.docsite.section.other", "Other"),
+    };
+    const groups = {
+        Foundations: t("server.design.docsite.group.foundations", "Foundations"),
+        Components: t("server.design.docsite.group.components", "Components"),
+        Reference: t("server.design.docsite.group.reference", "Reference"),
+    };
+
     // The page's scripts carry this, and nothing in project text can know it: it is new for each page.
     const nonce = randomBytes(16).toString("base64url");
     const name = clip(system.name || "Design system", 80);
@@ -200,7 +218,7 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
         if (html !== undefined) {
             sections.push({
                 id,
-                title,
+                title: titles[id] ?? title,
                 group: "Foundations",
                 html: countsLine(ctx, id) + html,
                 count: sectionCount(ctx, id).headline,
@@ -214,7 +232,7 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
     if (components !== undefined) {
         sections.push({
             id: "components",
-            title: "Components",
+            title: groups.Components,
             group: "Components",
             html: components,
             count: Math.min(system.components.length, MAX_COMPONENTS),
@@ -225,7 +243,7 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
     if (system.guidelines.trim() !== "") {
         sections.push({
             id: "guidelines",
-            title: "Guidelines",
+            title: t("server.design.docsite.section.guidelines", "Guidelines"),
             group: "Reference",
             html: `<div class="prose">${renderMarkdown(system.guidelines)}</div>`,
         });
@@ -234,13 +252,18 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
     sections.push(
         {
             id: "tokens",
-            title: "All tokens",
+            title: t("server.design.docsite.section.tokens", "All tokens"),
             group: "Reference",
             html: referenceSection(ctx, referenceRows),
             count: system.tokens.length,
             searchable: true,
         },
-        { id: "code", title: "Use in code", group: "Reference", html: codeSection(ctx) },
+        {
+            id: "code",
+            title: t("server.design.docsite.section.code", "Use in code"),
+            group: "Reference",
+            html: codeSection(ctx),
+        },
     );
 
     const pairs = pairRows(ctx);
@@ -251,11 +274,11 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
         `<div class="stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`;
     const count = (value: number, noun: string) =>
         stat(String(value), plural(value, noun).slice(String(value).length + 1));
-    const overview = `<section class="block" id="overview" data-pid="overview" aria-labelledby="overview-title"><div class="hero"><p class="eyebrow">Design system</p><h1 id="overview-title">${esc(name)}</h1>${system.description === undefined ? "" : `<p class="lead">${esc(clip(system.description, 400))}</p>`}${sampler(ctx)}<div class="stats">${count(ctx.system.tokens.length, "token")}${count(roleCount, "color role")}${count(ctx.modes.length, "mode")}${count(ctx.system.components.length, "component")}${pairs.total > 0 ? stat(`${pairs.passing}/${pairs.total}`, pairs.total === 1 ? "contrast check passes" : "contrast checks pass") : ""}</div></div>${problemsHtml(ctx)}${system.tokens.length > MAX_TOKENS ? `<p class="sub">This page shows the first ${MAX_TOKENS} of ${system.tokens.length} tokens.</p>` : ""}</section>`;
+    const overview = `<section class="block" id="overview" data-pid="overview" aria-labelledby="overview-title"><div class="hero"><p class="eyebrow">${esc(t("server.design.docsite.build.p.design-system", "Design system"))}</p><h1 id="overview-title">${esc(name)}</h1>${system.description === undefined ? "" : `<p class="lead">${esc(clip(system.description, 400))}</p>`}${sampler(ctx)}<div class="stats">${count(ctx.system.tokens.length, "token")}${count(roleCount, "color role")}${count(ctx.modes.length, "mode")}${count(ctx.system.components.length, "component")}${pairs.total > 0 ? stat(`${pairs.passing}/${pairs.total}`, pairs.total === 1 ? "contrast check passes" : "contrast checks pass") : ""}</div></div>${problemsHtml(ctx)}${system.tokens.length > MAX_TOKENS ? `<p class="sub">This page shows the first ${MAX_TOKENS} of ${system.tokens.length} tokens.</p>` : ""}</section>`;
     const body = sections
         .map(
             (section) =>
-                `<section class="block" id="${section.id}" data-pid="${section.id}" aria-labelledby="${section.id}-title"${section.searchable ? " data-searchable" : ""}><p class="eyebrow">${section.group}</p><h2 id="${section.id}-title">${esc(section.title)}${anchor(section.id, section.title)}</h2>${section.html}</section>`,
+                `<section class="block" id="${section.id}" data-pid="${section.id}" aria-labelledby="${section.id}-title"${section.searchable ? " data-searchable" : ""}><p class="eyebrow">${esc(groups[section.group])}</p><h2 id="${section.id}-title">${esc(section.title)}${anchor(section.id, section.title)}</h2>${section.html}</section>`,
         )
         .join("");
     const nav = (["Foundations", "Components", "Reference"] as const)
@@ -278,7 +301,7 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
                 )
                 .join("");
 
-            return links === "" ? "" : `<p class="nav-title">${group}</p>${links}`;
+            return links === "" ? "" : `<p class="nav-title">${esc(groups[group])}</p>${links}`;
         })
         .join("");
     const first = ctx.modes[0]!;
@@ -287,10 +310,13 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
     );
     const modeAttrs = (mode: string) =>
         `data-mode="${ctx.slug.get(mode)}" data-theme="${esc(ctx.theme.get(mode) ?? "light")}"`;
+    const modeWord = esc(
+        t("server.extensions.design.check.create-check.check-dock.aria-label.mode", "Mode"),
+    );
     const modeSwitch =
         ctx.modes.length < 2
             ? ""
-            : `<div class="seg" role="group" aria-label="Mode">${ctx.modes.map((mode, index) => `<button type="button" ${modeAttrs(mode)} aria-pressed="${index === 0}">${esc(modeLabel(mode))}</button>`).join("")}</div><select class="modesel" aria-label="Mode">${ctx.modes.map((mode, index) => `<option value="${ctx.slug.get(mode)}" data-theme="${esc(ctx.theme.get(mode) ?? "light")}"${index === 0 ? " selected" : ""}>${esc(modeLabel(mode))}</option>`).join("")}</select>`;
+            : `<div class="seg" role="group" aria-label="${modeWord}">${ctx.modes.map((mode, index) => `<button type="button" ${modeAttrs(mode)} aria-pressed="${index === 0}">${esc(modeLabel(mode))}</button>`).join("")}</div><select class="modesel" aria-label="${modeWord}">${ctx.modes.map((mode, index) => `<option value="${ctx.slug.get(mode)}" data-theme="${esc(ctx.theme.get(mode) ?? "light")}"${index === 0 ? " selected" : ""}>${esc(modeLabel(mode))}</option>`).join("")}</select>`;
     const modeCss = ctx.modes
         .map(
             (mode, index) =>
@@ -298,13 +324,13 @@ function build(system: DesignSystem, referenceRows: number): SystemDoc {
         )
         .join("\n");
     const html = `<!doctype html>
-<html lang="en" class="nojs" ${modeAttrs(first)}${darkMode === undefined ? "" : ` data-dark-mode="${ctx.slug.get(darkMode)}"`}>
+<html lang="${esc(ctx.locale.lang)}" class="nojs" ${modeAttrs(first)}${darkMode === undefined ? "" : ` data-dark-mode="${ctx.slug.get(darkMode)}"`}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${pageCsp(nonce)}">
 <meta name="color-scheme" content="light dark">
-<title>${esc(name)} · Design system</title>
+<title>${esc(name)} · ${esc(t("server.design.docsite.build.p.design-system", "Design system"))}</title>
 <script nonce="${nonce}">${DOC_BOOT_JS}</script>
 <style>${DOC_CSS}
 html[data-theme="light"]{${chromeAccent(ctx, "light")}}
@@ -314,22 +340,22 @@ ${modeCss}
 <style>${tokenVars(ctx)}</style>
 </head>
 <body class="ds">
-<a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">${esc(t("server.design.docsite.build.a.skip-content", "Skip to content"))}</a>
 <header class="topbar">
-<button class="icon-btn" type="button" aria-label="Menu" aria-controls="nav" aria-expanded="false">${ICON_MENU}</button>
-<div class="brand"><span class="brand-name">${esc(name)}</span><span class="brand-sub">Design system</span></div>
+<button class="icon-btn" type="button" aria-label="${esc(t("app.menu", "Menu"))}" aria-controls="nav" aria-expanded="false">${ICON_MENU}</button>
+<div class="brand"><span class="brand-name">${esc(name)}</span><span class="brand-sub">${esc(t("server.design.docsite.build.p.design-system", "Design system"))}</span></div>
 ${modeSwitch}
 </header>
 <div class="layout">
 <aside class="side" id="nav">
-<input id="q" type="search" placeholder="Filter tokens and values" aria-label="Filter tokens, values, and components" autocomplete="off" spellcheck="false">
-<nav class="nav" aria-label="Sections"><a href="#overview" aria-current="true">Overview</a>${nav}</nav>
+<input id="q" type="search" placeholder="${esc(t("server.design.docsite.build.placeholder.filter-tokens-values", "Filter tokens and values"))}" aria-label="${esc(t("server.design.docsite.build.aria-label.filter-tokens-values-components", "Filter tokens, values, and components"))}" autocomplete="off" spellcheck="false">
+<nav class="nav" aria-label="${esc(t("server.design.docsite.build.aria-label.sections", "Sections"))}"><a href="#overview" aria-current="true">${esc(t("server.design.docsite.build.a.overview", "Overview"))}</a>${nav}</nav>
 </aside>
 <main id="main">
 ${overview}
 ${body}
-<p class="empty" id="nomatch" hidden>No token or component matches that filter.</p>
-<footer class="foot"><strong>${esc(name)}</strong> · ${plural(ctx.system.tokens.length, "token")} · ${plural(ctx.modes.length, "mode")} · ${plural(ctx.system.components.length, "component")} · generated ${new Date().toISOString().slice(0, 10)} by Pi Pocket</footer>
+<p class="empty" id="nomatch" hidden>${esc(t("server.design.docsite.build.p.no-token-component-matches", "No token or component matches that filter."))}</p>
+<footer class="foot"><strong>${esc(name)}</strong> · ${plural(ctx.system.tokens.length, "token")} · ${plural(ctx.modes.length, "mode")} · ${plural(ctx.system.components.length, "component")} · ${esc(t("server.design.docsite.footer.generated", "generated {date} by Pi Pocket", { date: new Date().toISOString().slice(0, 10) }))}</footer>
 </main>
 </div>
 <div class="toast" role="status" aria-live="polite"></div>

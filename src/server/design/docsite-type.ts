@@ -74,7 +74,7 @@ export function typographySection(ctx: Ctx): string | undefined {
 
     if (families.length > 0) {
         parts.push(
-            `<h3>Typefaces</h3><div class="cards">${families
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.typography-section.h3.typefaces", "Typefaces"))}</h3><div class="cards">${families
                 .map(
                     (token) =>
                         `<article class="family" data-s>${copyName(token)}<div class="big" style="font-family:${varOf(token, "system-ui")}, system-ui" aria-hidden="true">Aa</div><p class="abc" style="font-family:${varOf(token, "system-ui")}, system-ui">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 &amp;?!@#</p><p class="desc">${esc(clip(plain("fontFamily", valueIn(token, first)), 200))}</p>${descOf(token)}</article>`,
@@ -85,24 +85,26 @@ export function typographySection(ctx: Ctx): string | undefined {
 
     if (weights.length > 0) {
         parts.push(
-            `<h3>Weights</h3>${rows(weights, (token) => `<span style="font-family:${base};font-weight:${varOf(token, "400")}">${PANGRAM}</span>`)}`,
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.typography-section.h3.weights", "Weights"))}</h3>${rows(weights, (token) => `<span style="font-family:${base};font-weight:${varOf(token, "400")}">${PANGRAM}</span>`)}`,
         );
     }
 
     if (styles.length > 0) {
         parts.push(
-            `<h3>Text styles</h3><p class="sub">A style fixes the family, size, weight, line height, and tracking together.</p>${rows(styles, (token) => `<span style="${esc(textStyle(valueIn(token, first)?.value))}">${esc(token.description ?? PANGRAM)}</span>`)}`,
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.typography-section.h3.text-styles", "Text styles"))}</h3><p class="sub">${esc(ctx.locale.t("server.design.docsite-type.typography-section.p.style-fixes-family-size", "A style fixes the family, size, weight, line height, and tracking together."))}</p>${rows(styles, (token) => `<span style="${esc(textStyle(valueIn(token, first)?.value))}">${esc(token.description ?? PANGRAM)}</span>`)}`,
         );
     }
 
     if (sizes.length > 0) {
         parts.push(
-            `<h3>Size scale</h3>${rows(sizes, (token) => `<span class="line" style="font-family:${base};font-size:${varOf(token, "inherit")}">${PANGRAM}</span>`)}`,
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.typography-section.h3.size-scale", "Size scale"))}</h3>${rows(sizes, (token) => `<span class="line" style="font-family:${base};font-size:${varOf(token, "inherit")}">${PANGRAM}</span>`)}`,
         );
     }
 
     if (rest.length > 0) {
-        parts.push(`<h3>Line height and tracking</h3>${rows(rest, () => "")}`);
+        parts.push(
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.typography-section.h3.line-height-tracking", "Line height and tracking"))}</h3>${rows(rest, () => "")}`,
+        );
     }
 
     return `${parts.join("")}${note()}${moreTokens(ctx, "typography")}`;
@@ -125,7 +127,7 @@ function curvePath(value: unknown): string | undefined {
 }
 
 const demo = (ctx: Ctx, token: ResolvedToken, style: string, lead = "") =>
-    `<div class="demo" data-s style="${esc(style)}"><div class="row-head">${lead}${copyName(token)}<button class="play" type="button">Play</button></div><span class="desc">${esc(plain(token.type, valueIn(token, ctx.modes[0]!)))}</span><div class="track"><i></i></div></div>`;
+    `<div class="demo" data-s style="${esc(style)}"><div class="row-head">${lead}${copyName(token)}<button class="play" type="button">${esc(ctx.locale.t("server.design.docsite-type.demo.button.play", "Play"))}</button></div><span class="desc">${esc(plain(token.type, valueIn(token, ctx.modes[0]!)))}</span><div class="track"><i></i></div></div>`;
 
 export function motionSection(ctx: Ctx): string | undefined {
     const mine = tokensOf(ctx, "motion");
@@ -142,18 +144,18 @@ export function motionSection(ctx: Ctx): string | undefined {
     const transitions = own("transition");
     const ease = easings[0] === undefined ? "ease" : `var(${easings[0].cssVar}, ease)`;
     const parts = [
-        `<p class="intro">Motion should explain a change, never decorate. Press Play to run a token.</p>`,
+        `<p class="intro">${esc(ctx.locale.t("server.design.docsite-type.motion-section.p.motion-explain-change-never", "Motion should explain a change, never decorate. Press Play to run a token."))}</p>`,
     ];
 
     if (durations.length > 0) {
         parts.push(
-            `<h3>Durations</h3><div class="demos">${durations.map((token) => demo(ctx, token, `--dur:${varOf(token, "400ms")};--ease:${ease}`)).join("")}</div>`,
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.motion-section.h3.durations", "Durations"))}</h3><div class="demos">${durations.map((token) => demo(ctx, token, `--dur:${varOf(token, "400ms")};--ease:${ease}`)).join("")}</div>`,
         );
     }
 
     if (easings.length > 0) {
         parts.push(
-            `<h3>Easing</h3><div class="demos">${easings
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.motion-section.h3.easing", "Easing"))}</h3><div class="demos">${easings
                 .map((token) => {
                     const path = curvePath(valueIn(token, ctx.modes[0]!)?.value);
                     const curve =
@@ -169,7 +171,7 @@ export function motionSection(ctx: Ctx): string | undefined {
 
     if (transitions.length > 0) {
         parts.push(
-            `<h3>Transitions</h3><div class="demos">${transitions
+            `<h3>${esc(ctx.locale.t("server.design.docsite-type.motion-section.h3.transitions", "Transitions"))}</h3><div class="demos">${transitions
                 .map((token) => {
                     const value = valueIn(token, ctx.modes[0]!)?.value;
                     const duration = isObject(value) ? safeCss(dimText(value.duration)) : undefined;

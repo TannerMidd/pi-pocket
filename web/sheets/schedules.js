@@ -10,6 +10,7 @@ import {
     store,
 } from "../store.js";
 import { countdown, formatWhen, html, Icon, Sheet, Switch, useSecond } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -531,9 +532,9 @@ function ScheduleEditor({ schedule, onDone }) {
                                 ? `${daysText(draft.days)}, ${draft.from} to ${draft.to} · `
                                 : ""
                         }
-                        Next ${formatWhen(next)}
+                        ${t("web.sheets.schedules.next-when", "Next {when}", { when: formatWhen(next) })}
                     </span>
-                    <span class="sched-countdown">in ${countdown(next, now)}</span>`
+                    <span class="sched-countdown">${t("web.running-board.relative.future", "in {time}", { time: countdown(next, now) })}</span>`
             }
         </div>
         ${
@@ -617,6 +618,19 @@ function ScheduleRow({ schedule, now, setBy, archived, steer, onEdit }) {
     const repeat = schedule.repeat !== undefined;
     const paused = schedule.paused !== undefined;
     const due = schedule.next <= now;
+    const when = formatWhen(schedule.next);
+    const next = paused
+        ? `Paused by ${setBy(schedule.pausedBy)} · ${repeat ? schedule.repeat : when}`
+        : repeat
+          ? t(
+                "web.sheets.schedules.schedules-sheet.div.next-repeat-when",
+                "{repeat} · next {when}",
+                {
+                    repeat: schedule.repeat,
+                    when,
+                },
+            )
+          : when;
 
     return html`<div class=${`sched-item ${paused ? "paused" : ""}`} data-part="schedule">
         <button
@@ -631,28 +645,21 @@ function ScheduleRow({ schedule, now, setBy, archived, steer, onEdit }) {
             <span class="sched-main">
                 <span class="sched-text">${schedule.text}</span>
                 <span class="sched-meta">
-                    ${
-                        paused
-                            ? `Paused by ${setBy(schedule.pausedBy)} · ${repeat ? schedule.repeat : formatWhen(schedule.next)}`
-                            : repeat
-                              ? `${schedule.repeat} · next ${formatWhen(schedule.next)}`
-                              : formatWhen(schedule.next)
-                    }
-                    ${` · set by ${setBy(schedule.by)}`}
+                    ${t("web.sheets.schedules.schedules-sheet.div.set-by", "{when} · set by {who}", { when: next, who: setBy(schedule.by) })}
                     ${repeat && schedule.runs > 0 ? ` · sent ${schedule.runs}×` : ""}
                     ${schedule.compactBefore ? " · compacts first" : ""}
-                    ${archived ? " · session archived" : ""}
+                    ${archived ? t("web.sheets.schedules.archived", " · session archived") : ""}
                 </span>
                 ${
                     schedule.skipped > 0 &&
                     html`<span class="sched-meta" data-part="schedule-skipped">
-                        Skipped ${schedule.skipped === 1 ? "once" : `${schedule.skipped} times`}, last ${formatWhen(schedule.skippedAt)}: its last message still waits in the queue
+                        ${schedule.skipped === 1 ? t("web.sheets.schedules.release0281.skipped-once", "Skipped once, last {when}: its last message still waits in the queue", { when: formatWhen(schedule.skippedAt) }) : t("web.sheets.schedules.release0281.skipped-many", "Skipped {count} times, last {when}: its last message still waits in the queue", { count: schedule.skipped, when: formatWhen(schedule.skippedAt) })}
                     </span>`
                 }
             </span>
             <span class="sched-side">
                 <span class="sched-countdown">
-                    ${paused ? "paused" : due ? "due now" : `in ${countdown(schedule.next, now)}`}
+                    ${paused ? "paused" : due ? "due now" : t("web.running-board.relative.future", "in {time}", { time: countdown(schedule.next, now) })}
                 </span>
                 ${steer && html`<span class="sched-edit">Edit</span>`}
             </span>
@@ -687,10 +694,11 @@ export function SchedulesSheet() {
     );
     const setBy = (id) =>
         id === undefined
-            ? "Pi"
+            ? t("web.sheets.schedules.schedules-sheet.set-by.pi", "Pi")
             : id === me?.id
-              ? "you"
-              : (users.find((user) => user.id === id)?.name ?? "someone");
+              ? t("web.sheets.schedules.schedules-sheet.set-by.content", "you")
+              : (users.find((user) => user.id === id)?.name ??
+                t("web.sheets.schedules.schedules-sheet.set-by.someone", "someone"));
     const open = useMemo(
         () => (editing === "new" ? undefined : schedules.find((each) => each.id === editing)),
         [editing, schedules],
@@ -723,7 +731,7 @@ export function SchedulesSheet() {
             ${
                 next !== undefined &&
                 html`<div class="sched-next">
-                    <span class="muted">Next in</span>
+                    <span class="muted">${t("web.sheets.schedules.next-in", "Next in")}</span>
                     <span class="sched-big">${countdown(next.next, now)}</span>
                 </div>`
             }
@@ -756,9 +764,9 @@ export function SchedulesSheet() {
             editing !== "new" &&
             html`<div class="sched-empty">
                 <${Icon} name="clock" size=${22} />
-                <p>Nothing is scheduled.</p>
+                <p>${t("web.sheets.schedules.schedules-sheet.p.nothing-is-scheduled", "Nothing is scheduled.")}</p>
                 <p class="muted small">
-                    ${"Pi gets a scheduled message at its time, also when nobody is here, and the people in this session get a notification when it is done."}
+                    ${t("web.sheets.schedules.schedules-sheet.p.pi-gets-their-time", "Pi gets these at their time, also when nobody is here, and the people in this session get a notification when it is done.")}
                 </p>
             </div>`
         }

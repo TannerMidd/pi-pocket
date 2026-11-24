@@ -16,13 +16,18 @@ import {
 } from "../store.js";
 import { isPinned, movePin, togglePin } from "../theme.js";
 import { copyText, html, item, scrimPress, Sheet } from "../ui.js";
+import { t } from "../ui-locale.js";
 
 const linkOf = (id) => `${location.origin}/s/${id}`;
 
 const copy = (text, what) =>
     copyText(text).then(
-        () => notify("info", `Copied the ${what}.`),
-        () => notify("error", `Could not copy the ${what}.`),
+        () => notify("info", t("web.sheets.session.copy.copied", "Copied the {what}.", { what })),
+        () =>
+            notify(
+                "error",
+                t("web.sheets.session.copy.not-copy", "Could not copy the {what}.", { what }),
+            ),
     );
 
 let forking = false;
@@ -37,7 +42,13 @@ function fork(id) {
         const created = await actions.forkSession(id);
 
         navigate(created.id);
-        notify("info", "Opened the fork. The original is unchanged.");
+        notify(
+            "info",
+            t(
+                "web.sheets.session.fork.text.opened-fork-original-unchanged",
+                "Opened the fork. The original is unchanged.",
+            ),
+        );
     }).finally(() => {
         forking = false;
     });
@@ -62,47 +73,86 @@ function sessionItems(session) {
 
     return [
         [
-            { label: "Open in new tab", run: () => window.open(linkOf(id), "_blank", "noopener") },
-            { label: "Copy link", run: () => copy(linkOf(id), "link") },
-            { label: "Copy folder path", run: () => copy(session.cwd, "folder path") },
+            {
+                label: t("web.sheets.session.session-items.label.open-new-tab", "Open in new tab"),
+                run: () => window.open(linkOf(id), "_blank", "noopener"),
+            },
+            {
+                label: t("web.sheets.session.session-items.label.copy-link", "Copy link"),
+                run: () => copy(linkOf(id), t("web.sheets.session.session-items.run.link", "link")),
+            },
+            {
+                label: t(
+                    "web.sheets.session.session-items.label.copy-folder-path",
+                    "Copy folder path",
+                ),
+                run: () =>
+                    copy(
+                        session.cwd,
+                        t("web.sheets.session.session-items.run.folder-path", "folder path"),
+                    ),
+            },
         ],
         [
             steer && {
-                label: "Rename",
+                label: t("web.sheets.session.session-items.label.rename", "Rename"),
                 opens: true,
                 run: () => store.set({ sheet: { type: "rename", id } }),
             },
-            starts && { label: "Fork", hint: "up to the last reply", run: () => fork(id) },
-            starts && { label: "New session in this folder", run: () => newIn(session.cwd) },
+            starts && {
+                label: t("web.sheets.session.session-items.label.fork", "Fork"),
+                hint: t(
+                    "web.sheets.session.session-items.hint.up-last-reply",
+                    "up to the last reply",
+                ),
+                run: () => fork(id),
+            },
+            starts && {
+                label: t(
+                    "web.sheets.session.session-items.label.new-session-folder",
+                    "New session in this folder",
+                ),
+                run: () => newIn(session.cwd),
+            },
             starts &&
                 collab() && {
-                    label: "Share",
-                    hint: "invite someone",
+                    label: t("web.sheets.session.session-items.label.share", "Share"),
+                    hint: t(
+                        "web.sheets.session.session-items.hint.invite-someone",
+                        "invite someone",
+                    ),
                     opens: true,
                     run: () => store.set({ sheet: { type: "invite", session: id } }),
                 },
         ],
         [
             !session.archived && {
-                label: pinned ? "Unpin from the top" : "Pin to the top",
-                hint: "this browser",
+                label: pinned
+                    ? t("web.sheets.session.session-items.label.unpin-top", "Unpin from the top")
+                    : t("web.sheets.session.session-items.label.pin-top", "Pin to the top"),
+                hint: t("web.sheets.session.session-items.hint.this-browser", "this browser"),
                 run: () => togglePin(id),
             },
             pinned &&
                 pins[0] !== id && {
-                    label: "Move to top",
-                    hint: "of the pinned",
+                    label: t("web.sheets.session.session-items.label.move-top", "Move to top"),
+                    hint: t("web.sheets.session.session-items.hint.pinned", "of the pinned"),
                     run: () => movePin(id, false),
                 },
             pinned &&
                 pins.at(-1) !== id && {
-                    label: "Move to bottom",
-                    hint: "of the pinned",
+                    label: t(
+                        "web.sheets.session.session-items.label.move-bottom",
+                        "Move to bottom",
+                    ),
+                    hint: t("web.sheets.session.session-items.hint.pinned", "of the pinned"),
                     run: () => movePin(id, true),
                 },
             !session.archived && {
-                label: isUnread(id) ? "Mark read" : "Mark unread",
-                hint: "this browser",
+                label: isUnread(id)
+                    ? t("web.sheets.session.session-items.label.mark-read", "Mark read")
+                    : t("web.sheets.session.session-items.label.mark-unread", "Mark unread"),
+                hint: t("web.sheets.session.session-items.hint.this-browser", "this browser"),
                 run: () => setUnread(id, !isUnread(id)),
             },
         ],
@@ -114,13 +164,26 @@ function sessionItems(session) {
         [
             selectedInList() > 0
                 ? {
-                      label: "Deselect all",
-                      hint: `${selectedInList()} selected`,
+                      label: t("web.sheets.session.session-items.label.deselect", "Deselect all"),
+                      hint: t(
+                          "web.sheets.session.session-items.hint.selected-count",
+                          "{count} selected",
+                          { count: selectedInList() },
+                      ),
                       run: deselectInList,
                   }
-                : { label: "Select", hint: "then add others", run: () => selectFromList(id) },
+                : {
+                      label: t("web.sheets.session.session-items.label.select", "Select"),
+                      hint: t(
+                          "web.sheets.session.session-items.hint.add-others",
+                          "then add others",
+                      ),
+                      run: () => selectFromList(id),
+                  },
             steer && {
-                label: session.archived ? "Unarchive" : "Archive",
+                label: session.archived
+                    ? t("web.sheets.session.session-items.label.unarchive", "Unarchive")
+                    : t("web.sheets.session.session-items.label.archive", "Archive"),
                 run: () => setArchived([id], !session.archived),
             },
         ],
@@ -140,12 +203,14 @@ const runItem = (each) => () => {
 export function SessionSheet({ id, at = null }) {
     const session = store.state.sessions.find((each) => each.id === id);
     const groups = sessionItems(session);
+    const title =
+        session.title ?? t("web.sheets.session.session-sheet.text.new-session", "New session");
 
     if (at) {
-        return html`<${SessionMenu} title=${session.title ?? "New session"} groups=${groups} at=${at} />`;
+        return html`<${SessionMenu} title=${title} groups=${groups} at=${at} />`;
     }
 
-    return html`<${Sheet} title=${session.title ?? "New session"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${title} onClose=${closeSheet}>
         <div class="sheet-list">
             ${groups.flat().map((each) => item(each.label, runItem(each), each.hint))}
         </div>

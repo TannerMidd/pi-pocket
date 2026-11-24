@@ -41,6 +41,8 @@ const POCKET_MEMBERS: Record<keyof Pocket, true> = {
     pocketVersion: true,
     module: true,
     title: true,
+    t: true,
+    onLocaleChange: true,
     h: true,
     html: true,
     Fragment: true,

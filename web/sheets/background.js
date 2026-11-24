@@ -1,3 +1,4 @@
+import { t } from "../ui-locale.js";
 // Background: what the session's commands print as they run, one task at a time.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, canSteer, closeSheet, notify, store } from "../store.js";
@@ -20,6 +21,34 @@ function took(task) {
     return seconds < 60
         ? `${seconds}s`
         : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/** Translate exact UI status lines only; detailed failures and daemon warnings stay intact. */
+function outcomeText(item) {
+    switch (item.outcome) {
+        case "starting":
+            return t("web.sheets.background.release028.starting", "starting");
+        case "running":
+            return t("web.sheets.background.release028.running", "running");
+        case "stopped":
+            return t("web.sheets.background.release028.stopped", "stopped");
+        case "has an unknown outcome: a restart cut its start off, and no process or exit code of it was found (it may have run and ended, or never started)":
+            return t(
+                "web.sheets.background.release028.unknown",
+                "has an unknown outcome: a restart cut its start off, and no process or exit code of it was found (it may have run and ended, or never started)",
+            );
+        case "ended without an exit code (killed by a signal, or the machine restarted)":
+            return t(
+                "web.sheets.background.release028.lost",
+                "ended without an exit code (killed by a signal, or the machine restarted)",
+            );
+        case `exited with code ${item.code ?? "?"}`:
+            return t("web.sheets.background.release028.exited", "exited with code {code}", {
+                code: item.code ?? "?",
+            });
+        default:
+            return item.outcome;
+    }
 }
 
 /** One command and what it prints, or a row to pick one of the session's commands. */
@@ -157,21 +186,21 @@ export function BackgroundSheet({ task: opened }) {
         });
 
     return html`<${Sheet}
-        title="Background"
+        title=${t("web.sheets.background.release028.title", "Background")}
         wide=${true}
         onClose=${closeSheet}
-        actions=${live && steer ? html`<button class="button small" onClick=${stop}>Stop</button>` : null}
+        actions=${live && steer ? html`<button class="button small" onClick=${stop}>${t("web.sheets.background.release028.stop", "Stop")}</button>` : null}
     >
-        ${tasks === null && html`<${Loader} label="Looking" />`}
+        ${tasks === null && html`<${Loader} label=${t("web.sheets.background.release028.looking", "Looking")} />`}
         ${
             tasks?.length === 0 &&
             html`<p class="muted">
-                No command has run in the background in this session. Pi starts one with its background tool.
+                ${t("web.sheets.background.release028.empty", "No command has run in the background in this session. Pi starts one with its background tool.")}
             </p>`
         }
         ${
             (tasks?.length ?? 0) > 0 &&
-            html`<div class="background-tasks" role="tablist" aria-label="Background commands" ref=${row}>
+            html`<div class="background-tasks" role="tablist" aria-label=${t("web.sheets.background.release028.commands", "Background commands")} ref=${row}>
                 ${tasks.map(
                     (each) => html`<button
                         type="button"
@@ -200,26 +229,26 @@ export function BackgroundSheet({ task: opened }) {
                     <span class="mono grow">${task.command}</span>
                 </div>
                 <div class="muted small background-said">
-                    ${log.item?.outcome ?? task.outcome} · ${took(log.item ?? task)}
-                    ${live ? "" : " · it ends here"}
+                    ${outcomeText(log.item ?? task)} · ${took(log.item ?? task)}
+                    ${live ? "" : t("web.sheets.background.release028.ends-here", " · it ends here")}
                 </div>
                 <div class="background-log" ref=${box} onScroll=${onScroll} tabindex="0">
                     ${
                         log.text === ""
-                            ? html`<p class="muted small">It printed nothing yet.</p>`
+                            ? html`<p class="muted small">${t("web.sheets.background.release028.nothing", "It printed nothing yet.")}</p>`
                             : html`<pre>${log.text}</pre>`
                     }
                 </div>
                 ${
                     log.skipped > 0 &&
                     html`<p class="muted small">
-                        ${`${log.skipped} bytes before this not shown: the log grew past what the sheet keeps, or its oldest part went.`}
+                        ${t("web.sheets.background.release028.skipped", "{bytes} bytes before this not shown: the log grew past what the sheet keeps, or its oldest part went.", { bytes: log.skipped })}
                     </p>`
                 }
                 ${
                     !follow &&
                     html`<button class="link small background-end" onClick=${() => setFollow(true)}>
-                        Jump to the end
+                        ${t("web.sheets.background.release028.jump", "Jump to the end")}
                     </button>`
                 }
             </div>`

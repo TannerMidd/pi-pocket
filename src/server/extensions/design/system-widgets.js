@@ -53,6 +53,7 @@ const FORMATS = Object.keys(SHOW_COLOR);
 const round = (value) => Math.round(value * 10000) / 10000;
 
 export function createSystemWidgets(env) {
+    const t = env.pocket.t;
     const { pocket } = env;
     const { html, useState } = pocket;
     const { Ico, Popover } = env.parts;
@@ -267,7 +268,7 @@ export function createSystemWidgets(env) {
             <button
                 type="button"
                 class="dsy-format"
-                title="Show it as hex, oklch, or rgb"
+                title=${t("server.extensions.design.system-widgets.create-system-widgets.color-field.title.show-hex-oklch-rgb", "Show it as hex, oklch, or rgb")}
                 aria-label=${`Shown as ${format}. Change.`}
                 onClick=${() => {
                     setDraft(null);
@@ -370,7 +371,10 @@ export function createSystemWidgets(env) {
                 autofocus
                 onInput=${(event) => setQuery(event.currentTarget.value)}
             />
-            <ul class="dsn-list dsy-targets" aria-label="Tokens">
+            <ul
+                class="dsn-list dsy-targets"
+                aria-label=${t("server.extensions.design.system-widgets.create-system-widgets.alias-picker.aria-label.tokens", "Tokens")}
+            >
                 ${targets.slice(0, 120).map((each) => {
                     const value = model.value(each.name, mode);
 
@@ -486,7 +490,7 @@ export function createSystemWidgets(env) {
                             class="dsn-link"
                             onClick=${() => write(now.value)}
                         >
-                            Use a value
+                            ${t("server.extensions.design.system-widgets.create-system-widgets.part-field.button.value", "Use a value")}
                         </button>`
                     }
                 </div>`
@@ -542,7 +546,7 @@ export function createSystemWidgets(env) {
                                         withPart(layers, at, "inset", event.currentTarget.checked),
                                     )}
                             />
-                            Inset
+                            ${t("server.extensions.design.system-widgets.create-system-widgets.shadow-field.input.inset", "Inset")}
                         </label>
                     </fieldset>`,
             )}
@@ -554,7 +558,7 @@ export function createSystemWidgets(env) {
                     class="dsn-link"
                     onClick=${() => write([...layers, { ...layers.at(-1) }])}
                 >
-                    Add a layer
+                    ${t("server.extensions.design.system-widgets.create-system-widgets.shadow-field.button.add-layer", "Add a layer")}
                 </button>`
             }
         </div>`;
@@ -585,7 +589,12 @@ export function createSystemWidgets(env) {
 
                 return amount
                     ? amountField(token.type, amount, like, label, disabled, edit)
-                    : html`<p class="muted small">This value has no size to edit.</p>`;
+                    : html`<p class="muted small">
+                          ${t(
+                              "server.extensions.design.system-widgets.create-system-widgets.value-field.p.value-no-size-edit",
+                              "This value has no size to edit.",
+                          )}
+                      </p>`;
             }
 
             case "number":
@@ -646,11 +655,13 @@ export function createSystemWidgets(env) {
                 ${pairs.map(
                     (pair) =>
                         html`<li key=${pair.on}>
-                            <span class="muted small">on</span>
+                            <span class="muted small"
+                                >${t("server.extensions.design.system-widgets.create-system-widgets.contrast-list.span.on", "on")}</span
+                            >
                             <${TokenChip} name=${pair.on} />
                             <${ContrastBadge} info=${pair} mode=${mode} />
                             ${pair.exempt && html`<span class="dsy-exempt-note">exempt: ${pair.exempt}</span>`}
-                            ${pair.auto && html`<span class="muted small">checked against the page</span>`}
+                            ${pair.auto && html`<span class="muted small">${t("server.extensions.design.system-widgets.create-system-widgets.contrast-list.span.checked-against-page", "checked against the page")}</span>`}
                         </li>`,
                 )}
             </ul>
@@ -702,7 +713,9 @@ export function createSystemWidgets(env) {
                                       />`,
                           )}
                       </span>`
-                    : html`<span class="muted small">A value of its own</span>`
+                    : html`<span class="muted small"
+                          >${t("server.extensions.design.system-widgets.create-system-widgets.alias-line.span.value-own", "A value of its own")}</span
+                      >`
             }
             <span class="grow"></span>
             ${
@@ -729,7 +742,7 @@ export function createSystemWidgets(env) {
                                     : now.value,
                         })}
                 >
-                    Use a value
+                    ${t("server.extensions.design.system-widgets.create-system-widgets.alias-line.button.value", "Use a value")}
                 </button>`
             }
         </div>`;
@@ -786,7 +799,8 @@ export function createSystemWidgets(env) {
                             class="button small"
                             onClick=${() => env.askPiAbout(token)}
                         >
-                            <${Ico} name="sparkle" size=${14} /> Ask Pi
+                            <${Ico} name="sparkle" size=${14} />
+                            ${t("server.extensions.design.system-widgets.create-system-widgets.token-editor.text.ask-pi", "Ask Pi")}
                         </button>`
                     }
                 </div>`
@@ -818,7 +832,8 @@ export function createSystemWidgets(env) {
                         class="dsn-link"
                         onClick=${() => env.resetToken(token.name)}
                     >
-                        <${Ico} name="undo" size=${13} /> Reset
+                        <${Ico} name="undo" size=${13} />
+                        ${t("server.extensions.design.system-widgets.create-system-widgets.token-editor.text.reset", "Reset")}
                     </button>`
                 }
             </div>

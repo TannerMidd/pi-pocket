@@ -1,3 +1,4 @@
+import { t } from "../ui-locale.js";
 // Every artifact in every session, one row each, with the number of its current (latest) version.
 import { folderColor } from "../avatar.js";
 import { useEffect, useState } from "preact/hooks";
@@ -25,7 +26,9 @@ function bySession(entries) {
 /** One session's artifacts, in a frame of its own: a header with the session, then a row for each. */
 function Group({ group, open }) {
     const cwd = store.state.sessions.find((entry) => entry.id === group.session)?.cwd;
-    const title = group.title || `Session ${group.session}`;
+    const title =
+        group.title ||
+        t("web.sheets.all-artifacts.release028.session", "Session {id}", { id: group.session });
 
     return html`<div class="overview-group">
         <div class="overview-head">
@@ -48,7 +51,7 @@ function Group({ group, open }) {
                 </span>
                 <span
                     class="overview-version"
-                    title=${`Current version: ${entry.current}, of ${entry.versions}`}
+                    title=${t("web.sheets.all-artifacts.release028.version", "Current version: {current}, of {versions}", { current: entry.current, versions: entry.versions })}
                 >
                     v${entry.current}
                     ${entry.versions > 1 && html`<span class="muted"> / ${entry.versions}</span>`}
@@ -88,13 +91,13 @@ export function AllArtifactsSheet() {
         });
     };
 
-    return html`<${Sheet} title="All artifacts" onClose=${closeSheet} wide=${true}>
-        ${entries === null && failed === null && html`<${Loader} label="Looking" />`}
+    return html`<${Sheet} title=${t("web.sheets.all-artifacts.release028.title", "All artifacts")} onClose=${closeSheet} wide=${true}>
+        ${entries === null && failed === null && html`<${Loader} label=${t("web.sheets.all-artifacts.release028.looking", "Looking")} />`}
         ${failed !== null && html`<p class="warn">${failed}</p>`}
         ${
             entries?.length === 0 &&
             html`<p class="muted">
-                No artifacts yet. Ask Pi to build something you can look at: a chart, a demo, a game.
+                ${t("web.sheets.all-artifacts.release028.empty", "No artifacts yet. Ask Pi to build something you can look at: a chart, a demo, a game.")}
             </p>`
         }
         ${bySession(entries ?? []).map(

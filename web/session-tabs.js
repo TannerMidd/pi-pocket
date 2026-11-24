@@ -6,8 +6,14 @@ import { folderColor } from "./avatar.js";
 import { isUnread, navigate, openId, store, workspaceOrder } from "./store.js";
 import { TAB_MAX, tabSessions, tabState } from "./tab-order.js";
 import { drawnFor, html } from "./ui.js";
+import { t } from "./ui-locale.js";
 
-const STATE_WORDS = { waiting: ", needs you", working: ", working", unread: ", unread", idle: "" };
+const STATE_WORDS = {
+    waiting: () => t("web.session-tabs.needs-you", ", needs you"),
+    working: () => t("web.session-tabs.working", ", working"),
+    unread: () => t("web.session-tabs.unread", ", unread"),
+    idle: () => "",
+};
 
 function Tabs() {
     // Under a route opened over a session (PiP's board), that session's tab stays the open one.
@@ -26,13 +32,13 @@ function Tabs() {
     return html`<nav
         class="tabstrip"
         data-part="tabstrip"
-        aria-label="Sessions"
+        aria-label=${t("app.sessions", "Sessions")}
         ref=${strip}
     >
         ${tabs.map((session) => {
             const open = session.id === conversationId;
             const state = tabState(session, open, isUnread(session.id));
-            const title = session.title ?? "New session";
+            const title = session.title ?? t("sessions.new", "New session");
             const number = order.findIndex((each) => each.id === session.id) + 1;
 
             return html`<button
@@ -41,7 +47,7 @@ function Tabs() {
                 data-part="tabstrip-tab"
                 data-state=${state}
                 aria-current=${open ? "page" : undefined}
-                aria-label=${`${title}${STATE_WORDS[state]}`}
+                aria-label=${`${title}${STATE_WORDS[state]()}`}
                 title=${`${title}${number <= TAB_MAX ? ` (Alt+${number})` : ""}`}
                 style=${`--folder:${folderColor(session.cwd)}`}
                 onClick=${() => navigate(session.id)}
@@ -53,7 +59,15 @@ function Tabs() {
     </nav>`;
 }
 
-const KEYS = ["sessions", "pinned", "unread", "conversationId", "over", "foldedLinked"];
+const KEYS = [
+    "localeRevision",
+    "sessions",
+    "pinned",
+    "unread",
+    "conversationId",
+    "over",
+    "foldedLinked",
+];
 
 /** Drawn again only when the sessions, the open one, or what is unread changes: not as an answer streams. */
 export const SessionTabs = drawnFor(KEYS, Tabs);

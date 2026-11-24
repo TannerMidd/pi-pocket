@@ -12,8 +12,8 @@ import {
 } from "./docsite-core.ts";
 import type { ComponentSpec } from "./system-types.ts";
 
-export const snippet = (id: string, text: string, label: string, kind = "") =>
-    `<div class="snip"${kind === "" ? "" : ` data-kind="${kind}" data-panel="${esc(label)}"`}><div class="snip-head"><span>${esc(label)}</span><button class="mini" type="button" data-copy-from="${esc(id)}">Copy</button></div><pre id="${esc(id)}"><code>${esc(text)}</code></pre></div>`;
+export const snippet = (id: string, text: string, label: string, kind = "", copy = "Copy") =>
+    `<div class="snip"${kind === "" ? "" : ` data-kind="${kind}" data-panel="${esc(label)}"`}><div class="snip-head"><span>${esc(label)}</span><button class="mini" type="button" data-copy-from="${esc(id)}">${esc(copy)}</button></div><pre id="${esc(id)}"><code>${esc(text)}</code></pre></div>`;
 
 function stage(ctx: Ctx): string {
     const ground = groundToken(ctx);
@@ -27,10 +27,12 @@ function stage(ctx: Ctx): string {
         family === undefined ? "" : `--f:var(${family.cssVar});`,
     ].join("");
 
-    return `<div class="comp-stage" role="group" aria-label="States"${style === "" ? "" : ` style="${esc(style)}"`}><p class="sub">The states show when script runs; the markup and CSS are below.</p></div>`;
+    return `<div class="comp-stage" role="group" aria-label="${esc(ctx.locale.t("server.design.docsite-components.stage.aria-label.states", "States"))}"${style === "" ? "" : ` style="${esc(style)}"`}><p class="sub">${esc(ctx.locale.t("server.design.docsite-components.stage.p.states-show-script-runs", "The states show when script runs; the markup and CSS are below."))}</p></div>`;
 }
 
 function article(ctx: Ctx, spec: ComponentSpec, index: number): string {
+    const t = ctx.locale.t;
+    const copy = t("ui.copy", "Copy");
     const id = `comp-${idOf(spec.slug)}`;
     const states = spec.states.slice(0, MAX_STATES);
     const list = (title: string, items: string[], kind: string) =>
@@ -55,12 +57,13 @@ function article(ctx: Ctx, spec: ComponentSpec, index: number): string {
                 clip(spec.markup[state] ?? "", MAX_CODE),
                 state,
                 "state",
+                copy,
             ),
         ),
-        snippet(`code-${index}-css`, clip(spec.css, MAX_CODE), "css", "css"),
+        snippet(`code-${index}-css`, clip(spec.css, MAX_CODE), "css", "css", copy),
     ].join("");
 
-    return `<article class="comp" id="${id}" data-pid="${id}" data-s><div class="row-head"><h3>${esc(spec.name)}${anchor(id, spec.name)}</h3><span class="pill">${plural(states.length, "state")}</span></div><p class="intro">${esc(spec.description)}</p>${stage(ctx)}${usage === "" ? "" : `<div class="dos">${usage}</div>`}${tokens === "" ? "" : `<details class="fold"><summary>Tokens it uses <span class="pill">${Math.min(spec.tokens.length, 80)}</span></summary><div class="chips">${tokens}</div></details>`}<details class="fold"><summary>Markup and CSS</summary>${code}</details></article>`;
+    return `<article class="comp" id="${id}" data-pid="${id}" data-s><div class="row-head"><h3>${esc(spec.name)}${anchor(id, spec.name)}</h3><span class="pill">${plural(states.length, "state")}</span></div><p class="intro">${esc(spec.description)}</p>${stage(ctx)}${usage === "" ? "" : `<div class="dos">${usage}</div>`}${tokens === "" ? "" : `<details class="fold"><summary>${esc(t("server.design.docsite-components.article.summary.tokens-it-uses", "Tokens it uses"))} <span class="pill">${Math.min(spec.tokens.length, 80)}</span></summary><div class="chips">${tokens}</div></details>`}<details class="fold"><summary>${esc(t("server.design.docsite-components.article.summary.markup-and-css", "Markup and CSS"))}</summary>${code}</details></article>`;
 }
 
 export function componentsSection(ctx: Ctx): string | undefined {

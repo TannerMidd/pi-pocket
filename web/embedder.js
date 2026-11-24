@@ -1,6 +1,7 @@
 // What Pi Pocket does with the app bridge an embedder gives it (`web/host.js`): notifications, badge, pinned sessions,
 // links, and the embedder's menu group. docs/embedders.md describes it.
 import { callHost, host, hostCan, onHost } from "./host.js";
+import { t } from "./ui-locale.js";
 import { openPip } from "./pip.js";
 import { sessionMark } from "./sessions.js";
 import { actions, attempt, navigate, notify, onEmbedderNotify, store } from "./store.js";
@@ -55,7 +56,8 @@ if (host !== null) {
                 (from?.sessions === state.sessions &&
                     from.pinned === state.pinned &&
                     from.unread === state.unread &&
-                    from.peekSeen === state.peekSeen)
+                    from.peekSeen === state.peekSeen &&
+                    from.localeRevision === state.localeRevision)
             ) {
                 return;
             }
@@ -65,6 +67,7 @@ if (host !== null) {
                 pinned: state.pinned,
                 unread: state.unread,
                 peekSeen: state.peekSeen,
+                localeRevision: state.localeRevision,
             };
 
             const byId = new Map(state.sessions.map((session) => [session.id, session]));
@@ -122,7 +125,13 @@ export function hostMenu() {
                     const done = callHost("invoke", each.id);
 
                     if (done === false) {
-                        notify("error", "The host around Pi Pocket could not do that.");
+                        notify(
+                            "error",
+                            t(
+                                "web.embedder.action-failed",
+                                "The host around Pi Pocket could not do that.",
+                            ),
+                        );
                     }
                 },
             })),

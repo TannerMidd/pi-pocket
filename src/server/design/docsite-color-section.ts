@@ -55,7 +55,7 @@ function swatchCard(ctx: Ctx, token: ResolvedToken): string {
     const sample =
         pair === undefined
             ? `<i style="background:${varOf(token)}"></i>`
-            : `<i style="background:${varOf(pair)}"></i><span class="aa" style="color:${varOf(token, "inherit")}">Aa <small>on ${esc(pair.name)}</small></span>`;
+            : `<i style="background:${varOf(pair)}"></i><span class="aa" style="color:${varOf(token, "inherit")}">Aa <small>${esc(ctx.locale.t("server.design.docsite-color-section.swatch-card.sample.on", "on {name}", { name: pair.name }))}</small></span>`;
     const hex = variants(ctx, (mode) => esc(hexOf(token, mode) ?? "—"));
     const alias = variants(ctx, (mode) => esc(valueIn(token, mode)?.alias ?? "—"));
     const hasAlias = ctx.modes.some((mode) => valueIn(token, mode)?.alias !== undefined);
@@ -78,9 +78,9 @@ function swatchCard(ctx: Ctx, token: ResolvedToken): string {
     const deprecated =
         token.deprecated === undefined || token.deprecated === false
             ? ""
-            : ` <span class="pill warn">Deprecated</span>`;
+            : ` <span class="pill warn">${esc(ctx.locale.t("server.design.docsite-color-section.swatch-card.deprecated.deprecated", "Deprecated"))}</span>`;
 
-    return `<article class="card" data-s><button type="button" class="sw" data-copy="var(${esc(token.cssVar)})" aria-label="Copy var(${esc(token.cssVar)})">${sample}</button><div class="card-body"><div><button class="tk">${esc(token.name)}</button>${deprecated}</div>${token.description === undefined ? "" : `<p class="desc">${esc(token.description)}</p>`}<dl class="vals"><div><dt>hex</dt><dd>${hex}</dd></div>${hasAlias ? `<div><dt>alias</dt><dd>${alias}</dd></div>` : ""}</dl>${contrast}${copies(ctx, token)}</div></article>`;
+    return `<article class="card" data-s><button type="button" class="sw" data-copy="var(${esc(token.cssVar)})" aria-label="${esc(ctx.locale.t("server.design.docsite-color-section.swatch-card.text.copy-var", "Copy var({detail})", { detail: token.cssVar }))}">${sample}</button><div class="card-body"><div><button class="tk">${esc(token.name)}</button>${deprecated}</div>${token.description === undefined ? "" : `<p class="desc">${esc(token.description)}</p>`}<dl class="vals"><div><dt>${esc(ctx.locale.t("server.design.docsite-color-section.swatch-card.dt.hex", "hex"))}</dt><dd>${hex}</dd></div>${hasAlias ? `<div><dt>${esc(ctx.locale.t("server.design.docsite-color-section.swatch-card.dt.alias", "alias"))}</dt><dd>${alias}</dd></div>` : ""}</dl>${contrast}${copies(ctx, token)}</div></article>`;
 }
 
 function grouped(tokens: ResolvedToken[]): [string, ResolvedToken[]][] {
@@ -122,6 +122,10 @@ const ramps = (ctx: Ctx, tokens: ResolvedToken[]) =>
         .join("");
 
 export function pairRows(ctx: Ctx): { total: number; passing: number; table: string } {
+    const t = ctx.locale.t;
+    const textLabel = esc(t("server.design.docsite-color-section.pair-rows.rows.text", "Text"));
+    const onLabel = esc(t("server.design.docsite-color-section.contrast.background", "On"));
+    const needsLabel = esc(t("server.design.docsite-color-section.contrast.required", "Needs"));
     const declared = ctx.system.tokens.filter((token) => token.contrast !== undefined);
     let total = 0;
     let passing = 0;
@@ -149,7 +153,7 @@ export function pairRows(ctx: Ctx): { total: number; passing: number; table: str
                 return cell(ratioPill(ratio, pairOf.min, pairOf.exempt));
             });
 
-            return `<tr data-s><td data-label="Text"><i class="chip" style="background:${varOf(token)}"></i><button class="tk">${esc(token.name)}</button></td><td data-label="On"><button class="tk">${esc(on)}</button></td><td class="num" data-label="Needs">${pairOf.exempt === undefined ? `${pairOf.min}:1` : `exempt (${esc(pairOf.exempt)})`}</td>${cells.join("")}</tr>`;
+            return `<tr data-s><td data-label="${textLabel}"><i class="chip" style="background:${varOf(token)}"></i><button class="tk">${esc(token.name)}</button></td><td data-label="${onLabel}"><button class="tk">${esc(on)}</button></td><td class="num" data-label="${needsLabel}">${pairOf.exempt === undefined ? `${pairOf.min}:1` : `exempt (${esc(pairOf.exempt)})`}</td>${cells.join("")}</tr>`;
         }),
     );
 
@@ -159,7 +163,7 @@ export function pairRows(ctx: Ctx): { total: number; passing: number; table: str
         table:
             declared.length === 0
                 ? ""
-                : `<div class="table-wrap stack"><table><thead><tr><th>Text</th><th>On</th><th>Needs</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`,
+                : `<div class="table-wrap stack"><table><thead><tr><th>${textLabel}</th><th>${onLabel}</th><th>${needsLabel}</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`,
     };
 }
 
@@ -205,7 +209,7 @@ export function colorSection(ctx: Ctx): string | undefined {
 
     if (roles.length > 0) {
         parts.push(
-            `<h3 id="color-roles">Roles</h3><p class="sub">Roles say what a color is for. Use a role, never a palette step, so the color follows the mode.</p>${capNote(roles.length, allRoles.length)}`,
+            `<h3 id="color-roles">${esc(ctx.locale.t("server.design.docsite-color-section.color-section.h3.roles", "Roles"))}</h3><p class="sub">${esc(ctx.locale.t("server.design.docsite-color-section.color-section.p.roles-say-color-role", "Roles say what a color is for. Use a role, never a palette step, so the color follows the mode."))}</p>${capNote(roles.length, allRoles.length)}`,
         );
 
         const groups = grouped(roles);
@@ -231,19 +235,19 @@ export function colorSection(ctx: Ctx): string | undefined {
 
     if (palette.length > 0) {
         parts.push(
-            `<h3 id="color-palette">Palette</h3><p class="sub">The raw colors that roles point at. Click a step to copy its name.</p>${capNote(palette.length, allPalette.length)}${ramps(ctx, palette)}`,
+            `<h3 id="color-palette">${esc(ctx.locale.t("web.sheets.gallery.theme-entry.h4.palette", "Palette"))}</h3><p class="sub">${esc(ctx.locale.t("server.design.docsite-color-section.color-section.p.raw-colors-roles-point", "The raw colors that roles point at. Click a step to copy its name."))}</p>${capNote(palette.length, allPalette.length)}${ramps(ctx, palette)}`,
         );
     }
 
     if (components.length > 0) {
         parts.push(
-            `<details class="fold" data-group><summary>Component colors <span class="pill">${components.length}</span></summary>${ramps(ctx, components)}</details>`,
+            `<details class="fold" data-group><summary>${esc(ctx.locale.t("server.design.docsite-color-section.color-section.summary.component-colors", "Component colors"))} <span class="pill">${components.length}</span></summary>${ramps(ctx, components)}</details>`,
         );
     }
 
     if (pairs.table !== "") {
         parts.push(
-            `<h3 id="color-pairs">Contrast pairs</h3><p class="sub">The system checks these pairs in every mode: ${pairs.passing} of ${plural(pairs.total, "check")} ${pairs.passing === 1 ? "passes" : "pass"}.</p>${pairs.table}`,
+            `<h3 id="color-pairs">${esc(ctx.locale.t("server.design.docsite-color-section.color-section.h3.contrast-pairs", "Contrast pairs"))}</h3><p class="sub">The system checks these pairs in every mode: ${pairs.passing} of ${plural(pairs.total, "check")} ${pairs.passing === 1 ? "passes" : "pass"}.</p>${pairs.table}`,
         );
     }
 

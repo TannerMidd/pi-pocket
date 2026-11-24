@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, MODEL_SEARCH_AT, Sheet } from "../ui.js";
+import { t } from "../ui-locale.js";
 import { RefreshModelsButton, RefreshModelsStatus } from "../model-refresh.js";
 import { favoriteModels, setModelFavorite } from "../model-favorites.js";
 import { EndpointForm, removeCustomProvider, useCustomProviders } from "./custom-providers.js";
@@ -44,8 +45,18 @@ function SubagentModels({ names }) {
     const chosen = rows.filter((row) => isOn(row.spec)).map((row) => row.model?.name ?? row.spec);
     const summary =
         chosen.length === 0
-            ? "None allowed: Pi never picks a model."
-            : `${chosen.length} allowed: ${chosen.join(", ")}`;
+            ? t(
+                  "web.sheets.providers.subagent-models.summary.none-allowed-pi-never",
+                  "None allowed: Pi never picks a model.",
+              )
+            : t(
+                  "web.sheets.providers.subagent-models.summary.allowed",
+                  "{count} allowed: {detail}",
+                  {
+                      count: chosen.length,
+                      detail: chosen.join(", "),
+                  },
+              );
     const needle = query.trim().toLowerCase();
     const groups = new Map();
 
@@ -91,22 +102,21 @@ function SubagentModels({ names }) {
 
     return html`<div class="subagent-models">
         <div class="subagent-models-heading">
-            <div class="label">Subagent models</div>
+            <div class="label">${t("web.sheets.providers.release028.subagents", "Subagent models")}</div>
             <${RefreshModelsButton} />
             <span class="small subagent-models-chosen" title=${summary} aria-live="polite">
-                ${chosen.length} for subagents
+                ${t("web.sheets.providers.release028.chosen", "{count} for subagents", { count: chosen.length })}
             </span>
         </div>
         <${RefreshModelsStatus} />
         <p class="muted small">
-            <strong>Checkbox:</strong> models subagents and linked sessions may use. With none checked, they use the
-            session's model. <strong>Star:</strong> only a shortcut in your model picker; it changes no permission.
+            <strong>${t("web.sheets.providers.release028.checkbox", "Checkbox:")}</strong>${" "}${t("web.sheets.providers.release028.checkbox-detail", "models subagents and linked sessions may use. With none checked, they use the session's model.")}${" "}<strong>${t("web.sheets.providers.release028.star", "Star:")}</strong>${" "}${t("web.sheets.providers.release028.star-detail", "only a shortcut in your model picker; it changes no permission.")}
         </p>
-        <div class="segmented model-filters" role="group" aria-label="Filter models">
+        <div class="segmented model-filters" role="group" aria-label=${t("web.sheets.providers.release028.filter", "Filter models")}>
             ${[
-                ["all", "All models", null],
-                ["allowed", "Allowed", "check"],
-                ["favorites", "Favorites", "star"],
+                ["all", t("web.sheets.providers.release028.all-models", "All models"), null],
+                ["allowed", t("web.sheets.providers.release028.allowed", "Allowed"), "check"],
+                ["favorites", t("web.sheets.providers.release028.favorites", "Favorites"), "star"],
             ].map(
                 ([value, label, icon]) => html`<button
                     class=${filter === value ? "on" : ""}
@@ -122,22 +132,28 @@ function SubagentModels({ names }) {
             html`<label class="search">
                 <${Icon} name="search" size=${16} />
                 <input
-                    placeholder="Find a model"
-                    aria-label="Find a model for subagents"
+                    placeholder=${t(
+                        "web.sheets.providers.subagent-models.placeholder.find-a-model",
+                        "Find a model",
+                    )}
+                    aria-label=${t(
+                        "web.sheets.providers.subagent-models.aria-label.find-model-subagents",
+                        "Find a model for subagents",
+                    )}
                     value=${query}
                     onInput=${(event) => setQuery(event.currentTarget.value)}
                 />
             </label>`
         }
         <div class="subagent-models-legend" aria-hidden="true">
-            <span><${Icon} name="check" size=${13} />${" "}Allowed for subagents</span>
-            <span>Favorite${" "}<${Icon} name="star" size=${13} /></span>
+            <span><${Icon} name="check" size=${13} />${" "}${t("web.sheets.providers.release028.allowed-subagents", "Allowed for subagents")}</span>
+            <span>${t("web.sheets.providers.release028.favorite", "Favorite")}${" "}<${Icon} name="star" size=${13} /></span>
         </div>
-        <div class="subagent-models-list" role="group" aria-label="Subagent models">
+        <div class="subagent-models-list" role="group" aria-label=${t("web.sheets.providers.release028.subagents", "Subagent models")}>
             ${
                 groups.size === 0 &&
                 html`<p class="muted small">
-                    ${rows.length === 0 ? "No models: sign in to a provider first." : needle === "" && filter !== "all" ? (favoritesOnly ? "Star models in All models to add favorites." : "No model is allowed yet: check some in All models.") : "No model matches."}
+                    ${rows.length === 0 ? t("web.sheets.providers.release028.no-models", "No models: sign in to a provider first.") : needle === "" && filter !== "all" ? (favoritesOnly ? t("web.sheets.providers.release028.star-help", "Star models in All models to add favorites.") : t("web.sheets.providers.release028.allow-help", "No model is allowed yet: check some in All models.")) : t("web.sheets.providers.release028.no-matches", "No model matches.")}
                 </p>`
             }
             ${[...groups].map(
@@ -158,18 +174,18 @@ function SubagentModels({ names }) {
                                         ${spec}
                                         ${
                                             !model
-                                                ? html` · <span class="warn">not signed in</span>`
+                                                ? html` · <span class="warn">${t("web.sheets.providers.subagent-models.span.not-signed-in", "not signed in")}</span>`
                                                 : model.signIn &&
-                                                  html` · <span class="warn">needs sign-in</span>`
+                                                  html` · <span class="warn">${t("web.sheets.providers.subagent-models.span.needs-sign-in", "needs sign-in")}</span>`
                                         }
                                     </span>
                                 </span>
                             </label>
                             <button
                                 class="icon-button model-favorite"
-                                aria-label=${`Favorite ${model?.name ?? spec} (model picker shortcut)`}
+                                aria-label=${t("web.sheets.providers.release028.favorite-model", "Favorite {model} (model picker shortcut)", { model: model?.name ?? spec })}
                                 aria-pressed=${favorites.has(spec)}
-                                title=${favorites.has(spec) ? "Remove from model picker favorites" : "Add to model picker favorites (does not allow it for subagents)"}
+                                title=${favorites.has(spec) ? t("web.sheets.providers.release028.remove-favorite", "Remove from model picker favorites") : t("web.sheets.providers.release028.add-favorite", "Add to model picker favorites (does not allow it for subagents)")}
                                 onClick=${(event) => {
                                     if (favoritesOnly) {
                                         event.currentTarget
@@ -196,12 +212,12 @@ function SubagentModels({ names }) {
 }
 
 /** How long a run waits for a provider's limit to clear (`limit-gate.ts`), at most. */
-const LIMIT_WAIT = [
-    [0, "Off"],
-    [1, "1 hour"],
-    [6, "6 hours"],
-    [12, "12 hours"],
-    [24, "24 hours"],
+const limitWait = () => [
+    [0, t("web.sheets.providers.limit-wait.off", "Off")],
+    [1, t("web.sheets.providers.limit-wait.hour", "1 hour")],
+    [6, t("web.sheets.providers.limit-wait.6-hours", "6 hours")],
+    [12, t("web.sheets.providers.limit-wait.12-hours", "12 hours")],
+    [24, t("web.sheets.providers.limit-wait.24-hours", "24 hours")],
 ];
 
 /** The owner's choice of how long a run waits for a limit, rather than failing. Shorter limits wait less. */
@@ -216,13 +232,21 @@ function LimitWait() {
     const change = (value) => attempt(() => api("settings", { limitWaitHours: value }));
 
     return html`<div class="limit-wait">
-        <div class="small">Wait for a limit</div>
+        <div class="small">${t(
+            "web.sheets.providers.limit-wait.div.wait-for-a-limit",
+            "Wait for a limit",
+        )}</div>
         <p class="muted small">
-            When a provider's limit stops a run, it waits for the limit to clear, up to this long, and goes on by
-            itself. A limit that clears later makes it fail with the time.
+            ${t(
+                "web.sheets.providers.limit-wait.p.provider-s-limit-stops",
+                "When a provider's limit stops a run, it waits for the limit to clear, up to this long, and goes on by itself. A limit that clears later makes it fail with the time.",
+            )}
         </p>
-        <div class="segmented" role="group" aria-label="How long to wait for a limit">
-            ${LIMIT_WAIT.map(
+        <div class="segmented" role="group" aria-label=${t(
+            "web.sheets.providers.limit-wait.aria-label.long-wait-limit",
+            "How long to wait for a limit",
+        )}>
+            ${limitWait().map(
                 ([value, label]) => html`<button
                     class=${hours === value ? "on" : ""}
                     aria-pressed=${hours === value}
@@ -236,16 +260,22 @@ function LimitWait() {
 }
 
 /** Where a sign-in's key comes from, in words. */
-const SOURCES = { models_json_key: "key in models.json", models_json_command: "key command" };
+const sources = () => ({
+    models_json_key: t("web.sheets.providers.release028.file-key", "key in models.json"),
+    models_json_command: t("web.sheets.providers.release028.command-key", "key command"),
+});
 /** Where an endpoint's key is, in words. */
-const ENDPOINT_KEYS = {
-    stored: "key stored",
-    file: "key in models.json",
-    none: "no key",
-    missing: "no key set",
-};
+const endpointKeys = () => ({
+    stored: t("web.sheets.providers.release028.key-stored", "key stored"),
+    file: t("web.sheets.providers.release028.file-key", "key in models.json"),
+    none: t("web.sheets.providers.release028.no-key", "no key"),
+    missing: t("web.sheets.providers.release028.missing-key", "no key set"),
+});
 
-const modelCount = (n) => `${n} ${n === 1 ? "model" : "models"}`;
+const modelCount = (n) =>
+    n === 1
+        ? t("web.sheets.providers.release028.one-model", "{count} model", { count: n })
+        : t("web.sheets.providers.release028.models", "{count} models", { count: n });
 
 /** A provider row's line under its name: its sign-in and its models, or what the row adds. */
 function aboutOf(provider, endpoint) {
@@ -254,16 +284,20 @@ function aboutOf(provider, endpoint) {
     }
 
     if (endpoint !== undefined && !provider.needsSignIn) {
-        return `${endpoint.baseUrl} · ${ENDPOINT_KEYS[endpoint.key]} · ${modelCount(provider.models)}`;
+        return `${endpoint.baseUrl} · ${endpointKeys()[endpoint.key]} · ${modelCount(provider.models)}`;
     }
 
-    const account = provider.label || SOURCES[provider.source] || provider.source;
+    const account = provider.label || sources()[provider.source] || provider.source;
     const signIn = provider.needsSignIn
-        ? "the sign-in expired and could not be renewed: sign in again. Until then, sessions " +
-          "on its models fail, and PiP and subagents on other models do not use them"
+        ? t(
+              "web.sheets.providers.providers-sheet.row.div.sign-expired-not-renewed",
+              "the sign-in expired and could not be renewed: sign in again. Until then, sessions on its models fail, and PiP and subagents on other models do not use them",
+          )
         : provider.configured
-          ? `signed in${account ? ` · ${account}` : ""}`
-          : "not configured";
+          ? t("web.sheets.providers.release028.signed-in", "signed in{account}", {
+                account: account ? ` · ${account}` : "",
+            })
+          : t("web.sheets.providers.release028.not-configured", "not configured");
 
     return `${signIn} · ${modelCount(provider.models)}`;
 }
@@ -352,7 +386,11 @@ export function ProvidersSheet() {
 
     const logout = (provider) =>
         confirm(
-            `Log out of ${provider.name}? Pi uses the same sign-in, so it is signed out too.`,
+            t(
+                "web.sheets.providers.providers-sheet.logout.confirm.log-out-pi-uses",
+                "Log out of {provider}? Pi uses the same sign-in, so it is signed out too.",
+                { provider: provider.name },
+            ),
         ) &&
         attempt(async () => {
             await api(`providers/${encodeURIComponent(provider.id)}/logout`, {});
@@ -364,14 +402,15 @@ export function ProvidersSheet() {
         ? [
               {
                   id: "openai-compatible",
-                  name: "OpenAI Compatible",
+                  name: t("web.sheets.providers.release028.compatible-name", "OpenAI Compatible"),
                   configured: false,
                   adds: true,
                   models: 0,
                   words: "custom endpoint local self-hosted ollama lm studio vllm llama.cpp proxy",
-                  about:
-                      "Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): " +
-                      "a URL, a key, and its models",
+                  about: t(
+                      "web.sheets.providers.release028.compatible-about",
+                      "Any server with the OpenAI API (Ollama, LM Studio, vLLM, a proxy): a URL, a key, and its models",
+                  ),
               },
           ]
         : [];
@@ -392,21 +431,32 @@ export function ProvidersSheet() {
 
     // Signed-out providers wait at the end, and an expired sign-in comes first: that is the one to act on.
     const groups = [
-        ["Needs sign-in", list.filter((provider) => provider.needsSignIn)],
-        ["Signed in", list.filter((provider) => !provider.needsSignIn && provider.configured)],
         [
-            "Not configured",
+            "needs-sign-in",
+            t("web.sheets.providers.providers-sheet.groups.needs-sign", "Needs sign-in"),
+            list.filter((provider) => provider.needsSignIn),
+        ],
+        [
+            "signed-in",
+            t("web.sheets.providers.providers-sheet.groups.signed", "Signed in"),
+            list.filter((provider) => !provider.needsSignIn && provider.configured),
+        ],
+        [
+            "not-configured",
+            t("web.sheets.providers.providers-sheet.groups.not-configured", "Not configured"),
             list.filter((provider) => !provider.needsSignIn && !provider.configured),
         ],
-    ].filter(([, each]) => each.length > 0);
+    ].filter(([, , each]) => each.length > 0);
 
     // Where sign-ins live, said once: beside Signed in, or the first group when nothing is signed in.
-    const noteGroup = (groups.find(([title]) => title === "Signed in") ??
-        groups.find(([title]) => title === "Not configured") ??
+    const noteGroup = (groups.find(([id]) => id === "signed-in") ??
+        groups.find(([id]) => id === "not-configured") ??
         groups[0])?.[0];
-    const noteMore = owner ? "" : " · only the owner can change them";
+    const noteMore = owner
+        ? ""
+        : t("web.sheets.providers.release028.owner-only", " · only the owner can change them");
     const note = html`<p class="providers-note">
-        Shared with Pi · <span class="mono">~/.pi/agent/auth.json</span>${noteMore}
+        ${t("web.sheets.providers.release028.shared", "Shared with Pi")} · <span class="mono">~/.pi/agent/auth.json</span>${noteMore}
     </p>`;
 
     // A sign-in opens under its provider's row; one whose row is not shown (a search hides it) opens above the list.
@@ -442,7 +492,10 @@ export function ProvidersSheet() {
                 ${provider.name}
                 ${
                     provider.needsSignIn
-                        ? html` <span class="warn provider-needs">needs sign-in</span>`
+                        ? html` <span class="warn provider-needs">${t(
+                              "web.sheets.providers.providers-sheet.row.span.needs-sign-in",
+                              "needs sign-in",
+                          )}</span>`
                         : provider.configured && html` <span class="ok">✓</span>`
                 }
             </div>
@@ -467,7 +520,7 @@ export function ProvidersSheet() {
                         aria-expanded=${endpointForm === ADDING}
                         onClick=${() => openEndpointForm(ADDING)}
                     >
-                        Add
+                        ${t("web.sheets.providers.release028.add", "Add")}
                     </button>`
                 }
                 ${
@@ -477,7 +530,7 @@ export function ProvidersSheet() {
                             aria-expanded=${endpointForm === provider.id}
                             onClick=${() => openEndpointForm(provider.id)}
                         >
-                            Edit
+                            ${t("web.sheets.providers.release028.edit", "Edit")}
                         </button>
                         <button
                             class="button small ghost"
@@ -487,7 +540,7 @@ export function ProvidersSheet() {
                                     endpointSaved,
                                 )}
                         >
-                            Remove
+                            ${t("web.sheets.providers.release028.remove", "Remove")}
                         </button>`
                 }
                 ${
@@ -506,14 +559,14 @@ export function ProvidersSheet() {
                         class="button small"
                         onClick=${(event) => login(provider, "api_key", event.currentTarget)}
                     >
-                        API key
+                        ${t("web.sheets.providers.providers-sheet.row.button.api-key", "API key")}
                     </button>`
                 }
                 ${
                     provider.configured &&
                     provider.source === "stored" &&
                     html`<button class="button small ghost" onClick=${() => logout(provider)}>
-                        Log out
+                        ${t("web.sheets.providers.providers-sheet.row.button.log-out", "Log out")}
                     </button>`
                 }
             </div>`
@@ -521,14 +574,14 @@ export function ProvidersSheet() {
     </div>`;
 
     return html`<${Sheet}
-        title="Providers"
+        title=${t("web.sheets.providers.providers-sheet.title.providers", "Providers")}
         onClose=${closeSheet}
         className=${`providers-sheet ${owner ? "with-side" : ""}`}
     >
         <div class="providers-layout">
             ${
                 owner &&
-                html`<aside class="providers-side" aria-label="Subagent models">
+                html`<aside class="providers-side" aria-label=${t("web.sheets.providers.release028.subagents", "Subagent models")}>
                     <${SubagentModels}
                         names=${Object.fromEntries(
                             (providers ?? []).map((each) => [each.id, each.name]),
@@ -542,28 +595,49 @@ export function ProvidersSheet() {
                 <label class="search">
                     <${Icon} name="search" size=${16} />
                     <input
-                        placeholder="Search providers"
+                        placeholder=${t(
+                            "web.sheets.providers.providers-sheet.placeholder.search-providers",
+                            "Search providers",
+                        )}
                         value=${query}
                         onInput=${(event) => setQuery(event.currentTarget.value)}
                     />
                 </label>
-                ${providers === null && html`<${Loader} label="Loading providers" />`}
+                ${groups.length === 0 && note}
+                ${
+                    providers === null &&
+                    html`<${Loader}
+                        label=${t(
+                            "web.sheets.providers.providers-sheet.label.loading-providers",
+                            "Loading providers",
+                        )}
+                    />`
+                }
                 ${
                     providers !== null &&
                     list.length === 0 &&
                     needle !== "" &&
                     html`<div class="launcher-empty" role="status">
-                        <strong>No providers match “${query.trim()}”.</strong>
-                        <button class="button" onClick=${() => setQuery("")}>Clear search</button>
+                        <strong>
+                            ${t(
+                                "web.sheets.providers.providers-sheet.strong.no-providers-match",
+                                "No providers match “{query}”.",
+                                { query: query.trim() },
+                            )}
+                        </strong>
+                        <button class="button" onClick=${() => setQuery("")}>${t(
+                            "web.sheets.providers.providers-sheet.button.clear-search",
+                            "Clear search",
+                        )}</button>
                     </div>`
                 }
                 ${groups.map(
-                    ([title, each]) => html`<section class="provider-group" key=${title}>
+                    ([id, title, each]) => html`<section class="provider-group" key=${id}>
                         <div class="provider-group-top">
                             <h3 class="provider-group-head">
                                 ${title} <span class="muted">${each.length}</span>
                             </h3>
-                            ${title === noteGroup && note}
+                            ${id === noteGroup && note}
                         </div>
                         <div class="sheet-list">${each.map(row)}</div>
                     </section>`,
@@ -621,7 +695,10 @@ function AuthFrame({ title, onClose, inline, focusKey, children }) {
         ? html`<section class="auth-inline" aria-label=${title} tabindex="-1" ref=${ref}>
             <div class="auth-inline-head">
                 <strong>${title}</strong>
-                <button class="icon-button" aria-label="Close" onClick=${onClose}>
+                <button class="icon-button" aria-label=${t(
+                    "web.sheets.providers.auth-frame.aria-label.close",
+                    "Close",
+                )} onClick=${onClose}>
                     <${Icon} name="close" size=${16} />
                 </button>
             </div>
@@ -666,7 +743,9 @@ export function AuthDialog({ inline = false }) {
     const prompt = auth.prompt;
 
     return html`<${AuthFrame}
-        title=${`Sign in: ${auth.providerName}`}
+        title=${t("web.sheets.providers.auth-dialog.title.sign", "Sign in: {provider}", {
+            provider: auth.providerName,
+        })}
         onClose=${close}
         inline=${inline}
         focusKey=${`${auth.flowId}:${prompt?.id ?? auth.events.length}`}
@@ -675,7 +754,10 @@ export function AuthDialog({ inline = false }) {
             if (event.type === "auth_url") {
                 return html`<div class="auth-event">
                     <a class="button primary wide" href=${event.url} target="_blank" rel="noopener">
-                        Open the sign-in page
+                        ${t(
+                            "web.sheets.providers.auth-dialog.a.open-the-sign-in-page",
+                            "Open the sign-in page",
+                        )}
                     </a>
                     ${event.instructions && html`<p class="muted small">${event.instructions}</p>`}
                 </div>`;
@@ -684,7 +766,7 @@ export function AuthDialog({ inline = false }) {
             if (event.type === "device_code") {
                 return html`<div class="auth-event">
                     <p>
-                        Enter this code at <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
+                        ${t("web.sheets.providers.auth-dialog.p.enter-this-code-at", "Enter this code at")} <a href=${event.verificationUri} target="_blank" rel="noopener">${event.verificationUri}</a>
                     </p>
                     <div class="code-big">${event.userCode}</div>
                 </div>`;
@@ -732,19 +814,38 @@ export function AuthDialog({ inline = false }) {
                             disabled=${prompt.type === "secret" && value.trim() === ""}
                             onClick=${() => answer({ value })}
                         >
-                            Continue
+                            ${t("web.sheets.providers.auth-dialog.button.continue", "Continue")}
                         </button>
                     </div>
                 </div>`)
         }
-        ${!prompt && !auth.done && html`<${Loader} label="Waiting for the provider" />`}
+        ${
+            !prompt &&
+            !auth.done &&
+            html`<${Loader}
+                label=${t(
+                    "web.sheets.providers.auth-dialog.label.waiting-for-the-provider",
+                    "Waiting for the provider",
+                )}
+            />`
+        }
         ${
             auth.done &&
             !auth.done.ok &&
             html`<div class="error-box">
-                <p>${auth.done.details ? auth.done.error : "Sign-in did not finish. Try again."}</p>
+                <p>${
+                    auth.done.details
+                        ? auth.done.error
+                        : t(
+                              "web.sheets.providers.auth-dialog.text.sign-not-finish-try",
+                              "Sign-in did not finish. Try again.",
+                          )
+                }</p>
                 <details>
-                    <summary>Details</summary>
+                    <summary>${t(
+                        "web.sheets.providers.auth-dialog.summary.details",
+                        "Details",
+                    )}</summary>
                     <p>${auth.done.details ?? auth.done.error}</p>
                 </details>
                 <button
@@ -757,7 +858,7 @@ export function AuthDialog({ inline = false }) {
                             closeSignIn(auth.flowId);
                         })}
                 >
-                    Start again
+                    ${t("web.sheets.providers.auth-dialog.button.start-again", "Start again")}
                 </button>
             </div>`
         }

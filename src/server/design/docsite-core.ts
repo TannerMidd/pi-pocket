@@ -1,3 +1,4 @@
+import { requestLocale, type RequestLocale } from "../ui-locales.ts";
 import { colorObjectCss, contrastRatio, parseColor, toHex, type Rgba } from "./color.ts";
 import { dimensionParts } from "./lint-color.ts";
 import { escapeHtml as esc, plural, slugify } from "./docsite-markdown.ts";
@@ -227,6 +228,8 @@ export function sectionOf(token: ResolvedToken): SectionId {
 
 export interface Ctx {
     system: DesignSystem;
+    /** The words of this page: the language of the request that asked for it, else English. */
+    locale: RequestLocale;
     modes: string[];
     /** A mode's name as an attribute value. */
     slug: Map<string, string>;
@@ -293,7 +296,14 @@ export const groundToken = (ctx: Ctx) =>
 
 export const textToken = (ctx: Ctx) => findToken(ctx, BASE_TEXTS) ?? firstRole(ctx, TEXT_SEGMENTS);
 
-export function buildContext(system: DesignSystem): Ctx {
+/**
+ * English for a page that no request asked for: one made for each page, so that no language lives longer than the page
+ * that reads it.
+ */
+export const englishLocale = (): RequestLocale =>
+    requestLocale({ revision: 0, locales: [] }, undefined);
+
+export function buildContext(system: DesignSystem, locale?: RequestLocale): Ctx {
     // A custom property name goes into styles: one that is not plain gets a safe name made from the token's.
     const tokens = system.tokens
         .slice(0, MAX_TOKENS)
@@ -317,6 +327,7 @@ export function buildContext(system: DesignSystem): Ctx {
 
     const ctx: Ctx = {
         system: { ...system, tokens },
+        locale: locale ?? englishLocale(),
         modes,
         slug,
         theme: new Map(),
@@ -411,13 +422,16 @@ export function countsLine(ctx: Ctx, id: SectionId): string {
     return count.total === 0 ? "" : `<p class="counts">${parts.join(" · ")}</p>`;
 }
 
-function modeCell(token: ResolvedToken, mode: string, across: number): string {
+function modeCell(ctx: Ctx, token: ResolvedToken, mode: string, across: number): string {
+    const t = ctx.locale.t;
     const value = valueIn(token, mode);
     const hex = token.type === "color" ? hexOf(token, mode) : undefined;
     const body = `${hex === undefined ? "" : `<i class="chip" style="background:${esc(hex)}"></i>`}${esc(clip(plain(token.type, value), 160))}`;
 
+    const everyMode = esc(t("server.design.docsite-core.mode-cell.text.every-mode", "Every mode"));
+
     return across > 1
-        ? `<td data-label="Every mode" class="v" colspan="${across}">${body} <span class="all">in every mode</span></td>`
+        ? `<td data-label="${everyMode}" class="v" colspan="${across}">${body} <span class="all">${esc(t("server.design.docsite-core.mode-cell.span.in-every-mode", "in every mode"))}</span></td>`
         : `<td data-label="${esc(modeLabel(mode))}" class="v">${body}</td>`;
 }
 
@@ -429,8 +443,8 @@ export function tableRows(ctx: Ctx, tokens: ResolvedToken[]): string {
             );
             const same = ctx.modes.length > 1 && texts.every((text) => text === texts[0]);
             const cells = same
-                ? modeCell(token, ctx.modes[0]!, ctx.modes.length)
-                : ctx.modes.map((mode) => modeCell(token, mode, 1)).join("");
+                ? modeCell(ctx, token, ctx.modes[0]!, ctx.modes.length)
+                : ctx.modes.map((mode) => modeCell(ctx, token, mode, 1)).join("");
             const deprecated =
                 token.deprecated === undefined || token.deprecated === false
                     ? ""
@@ -442,15 +456,22 @@ export function tableRows(ctx: Ctx, tokens: ResolvedToken[]): string {
 }
 
 export function moreTokens(ctx: Ctx, id: SectionId): string {
+    const t = ctx.locale.t;
     const left = tokensOf(ctx, id).filter((token) => !ctx.claimed.has(token));
+    const note = esc(
+        t(
+            "server.design.docsite-core.more-tokens.p.tokens-no-specimen",
+            "Tokens of this section with no specimen of their own, most of them a component's.",
+        ),
+    );
 
     return left.length === 0
         ? ""
-        : `<h3>More tokens</h3><p class="sub">Tokens of this section with no specimen of their own, most of them a component's.</p>${tokenTable(ctx, left)}`;
+        : `<h3>${esc(t("server.design.docsite-core.more-tokens.h3.more-tokens", "More tokens"))}</h3><p class="sub">${note}</p>${tokenTable(ctx, left)}`;
 }
 
 export const tokenTable = (ctx: Ctx, tokens: ResolvedToken[]) =>
-    `<div class="table-wrap stack"><table><thead><tr><th>Token</th><th>Type</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${tableRows(ctx, tokens)}</tbody></table></div>`;
+    `<div class="table-wrap stack"><table><thead><tr><th>${esc(ctx.locale.t("server.design.docsite-core.token-table.th.token", "Token"))}</th><th>${esc(ctx.locale.t("server.design.docsite-core.token-table.th.type", "Type"))}</th>${ctx.modes.map((mode) => `<th>${esc(modeLabel(mode))}</th>`).join("")}</tr></thead><tbody>${tableRows(ctx, tokens)}</tbody></table></div>`;
 
 export function anchor(id: string, label: string): string {
     return `<a class="anchor" href="#${esc(id)}" aria-label="Link to ${esc(label)}"></a>`;

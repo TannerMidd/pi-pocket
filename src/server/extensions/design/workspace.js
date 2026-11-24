@@ -16,6 +16,7 @@ const SIDE = 900;
 const STACK = 560;
 
 export function createWorkspace(env) {
+    const t = env.pocket.t;
     const { pocket, store, data, parts, app } = env;
     const { html, useEffect, useMemo, useRef, useState } = pocket;
     const { Ico, Popover, Segmented, useSize } = parts;
@@ -61,10 +62,20 @@ export function createWorkspace(env) {
         const [, draw] = useState(0);
 
         useEffect(() => {
-            let last = [app.state.view.artifacts, app.state.me, app.state.conversationId];
+            let last = [
+                app.state.view.artifacts,
+                app.state.me,
+                app.state.conversationId,
+                app.state.localeRevision,
+            ];
 
             return app.subscribe((state) => {
-                const next = [state.view.artifacts, state.me, state.conversationId];
+                const next = [
+                    state.view.artifacts,
+                    state.me,
+                    state.conversationId,
+                    state.localeRevision,
+                ];
 
                 if (next.some((each, index) => each !== last[index])) {
                     last = next;
@@ -104,8 +115,8 @@ export function createWorkspace(env) {
             <button
                 type="button"
                 class="icon-button"
-                title="Swap width and height"
-                aria-label="Swap width and height"
+                title=${t("server.extensions.design.workspace.create-workspace.custom-size.title.swap-width-height", "Swap width and height")}
+                aria-label=${t("server.extensions.design.workspace.create-workspace.custom-size.aria-label.swap-width-height", "Swap width and height")}
                 onClick=${() => env.setCustom({ w: s.custom.h, h: s.custom.w })}
             >
                 <${Ico} name="swap" size=${14} />
@@ -121,7 +132,9 @@ export function createWorkspace(env) {
                     onChange=${(event) => env.setCustom({ h: clampSize(event.currentTarget.value, s.custom.h) })}
                 />
             </label>
-            <span class="muted small">px</span>
+            <span class="muted small"
+                >${t("server.extensions.design.workspace.create-workspace.custom-size.span.px", "px")}</span
+            >
         </div>`;
     }
 
@@ -170,7 +183,7 @@ export function createWorkspace(env) {
         const exporting = (format, label, hint) =>
             html`<${MenuItem}
                 icon="download"
-                label=${busy === format ? `Making the ${label}…` : label}
+                label=${busy === format ? t("server.extensions.design.workspace.ui.making", "Making the {label}…", { label }) : label}
                 hint=${hint}
                 disabled=${busy !== null}
                 onClick=${() => run(format)}
@@ -183,7 +196,9 @@ export function createWorkspace(env) {
             sheet=${env.sizeClass(s) === "narrow"}
         >
             <div class="dsn-menu">
-                <div class="dsn-menu-label">Backdrop</div>
+                <div class="dsn-menu-label">
+                    ${t("server.extensions.design.workspace.create-workspace.menu.div.backdrop", "Backdrop")}
+                </div>
                 <${Segmented}
                     label="Backdrop"
                     value=${s.backdrop}
@@ -211,7 +226,9 @@ export function createWorkspace(env) {
                         onClose();
                     }}
                 />
-                <div class="dsn-menu-label">Design</div>
+                <div class="dsn-menu-label">
+                    ${t("server.extensions.design.workspace.create-workspace.menu.div.design", "Design")}
+                </div>
                 <${MenuItem}
                     icon="palette"
                     label="Design system"
@@ -252,15 +269,24 @@ export function createWorkspace(env) {
                         }}
                     />`
                 }
-                <div class="dsn-menu-label">${canEdit ? "Export and share" : "Open"}</div>
-                ${canEdit && exporting("png", "PNG image", `v${shown}`)}
+                <div class="dsn-menu-label">
+                    ${t("server.extensions.design.workspace.ui.export-share", "Export and share")}
+                </div>
+                ${canEdit && exporting("png", t("server.extensions.design.workspace.create-workspace.menu.text.png-image", "PNG image"), `v${shown}`)}
                 ${canEdit && exporting("pdf", "PDF", `v${shown}`)}
                 ${
                     canEdit &&
                     deck &&
-                    exporting("pptx", "PowerPoint (PPTX)", `${s.deck?.slides ?? ""} slides`)
+                    exporting(
+                        "pptx",
+                        t(
+                            "server.extensions.design.workspace.create-workspace.menu.text.power-point-pptx",
+                            "PowerPoint (PPTX)",
+                        ),
+                        `${s.deck?.slides ?? ""} slides`,
+                    )
                 }
-                ${canEdit && exporting("html", "HTML bundle (zip)", "for code")}
+                ${canEdit && exporting("html", t("server.extensions.design.workspace.create-workspace.menu.text.html-bundle-zip", "HTML bundle (zip)"), t("server.extensions.design.workspace.create-workspace.menu.text.code", "for code"))}
                 ${
                     canShare &&
                     html`<${MenuItem}
@@ -300,12 +326,45 @@ export function createWorkspace(env) {
         const [open, setOpen] = useState(null);
         const narrow = env.sizeClass(s) === "narrow";
         const devices = [
-            { value: "mobile", icon: DEVICES.mobile.icon, title: "Phone, 390 × 844" },
-            { value: "tablet", icon: DEVICES.tablet.icon, title: "Tablet, 820 × 1180" },
+            {
+                value: "mobile",
+                icon: DEVICES.mobile.icon,
+                title: t("server.extensions.design.workspace.ui.phone-size", "Phone, 390 × 844"),
+            },
+            {
+                value: "tablet",
+                icon: DEVICES.tablet.icon,
+                title: t("server.extensions.design.workspace.ui.tablet-size", "Tablet, 820 × 1180"),
+            },
             deck
-                ? { value: "slide", icon: "monitor", title: "Slide, 1280 × 720" }
-                : { value: "desktop", icon: DEVICES.desktop.icon, title: "Desktop, 1280 × 800" },
-            ...(narrow ? [] : [{ value: "custom", icon: "fit", title: "Custom size" }]),
+                ? {
+                      value: "slide",
+                      icon: "monitor",
+                      title: t(
+                          "server.extensions.design.workspace.ui.slide-size",
+                          "Slide, 1280 × 720",
+                      ),
+                  }
+                : {
+                      value: "desktop",
+                      icon: DEVICES.desktop.icon,
+                      title: t(
+                          "server.extensions.design.workspace.ui.desktop-size",
+                          "Desktop, 1280 × 800",
+                      ),
+                  },
+            ...(narrow
+                ? []
+                : [
+                      {
+                          value: "custom",
+                          icon: "fit",
+                          title: t(
+                              "server.extensions.design.workspace.create-workspace.bar.title.custom-size",
+                              "Custom size",
+                          ),
+                      },
+                  ]),
         ];
         const open_ = openOf(s.notes[design.id]?.comments ?? []).length;
         const edits = (s.edits[`${design.id}@${shown}`] ?? []).length;
@@ -314,17 +373,70 @@ export function createWorkspace(env) {
         const report = s.checks[checkKey(design.id, shown, check.mode, check.size)]?.report;
         const found = report ? report.summary.errors + report.summary.warnings : 0;
         const tabs = [
-            { id: "view", label: "Preview", icon: "eye" },
+            {
+                id: "view",
+                label: t(
+                    "server.extensions.design.workspace.create-workspace.bar.label.preview",
+                    "Preview",
+                ),
+                icon: "eye",
+            },
             {
                 id: "comment",
-                label: canEdit ? "Comment" : "Comments",
+                label: canEdit
+                    ? t("server.extensions.design.workspace.ui.comment-tab", "Comment")
+                    : t("server.extensions.design.workspace.ui.comments-tab", "Comments"),
                 icon: "comment",
                 badge: open_,
             },
-            ...(canEdit ? [{ id: "edit", label: "Edit text", icon: "text", badge: edits }] : []),
-            ...(canEdit ? [{ id: "tweaks", label: "Tweaks", icon: "sliders", badge: moved }] : []),
-            ...(canEdit ? [{ id: "check", label: "Check", icon: "shield", badge: found }] : []),
-            { id: "versions", label: "Versions", icon: "history", badge: design.versions.length },
+            ...(canEdit
+                ? [
+                      {
+                          id: "edit",
+                          label: t(
+                              "server.extensions.design.workspace.create-workspace.bar.label.edit-text",
+                              "Edit text",
+                          ),
+                          icon: "text",
+                          badge: edits,
+                      },
+                  ]
+                : []),
+            ...(canEdit
+                ? [
+                      {
+                          id: "tweaks",
+                          label: t(
+                              "server.extensions.design.workspace.create-workspace.bar.label.tweaks",
+                              "Tweaks",
+                          ),
+                          icon: "sliders",
+                          badge: moved,
+                      },
+                  ]
+                : []),
+            ...(canEdit
+                ? [
+                      {
+                          id: "check",
+                          label: t(
+                              "server.extensions.design.workspace.create-workspace.bar.label.check",
+                              "Check",
+                          ),
+                          icon: "shield",
+                          badge: found,
+                      },
+                  ]
+                : []),
+            {
+                id: "versions",
+                label: t(
+                    "server.extensions.design.workspace.create-workspace.bar.label.versions",
+                    "Versions",
+                ),
+                icon: "history",
+                badge: design.versions.length,
+            },
         ];
         const active =
             s.mode === "comment"
@@ -357,7 +469,7 @@ export function createWorkspace(env) {
                     <${Ico} name="down" size=${14} />
                 </button>
                 <${Segmented}
-                    label="Size"
+                    label=${t("server.extensions.design.workspace.ui.size", "Size")}
                     iconOnly=${true}
                     value=${device}
                     options=${devices.map((device) => ({ ...device, label: device.title }))}
@@ -368,8 +480,8 @@ export function createWorkspace(env) {
                     html`<button
                         type="button"
                         class=${`icon-button ${s.focus ? "on" : ""}`}
-                        title=${s.focus ? "Show the conversation" : "Hide the conversation"}
-                        aria-label=${s.focus ? "Show the conversation" : "Hide the conversation"}
+                        title=${s.focus ? t("server.extensions.design.workspace.ui.show-chat", "Show the conversation") : t("server.extensions.design.workspace.ui.hide-chat", "Hide the conversation")}
+                        aria-label=${s.focus ? t("server.extensions.design.workspace.ui.show-chat", "Show the conversation") : t("server.extensions.design.workspace.ui.hide-chat", "Hide the conversation")}
                         aria-pressed=${s.focus}
                         onClick=${env.toggleFocus}
                     >
@@ -379,8 +491,8 @@ export function createWorkspace(env) {
                 <button
                     type="button"
                     class="icon-button"
-                    title="More"
-                    aria-label="More"
+                    title=${t("server.extensions.design.workspace.create-workspace.bar.title.more", "More")}
+                    aria-label=${t("server.extensions.design.workspace.create-workspace.bar.aria-label.more", "More")}
                     aria-haspopup="dialog"
                     onClick=${() => setOpen("more")}
                 >
@@ -388,7 +500,11 @@ export function createWorkspace(env) {
                 </button>
             </div>
             ${device === "custom" && html`<${CustomSize} s=${s} />`}
-            <div class="dsn-tabs" role="group" aria-label="Mode">
+            <div
+                class="dsn-tabs"
+                role="group"
+                aria-label=${t("server.extensions.design.workspace.create-workspace.bar.aria-label.mode", "Mode")}
+            >
                 ${tabs.map(
                     (tab) =>
                         html`<button
@@ -411,8 +527,8 @@ export function createWorkspace(env) {
                     html`<button
                         type="button"
                         class=${`icon-button ${s.view === "compare" ? "on" : ""}`}
-                        title="Compare versions"
-                        aria-label="Compare versions"
+                        title=${t("server.extensions.design.workspace.create-workspace.bar.title.compare-versions", "Compare versions")}
+                        aria-label=${t("server.extensions.design.workspace.create-workspace.bar.aria-label.compare-versions", "Compare versions")}
                         aria-pressed=${s.view === "compare"}
                         onClick=${() => (s.view === "compare" ? env.setView("canvas") : env.compare())}
                     >
@@ -437,8 +553,8 @@ export function createWorkspace(env) {
                     html`<button
                         type="button"
                         class="icon-button"
-                        title="Present"
-                        aria-label="Present"
+                        title=${t("server.extensions.design.workspace.create-workspace.bar.title.present", "Present")}
+                        aria-label=${t("server.extensions.design.workspace.create-workspace.bar.aria-label.present", "Present")}
                         onClick=${() => store.set({ present: true })}
                     >
                         <${Ico} name="play" size=${16} />
@@ -476,17 +592,36 @@ export function createWorkspace(env) {
 
     function Empty({ canEdit }) {
         const ideas = [
-            "Design a landing page for a small coffee roaster. Make it a single page with a hero, three products, and a signup form.",
-            "Make a clickable prototype of a habit tracker app: today, history, and settings screens.",
-            "Make a 6-slide deck that pitches a weekend project, with a title, problem, solution, demo, and next steps.",
+            {
+                text: "Design a landing page for a small coffee roaster. Make it a single page with a hero, three products, and a signup form.",
+                label: t(
+                    "server.extensions.design.workspace.create-workspace.empty.ideas.design-landing-page-small",
+                    "Design a landing page for a small coffee roaster. Make it a single page with a hero, three products, and a signup form.",
+                ),
+            },
+            {
+                text: "Make a clickable prototype of a habit tracker app: today, history, and settings screens.",
+                label: t(
+                    "server.extensions.design.workspace.create-workspace.empty.ideas.make-habit-clickable",
+                    "Make a clickable prototype of a habit tracker app: today, history, and settings screens.",
+                ),
+            },
+            {
+                text: "Make a 6-slide deck that pitches a weekend project, with a title, problem, solution, demo, and next steps.",
+                label: t(
+                    "server.extensions.design.workspace.create-workspace.empty.ideas.make-slide-deck-pitches",
+                    "Make a 6-slide deck that pitches a weekend project, with a title, problem, solution, demo, and next steps.",
+                ),
+            },
         ];
 
         return html`<div class="dsn-empty-state">
             <${Ico} name="design" size=${34} />
-            <h3>No designs yet</h3>
+            <h3>
+                ${t("server.extensions.design.workspace.create-workspace.empty.h3.no-designs-yet", "No designs yet")}
+            </h3>
             <p class="muted">
-                Ask Pi to design something: a prototype, a screen, a one-pager, or a slide deck. It
-                shows up here, where you can point at things, comment, tweak, and compare versions.
+                ${t("server.extensions.design.workspace.create-workspace.empty.p.ask-pi-design-something", "Ask Pi to design something: a prototype, a screen, a one-pager, or a slide deck. It shows up here, where you can point at things, comment, tweak, and compare versions.")}
             </p>
             ${
                 canEdit &&
@@ -496,15 +631,16 @@ export function createWorkspace(env) {
                             html`<button
                                 type="button"
                                 class="dsn-idea"
-                                onClick=${() => env.sendToBox(idea)}
+                                onClick=${() => env.sendToBox(idea.text)}
                             >
-                                ${idea}
+                                ${idea.label}
                             </button>`,
                     )}
                 </div>`
             }
             <button type="button" class="dsn-link dsy-empty-system" onClick=${env.openSystem}>
-                <${Ico} name="palette" size=${15} /> The design system
+                <${Ico} name="palette" size=${15} />
+                ${t("server.extensions.design.workspace.create-workspace.empty.text.design-system", "The design system")}
             </button>
         </div>`;
     }
@@ -566,7 +702,12 @@ export function createWorkspace(env) {
 
                 if (s.listed !== null) {
                     store.set({ wanted: null });
-                    pocket.notify("info", `No design matches “${s.wanted.artifact}”.`);
+                    pocket.notify(
+                        "info",
+                        t("builtin.design.no-match", "No design matches “{artifact}”.", {
+                            artifact: s.wanted.artifact,
+                        }),
+                    );
                 }
 
                 return;
@@ -771,7 +912,7 @@ export function createWorkspace(env) {
                 html`<div class="dsn-old">
                     ${`Version ${shown} of ${latest}. `}
                     <button type="button" class="dsn-link" onClick=${() => env.showVersion(null)}>
-                        Show the newest
+                        ${t("server.extensions.design.workspace.create-workspace.workspace.button.show-newest", "Show the newest")}
                     </button>
                 </div>`
             }
@@ -781,7 +922,7 @@ export function createWorkspace(env) {
                 html`<div class="dsn-old dsy-unsaved">
                     ${`The design system has ${unsaved} unsaved change${unsaved === 1 ? "" : "s"}, shown here. `}
                     <button type="button" class="dsn-link" onClick=${env.openSystem}>
-                        Open the system
+                        ${t("server.extensions.design.workspace.create-workspace.workspace.button.open-system", "Open the system")}
                     </button>
                 </div>`
             }
