@@ -13,6 +13,7 @@ import {
     scriptedModel,
     until,
 } from "./helpers.ts";
+import { noDirectoryWatch } from "./directory-watch.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -167,12 +168,24 @@ test("a drop-in that is on gives Pi its tools and hooks, reloads when edited, an
     await new Promise((resolve) => setTimeout(resolve, process.platform === "darwin" ? 1000 : 0));
 
     try {
-        writeFileSync(join(dropIns, "shout.ts"), shout("!!"));
         const notices = () =>
             tab.events
                 .filter((each) => each.event === "notice")
                 .map((each) => String(each.data.message));
 
+        if (noDirectoryWatch) {
+            await until(
+                () =>
+                    notices().some((message) =>
+                        message.includes(`Extensions in ${dropIns} are not reloaded`),
+                    ),
+                "the owner to hear why live reload is unavailable",
+            );
+
+            return;
+        }
+
+        writeFileSync(join(dropIns, "shout.ts"), shout("!!"));
         await until(
             () => notices().includes("Reloaded shout.ts: shout"),
             "the edited file to be reloaded",

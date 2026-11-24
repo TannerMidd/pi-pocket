@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
+import { noDirectoryWatch } from "../../test/directory-watch.ts";
 
 test(
     "installed Pocket loads, reloads and preserves owner extensions across restarts",
@@ -243,12 +244,17 @@ test(
         const serverPid = jsonFile("runtime-probe.json").pid;
 
         writeFileSync(file, source.replaceAll("v1", "v2"));
-        await loaded("v2");
-        assert.equal(
-            jsonFile("runtime-probe.json").pid,
-            serverPid,
-            "hot reload does not restart the server",
-        );
+
+        if (noDirectoryWatch) {
+            t.diagnostic(noDirectoryWatch + "; the edit must load on restart instead");
+        } else {
+            await loaded("v2");
+            assert.equal(
+                jsonFile("runtime-probe.json").pid,
+                serverPid,
+                "hot reload does not restart the server",
+            );
+        }
 
         // Restart through Pocket's actual supervisor, not by reopening an in-process app.
         await api("restart", {});

@@ -371,7 +371,7 @@ export class Themes {
 
         for (const dir of [this.builtInDir, this.dir]) {
             try {
-                this.#stops.push(watchTree(dir, later));
+                this.#stops.push(watchTree(dir, later, this.#options.notify));
             } catch (error) {
                 this.#options.log(
                     `Themes in ${dir} are not reloaded when edited: ${describe(error)}`,

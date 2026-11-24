@@ -1,6 +1,7 @@
 // The watch of the web app's files (`watchTree`): tabs reload for a real change, not for an event that leaves a file as
 // it was. Windows reports reads and attribute changes to a watch too, and every tab reloaded for them.
 import { cleanUp, root, until } from "./helpers.ts";
+import { noDirectoryWatch } from "./directory-watch.ts";
 import assert from "node:assert/strict";
 import {
     chmodSync,
@@ -20,7 +21,11 @@ after(cleanUp);
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 600));
 
-test("a watched tree tells of added, written, and removed files, and not of reads or new attributes", async () => {
+test("a watched tree tells of added, written, and removed files, and not of reads or new attributes", async (t) => {
+    if (noDirectoryWatch) {
+        return t.skip(noDirectoryWatch);
+    }
+
     const directory = join(root, "watched-web");
 
     mkdirSync(join(directory, "fonts"), { recursive: true });

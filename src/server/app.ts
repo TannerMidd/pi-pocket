@@ -859,11 +859,15 @@ export class PocketApp {
             return;
         }
 
-        this.#stopWebWatch = watchTree(join(APP_ROOT, "web"), (file) => {
-            if (!this.reloadsPaused) {
-                this.reloadClients(file);
-            }
-        });
+        this.#stopWebWatch = watchTree(
+            join(APP_ROOT, "web"),
+            (file) => {
+                if (!this.reloadsPaused) {
+                    this.reloadClients(file);
+                }
+            },
+            (message) => this.ownerNotice("warning", message),
+        );
         this.#watchingLive = true;
         this.loader?.watch();
         this.themes?.watch();
