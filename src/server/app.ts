@@ -6,6 +6,7 @@
  * What people ask of Pi lives in `commands.ts`, the people's side of a session in `collab.ts`, push notifications in
  * `alerts.ts`, provider sign-ins in `providers.ts`, and each conversation's shared live view in `room.ts`.
  */
+import { type ManagedFolderProof, ManagedStorage } from "./managed-storage.ts";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -39,6 +40,7 @@ import {
     type Registry,
     type Storage,
     type SubmissionRecord,
+    type Tx,
     UsageDoc,
     type UsageState,
 } from "@earendil-works/pi-durable";
@@ -125,8 +127,10 @@ import {
     prepareRelay,
     recordEcho,
     recordSent,
+    type PreparedRelay,
     type RelayEcho,
     type RelayMessage,
+    type RelayReceipt,
     type SurfaceWhere,
 } from "./surfaces/relay.ts";
 import type { Surface } from "./surfaces/types.ts";
@@ -150,7 +154,6 @@ import {
     prepareDropInFolder,
     watchTree,
 } from "./reload.ts";
-import { ResendTask } from "./resend.ts";
 import {
     type Client,
     reportingOf,
@@ -381,6 +384,7 @@ export interface OpenOptions {
     defaultCwd: string;
     supervised: boolean;
     log?: (line: string) => void;
+    rotateOwnerToken?: boolean;
     /** Tests register scripted providers here. */
     configureModels?: (models: ModelRuntime) => void;
     /** Tests shorten the limit gate's waits (`limit-gate.ts`). */
@@ -401,9 +405,15 @@ export class PocketApp {
     readonly config: ConfigStore;
     /** Push subscriptions and their keys; undefined until the server opened. */
     pushStore: PushStore | undefined;
-    readonly approvals = new Approvals((id) => this.attribution.requesterOf(id));
+    readonly approvals = new Approvals(
+        (id) => this.attribution.requesterOf(id),
+        (id, by) => this.steeringUser(id, by) !== undefined,
+    );
     readonly guard = new LancetGuard();
     readonly dataDir: string;
+    /** The data directory this server opened. Do not authorize or collect uploads under a replacement link. */
+    readonly canonicalDataDir: string;
+    readonly managedStorage: ManagedStorage;
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
@@ -505,7 +515,7 @@ export class PocketApp {
         string,
         { token: symbol; provider: WorkspaceProvider }[]
     >();
-    readonly #busy = new Set<ConversationId>();
+    readonly #busy = new Map<ConversationId, NonNullable<LiveState["run"]>["taskId"]>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
     /**
@@ -524,10 +534,10 @@ export class PocketApp {
     /** Each conversation's subagents, and those with a report on its way to it: for the board and the session list. */
     readonly #subagents = new Map<ConversationId, SubagentsOf>();
     #sessions: Record<string, SessionMeta> = {};
-    /** The conversations of sessions removed from the app: nobody sees them again. */
-    #removed = new Set<string>();
+    /** Removed conversations and the only background folders their watches or sweeper may still use. */
+    #removed = new Map<string, ManagedFolderProof | undefined>();
     /** The session each removed session was forked from: a live fork still reads its uploads through it. */
-    #removedForks = new Map<string, NonNullable<SessionMeta["forkedFrom"]>>();
+    #removedForks = new Map<string, SessionMeta["forkedFrom"]>();
     #sessionsTimer: NodeJS.Timeout | undefined;
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
@@ -539,6 +549,7 @@ export class PocketApp {
     #lockFile: string;
     #releaseLock: (() => void) | undefined;
     #openingStorage: Storage | undefined;
+    #restoredThrough = 0;
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
@@ -579,6 +590,8 @@ export class PocketApp {
                 : {}),
         });
         this.config = new ConfigStore(options.dataDir);
+        this.managedStorage = new ManagedStorage(options.dataDir);
+        this.canonicalDataDir = this.managedStorage.canonicalDataDir;
         this.#lockFile = join(options.dataDir, "harness.lock");
         this.#log = options.log ?? ((line) => console.log(line));
         this.cacheKeeper = new CacheKeeper({
@@ -895,7 +908,7 @@ export class PocketApp {
         const app = new PocketApp(options);
 
         try {
-            await app.#open();
+            await app.#open(options.rotateOwnerToken);
         } catch (error) {
             if (app.#releaseLock !== undefined) {
                 await app.close();
@@ -907,11 +920,15 @@ export class PocketApp {
         return app;
     }
 
-    async #open(): Promise<void> {
+    async #open(rotateOwnerToken = false): Promise<void> {
         this.#releaseLock = takeLock(this.#lockFile);
 
+        if (rotateOwnerToken) {
+            this.config.rotateOwnerToken();
+        }
+
         try {
-            this.pushStore = new PushStore(this.dataDir);
+            this.pushStore = new PushStore(this.dataDir, (id) => this.config.pushCredential(id));
         } catch (error) {
             this.#log(`Push notifications are off: ${describe(error)}`);
         }
@@ -948,7 +965,7 @@ export class PocketApp {
             defineExtension({
                 name: "pocket-core",
                 tasks: [
-                    ResendTask,
+                    this.commands.resendTask,
                     this.commands.interruptTask,
                     this.shell.task,
                     this.commands.followTask,
@@ -1008,8 +1025,9 @@ export class PocketApp {
             fetchPublic: createPublicFetch(),
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             roleOf: (personId) => this.config.userById(personId)?.role,
+            canSteer: (id, personId) => this.steeringUser(id, personId) !== undefined,
             on: (event, listener) => this.events.on(event, listener),
-            ask: (request, askContext) => ask(this.approvals, request, askContext),
+            ask: (request, askContext) => ask(this, request, askContext, this.#restoredThrough),
             hide: (value) => this.hidden.add(value),
             commandEnv: (provider) => this.commandEnvs.add(provider),
             annotateTurns: (name, annotate) => this.turnNotes.add(name, annotate),
@@ -1032,6 +1050,11 @@ export class PocketApp {
             inbox: Object.freeze({
                 deliver: (target: ConversationId, delivery: InboxDelivery) =>
                     this.inbox.deliver(target, delivery),
+                deliverCurrent: (
+                    target: ConversationId,
+                    delivery: InboxDelivery,
+                    checkCurrent: () => void,
+                ) => this.inbox.deliver(target, delivery, checkCurrent),
             }),
             onLimitsChanged: (listener) => this.spend.onLimitsChanged(listener),
             linkedSessions: this.linkedSessions,
@@ -1050,12 +1073,13 @@ export class PocketApp {
             surfaces: Object.freeze({
                 prepare: (id: ConversationId, surface: string, where: SurfaceWhere) =>
                     prepareRelay(this, id, surface, where),
-                sent: (
+                confirm: (
                     id: ConversationId,
                     surface: string,
-                    messageId: string | undefined,
-                    where?: { channel?: string; thread?: string },
-                ) => recordSent(this, id, surface, messageId, where),
+                    prepared: PreparedRelay,
+                    receipt: RelayReceipt,
+                    isCurrent: () => boolean,
+                ) => recordSent(this, id, surface, prepared, receipt, isCurrent),
                 echoed: (id: ConversationId, surface: string, messageId: string, echo: RelayEcho) =>
                     recordEcho(this, id, surface, messageId, echo),
                 fromRelay: (id: ConversationId, message: RelayMessage) =>
@@ -1150,6 +1174,7 @@ export class PocketApp {
         this.#openingStorage = undefined;
         const conversations = await this.#recover(storage);
 
+        this.background.startSweeping();
         await this.spend.load(conversations);
 
         // An observer that throws is detached for good: one commit's error must not stop the app hearing of the rest.
@@ -1205,8 +1230,10 @@ export class PocketApp {
         // Core's secrets are hidden before any work goes on, with the settings the modules that loaded declare.
         this.secrets.sync();
         await this.pip.tuneAll((line) => this.#log(line));
-        // Work a previous process left unfinished continues now.
+        // A restart must not resume work for a person who no longer has steering access.
+        await this.#cancelRevoked(conversations);
         this.harness.resume();
+        this.surfacePending.resume();
         void this.sessionCleanup
             .resume()
             .catch((error: unknown) => this.#log(`Removals could not go on: ${describe(error)}`));
@@ -1222,8 +1249,11 @@ export class PocketApp {
      * written back, in one commit. Returns every conversation's id.
      */
     async #recover(storage: Storage): Promise<ConversationId[]> {
-        this.#sessions = { ...((await this.harness.snapshot(SessionsDoc, context))?.items ?? {}) };
+        const newest = await storage.scanTasks({ order: "descending" }, 1, undefined, context);
+
+        this.#restoredThrough = Number(newest.items[0]?.id ?? 0);
         this.#noteRemoved((await this.harness.snapshot(DeletedDoc, context))?.items);
+        this.#sessions = { ...((await this.harness.snapshot(SessionsDoc, context))?.items ?? {}) };
         const conversations: ConversationId[] = [];
         const unrecorded = new Map<ConversationId, Missing[]>();
         let cursor: Cursor | undefined;
@@ -1239,7 +1269,7 @@ export class PocketApp {
                 const live = await this.harness.snapshot(LiveDoc, id, context);
 
                 if (live?.run !== undefined) {
-                    this.#busy.add(id);
+                    this.#busy.set(id, live.run.taskId);
                 }
 
                 if (this.#sessions[String(id)] !== undefined) {
@@ -1436,7 +1466,15 @@ export class PocketApp {
         }
 
         if (kind === "pi.live" && id !== undefined) {
-            const busy = (value as LiveState | null)?.run !== undefined;
+            const run = (value as LiveState | null)?.run;
+            const wasBusy = this.#busy.has(id);
+            const busy = run !== undefined;
+
+            if (run !== undefined) {
+                this.#busy.set(id, run.taskId);
+            } else {
+                this.#busy.delete(id);
+            }
 
             // A compaction asks the model too (an idle session's manual one has no run): it may wait for a limit.
             if (((value as LiveState | null)?.compactions?.length ?? 0) > 0) {
@@ -1445,7 +1483,7 @@ export class PocketApp {
                 this.#compacting.delete(id);
             }
 
-            if (busy !== this.#busy.has(id)) {
+            if (busy !== wasBusy) {
                 const session = Number(this.rootOf(id));
                 const failure = busy ? undefined : (failedNow.get(id) ?? this.#failed.get(id));
                 const outcome =
@@ -1466,7 +1504,6 @@ export class PocketApp {
                 }
 
                 if (busy) {
-                    this.#busy.add(id);
                     // A new run starts over: whether it fails is its own to say.
                     this.#failed.delete(id);
                     this.#storeRunFailure(id, undefined);
@@ -1474,8 +1511,6 @@ export class PocketApp {
                     if (this.#sessions[String(id)] !== undefined) {
                         this.#movedUp(id, Date.now());
                     }
-                } else {
-                    this.#busy.delete(id);
                 }
 
                 sessionsChanged = true;
@@ -1889,7 +1924,7 @@ export class PocketApp {
 
     /** The conversation whose generation or compaction sends requests under a provider session id: only those wait. */
     async #conversationOfSession(sessionId: string): Promise<number | undefined> {
-        for (const id of new Set([...this.#busy, ...this.#compacting])) {
+        for (const id of new Set([...this.#busy.keys(), ...this.#compacting])) {
             const mine = await this.harness
                 .snapshot(ProviderDoc, id, context)
                 .catch(() => undefined);
@@ -2550,6 +2585,18 @@ export class PocketApp {
         return user.sessions === undefined || user.sessions.includes(String(root));
     }
 
+    /** Resolve the recorded person again before deferred work acts. A removed session or person grants no access. */
+    steeringUser(id: ConversationId, personId: string | undefined): User | undefined {
+        const person = personId ? this.config.userById(personId) : undefined;
+
+        return person !== undefined &&
+            (person.role === "owner" || person.role === "guest") &&
+            this.sessionMeta(this.rootOf(id)) !== undefined &&
+            this.canSee(person, id)
+            ? person
+            : undefined;
+    }
+
     requireSee(user: User, id: ConversationId): void {
         if (!this.canSee(user, id)) {
             throw new HttpError(404, "This session is not shared with you.");
@@ -2567,9 +2614,13 @@ export class PocketApp {
     }
 
     /** While take turns is on, only the driver sends to Pi or changes its settings. */
-    async requireDriver(id: ConversationId, user: User): Promise<void> {
+    async requireDriver(id: ConversationId, user: User, tx?: Tx): Promise<void> {
         this.requireSteer(user);
-        const turns = await this.harness.snapshot(TurnsDoc, this.rootOf(id), context);
+        const root = this.rootOf(id);
+        const turns =
+            tx === undefined
+                ? await this.harness.snapshot(TurnsDoc, root, context)
+                : await tx.doc(TurnsDoc, root);
 
         if (turns?.on !== true || turns.driver === user.id) {
             return;
@@ -3127,7 +3178,12 @@ export class PocketApp {
 
     /** The conversations with a run going. */
     busyConversations(): ConversationId[] {
-        return [...this.#busy];
+        return [...this.#busy.keys()];
+    }
+
+    /** Whether a fork parent has a catalogue entry or a removal record. A missing link cannot grant file access. */
+    knownForkParent(id: ConversationId): boolean {
+        return this.#sessions[String(id)] !== undefined || this.#removedForks.has(String(id));
     }
 
     /** The session this one was forked from: also for a session removed from the app, whose forks still read it. */
@@ -3136,20 +3192,35 @@ export class PocketApp {
     }
 
     #noteRemoved(items: Record<string, RemovedSession> | undefined): void {
-        this.#removed = new Set();
+        this.#removed = new Map();
         this.#removedForks = new Map();
 
         for (const [key, record] of Object.entries(items ?? {})) {
-            this.#removed.add(key);
+            this.#removed.set(key, record.folders?.background?.[key]);
 
             for (const each of record.conversations) {
-                this.#removed.add(String(each));
+                this.#removed.set(String(each), record.folders?.background?.[String(each)]);
             }
 
-            if (record.forkedFrom !== undefined) {
-                this.#removedForks.set(key, record.forkedFrom);
-            }
+            this.#removedForks.set(key, record.forkedFrom);
         }
+    }
+
+    /** Removed conversations never create log folders. A missing catalogue entry grants no access before recovery. */
+    backgroundFolder(id: ConversationId, create = false): string | undefined {
+        const name = String(id);
+
+        if (this.#removed.has(name)) {
+            return create
+                ? undefined
+                : this.managedStorage.verifiedFolder("background", name, this.#removed.get(name));
+        }
+
+        const meta = this.sessionMeta(id);
+
+        return meta !== undefined && meta.pip === undefined
+            ? this.managedStorage.folder("background", name, create)
+            : undefined;
     }
 
     /** The catalogue entry of a session; undefined for subagents and other conversations. */
@@ -3329,24 +3400,23 @@ export class PocketApp {
             return "You can view this session but not steer Pi.";
         }
 
-        // An ask (`host.ask`) is answered by the person Pi works for: what it asks for is theirs. With nobody known, the
-        // owner answers it. Anyone who can steer can decline it.
-        if (request.form !== undefined) {
-            const answerer =
-                request.requestedBy ?? this.config.users.find((each) => each.role === "owner")?.id;
+        if (request.requestedBy === undefined) {
+            return "Nobody is known to have asked for this call. It can only be declined.";
+        }
 
-            return answerer === user.id
+        if (this.steeringUser(request.conversationId, request.requestedBy) === undefined) {
+            return "The person who requested this call can no longer steer here.";
+        }
+
+        // An ask is personal. Anyone who can steer can decline it.
+        if (request.form !== undefined) {
+            return request.requestedBy === user.id
                 ? undefined
                 : "Only the person Pi works for here can answer this.";
         }
 
         if (this.config.approvalRule !== "others" || user.role === "owner") {
             return undefined;
-        }
-
-        // Not knowing who asked is not knowing that it was someone else.
-        if (request.requestedBy === undefined) {
-            return "Nobody is known to have asked for this call, so only the owner can allow it.";
         }
 
         return request.requestedBy === user.id
@@ -3360,14 +3430,20 @@ export class PocketApp {
         user: User,
         values?: unknown,
     ): Promise<boolean> {
-        this.requireSteer(user);
-        const request = this.approvals.all().find((each) => each.id === id);
+        const current = this.config.userById(user.id);
 
-        if (request === undefined || !this.canSee(user, request.conversationId)) {
+        if (current === undefined) {
             return false;
         }
 
-        const refused = allow ? this.cannotAllow(user, request) : undefined;
+        this.requireSteer(current);
+        const request = this.approvals.all().find((each) => each.id === id);
+
+        if (request === undefined || !this.canSee(current, request.conversationId)) {
+            return false;
+        }
+
+        const refused = allow ? this.cannotAllow(current, request) : undefined;
 
         if (refused !== undefined) {
             throw new HttpError(403, refused);
@@ -3423,8 +3499,38 @@ export class PocketApp {
         return true;
     }
 
+    /** Abort only the captured task: a later authorized run in the same session must not be stopped. */
+    async #cancelRevoked(
+        conversations: Iterable<ConversationId>,
+        personId?: string,
+    ): Promise<void> {
+        const queues = this.commands.pruneQueued(conversations, personId);
+        const stops = this.attribution
+            .revokedRuns(this.#busy, personId)
+            .map((task) => this.harness.abortTask(task, context));
+
+        await Promise.all([queues, this.surfacePending.cancelRevoked(personId), ...stops]);
+    }
+
+    #accessChanged(personId: string): Promise<void> {
+        const denied = [...this.#agents.keys()].filter(
+            (id) => this.steeringUser(id, personId) === undefined,
+        );
+        const cleanup = this.#cancelRevoked(denied, personId);
+
+        void cleanup.catch((error: unknown) =>
+            this.log(`Cannot cancel work after an access change: ${describe(error)}`),
+        );
+
+        return cleanup;
+    }
+
     /** The owner changes what someone may do: their role, or which session they may open. */
-    setAccess(owner: User, userId: string, patch: { role?: unknown; sessions?: unknown }): void {
+    setAccess(
+        owner: User,
+        userId: string,
+        patch: { role?: unknown; sessions?: unknown },
+    ): Promise<void> {
         if (owner.role !== "owner") {
             throw new HttpError(403, "Only the owner can do that");
         }
@@ -3463,6 +3569,7 @@ export class PocketApp {
         }
 
         this.config.updateUser(userId, change);
+        const cleanup = this.#accessChanged(userId);
         const updated = this.config.userById(userId);
 
         for (const client of [...this.#clients]) {
@@ -3487,9 +3594,11 @@ export class PocketApp {
 
         void this.#refreshUser(userId);
         this.#peopleChanged();
+
+        return cleanup;
     }
 
-    removeUser(owner: User, userId: string): void {
+    removeUser(owner: User, userId: string): Promise<void> {
         if (owner.role !== "owner") {
             throw new HttpError(403, "Only the owner can do that");
         }
@@ -3498,7 +3607,7 @@ export class PocketApp {
             throw new HttpError(400, "The owner cannot be removed");
         }
 
-        this.#forget(userId);
+        return this.#forget(userId);
     }
 
     /**
@@ -3520,8 +3629,10 @@ export class PocketApp {
         }
     }
 
-    #forget(userId: string): void {
+    #forget(userId: string): Promise<void> {
         this.config.removeUser(userId);
+        const cleanup = this.#accessChanged(userId);
+
         removeAvatar(this.dataDir, userId);
         this.pushStore?.removeUser(userId);
 
@@ -3537,6 +3648,8 @@ export class PocketApp {
         }
 
         this.#peopleChanged();
+
+        return cleanup;
     }
 
     /** Take a tab out of a conversation it may no longer see; it keeps app-wide events. */

@@ -8,7 +8,7 @@
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "../app.ts";
 import type { User } from "../config.ts";
 import { SurfacesDoc } from "../docs.ts";
@@ -19,7 +19,7 @@ import { keepFallbacks } from "./components.ts";
 import { MAX_PAYLOAD } from "../inbox.ts";
 import { deliverPending, MAX_PENDING } from "./pending.ts";
 import { SurfaceActed } from "./signal.ts";
-import { actedLine, endSurface, finalText } from "./store.ts";
+import { ACCESS_ENDED, actedLine, cardAuthorized, endSurface, finalText } from "./store.ts";
 import { type Acted, type ActResult, type JsonObject, LIMITS, type Surface } from "./types.ts";
 import { isObject } from "./validate.ts";
 
@@ -34,6 +34,8 @@ const recent = new Map<string, number[]>();
 export type ActBody = { pv: number; set?: Record<string, unknown>; event?: string };
 
 export type { ActResult };
+
+type ActorResult = ActResult & { replayed?: true };
 
 /** The chat messages a card remembers, to answer one that is tried again. */
 const MAX_SEEN = 50;
@@ -121,8 +123,25 @@ export async function actOnSurface(
 ): Promise<ActResult> {
     app.requireSee(user, id);
 
-    return actAs(app, id, user, sid, raw);
+    return actAs(app, id, user, sid, raw, {
+        resolveActor: () => {
+            const current = app.config.userById(user.id);
+
+            if (current === undefined || !app.canSee(current, id)) {
+                throw new HttpError(403, "You may not act on this card");
+            }
+
+            return current;
+        },
+    });
 }
+
+type ActOptions = {
+    derive?: Record<string, (current: unknown) => JsonValue>;
+    once?: string;
+    checkRoute?: (items: Record<string, Surface>) => void;
+    resolveActor?: () => Actor;
+};
 
 /**
  * The same for an actor whose access to the conversation was checked by the caller. `derive` is for the server's own
@@ -136,9 +155,8 @@ export async function actAs(
     user: Actor,
     sid: string,
     raw: unknown,
-    derive: Record<string, (current: unknown) => JsonValue> = {},
-    once?: string,
-): Promise<ActResult> {
+    { derive = {}, once, checkRoute, resolveActor }: ActOptions = {},
+): Promise<ActorResult> {
     const body = readBody(raw);
     const now = Date.now();
     const key = `${id}\n${user.id}\n${sid}`;
@@ -159,7 +177,7 @@ export async function actAs(
     }
 
     let queued = false;
-    const result = await app.harness.commit(async (tx): Promise<ActResult> => {
+    const result = await app.harness.commit(async (tx): Promise<ActorResult> => {
         const doc = await tx.doc(SurfacesDoc, id);
         const surface = doc.items[sid];
 
@@ -167,11 +185,23 @@ export async function actAs(
             throw new HttpError(404, "No such card");
         }
 
+        const checkedActor = () => {
+            checkRoute?.(doc.items);
+
+            if (!cardAuthorized(surface, (by) => app.steeringUser(id, by) !== undefined)) {
+                throw new HttpError(403, ACCESS_ENDED);
+            }
+
+            return resolveActor === undefined ? user : resolveActor();
+        };
+
+        const actor = checkedActor();
+
         const seen =
             once === undefined ? undefined : surface.seen?.find((each) => each.key === once);
 
         if (seen !== undefined) {
-            return seen.result;
+            return { ...seen.result, replayed: true };
         }
 
         if (surface.status !== "open") {
@@ -199,7 +229,7 @@ export async function actAs(
                 throw new HttpError(400, "That cannot be changed");
             }
 
-            if (!mayAct(user, whoOf(surface as Surface, binding.control), surface.by)) {
+            if (!mayAct(actor, whoOf(surface as Surface, binding.control), surface.by)) {
                 throw new HttpError(403, "You may not change this card");
             }
 
@@ -242,7 +272,7 @@ export async function actAs(
                 throw new HttpError(400, "That is not a button that acts");
             }
 
-            if (!mayAct(user, whoOf(surface as Surface, body.event), surface.by)) {
+            if (!mayAct(actor, whoOf(surface as Surface, body.event), surface.by)) {
                 throw new HttpError(403, "You may not press this button");
             }
 
@@ -293,7 +323,7 @@ export async function actAs(
                 throw new HttpError(413, "The values of this action are too large");
             }
 
-            acted = { name: event.name, by: `${user.name} (${user.role})`, at: now, values };
+            acted = { name: event.name, by: `${actor.name} (${actor.role})`, at: now, values };
         }
 
         // The signal comes first: it reads the task, and Pi Durable wants that before the commit's first write.
@@ -301,11 +331,21 @@ export async function actAs(
 
         if (acted !== undefined && surface.wait !== undefined) {
             wake = await tx.signal(
-                surface.wait.taskId as never,
+                Number(surface.wait.taskId) as TaskId,
                 SurfaceActed,
                 surface.wait.key,
                 acted,
             );
+
+            const current = checkedActor();
+
+            if (current.id !== actor.id || current.role !== actor.role) {
+                throw new HttpError(403, "Access changed before this action was recorded");
+            }
+
+            if (wake === "delivered") {
+                surface.checkedSignal = surface.wait.key;
+            }
 
             if (wake === "invalid") {
                 throw new HttpError(500, "The action could not be delivered");
@@ -343,7 +383,7 @@ export async function actAs(
         surface.updatedAt = now;
 
         if (acted !== undefined) {
-            surface.last = { name: acted.name, by: user.id, at: now };
+            surface.last = { name: acted.name, by: actor.id, at: now };
 
             if (event?.resolves !== false) {
                 endSurface(
@@ -364,7 +404,8 @@ export async function actAs(
                         name: acted.name,
                         text: said,
                         by: surface.by,
-                        sender: { name: user.name, id: user.id, trusted: user.role === "owner" },
+                        actorChecked: true,
+                        sender: { name: actor.name, id: actor.id, trusted: actor.role === "owner" },
                     },
                 ];
                 queued = true;

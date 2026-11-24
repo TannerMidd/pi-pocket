@@ -332,6 +332,14 @@ test(
     async (t) => {
         const paths: string[] = [];
         const mock = await mockServer((request, body) => {
+            if (request.url?.endsWith("/joined_rooms")) {
+                return { json: { joined_rooms: ["!room:local"] } };
+            }
+
+            if (request.url?.endsWith("/state/m.room.encryption")) {
+                return { status: 404, json: { errcode: "M_NOT_FOUND" } };
+            }
+
             paths.push(request.url!);
             assert.equal(request.method, "PUT");
             assert.match(request.url!, /rooms\/!room%3Alocal\/send\/m.room.message\/[a-f0-9]{64}$/);

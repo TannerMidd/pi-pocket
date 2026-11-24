@@ -22,7 +22,6 @@ import { randomUUID } from "node:crypto";
 import {
     closeSync,
     existsSync,
-    mkdirSync,
     openSync,
     readdirSync,
     readFileSync,
@@ -30,7 +29,7 @@ import {
     rmSync,
     statSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -294,8 +293,6 @@ export class BackgroundTasks {
 
     constructor(app: PocketApp) {
         this.#app = app;
-        // From the start, whether or not any watch runs: a log keeps to its limit while its extension is off too.
-        this.#sweeping();
         this.task = defineTask<WatchInput, WatchState, null>({
             name: "pocket.background",
             version: 1,
@@ -358,8 +355,8 @@ export class BackgroundTasks {
             : DEFAULT_BACKGROUND_LIMITS.commandQuietMs;
     }
 
-    /** The sweep runs while the server does; it only reads a folder until a log there passes its limit. */
-    #sweeping(): void {
+    /** After recovery, keep logs short even while their extension is off. */
+    startSweeping(): void {
         if (this.#sweeper === undefined) {
             this.#sweeper = setInterval(() => void this.sweep().catch(() => {}), this.timing.sweep);
             this.#sweeper.unref?.();
@@ -373,8 +370,14 @@ export class BackgroundTasks {
         this.#sweeper = undefined;
     }
 
-    #dir(conversationId: ConversationId): string {
-        return join(this.#app.dataDir, "background", String(conversationId));
+    #dir(conversationId: ConversationId, create = false): string {
+        const folder = this.#app.backgroundFolder(conversationId, create);
+
+        if (folder === undefined) {
+            throw new Error("No verified background folder for this session.");
+        }
+
+        return folder;
     }
 
     /** Where a task's log segments go: this, and six letters. */
@@ -389,10 +392,12 @@ export class BackgroundTasks {
     ): { path: string; start: number; size: number }[] {
         const size = item.segment ?? SEGMENT_BYTES;
         const prefix = `${item.id}.log.`;
-        let names: string[] = [];
+        let names: string[];
+        let folder: string;
 
         try {
-            names = readdirSync(this.#dir(conversationId));
+            folder = this.#dir(conversationId);
+            names = readdirSync(folder);
         } catch {
             return [];
         }
@@ -402,9 +407,9 @@ export class BackgroundTasks {
                 (name) => name.startsWith(prefix) && SEGMENT_NAME.test(name.slice(prefix.length)),
             )
             .map((name) => ({
-                path: join(this.#dir(conversationId), name),
+                path: join(folder, name),
                 start: segmentIndex(name.slice(prefix.length)) * size,
-                size: sizeOf(join(this.#dir(conversationId), name)),
+                size: sizeOf(join(folder, name)),
             }))
             .sort((a, b) => a.start - b.start);
     }
@@ -482,12 +487,17 @@ export class BackgroundTasks {
     }
 
     #ref(conversationId: ConversationId, item: BackgroundTask): TaskRef {
+        // POSIX needs no path. Windows checks its pid files on use, including after asynchronous process scans.
+        const files = () => join(this.#dir(conversationId), item.id);
+
         return {
             pid: item.pid,
             ...(item.startTicks === undefined ? {} : { startTicks: item.startTicks }),
             ...(item.boot === undefined ? {} : { boot: item.boot }),
             marker: this.#marker(conversationId, item.id),
-            files: join(this.#dir(conversationId), item.id),
+            get files() {
+                return files();
+            },
             startedAt: item.startedAt,
         };
     }
@@ -605,6 +615,13 @@ export class BackgroundTasks {
 
         for (;;) {
             stop();
+
+            if (this.#app.steeringUser(conversationId, watched.requestedBy) === undefined) {
+                runaway = "its requester can no longer steer here";
+                await this.#kill(conversationId, watched);
+                break;
+            }
+
             this.#trimLog(conversationId, watched.id);
 
             // How fast it writes, over the time that passed (a server slowed down makes a tick longer, not its output
@@ -871,7 +888,7 @@ export class BackgroundTasks {
 
             // Not while a spend limit holds Pi back, nor for someone who can no longer steer here: those wait unread.
             // Checked again for a saved batch: what holds Pi back now may have come since it was saved.
-            if (!this.#askable(conversationId, own)) {
+            if (own.requestedBy === undefined || !this.#askable(conversationId, own)) {
                 unasked = copies;
 
                 return undefined;
@@ -880,12 +897,10 @@ export class BackgroundTasks {
             sent = copies;
             requestId =
                 saved ??
-                (own.requestedBy === undefined
-                    ? `background:${sent.map((item) => item.id).join("+")}`
-                    : requestFor(
-                          own.requestedBy,
-                          `background-batch-${sent.map((item) => item.id).join("+")}`,
-                      ));
+                requestFor(
+                    own.requestedBy,
+                    `background-batch-${sent.map((item) => item.id).join("+")}`,
+                );
 
             for (const item of batch) {
                 item.batch = requestId;
@@ -895,15 +910,20 @@ export class BackgroundTasks {
         }, context);
 
         if (sent.length > 0) {
-            await conversation.submit(
-                {
-                    type: "input",
-                    content: sent.map((item) => this.#message(conversationId, item)).join("\n\n"),
-                    whenBusy: "steer",
-                    requestId,
-                },
-                context,
-            );
+            await runtime.commit(async (tx) => {
+                if (sent.every((item) => this.#askable(conversationId, item))) {
+                    await conversation.submit(tx, {
+                        type: "input",
+                        content: sent
+                            .map((item) => this.#message(conversationId, item))
+                            .join("\n\n"),
+                        whenBusy: "steer",
+                        requestId,
+                    });
+                }
+
+                return undefined;
+            }, context);
         }
 
         // Marked once the message is sent: a crash between the two sends the saved batch again under its id, and Pi
@@ -932,15 +952,11 @@ export class BackgroundTasks {
      */
     #askable(conversationId: ConversationId, item: BackgroundTask): boolean {
         const app = this.#app;
-        const person =
-            item.requestedBy === undefined ? undefined : app.config.userById(item.requestedBy);
-        const mayAsk =
-            item.requestedBy === undefined ||
-            (person !== undefined &&
-                person.role !== "viewer" &&
-                app.canSee(person, conversationId));
 
-        return mayAsk && app.spend.heldBack(conversationId, item.requestedBy) === undefined;
+        return (
+            app.steeringUser(conversationId, item.requestedBy) !== undefined &&
+            app.spend.heldBack(conversationId, item.requestedBy) === undefined
+        );
     }
 
     /** Pi's message about a task that ended: how, its command quoted, and the end of its output fenced, as data. */
@@ -1036,17 +1052,16 @@ export class BackgroundTasks {
      * cannot run. A segment's place in the output is in its name, so reads stay right.
      */
     async sweep(): Promise<void> {
-        const root = join(this.#app.dataDir, "background");
-        let folders: string[] = [];
+        let folders: string[];
 
         try {
-            folders = readdirSync(root);
+            folders = readdirSync(this.#app.managedStorage.root("background"));
         } catch {
             return;
         }
 
         for (const folder of folders) {
-            if (!/^\d+$/.test(folder)) {
+            if (!/^[1-9]\d*$/.test(folder) || !Number.isSafeInteger(Number(folder))) {
                 continue;
             }
 
@@ -1054,7 +1069,7 @@ export class BackgroundTasks {
             let names: string[] = [];
 
             try {
-                names = readdirSync(join(root, folder));
+                names = readdirSync(this.#dir(conversationId));
             } catch {
                 continue;
             }
@@ -1081,10 +1096,10 @@ export class BackgroundTasks {
                     continue;
                 }
 
-                const path = join(root, folder, name);
-
                 if (items !== undefined && !Object.hasOwn(items, id)) {
                     try {
+                        const path = join(this.#dir(conversationId), name);
+
                         if (Date.now() - statSync(path).mtimeMs > 60_000) {
                             rmSync(path, { force: true });
                         }
@@ -1113,7 +1128,7 @@ export class BackgroundTasks {
         while (segments.length > 2 && total > this.sizes.maxLog) {
             const oldest = segments.shift()!;
 
-            rmSync(oldest.path, { force: true });
+            this.#unlink(conversationId, basename(oldest.path));
             total -= oldest.size;
         }
     }
@@ -1138,17 +1153,29 @@ export class BackgroundTasks {
         return ended.map((item) => item.id);
     }
 
+    #unlink(conversationId: ConversationId, name: string): void {
+        let folder: string;
+
+        try {
+            folder = this.#dir(conversationId);
+        } catch {
+            return;
+        }
+
+        rmSync(join(folder, name), { force: true });
+    }
+
     #removeFiles(conversationId: ConversationId, ids: readonly string[] | undefined): void {
         for (const id of ids ?? []) {
-            rmSync(this.#exitFile(conversationId, id), { force: true });
+            this.#unlink(conversationId, `${id}.exit`);
             // Windows: the pid its bash wrote, and the processes found of it.
-            rmSync(join(this.#dir(conversationId), `${id}.pid`), { force: true });
-            rmSync(join(this.#dir(conversationId), `${id}.pids`), { force: true });
+            this.#unlink(conversationId, `${id}.pid`);
+            this.#unlink(conversationId, `${id}.pids`);
             // A log of one file, as builds of 0.24.0 before its release wrote.
-            rmSync(join(this.#dir(conversationId), `${id}.log`), { force: true });
+            this.#unlink(conversationId, `${id}.log`);
 
             for (const segment of this.#segments(conversationId, { id })) {
-                rmSync(segment.path, { force: true });
+                this.#unlink(conversationId, basename(segment.path));
             }
         }
     }
@@ -1183,6 +1210,13 @@ export class BackgroundTasks {
 
         this.#check(conversationId);
 
+        const requireRequester = () => {
+            if (app.steeringUser(conversationId, request.requestedBy) === undefined) {
+                throw new HttpError(403, "A background task needs someone who can steer here.");
+            }
+        };
+
+        requireRequester();
         const command = request.command.trim();
 
         if (command === "") {
@@ -1216,6 +1250,8 @@ export class BackgroundTasks {
         // Reserved with its watch in one commit: the limit and the key hold for starts at the same time.
         const reserved = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(BackgroundDoc, conversationId);
+
+            requireRequester();
             const items = Object.values(doc.items);
             const same =
                 request.key === undefined
@@ -1296,6 +1332,7 @@ export class BackgroundTasks {
             }
 
             await this.beforeSpawn?.();
+            requireRequester();
             this.#needsSplit();
 
             const { pid: spawned, start } = await this.#spawn(conversationId, item, added);
@@ -1359,7 +1396,7 @@ export class BackgroundTasks {
         item: BackgroundTask,
         added: Record<string, string>,
     ): Promise<{ pid: number; start?: number }> {
-        mkdirSync(this.#dir(conversationId), { recursive: true });
+        this.#dir(conversationId, true);
 
         try {
             return await this.#procs.spawn(

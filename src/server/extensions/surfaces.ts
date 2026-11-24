@@ -3,13 +3,15 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { arr, bool, num, obj, oneOf, opt, str, union } from "@earendil-works/pi-schema";
-import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, section, type TaskId } from "@earendil-works/pi-durable";
 import type { PocketHost } from "../host.ts";
 import { keepFallbacks } from "../surfaces/components.ts";
 import { SurfacesDoc } from "../docs.ts";
 import { SurfaceActed } from "../surfaces/signal.ts";
 import {
+    ACCESS_ENDED,
     actedResult,
+    cardAuthorized,
     addSurface,
     callDone,
     detailsOf,
@@ -18,6 +20,7 @@ import {
     rememberCall,
     replaceParts,
     startWait,
+    waiterOf,
 } from "../surfaces/store.ts";
 import { dataFromSteps, fromA2ui, toA2uiAction } from "../surfaces/a2ui.ts";
 import { applyOps } from "../surfaces/patch.ts";
@@ -54,7 +57,7 @@ const REPLACED = "Another call already waits on this surface: patch it instead, 
 const DEFAULT_MINUTES = 24 * 60;
 const MAX_MINUTES = 7 * 24 * 60;
 
-type Park = { id: string; key: string; gen: number; until?: number };
+type Park = { id: string; key: string; gen: number; until?: number; by?: string };
 
 const Parameters = obj(
     {
@@ -173,6 +176,7 @@ export default function createSurfaces(host: PocketHost) {
             const cid = api.conversationId;
             const taskId = String(api.taskId);
             const callKey = `${taskId}/${api.callId}`;
+            const canSteer = (by: string | undefined) => host.canSteer?.(cid, by) === true;
             const read = async (): Promise<SurfacesState> =>
                 (await api.snapshot(SurfacesDoc, cid, context)) ?? { seq: 0, items: {} };
             const park = (wait: Park) => ({
@@ -189,16 +193,44 @@ export default function createSurfaces(host: PocketHost) {
                     const wait = api.checkpoint as Park;
                     const state = await api.readSignal(SurfaceActed, wait.key, context);
 
-                    if (state === undefined) {
-                        return park(wait);
-                    }
-
                     return await api.commit(async (tx) => {
                         const doc = await tx.doc(SurfacesDoc, cid);
                         const surface = doc.items[wait.id];
 
                         if (surface === undefined) {
                             return { output: text("The surface is gone.") };
+                        }
+
+                        if (
+                            surface.status === "cancelled" ||
+                            !canSteer(surface.by) ||
+                            !canSteer(waiterOf(surface, { taskId, by: wait.by }))
+                        ) {
+                            if (surface.status === "open") {
+                                endSurface(surface, "cancelled", ACCESS_ENDED, api.now());
+                            }
+
+                            return { output: text(ACCESS_ENDED), isError: true };
+                        }
+
+                        if (
+                            state !== undefined &&
+                            "value" in state &&
+                            surface.relay !== undefined &&
+                            surface.checkedSignal !== wait.key
+                        ) {
+                            const reason =
+                                "Cancelled: the saved relay action has no verified sender record.";
+
+                            if (surface.status === "open" && surface.wait?.key === wait.key) {
+                                endSurface(surface, "cancelled", reason, api.now());
+                            }
+
+                            return { output: text(reason), isError: true };
+                        }
+
+                        if (state === undefined) {
+                            return park(wait);
                         }
 
                         if ("expired" in state) {
@@ -330,12 +362,21 @@ export default function createSurfaces(host: PocketHost) {
 
                     const title = prior === undefined ? checkTitle(args.title) : prior.title;
                     const who = checkWhoInput(args.who) ?? "owner";
-                    const by = host.requesterOf(cid) ?? "";
+                    const by = host.requesterOf(cid);
                     const surface = await api.commit(async (tx) => {
                         const doc = await tx.doc(SurfacesDoc, cid);
+
+                        if (by === undefined || !canSteer(by)) {
+                            throw new SurfaceError(ACCESS_ENDED);
+                        }
+
                         const again = findByCall(doc, taskId, api.callId);
 
                         if (again !== undefined) {
+                            if (!cardAuthorized(again, canSteer)) {
+                                throw new SurfaceError(ACCESS_ENDED);
+                            }
+
                             return again;
                         }
 
@@ -345,6 +386,10 @@ export default function createSurfaces(host: PocketHost) {
                         if (args.id !== undefined) {
                             if (existing === undefined) {
                                 throw new SurfaceError(`No surface ${args.id} to replace`);
+                            }
+
+                            if (!cardAuthorized(existing, canSteer)) {
+                                throw new SurfaceError(ACCESS_ENDED);
                             }
 
                             // A call that runs again after a restart has done this already.
@@ -389,7 +434,7 @@ export default function createSurfaces(host: PocketHost) {
                         }
 
                         if (minutes !== undefined && made.wait === undefined) {
-                            startWait(made, taskId, now + minutes * 60_000);
+                            startWait(made, taskId, now + minutes * 60_000, by);
                         }
 
                         return JSON.parse(JSON.stringify(made)) as Surface;
@@ -408,6 +453,7 @@ export default function createSurfaces(host: PocketHost) {
                         id: surface.id,
                         key: surface.wait.key,
                         gen: surface.wait.gen,
+                        by: waiterOf(surface, surface.wait),
                         ...(surface.wait.until === undefined ? {} : { until: surface.wait.until }),
                     });
                 }
@@ -419,6 +465,10 @@ export default function createSurfaces(host: PocketHost) {
                     throw new SurfaceError(
                         `No surface ${JSON.stringify(id)} here. Show one first.`,
                     );
+                }
+
+                if (!cardAuthorized(current, canSteer)) {
+                    throw new SurfaceError(ACCESS_ENDED);
                 }
 
                 if (args.action === "patch") {
@@ -466,6 +516,10 @@ export default function createSurfaces(host: PocketHost) {
 
                         if (surface === undefined || surface.status !== "open") {
                             throw new SurfaceError(`Surface ${id} has ended: show a new one`);
+                        }
+
+                        if (!cardAuthorized(surface, canSteer)) {
+                            throw new SurfaceError(ACCESS_ENDED);
                         }
 
                         const result = applyOps(surface, args.ops);
@@ -517,6 +571,16 @@ export default function createSurfaces(host: PocketHost) {
                             throw new SurfaceError(`Surface ${id} has ended: show a new one`);
                         }
 
+                        const by = host.requesterOf(cid);
+
+                        if (
+                            by === undefined ||
+                            !canSteer(by) ||
+                            !cardAuthorized(surface, canSteer)
+                        ) {
+                            throw new SurfaceError(ACCESS_ENDED);
+                        }
+
                         if (surface.wait?.taskId === taskId) {
                             return surface.wait;
                         }
@@ -527,7 +591,7 @@ export default function createSurfaces(host: PocketHost) {
 
                         const now = api.now();
 
-                        startWait(surface, taskId, now + minutes! * 60_000);
+                        startWait(surface, taskId, now + minutes! * 60_000, by);
                         surface.rev += 1;
 
                         return JSON.parse(JSON.stringify(surface.wait)) as NonNullable<
@@ -539,6 +603,7 @@ export default function createSurfaces(host: PocketHost) {
                         id,
                         key: wait.key,
                         gen: wait.gen,
+                        by: waiterOf(current, wait),
                         ...(wait.until === undefined ? {} : { until: wait.until }),
                     });
                 }
@@ -551,13 +616,23 @@ export default function createSurfaces(host: PocketHost) {
                     if (surface.status === "open") {
                         const parked = surface.wait;
 
+                        if (!cardAuthorized(surface, canSteer)) {
+                            throw new SurfaceError(ACCESS_ENDED);
+                        }
+
                         if (parked !== undefined && parked.taskId !== taskId) {
-                            await tx.signal(parked.taskId as never, SurfaceActed, parked.key, {
-                                name: "closed",
-                                by: "Pi",
-                                at: api.now(),
-                                values: {},
-                            });
+                            await tx.signal(
+                                Number(parked.taskId) as TaskId,
+                                SurfaceActed,
+                                parked.key,
+                                {
+                                    name: "closed",
+                                    by: "Pi",
+                                    at: api.now(),
+                                    values: {},
+                                },
+                            );
+                            surface.checkedSignal = parked.key;
                         }
 
                         endSurface(surface, "closed", args.note ?? "Closed", api.now());

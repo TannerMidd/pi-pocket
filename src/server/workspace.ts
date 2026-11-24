@@ -1,11 +1,11 @@
 /**
  * A conversation's folder on this machine, as people reach it through the app: which files a person may load or read,
  * the file viewer, the files for `@` mentions, Changes, its git branch, uploads, and new folders from the folder picker. The
- * operations people call directly check who may do them; the path helpers (`conversationPath`, `conversationFile`,
- * `readableFile`, `uploadDirectory`) leave seeing the conversation to their callers.
+ * operations people call directly check who may do them; `conversationPath` and `uploadDirectory` leave seeing the
+ * conversation to their callers.
  */
-import { lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { lstatSync, mkdirSync, statSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -23,6 +23,9 @@ import {
 import { type Changes, changesIn, diffOf, editFacts, revertFile } from "./changes.ts";
 import type { User } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
+import type { ReadableFile, UploadContent } from "./upload-content.ts";
+import { uploadDirectory } from "./upload-references.ts";
+import { filePolicy } from "./file-policy.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { displayPath, expandHome } from "./paths.ts";
 import type { ClientEntry } from "./projection.ts";
@@ -278,126 +281,105 @@ export class Workspace {
         return resolve(this.#app.cwdOf(id), expandHome(path.trim()));
     }
 
-    /**
-     * A file a person may load through a conversation. People who can steer reach the whole machine through Pi anyway;
-     * viewers and people invited to one session get only files under the conversation's folder or its uploads.
-     */
-    conversationFile(user: User, id: ConversationId, path: string): string {
-        const file = this.conversationPath(id, path);
+    #policy(id: ConversationId, unrestrictedWorkspace: boolean) {
+        const inherited = this.#app.sessionMeta(id)?.inheritedUploads;
 
-        if (user.role !== "viewer" && user.sessions === undefined) {
-            return file;
+        return filePolicy({
+            dataDir: this.#app.dataDir,
+            canonicalDataDir: this.#app.canonicalDataDir,
+            managedStorage: this.#app.managedStorage,
+            agentDir: getAgentDir(),
+            cwd: this.#app.cwdOf(id),
+            unrestrictedWorkspace,
+            session: String(id),
+            inherited,
+            content: this.#app.sessionMeta(id)?.inheritedUploadContent,
+            ancestors: new Set(
+                (Array.isArray(inherited) && inherited.length > 0 ? this.#lineage(id) : []).map(
+                    String,
+                ),
+            ),
+        });
+    }
+
+    /** Can this source pass on a particular upload? No owner or workspace exception. The caller verifies issuance. */
+    uploadGrant(
+        id: ConversationId,
+    ): (ref: string, issued?: UploadContent) => Promise<UploadContent | undefined> {
+        return this.#app.sessionMeta(id) === undefined
+            ? async () => undefined
+            : this.#policy(id, false).grant;
+    }
+
+    #requestPolicy(user: User, id: ConversationId) {
+        this.#app.requireSee(user, id);
+        this.requireLocal(id);
+
+        if (this.#app.sessionMeta(this.#app.rootOf(id)) === undefined) {
+            throw new HttpError(404, "No such session");
         }
 
-        const real = (target: string) => {
-            try {
-                return realpathSync(target);
-            } catch {
-                return undefined;
-            }
-        };
+        return user.role === "owner" && user.sessions === undefined
+            ? undefined
+            : this.#policy(id, user.role === "guest" && user.sessions === undefined);
+    }
 
-        const target = real(file);
-        const cwd = this.#app.cwdOf(id);
-        // A fork shows the messages it inherited, with the files attached to them in the sessions it came from. Their
-        // later uploads are in the same folders, but an upload's name has random bits in it and shows only in its
-        // message, so nobody who cannot read that message can name the file.
-        const uploads = this.#lineage(id).map((each) =>
-            join(this.#app.dataDir, "uploads", String(each)),
-        );
-        const roots = [cwd, ...uploads]
-            .map(real)
-            .filter((root): root is string => root !== undefined);
+    /** The same path boundary applies to previews, downloads, the viewer and file mentions. Routes check their roles. */
+    conversationFile(user: User, id: ConversationId, path: string): ReadableFile {
+        return this.#file(id, path, this.#requestPolicy(user, id));
+    }
 
-        if (
-            target === undefined ||
-            !roots.some((root) => target === root || target.startsWith(root + sep))
-        ) {
+    #file(
+        id: ConversationId,
+        path: string,
+        policy: ReturnType<typeof filePolicy> | undefined,
+    ): ReadableFile {
+        // A listing returns literal names, including spaces. Read the same name that was authorized and displayed.
+        const file = resolve(this.#app.cwdOf(id), expandHome(path));
+        const result = policy === undefined ? file : policy.file(file);
+
+        if (result === undefined) {
             throw new HttpError(404, "Image not found");
         }
 
-        return target;
+        return result;
     }
 
-    /**
-     * A file a person may read whole through a session: the viewer, and files sent along with a message. As
-     * `conversationFile`, but Pi's own folder (sign-ins, settings) and this app's data (people, tokens, the database)
-     * are the owner's alone. Uploads, worktrees, and PiP's clones (`repos/`), which sessions use, are not kept back.
-     */
-    readableFile(user: User, id: ConversationId, path: string): string {
-        const file = this.conversationFile(user, id, path);
-
-        if (user.role === "owner") {
-            return file;
-        }
-
-        // The name on disk (case, long names, no `\\?\` prefix), and names compared without case where the disk does.
-        const fold = (path: string) =>
-            process.platform === "win32" || process.platform === "darwin"
-                ? path.toLowerCase()
-                : path;
-
-        const real = (target: string) => {
-            try {
-                return fold(realpathSync.native(target));
-            } catch {
-                return fold(resolve(target));
-            }
-        };
-
-        const target = real(file);
-
-        // A UNC or device path can name a local folder by another name: the owner's alone.
-        if (process.platform === "win32" && target.startsWith("\\\\")) {
-            throw new HttpError(404, "Not found");
-        }
-
-        const inside = (root: string) => target === root || target.startsWith(root + sep);
-        const data = real(this.#app.dataDir);
-
-        if (
-            inside(real(getAgentDir())) ||
-            (inside(data) &&
-                !inside(join(data, "uploads")) &&
-                !inside(join(data, "worktrees")) &&
-                !inside(join(data, "repos")))
-        ) {
-            throw new HttpError(404, "Not found");
-        }
-
-        return file;
+    readableFile(user: User, id: ConversationId, path: string): ReadableFile {
+        return this.conversationFile(user, id, path);
     }
 
     /** This session and the sessions it was forked from, nearest first. */
     #lineage(id: ConversationId): ConversationId[] {
-        const lineage = [id];
+        const lineage = new Set([id]);
 
         // A removed session in between still links its fork to the sessions before it (`session-cleanup.ts`).
-        for (let from = this.#app.forkedFrom(id); from !== undefined && lineage.length < 64;) {
+        for (let from = this.#app.forkedFrom(id); from !== undefined;) {
             const parent = from.id as unknown as ConversationId;
 
-            if (lineage.includes(parent)) {
-                break;
+            if (
+                !Number.isSafeInteger(parent) ||
+                Number(parent) <= 0 ||
+                lineage.has(parent) ||
+                !this.#app.knownForkParent(parent)
+            ) {
+                return [id];
             }
 
-            lineage.push(parent);
+            lineage.add(parent);
             from = this.#app.forkedFrom(parent);
         }
 
-        return lineage;
+        return [...lineage];
     }
 
-    /**
-     * The files in a conversation's folder, for `@` mentions in the message box: for people who can write to Pi. It lists
-     * names under the folder only, so someone invited to one session sees no more than `conversationFile` lets them load.
-     */
+    /** File mentions prune inaccessible directories and count only visible files. */
     async fileList(id: ConversationId, user: User): Promise<FileListing> {
         this.#app.requireSee(user, id);
-        this.requireLocal(id);
         this.#app.requireSteer(user);
         await this.#app.conversation(id);
 
-        return this.#files.get(this.#app.cwdOf(id));
+        return this.#files.get(this.#app.cwdOf(id), this.#requestPolicy(user, id));
     }
 
     /**
@@ -412,17 +394,22 @@ export class Workspace {
         this.#app.requireSee(user, id);
         this.#app.requireSteer(user);
         await this.#app.conversation(id);
-        let file: string;
 
         try {
-            file = this.readableFile(user, id, path);
+            const policy = this.#requestPolicy(user, id);
+            const file = this.#file(id, path, policy);
+            const name = typeof file === "string" ? file : file.path;
 
             return {
-                path: file,
-                display: displayPath(file, this.#app.cwdOf(id)),
-                ...(await viewFile(file)),
+                path: name,
+                display: displayPath(name, this.#app.cwdOf(id)),
+                ...(await viewFile(file, policy?.allow)),
             };
         } catch (error) {
+            if (error instanceof HttpError && error.status !== 404) {
+                throw error;
+            }
+
             if (error instanceof HttpError || (error as NodeJS.ErrnoException).code === "ENOENT") {
                 throw new HttpError(404, `${path} is not there.`);
             }
@@ -538,10 +525,6 @@ export class Workspace {
     }
 
     uploadDirectory(id: ConversationId): string {
-        const directory = join(this.#app.dataDir, "uploads", String(id));
-
-        mkdirSync(directory, { recursive: true });
-
-        return directory;
+        return uploadDirectory(this.#app, id);
     }
 }

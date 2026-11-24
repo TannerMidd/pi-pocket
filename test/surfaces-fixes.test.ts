@@ -228,6 +228,7 @@ test("an A2UI update changes a card that waits, and leaves its wait alone", asyn
     await app.harness.commit(async (tx) => {
         (await tx.doc(SurfacesDoc, id)).items[first.card.id]!.wait = {
             taskId: "other",
+            by: owner(app).id,
             key: `${first.card.id}.1`,
             gen: 1,
         };
@@ -335,18 +336,25 @@ test("a card answers only in the channel and thread it went to, and a toggle is 
     const { id, card: made } = await show({ ...card, title: "Chat" });
     const by = owner(app).id;
     const message = (text: string, more: object = {}) => ({
-        connector: "Chat",
+        connector: "connector-id",
+        routeRevision: "revision",
+        isCurrent: () => true,
         channel: "room-1",
         text,
         replyTo: "m1",
         author: { id: "me", name: "Me" },
         ownerIds: ["me"],
+        trusted: true,
         by,
         ...more,
     });
 
-    await prepareRelay(app, id, made.id, { connector: "Chat" });
-    await recordSent(app, id, made.id, "m1", { channel: "room-1" });
+    const prepared = await prepareRelay(app, id, made.id, {
+        connector: "connector-id",
+        routeRevision: "revision",
+    });
+
+    await recordSent(app, id, made.id, prepared, { id: "m1", channel: "room-1" }, () => true);
 
     assert.deepEqual(
         await fromRelay(app, id, message("2", { channel: "room-2" })),
@@ -417,17 +425,26 @@ test("a locked input takes no value from a person", async () => {
 test("a thread card answers only in its thread", async () => {
     const { id, card: made } = await show({ ...card, title: "Thread" });
     const message = (more: object) => ({
-        connector: "Chat",
+        connector: "connector-id",
+        routeRevision: "revision",
+        isCurrent: () => true,
         channel: "room-1",
-        // A bare number answers a card only as a reply to its message; this card was never sent, so it is named.
         text: `${made.id} 2`,
         author: { id: "me", name: "Me" },
         ownerIds: ["me"],
+        trusted: true,
         by: owner(app).id,
         ...more,
     });
 
-    await prepareRelay(app, id, made.id, { connector: "Chat", channel: "room-1", thread: "t1" });
+    const prepared = await prepareRelay(app, id, made.id, {
+        connector: "connector-id",
+        routeRevision: "revision",
+        channel: "room-1",
+        thread: "t1",
+    });
+
+    await recordSent(app, id, made.id, prepared, { channel: "room-1", thread: "t1" }, () => true);
     assert.deepEqual(await fromRelay(app, id, message({})), { handled: false }, "no thread");
     assert.deepEqual(await fromRelay(app, id, message({ thread: "t2" })), { handled: false });
     assert.equal((await surfaces(id))[made.id]!.data.agree, false);

@@ -83,6 +83,7 @@ type Internal =
     | "browsers"
     | "memory"
     | "surfaces"
+    | "canSteer"
     | "toolNames"
     | "stopToolCall"
     | "waitsForLimit"

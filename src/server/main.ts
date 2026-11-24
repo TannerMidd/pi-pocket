@@ -267,6 +267,7 @@ const opened = await App.open({
     dataDir: options.data,
     defaultCwd: options.cwd,
     supervised: process.env.PI_POCKET_SUPERVISED === "1",
+    rotateOwnerToken: options.rotateToken,
     // For updates of Pi Pocket itself, which restart the server once the new version is in place.
     restart: () => void stop(RESTART_CODE),
 });
@@ -274,7 +275,6 @@ const opened = await App.open({
 app = opened;
 
 if (options.rotateToken) {
-    opened.config.rotateOwnerToken();
     console.log("Rotated the owner token; old owner links no longer work.");
 }
 

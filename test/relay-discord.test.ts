@@ -476,7 +476,6 @@ test("a stop closes with 4000, keeps the session, and leaves no timer", async ()
     assert.deepEqual(closes, [4000]);
     assert.deepEqual((fake.state() as { session: unknown }).session, {
         id: "S",
-        url: mock.ws,
         seq: 1,
     });
     assert.ok(!process.getActiveResourcesInfo().includes("Timeout"));

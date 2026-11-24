@@ -197,8 +197,14 @@ test("tasks that ended together show a card each, in one group", real, async () 
         `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
         "the session",
     );
-    const first = await app.background.start(id, { command: "echo one; exit 1" });
-    const second = await app.background.start(id, { command: "echo two; exit 2" });
+    const first = await app.background.start(id, {
+        requestedBy: owner(app).id,
+        command: "echo one; exit 1",
+    });
+    const second = await app.background.start(id, {
+        requestedBy: owner(app).id,
+        command: "echo two; exit 2",
+    });
 
     // Both ended, so Pi got one message about the two: a card each, in one group.
     await see(

@@ -11,6 +11,7 @@ import {
     LiveDoc,
     type InputSubmissionDraft,
     type SubmissionId,
+    type Tx,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { TURN_NOTE_ENTRY, type TurnNoteData } from "./entry-format.ts";
@@ -80,6 +81,8 @@ export class TurnNotes {
         draft: InputSubmissionDraft & { requestId: string },
         turn: Omit<Turn, "signal" | "previousActivityAt" | "conversationId">,
         context: Context,
+        checkAdmission: () => void,
+        checkPolicy?: (tx: Tx) => Promise<void>,
     ): Promise<SubmissionId | undefined> {
         if (this.#annotators.length === 0) {
             return undefined;
@@ -109,6 +112,9 @@ export class TurnNotes {
             const idle =
                 (await tx.doc(LiveDoc, id)).run === undefined &&
                 (await tx.doc(InboxDoc, id)).items.length === 0;
+
+            await checkPolicy?.(tx);
+            checkAdmission();
             const submissionId = await conversation.submit(tx, draft);
 
             if (idle && (await tx.doc(LiveDoc, id)).run?.inputs.includes(submissionId) === true) {
@@ -129,6 +135,8 @@ export class TurnNotes {
                     });
                 }
             }
+
+            checkAdmission();
 
             return submissionId;
         }, context);

@@ -145,6 +145,7 @@ test("upgrades keep legacy implicit off, explicit on, explicit off, and mixed ch
 
 test("enabled workflows with no chosen classifier leave non-owner relay traffic and outcomes unchanged, even with a signed-in provider", async () => {
     let classifierCalls = 0;
+    let reference: string | undefined;
     const requests: string[] = [];
     const model = scriptedModel((request) => {
         requests.push(JSON.stringify(request));
@@ -155,7 +156,7 @@ test("enabled workflows with no chosen classifier leave non-owner relay traffic 
                 [
                     fauxToolCall("relay_reply", {
                         text: "Unchanged reply.",
-                        reply_to: "non-owner-event",
+                        reply_to: reference!,
                     }),
                 ],
                 { stopReason: "toolUse" },
@@ -302,9 +303,11 @@ test("enabled workflows with no chosen classifier leave non-owner relay traffic 
             return payload === undefined ? [] : [payload];
         });
 
+        reference = /^event: (e-[A-Za-z0-9_-]+)$/m.exec(payloads[0] ?? "")?.[1];
+        assert.ok(reference);
         assert.deepEqual(
             payloads,
-            ["event: non-owner-event\nchannel: (test-channel)\n\nUnchanged inbound."],
+            [`event: ${reference}\nchannel: (test-channel)\n\nUnchanged inbound.`],
             "the actual non-owner payload arrives unchanged",
         );
         await say(app, id, "REPLY_TEST");

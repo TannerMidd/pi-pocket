@@ -2,6 +2,7 @@
  * How a module asks the transcript to show an input it sends: one line, which opens to the text. The registration
  * lives only while the module is on. The model still reads the message in full. Nothing here is stored.
  */
+import { UPLOAD_INPUT } from "./entry-format.ts";
 import { createHash } from "node:crypto";
 
 /** Presentations one module may register. */
@@ -267,7 +268,7 @@ export function queuePresentation(
 ): { label: string; summary?: string } | undefined {
     let spec: RegisteredPresentation | undefined;
 
-    if (kind !== undefined && kind !== "pi.user") {
+    if (kind !== undefined && kind !== "pi.user" && kind !== UPLOAD_INPUT) {
         spec = presentations.byKind.get(kind);
     } else if (!wrote) {
         spec = matchPrefix(content, presentations);

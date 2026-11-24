@@ -204,6 +204,12 @@ export interface InboxDelivery {
 export interface InboxApi {
     /** Deliver to `target`. `sent: false`: its key delivered it before. */
     deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+    /** Internal: the relay rechecks its route inside the admission transaction. */
+    deliverCurrent?(
+        target: ConversationId,
+        delivery: InboxDelivery,
+        checkCurrent: () => void,
+    ): Promise<{ sent: boolean }>;
 }
 
 /** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
@@ -364,9 +370,14 @@ export class Approvals {
     readonly #observers = new Set<(change: ApprovalTransition) => void>();
     readonly #requesterOf: (conversationId: ConversationId) => string | undefined;
 
-    /** `requesterOf`: who Pi works for in a conversation right now. */
-    constructor(requesterOf: (conversationId: ConversationId) => string | undefined) {
+    readonly #canSteer: (id: ConversationId, by: string) => boolean;
+
+    constructor(
+        requesterOf: (conversationId: ConversationId) => string | undefined,
+        canSteer: (id: ConversationId, by: string) => boolean,
+    ) {
         this.#requesterOf = requesterOf;
+        this.#canSteer = canSteer;
     }
 
     request(asked: ApprovalRequest, context: Context): Promise<ApprovalAnswer> {
@@ -401,7 +412,12 @@ export class Approvals {
     answer(id: string, answer: ApprovalAnswer): boolean {
         const pending = this.#pending.get(id);
 
-        if (pending === undefined) {
+        if (
+            pending === undefined ||
+            (answer.allow &&
+                (pending.request.requestedBy === undefined ||
+                    !this.#canSteer(pending.request.conversationId, pending.request.requestedBy)))
+        ) {
             return false;
         }
 
@@ -583,6 +599,8 @@ export interface PocketHost {
      * @experimental In 0.27: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     roleOf(personId: string): Role | undefined;
+    /** Internal: check the current steering access of the person recorded on deferred work. */
+    canSteer(conversationId: ConversationId, personId: string | undefined): boolean;
     /**
      * Listen to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and
      * runs that start and end. Returns how to stop; pass that to `web.onDispose`. PiP's conversations send none.

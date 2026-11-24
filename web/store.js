@@ -981,11 +981,21 @@ export function signOut() {
         try {
             await disk.clear().catch(() => {});
             await api("logout", {});
+            personStorage.clear();
+
+            // Already visible notifications are local; the server has revoked future deliveries.
+            try {
+                const worker = await navigator.serviceWorker?.getRegistration();
+
+                for (const notice of (await worker?.getNotifications()) ?? []) {
+                    notice.close();
+                }
+            } catch {
+                // Local notification settings must not prevent sign-out.
+            }
         } finally {
             signingOut = false;
         }
-
-        personStorage.clear();
 
         try {
             localStorage.setItem(PERSON_KEY, "");
@@ -3034,7 +3044,11 @@ export const actions = {
     unwatchPr: () => api(`c/${current()}/watch`, { stop: true }),
     /** Allow or deny a call; an ask (`host.ask`) is allowed with what was typed in its fields. */
     approve: (id, allow, values) =>
-        api(`approvals/${encodeURIComponent(id)}`, { allow, ...(values ? { values } : {}) }),
+        api(`approvals/${encodeURIComponent(id)}`, {
+            source: "app",
+            allow,
+            ...(values ? { values } : {}),
+        }),
     /** `worktree`: the session works in a git worktree of its own, made from the folder. */
     createSession: (cwd, { worktree = false } = {}) =>
         api("sessions", { cwd, ...(worktree ? { worktree } : {}) }),

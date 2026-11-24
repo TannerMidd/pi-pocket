@@ -19,6 +19,9 @@ import { type ClassifyRequest } from "../src/server/classify.ts";
 import createRelayTriage from "../src/server/extensions/relay-triage.ts";
 import { type ConnectorConfig, Relay } from "../src/server/extensions/pocket-relay/runtime.ts";
 import type {
+    RelayConnector,
+    RelayContext,
+    RelayEvent,
     RelayOutbound,
     RelayOutboundEvent,
     RelayTriage,
@@ -152,7 +155,25 @@ function fakeWeb(values: Record<string, unknown> = { classifyModel: "faux/jev" }
 }
 
 /** One connector config, as the relay stores it. */
-const config: ConnectorConfig = {
+function listen(relay: Relay, reply?: RelayConnector["reply"]) {
+    let source: RelayContext;
+
+    relay.register({
+        kind: "mock",
+        label: "Mock",
+        authenticatedAuthors: true,
+        fields: [],
+        shape: "poll",
+        poll: async (context) => {
+            source = context;
+        },
+        reply,
+    });
+
+    return (...events: RelayEvent[]) => source.emit(events);
+}
+
+const settings: ConnectorConfig = {
     id: "c-mock",
     name: "mock one",
     kind: "mock",
@@ -331,7 +352,7 @@ test("the relay holds a reply its outbound hook blocks, and a broken hook never 
         return event.text.includes("sk-") ? "block" : "send";
     });
 
-    await relay.put(config);
+    const config = await relay.put(settings);
 
     const signal = new AbortController().signal;
 
@@ -410,10 +431,15 @@ test("the relay drops what a hook drops, labels the rest, and passes trusted sen
         channel: "chan",
     });
 
-    await relay.put(config);
-    await relay.deliver(config, came("1", "BUY NOW", "stranger"));
-    await relay.deliver(config, came("2", "How do I reset the token?", "stranger"));
-    await relay.deliver(config, came("3", "the owner's own words", "me"));
+    const emit = listen(relay);
+    const config = await relay.put(settings);
+
+    await emit(
+        came("1", "BUY NOW", "stranger"),
+        came("2", "How do I reset the token?", "stranger"),
+        came("3", "the owner's own words", "me"),
+    );
+    await until(() => relay.stateOf(config.id).delivered === 2, "the screened deliveries");
 
     // A hook that throws never holds the queue: the message goes on as it came.
     stop();
@@ -425,7 +451,7 @@ test("the relay drops what a hook drops, labels the rest, and passes trusted sen
 
     assert.deepEqual(
         delivered.map(({ key, payload }) => ({
-            key: key.replace("relay-c-mock-", ""),
+            key: key.replace(`relay-${config.revision}-`, ""),
             labeled: payload.startsWith("Triage: question (by test)\n"),
         })),
         [
@@ -463,8 +489,9 @@ test("a null, malformed, or multi-line triage answer never breaks a delivery or 
     ];
     let at = 0;
 
+    listen(relay);
     relay.setTriage((() => answers[at++]) as never);
-    await relay.put(config);
+    const config = await relay.put(settings);
 
     for (const id of ["1", "2", "3", "4", "5"]) {
         const done = await relay.deliver(config, {
@@ -514,7 +541,8 @@ test("a delivery that retries keeps its triage verdict: the classifier is asked 
 
         return { label: "chat" };
     });
-    await relay.put(config);
+    listen(relay);
+    const config = await relay.put(settings);
 
     const event = { id: "e1", text: "hi", author: { id: "stranger", name: "stranger" } };
 
@@ -537,45 +565,35 @@ test("a reply to a message from an owner is never screened; a reply to anyone el
         hide: () => () => {},
     });
 
-    relay.register({
-        kind: "mock",
-        label: "Mock",
-        fields: [],
-        shape: "stream",
-        run: async (context) => {
-            await new Promise((resolve) =>
-                context.signal.addEventListener("abort", resolve, { once: true }),
-            );
-        },
-        reply: async (_context, reply: { text: string }) => {
-            sent.push(reply.text);
+    const emit = listen(relay, async (_context, reply) => {
+        sent.push(reply.text);
 
-            return { id: "r1" };
-        },
+        return { id: "r1" };
     });
+
     relay.setOutbound(async (event) => {
         screened.push(event.text);
 
         return "block" as const;
     });
-    await relay.put(config);
-    await relay.deliver(config, {
-        id: "own",
-        text: "where is the box?",
-        author: { id: "me", name: "me" },
-    });
-    await relay.deliver(config, {
-        id: "other",
-        text: "hello",
-        author: { id: "stranger", name: "stranger" },
-    });
+    const config = await relay.put(settings);
+
+    await emit(
+        { id: "own", text: "where is the box?", author: { id: "me", name: "me" } },
+        { id: "other", text: "hello", author: { id: "stranger", name: "stranger" } },
+    );
+    await until(() => relay.stateOf(config.id).delivered === 2, "the two reply references");
 
     const signal = new AbortController().signal;
 
     // The owner's own chat: "your box is at 192.168.1.5" goes, and the hook never saw it.
     await relay.reply(
         config,
-        { text: "your box is at 192.168.1.5", key: "k1", replyTo: "own" },
+        {
+            text: "your box is at 192.168.1.5",
+            key: "k1",
+            replyTo: relay.stateOf(config.id).recent.find((heard) => heard.id === "own")!.reference,
+        },
         signal,
     );
     assert.deepEqual(sent, ["your box is at 192.168.1.5"]);
@@ -584,7 +602,12 @@ test("a reply to a message from an owner is never screened; a reply to anyone el
     await assert.rejects(
         relay.reply(
             config,
-            { text: "the box is at 192.168.1.5", key: "k2", replyTo: "other" },
+            {
+                text: "the box is at 192.168.1.5",
+                key: "k2",
+                replyTo: relay.stateOf(config.id).recent.find((heard) => heard.id === "other")!
+                    .reference,
+            },
             signal,
         ),
         /The relay held this reply/,
@@ -728,6 +751,7 @@ export default (_host, web) => {
     globalThis.relayMock = { push: (events) => { queue.push(events); wake(); } };
     const connector = {
         kind: "mock",
+        authenticatedAuthors: true,
         label: "Mock",
         shape: "stream",
         fields: [{ name: "token", label: "Token", type: "secret", required: true }],

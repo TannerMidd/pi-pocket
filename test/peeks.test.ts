@@ -319,6 +319,7 @@ test("a call waiting for approval shows on its session's tile, and goes when ans
     const tab = fakeTab(undefined, owner(app));
 
     try {
+        await say(app, id, "push the branch");
         await app.attach(tab.client);
         app.setPeeks(owner(app), tab.client.connection, [id]);
         await until(() => peeks(tab).length > 0, "the tile");
@@ -342,6 +343,7 @@ test("a call waiting for approval shows on its session's tile, and goes when ans
         assert.equal(shown.conversationId, id);
         assert.equal(shown.tool, "bash");
         assert.equal(shown.subject.length, 500, "a long command is cut short");
+        assert.equal(shown.requestedBy, owner(app).id, "attributed to the person who asked");
         assert.ok(!("taskId" in shown), "only what the tile shows");
         assert.equal(await app.answerApproval("call-1", true, owner(app)), true);
         assert.deepEqual(await asked, { allow: true, by: owner(app).name });

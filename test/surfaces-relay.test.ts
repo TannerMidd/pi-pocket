@@ -25,7 +25,7 @@ import { SurfacesDoc } from "../src/server/docs.ts";
 import type { Client } from "../src/server/room.ts";
 import type { EmbedderMessage } from "../src/server/push.ts";
 import { createHandler } from "../src/server/http.ts";
-import { prepareRelay } from "../src/server/surfaces/relay.ts";
+import { prepareRelay, recordSent } from "../src/server/surfaces/relay.ts";
 
 const dataDir = join(root, "data");
 const card = {
@@ -49,12 +49,21 @@ const card = {
         },
     ],
 };
+let firstReference: string;
 const model = scriptedModel((request) => {
     const { role, text } = lastText(request as never);
 
-    if (role === "toolResult" && text.startsWith("Surface s1 shown")) {
+    const shown = /^Surface (s\d+) shown/.exec(text);
+
+    if (role === "toolResult" && shown !== null) {
         return fauxAssistantMessage(
-            [fauxToolCall("relay_reply", { text: "", surface: "s1", reply_to: "e1" } as never)],
+            [
+                fauxToolCall("relay_reply", {
+                    text: "",
+                    surface: shown[1],
+                    reply_to: firstReference,
+                } as never),
+            ],
             { stopReason: "toolUse" },
         );
     }
@@ -99,6 +108,7 @@ export default (_host, web) => {
     globalThis.relayService = web.use("pocket-relay");
     const connector = {
         kind: "mock",
+        authenticatedAuthors: true,
         label: "Mock",
         shape: "stream",
         fields: [{ name: "token", label: "Token", type: "secret", required: true }],
@@ -118,7 +128,7 @@ export default (_host, web) => {
             const hold = globalThis.relayMock.holdNext;
             delete globalThis.relayMock.holdNext;
             await hold?.();
-            return { id };
+            return { id, channel: reply.channel, thread: reply.thread };
         },
     };
     const add = () => { stop(); stop = web.use("pocket-relay")?.register(connector) ?? (() => {}); };
@@ -188,6 +198,11 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
     mock().push([event("e1", "owner-1", "hello there")]);
     await until(async () => (await userTexts()).length === 1, "the first message");
 
+    const reference = /event: (e-[A-Za-z0-9_-]+)/.exec((await userTexts())[0]!)?.[1];
+
+    assert.ok(reference, "the delivered message has an opaque event reference");
+    firstReference = reference;
+
     // Pi shows the card, then sends it to the chat the message came from.
     await app.commands.submit(session, owner(app), { text: "show the card", requestId: "card-1" });
     await until(() => mock().sent.length === 1, "the card in the chat");
@@ -224,8 +239,8 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
         "the toggle back, by the echo",
     );
     await until(() => mock().sent.length === 3, "the second confirmation");
-    // A reply in a thread (Slack's way of answering) is in another thread than the card: the reply decides, not it.
-    mock().push([event("e2c", "owner-1", "1", { replyTo: "m3", thread: "thread-9" })]);
+    // Some services start a thread rooted at the message a person answers.
+    mock().push([event("e2c", "owner-1", "1", { replyTo: "m3", thread: "m3" })]);
     await until(
         async () => (await surface())!.data.agree === true,
         "the toggle, by the second echo",
@@ -287,13 +302,14 @@ test("a card goes to the chat as numbered text, and replies act on it for the pe
 });
 
 test("the relay's own echo of a card goes through the outbound screen", async () => {
-    // The first test's card is done: a new one, sent to the same chat by hand.
+    // The first test's card is done: send a new one to the same chat.
     await app.commands.submit(session, owner(app), { text: "show the card", requestId: "card-3" });
     await until(async () => Object.keys(await surfaces()).length === 2, "the second card");
 
-    const second = Object.values(await surfaces()).find((each) => each.id === "s2")!;
-
-    await prepareRelay(app, session, second.id, { connector: "Chat", channel: "room-1" });
+    await until(
+        async () => (await surfaces()).find((card) => card.id === "s2")?.relay?.msgId !== undefined,
+        "the second card delivered",
+    );
 
     const holds: string[] = [];
     const stop = (
@@ -335,7 +351,21 @@ test("a delayed echo cannot become a reply target after Pi sends the card again"
 
     try {
         await until(() => mock().sent.length === sent + 1, "the echo waiting at the service");
-        await prepareRelay(app, session, second.id, { connector: "Chat", channel: "room-1" });
+        const active = second.relay!;
+        const prepared = await prepareRelay(app, session, second.id, {
+            connector: active.connector,
+            routeRevision: active.routeRevision!,
+            channel: "room-1",
+        });
+
+        await recordSent(
+            app,
+            session,
+            second.id,
+            prepared,
+            { id: "resent", channel: "room-1" },
+            () => true,
+        );
     } finally {
         release();
     }
@@ -353,9 +383,12 @@ test("a delayed echo cannot become a reply target after Pi sends the card again"
         relay.echoes?.map((each) => (typeof each === "string" ? each : each.id)),
         [`m${sent + 2}`],
     );
+    const before = (await userTexts()).filter((text) => text.includes("<relay-message")).length;
+
     mock().push([event("e42", "owner-1", "1", { replyTo: `m${sent + 1}` })]);
     await until(
-        async () => (await userTexts()).some((text) => text.includes("event: e42")),
+        async () =>
+            (await userTexts()).filter((text) => text.includes("<relay-message")).length > before,
         "the old echo reply reaching Pi",
     );
     assert.equal(

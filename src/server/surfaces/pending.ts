@@ -5,10 +5,11 @@
  * and when a run ends. The inbox's key (`surface-<id>-<rev>`) makes a second delivery of the same action harmless.
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import type { PocketApp } from "../app.ts";
 import { SurfacesDoc } from "../docs.ts";
 import { describe, HttpError } from "../errors.ts";
+import { ACCESS_ENDED, endSurface, waiterOf } from "./store.ts";
 import type { Surface } from "./types.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -29,19 +30,17 @@ export async function deliverPending(
     id: ConversationId,
     sid: string,
 ): Promise<boolean> {
-    const marks = [
-        ...((await app.harness.snapshot(SurfacesDoc, id, context))?.items[sid]?.pending ?? []),
-    ].sort((a, b) => a.rev - b.rev);
+    const card = (await app.harness.snapshot(SurfacesDoc, id, context))?.items[sid];
+    const marks = [...(card?.pending ?? [])].sort((a, b) => a.rev - b.rev);
 
     for (const mark of marks) {
-        const owner = app.config.users.find((each) => each.role === "owner");
-        const asked = mark.by === "" ? undefined : app.config.userById(mark.by);
-        const by =
-            asked !== undefined && asked.role !== "viewer" && app.canSee(asked, id) ? asked : owner;
-
         try {
+            if (card?.relay !== undefined && mark.actorChecked !== true) {
+                throw new HttpError(410, "An older relay action has no verified sender record.");
+            }
+
             await app.inbox.deliver(id, {
-                by: by?.id ?? "",
+                by: mark.by,
                 via: `surface ${sid}`,
                 payload: mark.text,
                 key: `surface-${sid}-${mark.rev}`,
@@ -81,6 +80,9 @@ export class PendingActions {
     readonly #timers = new Map<ConversationId, NodeJS.Timeout>();
     readonly #delays = new Map<ConversationId, number>();
     readonly #running = new Set<ConversationId>();
+    readonly #people = new Map<ConversationId, Set<string>>();
+    readonly #deferred = new Set<ConversationId>();
+    #ready = false;
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -88,13 +90,123 @@ export class PendingActions {
 
     /** A surfaces document changed: schedule a retry when it holds a mark, forget the conversation when not. */
     note(id: ConversationId, items: Record<string, Surface> | undefined): void {
-        if (Object.values(items ?? {}).some((surface) => (surface.pending?.length ?? 0) > 0)) {
-            this.#schedule(id, this.#delays.get(id) ?? FIRST_MS);
+        const people = new Set<string>();
+        let pending = false;
+
+        for (const surface of Object.values(items ?? {})) {
+            if (surface.status === "open") {
+                people.add(surface.by);
+
+                if (surface.wait !== undefined) {
+                    people.add(waiterOf(surface, surface.wait) ?? "");
+                }
+            }
+
+            for (const mark of surface.pending ?? []) {
+                people.add(mark.by);
+                pending = true;
+            }
+        }
+
+        if (people.size > 0) {
+            this.#people.set(id, people);
         } else {
+            this.#people.delete(id);
+        }
+
+        if (pending) {
+            if (this.#ready) {
+                this.#schedule(id, this.#delays.get(id) ?? FIRST_MS);
+            } else {
+                this.#deferred.add(id);
+            }
+        } else {
+            this.#deferred.delete(id);
             clearTimeout(this.#timers.get(id));
             this.#timers.delete(id);
             this.#delays.delete(id);
         }
+    }
+
+    /** Start retries only after recovery checked access for all the restored sessions. */
+    resume(): void {
+        this.#ready = true;
+
+        for (const id of this.#deferred) {
+            this.#schedule(id, FIRST_MS);
+        }
+
+        this.#deferred.clear();
+    }
+
+    /** Close open cards and discard undelivered actions for people who lost access. Never send a wake signal with values. */
+    async cancelRevoked(personId?: string): Promise<void> {
+        const app = this.#app;
+        const commits = [];
+
+        for (const [id, people] of this.#people) {
+            const denied = new Set(
+                [...people].filter(
+                    (by) =>
+                        (personId === undefined || by === personId) &&
+                        app.steeringUser(id, by) === undefined,
+                ),
+            );
+
+            if (denied.size === 0) {
+                continue;
+            }
+
+            commits.push(
+                app.harness
+                    .commit(async (tx) => {
+                        const doc = await tx.doc(SurfacesDoc, id);
+                        const live = await tx.doc(LiveDoc, id);
+                        const running = [...(live.tools ?? []), ...(live.nestedTools ?? [])];
+                        const waits = [];
+
+                        for (const surface of Object.values(doc.items)) {
+                            if (
+                                surface.status === "open" &&
+                                (denied.has(surface.by) ||
+                                    (surface.wait !== undefined &&
+                                        denied.has(waiterOf(surface, surface.wait) ?? "")))
+                            ) {
+                                const task = running.find(
+                                    (slot) =>
+                                        slot.status === "running" &&
+                                        String(slot.taskId) === surface.wait?.taskId,
+                                )?.taskId;
+
+                                if (task !== undefined) {
+                                    waits.push(task);
+                                }
+
+                                endSurface(surface, "cancelled", ACCESS_ENDED, app.now());
+                            }
+
+                            if (surface.pending?.some((mark) => denied.has(mark.by))) {
+                                surface.pending = surface.pending.filter(
+                                    (mark) => !denied.has(mark.by),
+                                );
+
+                                if (surface.pending.length === 0) {
+                                    delete surface.pending;
+                                }
+                            }
+                        }
+
+                        return waits;
+                    }, context)
+                    .then(async (waits) => {
+                        for (const task of waits) {
+                            await app.harness.abortTask(task, context);
+                        }
+                    }),
+            );
+        }
+
+        await Promise.all(commits);
     }
 
     /** A run ended: the session takes a message again. */

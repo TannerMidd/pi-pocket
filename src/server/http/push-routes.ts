@@ -1,4 +1,5 @@
 /** `/api/push`: phone notifications. */
+import { pushDevice, setPushCookie } from "../auth.ts";
 import { describe, HttpError } from "../errors.ts";
 import { DEFAULT_PREFS } from "../push.ts";
 import { type ApiRequest, json, readJson } from "./io.ts";
@@ -13,12 +14,21 @@ export async function pushRoutes(api: ApiRequest, action: string | undefined): P
     }
 
     const method = request.method ?? "GET";
+    const device = pushDevice(request);
 
-    if (action === undefined && method === "GET") {
+    if ((action === undefined || action === "device") && method === "GET") {
+        const devices = store.subscriptions(user.id);
+        const current = devices.find((sub) => sub.device === device);
+
+        if (action === "device") {
+            return json(response, 200, { device: current?.device ?? null });
+        }
+
         return json(response, 200, {
             publicKey: store.publicKey,
             prefs: store.prefs(user.id),
-            devices: store.subscriptions(user.id).length,
+            devices: devices.length,
+            endpoint: current?.endpoint ?? null,
         });
     }
 
@@ -27,13 +37,23 @@ export async function pushRoutes(api: ApiRequest, action: string | undefined): P
     }
 
     if (action === "subscribe") {
+        const credential = app.config.pushCredential(user.id);
+        const revision = store.revision;
         const body = await readJson<{
             subscription?: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
         }>(request);
         const sub = body.subscription;
 
+        if (
+            !credential ||
+            credential !== app.config.pushCredential(user.id) ||
+            revision !== store.revision
+        ) {
+            throw new HttpError(409, "The notification sign-in changed. Try again.");
+        }
+
         try {
-            store.subscribe(
+            const binding = store.subscribe(
                 user.id,
                 {
                     endpoint: String(sub?.endpoint ?? ""),
@@ -43,7 +63,10 @@ export async function pushRoutes(api: ApiRequest, action: string | undefined): P
                     },
                 },
                 String(request.headers["user-agent"] ?? "").slice(0, 200),
+                device,
             );
+
+            setPushCookie(request, response, binding);
         } catch (error) {
             throw new HttpError(400, describe(error));
         }

@@ -38,7 +38,7 @@ const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one :
 function freed(plan) {
     return (
         (plan.worktree?.state === "clean" ? plan.worktree.bytes : 0) +
-        (plan.uploads.kept ? 0 : plan.uploads.bytes) +
+        (plan.uploads.removableBytes ?? (plan.uploads.kept ? 0 : plan.uploads.bytes)) +
         plan.logs
     );
 }
@@ -173,8 +173,7 @@ export default function setup(pocket) {
                           ${
                               kept > 0 &&
                               html`<p class="muted small">
-                                  The uploads of ${plural(kept, "session")} stay: a fork of
-                                  ${kept === 1 ? "it" : "them"} still shows them.
+                                  ${`Some uploads from ${plural(kept, "session")} may still be needed by a fork. Those files stay on disk and are not counted as space freed.`}
                               </p>`
                           }`
             }

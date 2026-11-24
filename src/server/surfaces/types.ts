@@ -56,7 +56,7 @@ export type Surface = {
     /** How many waits this surface has had: never reset, so a signal key (`<id>.<gen>`) serves one wait only. */
     gen?: number;
     /** The wait a `ui` call is parked in: a signal under `key` wakes it. `gen` is this wait's number. */
-    wait?: { taskId: string; key: string; gen: number; until?: number };
+    wait?: { taskId: string; key: string; gen: number; until?: number; by?: string };
     /** The plain text of each extension component, kept while its module is on: it still shows when the module is off. */
     fallbacks?: Record<string, string>;
     /** Actions waiting to reach the session as a message: written with the action, cleared when delivered. */
@@ -65,6 +65,8 @@ export type Surface = {
     calls?: { key: string; rev: number }[];
     /** The chat messages (relay event ids, newest last) whose action this card took, with its result: a message tried again returns it. */
     seen?: { key: string; result: ActResult }[];
+    /** The wait key that received a signal after relay sender authentication was introduced. */
+    checkedSignal?: string;
     /** The latest action delivered. */
     last?: { name: string; by: string; at: number };
     /** Set when the status leaves `open`: the text the transcript, an export, and a fork show. */
@@ -73,15 +75,19 @@ export type Surface = {
     a2ui?: string;
     /** The A2UI components as sent, by id: an update that repeats only some of them is read with the others. */
     a2uiRaw?: Record<string, JsonObject>;
+    /** Only this preparation can replace the last confirmed chat route. It does not itself authorize an action. */
+    relayPreparation?: string;
     relay?: {
         connector: string;
+        /** Absent on legacy records, whose delivery and connector identity cannot be verified. */
+        routeRevision?: string;
         channel: string;
         thread?: string;
         msgId?: string;
         /** Each prepare gets a new token, even when the card's pv stays the same. */
         generation?: string;
         /** Newest last. String entries come from older stored cards and use the original map and pv. */
-        echoes?: (string | ({ id: string } & RelayView))[];
+        echoes?: (string | ({ id: string; thread?: string } & RelayView))[];
         pv: number;
         map: Record<string, Target>;
     };
@@ -94,6 +100,8 @@ export type PendingDelivery = {
     text: string;
     /** The user id Pi worked for when the card was made: who the message is from, when they can still reach the session. */
     by: string;
+    /** Absent on older records, which carry no actor provenance for a card sent through a relay. */
+    actorChecked?: true;
     sender: { name: string; id: string; trusted: boolean };
 };
 

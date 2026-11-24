@@ -85,6 +85,13 @@ export class Shell {
             phases: {
                 run: async (task, runtime, context) => {
                     const taskId = Number(task.id);
+                    const permitted = () =>
+                        app.steeringUser(runtime.conversationId, task.input.by) !== undefined;
+
+                    if (!permitted()) {
+                        return runtime.commit(() => finished, context);
+                    }
+
                     // Set before the command starts: finding it set means a restart cut the command off.
                     const started = await runtime.memo<number>("started", context);
                     let data: ShellData;
@@ -98,6 +105,10 @@ export class Shell {
                             (found) => ({ found }),
                             (error: unknown) => ({ error: describe(error) }),
                         );
+
+                        if (!permitted()) {
+                            return runtime.commit(() => finished, context);
+                        }
 
                         data =
                             "error" in env
@@ -228,7 +239,9 @@ export class Shell {
             : `shell:${data.taskId}`;
         const conversation = await app.conversation(id);
 
-        await conversation.submit({ type: "write", entry, requestId }, context);
+        if (app.steeringUser(id, data.by) !== undefined) {
+            await conversation.submit({ type: "write", entry, requestId }, context);
+        }
     }
 
     /**

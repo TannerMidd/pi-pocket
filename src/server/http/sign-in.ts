@@ -75,6 +75,7 @@ export async function login(
         );
     }
 
+    auth.switchBrowser(request, signingIn);
     setAuthCookie(request, response, token);
     response.writeHead(303, { location: next });
     response.end();
@@ -114,6 +115,7 @@ export async function join(
             app.config.updateUser(redeemed.user.id, { tunnel });
         }
 
+        auth.switchBrowser(request, redeemed.user);
         setAuthCookie(request, response, redeemed.token);
         response.writeHead(303, { location: "/" });
         response.end();

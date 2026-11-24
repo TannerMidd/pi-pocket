@@ -45,7 +45,7 @@ type Output = { output: { text: string }[]; isError?: boolean } | { sleep: unkno
 
 /** The `ui` tool run by hand, as Pi Durable runs it: a call id and a task id, and a read that may be stale. */
 function tool(id: ConversationId) {
-    const ui = createSurfaces({ requesterOf: () => owner(app).id } as never)
+    const ui = createSurfaces({ requesterOf: () => owner(app).id, canSteer: () => true } as never)
         .tools![0]! as unknown as {
         execute(args: unknown, api: unknown, context: unknown): Promise<Output>;
     };
@@ -193,13 +193,23 @@ const form = {
         },
     ],
 };
+const route = { connector: "connector-id", routeRevision: "revision" };
+
+async function sent(id: ConversationId, sid: string, msgId: string) {
+    const prepared = await prepareRelay(app, id, sid, route);
+
+    await recordSent(app, id, sid, prepared, { id: msgId, channel: "room-1" }, () => true);
+}
+
 const message = (text: string, more: object = {}) => ({
-    connector: "Chat",
+    ...route,
+    isCurrent: () => true,
     channel: "room-1",
     text,
     replyTo: "m1",
     author: { id: "me", name: "Me" },
     ownerIds: ["me"],
+    trusted: true,
     by: owner(app).id,
     ...more,
 });
@@ -208,15 +218,13 @@ const actor = () => ({ id: owner(app).id, name: owner(app).name, role: owner(app
 test("a reply that names an ended card is refused, and never reaches the newest card", async () => {
     const { id, run, card: old } = await made(form);
 
-    await prepareRelay(app, id, old.id, { connector: "Chat" });
-    await recordSent(app, id, old.id, "m1", { channel: "room-1" });
+    await sent(id, old.id, "m1");
     await run({ action: "close", id: old.id }, { task: "t1", call: "c5" });
     await run({ ...form, title: "Newer" }, { task: "t1", call: "c6" });
 
     const fresh = Object.values(await surfaces(id)).find((each) => each.status === "open")!;
 
-    await prepareRelay(app, id, fresh.id, { connector: "Chat" });
-    await recordSent(app, id, fresh.id, "m2", { channel: "room-1" });
+    await sent(id, fresh.id, "m2");
 
     const outcome = await fromRelay(app, id, message("2", { replyTo: "m1" }));
 
@@ -253,8 +261,7 @@ test("each card message keeps the numbers it displayed", async () => {
         ],
     });
 
-    await prepareRelay(app, id, card.id, { connector: "Chat", channel: "room-1" });
-    await recordSent(app, id, card.id, "m1");
+    await sent(id, card.id, "m1");
 
     const toggled = await fromRelay(app, id, message("1"));
 
@@ -292,12 +299,12 @@ test("each card message keeps the numbers it displayed", async () => {
     }
 });
 
-test("stored relay records without message views still work", async () => {
+test("unverified legacy relay records do not accept replies", async () => {
     const { id, card } = await made(form);
 
     await app.harness.commit(async (tx) => {
         (await tx.doc(SurfacesDoc, id)).items[card.id]!.relay = {
-            connector: "Chat",
+            connector: route.connector,
             channel: "room-1",
             msgId: "m1",
             echoes: ["m2"],
@@ -305,17 +312,15 @@ test("stored relay records without message views still work", async () => {
             map: { "2": { kind: "toggle", path: "/agree" } },
         };
     }, context);
-    assert.equal((await fromRelay(app, id, message("2"))).handled, true);
-    assert.equal((await surfaces(id))[card.id]!.data.agree, true);
-    assert.equal((await fromRelay(app, id, message("2", { replyTo: "m2" }))).handled, true);
+    assert.equal((await fromRelay(app, id, message("2"))).handled, false);
+    assert.equal((await fromRelay(app, id, message("2", { replyTo: "m2" }))).handled, false);
     assert.equal((await surfaces(id))[card.id]!.data.agree, false);
 });
 
 test("an echo from an older relay send cannot attach to a newer send", async () => {
     const { id, card } = await made(form);
 
-    await prepareRelay(app, id, card.id, { connector: "Chat", channel: "room-1" });
-    await recordSent(app, id, card.id, "m1");
+    await sent(id, card.id, "m1");
 
     const pending = await fromRelay(app, id, message("2"));
 
@@ -325,8 +330,7 @@ test("an echo from an older relay send cannot attach to a newer send", async () 
         return;
     }
 
-    await prepareRelay(app, id, card.id, { connector: "Chat", channel: "room-1" });
-    await recordSent(app, id, card.id, "m-new");
+    await sent(id, card.id, "m-new");
     await recordEcho(app, id, card.id, "m-old-echo", pending.echo!);
     assert.deepEqual(await fromRelay(app, id, message("2", { replyTo: "m-old-echo" })), {
         handled: false,
@@ -338,8 +342,7 @@ test("an echo from an older relay send cannot attach to a newer send", async () 
 test("a chat message that is tried again acts once", async () => {
     const { id, run, card } = await made(form);
 
-    await prepareRelay(app, id, card.id, { connector: "Chat" });
-    await recordSent(app, id, card.id, "m1", { channel: "room-1" });
+    await sent(id, card.id, "m1");
 
     const first = await fromRelay(app, id, message("2", { eventId: "ev-1" }));
     const again = await fromRelay(app, id, message("2", { eventId: "ev-1" }));

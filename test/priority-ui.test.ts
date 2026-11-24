@@ -7,6 +7,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -158,6 +159,9 @@ test("calls wait in Needs you, oldest first, and are answered in their rows", re
     const short = await newSession(app);
     const long = await newSession(app);
     const quiet = await newSession(app);
+
+    await say(app, short, "publish the beta");
+    await say(app, long, "run the long command");
     const shortAnswer = ask(short, "npm publish --tag beta", 1_000);
     const longAnswer = ask(long, `echo ${"a very long command ".repeat(10)}`, 2_000);
 
@@ -255,6 +259,8 @@ test(
 
 test("a row answers only the call it shows, not one that took its place", real, async () => {
     const id = await newSession(app);
+
+    await say(app, id, "publish the next version");
     const answer = ask(id, "npm publish --tag next", 3_000);
     const allow = `${rowIn("needs", id)} [data-part="session-allow"]`;
 

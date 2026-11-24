@@ -117,7 +117,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const app = this.#app;
         const meta = app.sessionMeta(source);
         const requester = by ?? app.attribution.requesterOf(source);
-        const user = requester === undefined ? undefined : app.config.userById(requester);
+        const user = app.steeringUser(source, requester);
 
         if (meta === undefined || meta.pip !== undefined || user === undefined) {
             throw new HttpError(403, "Linked sessions need a session where Pi works for someone.");
@@ -126,6 +126,14 @@ export class LinkedSessions implements LinkedSessionsApi {
         app.requireSee(user, source);
 
         return user;
+    }
+
+    #caller(source: ConversationId, previous?: { by?: string }): User {
+        if (previous !== undefined && previous.by === undefined) {
+            throw new HttpError(403, "This saved linked-session request has no requester.");
+        }
+
+        return this.#person(source, previous?.by);
     }
 
     async #maySend(source: ConversationId, user: User, actor?: RequestActor): Promise<void> {
@@ -137,13 +145,22 @@ export class LinkedSessions implements LinkedSessionsApi {
             return;
         }
 
-        await app.requireDriver(source, user);
+        await this.#requireAgentTurn(source, user);
+        app.spend.check(user, source);
+    }
 
-        if ((await app.harness.snapshot(PlanDoc, source, context))?.on) {
+    async #requireAgentTurn(source: ConversationId, user: User, tx?: Tx): Promise<void> {
+        const app = this.#app;
+
+        await app.requireDriver(source, user, tx);
+        const plan =
+            tx === undefined
+                ? await app.harness.snapshot(PlanDoc, source, context)
+                : await tx.doc(PlanDoc, source);
+
+        if (plan?.on) {
             throw new HttpError(409, "This session is in plan mode.");
         }
-
-        app.spend.check(user, source);
     }
 
     /** Re-read policy on the mutation line, and re-resolve the person after every wait. */
@@ -441,6 +458,9 @@ export class LinkedSessions implements LinkedSessionsApi {
         failure: string | undefined,
     ): Promise<void> {
         const app = this.#app;
+        const user = this.#person(id);
+
+        app.requireSee(user, lead);
         const { last, answer, answerId } = await app.harness.commit(async (tx) => {
             const latest = await tx.latestEntryId(id);
 
@@ -478,11 +498,15 @@ export class LinkedSessions implements LinkedSessionsApi {
                 : outcome === "failed"
                   ? (failure ?? "its run failed")
                   : "its run was stopped";
+
+        if (!app.steeringUser(id, user.id) || !app.steeringUser(lead, user.id)) {
+            return;
+        }
+
         const label =
             outcome === "done" && answer?.stopReason === "stop" && answerId !== undefined
                 ? await app.classifyRunOutcome(id, answerId, text)
                 : undefined;
-        const user = this.#person(id);
 
         await this.#deliver(
             id,
@@ -623,7 +647,14 @@ export class LinkedSessions implements LinkedSessionsApi {
             (await this.#app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
         const target = Object.hasOwn(peers, request.to) ? peers[request.to] : undefined;
 
-        if (target === undefined || !this.#leads(source, target as unknown as ConversationId)) {
+        const by = this.#app.attribution.requesterOf(source);
+
+        if (
+            target === undefined ||
+            !this.#leads(source, target as unknown as ConversationId) ||
+            !this.#app.steeringUser(source, by) ||
+            !this.#app.steeringUser(target as unknown as ConversationId, by)
+        ) {
             return false;
         }
 
@@ -744,7 +775,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const previous = (
             await app.harness.snapshot(LinkedSessionCallsDoc, source, actor?.context ?? context)
         )?.items[token];
-        const user = actor?.current() ?? this.#person(source, previous?.by);
+        const user = actor?.current() ?? this.#caller(source, previous);
 
         if (actor !== undefined && previous !== undefined && previous.by !== user.id) {
             throw new HttpError(409, "This start key belongs to another person.");
@@ -1030,7 +1061,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1123,7 +1154,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1322,7 +1353,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1401,9 +1432,7 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         user = actor?.current() ?? user;
 
-        if (actor !== undefined) {
-            app.requireSee(user, target);
-        }
+        app.requireSee(user, target);
 
         const requestId = requestFor(user.id, token);
         const existing = await app.harness.commit(
@@ -1458,7 +1487,16 @@ export class LinkedSessions implements LinkedSessionsApi {
                 { text, requestId: token, mode: steer ? "steer" : "followUp" },
                 `linked session ${replyTo}`,
                 actor === undefined
-                    ? undefined
+                    ? {
+                          beforeSubmit: async () => {
+                              const current = this.#person(source, user.id);
+
+                              app.requireSee(current, target);
+
+                              return { user: current, context };
+                          },
+                          afterSubmit: () => {},
+                      }
                     : {
                           beforeSubmit: () =>
                               app.harness.commit(async (tx) => {
@@ -1476,6 +1514,17 @@ export class LinkedSessions implements LinkedSessionsApi {
                               }, actor.context),
                           afterSubmit: () => closeAdmission(),
                       },
+                () => {
+                    const current = this.#person(source, actor?.current().id ?? user.id);
+
+                    app.spend.check(current, source);
+                },
+                actor === undefined
+                    ? async (tx) => {
+                          await this.#requireAgentTurn(source, user, tx);
+                          await app.requireDriver(target, user, tx);
+                      }
+                    : undefined,
             );
         } finally {
             closeAdmission();

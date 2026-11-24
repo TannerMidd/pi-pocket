@@ -11,6 +11,7 @@ import {
 
 /** Synapse takes 50 MB by default; a homeserver with a lower limit refuses, and nothing is sent. */
 const MAX_UPLOAD = 50 * 1024 * 1024;
+const MAX_EVENT_BYTES = 65_536;
 const MXC = /^mxc:\/\/([A-Za-z0-9.:[\]-]{1,255})\/([A-Za-z0-9_-]{1,255})$/;
 
 type RequestContext = Pick<RelayContext, "values" | "signal">;
@@ -39,6 +40,8 @@ interface Sync {
     rooms?: { join?: Record<string, { timeline?: { events?: MatrixEvent[] } }> };
 }
 
+class MatrixNotFound extends Error {}
+
 async function request<T>(
     context: RequestContext,
     path: string,
@@ -46,6 +49,7 @@ async function request<T>(
     longPoll = false,
     file?: RelayOutFile,
 ): Promise<T> {
+    context.signal.throwIfAborted();
     let response: Response;
     let data: T & { errcode?: string; retry_after_ms?: number };
 
@@ -56,6 +60,8 @@ async function request<T>(
                 ? `${baseOf(context)}/_matrix/client/v3/${path}`
                 : `${baseOf(context)}/_matrix/media/v3/upload?${new URLSearchParams({ filename: file.name })}`,
             {
+                redirect: "error",
+                cache: "no-store",
                 method: file !== undefined ? "POST" : body === undefined ? "GET" : "PUT",
                 headers: {
                     Authorization: `Bearer ${context.values.token}`,
@@ -77,6 +83,8 @@ async function request<T>(
     } catch {
         throw new Error("Matrix request failed. Check the homeserver and connection.");
     }
+
+    context.signal.throwIfAborted();
 
     // A good status with a body that is not JSON (a proxy's page, a cut body) is no answer: taken as one, it loops.
     if (data === null || typeof data !== "object") {
@@ -103,6 +111,10 @@ async function request<T>(
 
     if (response.status === 413 || data.errcode === "M_TOO_LARGE") {
         throw new Error("The Matrix homeserver refused the file as too large.");
+    }
+
+    if (response.status === 404 && data.errcode === "M_NOT_FOUND") {
+        throw new MatrixNotFound("Matrix did not find the requested resource.");
     }
 
     if (!response.ok || data.errcode) {
@@ -218,6 +230,7 @@ function eventOf(event: MatrixEvent, room: string, user: string): RelayEvent {
 
 const matrix: RelayConnector = {
     kind: "matrix",
+    authenticatedAuthors: true,
     label: "Matrix",
     idempotentReply: true,
     description: "A Matrix account: messages in the rooms it joined.",
@@ -299,9 +312,35 @@ const matrix: RelayConnector = {
         const room = reply.to?.channel ?? reply.channel ?? context.values.replyRoom;
         const thread = reply.to?.thread ?? reply.thread;
 
-        if (!room) {
+        if (typeof room !== "string" || !room) {
             throw new Error("Choose a Matrix reply room.");
         }
+
+        const roomPath = `rooms/${encodeURIComponent(room)}`;
+
+        const requireUnencrypted = async () => {
+            // A former member can see stale room state from the time it left.
+            const { joined_rooms: joined } = await request<{ joined_rooms?: unknown }>(
+                context,
+                "joined_rooms",
+            );
+
+            if (!Array.isArray(joined) || !joined.includes(room)) {
+                throw new Error("Matrix did not confirm membership in the reply room.");
+            }
+
+            try {
+                await request(context, `${roomPath}/state/m.room.encryption`);
+            } catch (error) {
+                if (error instanceof MatrixNotFound) {
+                    return;
+                }
+
+                throw error;
+            }
+
+            throw new Error("The Matrix relay cannot send plaintext to an encrypted room.");
+        };
 
         const relation = {
             ...(reply.to ? { "m.in_reply_to": { event_id: reply.to.id } } : {}),
@@ -309,23 +348,43 @@ const matrix: RelayConnector = {
         };
         const files = reply.files ?? [];
 
+        let confirmed = true;
+
         // Each event has its own transaction id from the key: one that runs again is sent once.
-        const send = async (part: string, content: Record<string, unknown>) =>
-            (
+        const send = async (part: string, content: Record<string, unknown>) => {
+            const body = {
+                ...content,
+                ...(Object.keys(relation).length ? { "m.relates_to": relation } : {}),
+                "m.mentions": {},
+            };
+
+            if (
+                reply.confirmDestination &&
+                Buffer.byteLength(JSON.stringify(body)) > MAX_EVENT_BYTES
+            ) {
+                throw new Error("The Matrix reply exceeds the event size limit.");
+            }
+
+            await requireUnencrypted();
+
+            const id = (
                 await request<{ event_id: string }>(
                     context,
-                    `rooms/${encodeURIComponent(String(room))}/send/m.room.message/${createHash(
-                        "sha256",
-                    )
+                    `${roomPath}/send/m.room.message/${createHash("sha256")
                         .update(part === "" ? reply.key : `${reply.key}\u0000${part}`)
                         .digest("hex")}`,
-                    {
-                        ...content,
-                        ...(Object.keys(relation).length ? { "m.relates_to": relation } : {}),
-                        "m.mentions": {},
-                    },
+                    body,
                 )
             ).event_id;
+
+            if (typeof id !== "string" || !id.trim()) {
+                confirmed = false;
+
+                return undefined;
+            }
+
+            return id;
+        };
 
         let first: string | undefined;
 
@@ -334,6 +393,8 @@ const matrix: RelayConnector = {
         }
 
         for (const [index, file] of files.entries()) {
+            await requireUnencrypted();
+
             const { content_uri: url } = await request<{ content_uri?: string }>(
                 context,
                 "",
@@ -357,7 +418,14 @@ const matrix: RelayConnector = {
             first ??= id;
         }
 
-        return first === undefined ? {} : { id: first };
+        if (reply.confirmDestination && (!confirmed || !first)) {
+            return {};
+        }
+
+        return {
+            ...(first === undefined ? {} : { id: first }),
+            ...(reply.confirmDestination ? { channel: room, ...(thread ? { thread } : {}) } : {}),
+        };
     },
 };
 

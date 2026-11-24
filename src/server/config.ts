@@ -43,6 +43,8 @@ export interface User {
     role: Role;
     /** sha256 of the user's login token; the token itself is only kept for the owner. */
     tokenHash: string;
+    /** Changes when sign-out cannot persist revocation in the push store. */
+    pushGeneration?: string;
     createdAt: number;
     lastSeen?: number;
     /** Conversation ids of the only sessions this person may open; absent means every session. */
@@ -411,6 +413,32 @@ export class ConfigStore {
 
     userById(id: string): User | undefined {
         return this.#config.users.find((user) => user.id === id);
+    }
+
+    pushCredential(id: string): string | undefined {
+        const user = this.userById(id);
+
+        return user?.tokenHash
+            ? hashToken(`push:${user.tokenHash}:${user.pushGeneration ?? ""}`)
+            : undefined;
+    }
+
+    revokeUserPush(id: string): void {
+        const user = this.userById(id);
+
+        if (user !== undefined) {
+            const previous = user.pushGeneration;
+
+            user.pushGeneration = randomUUID();
+
+            try {
+                this.save();
+            } catch (error) {
+                user.pushGeneration = previous;
+
+                throw error;
+            }
+        }
     }
 
     addUser(name: string, role: Role, sessions?: string[]): { user: User; token: string } {

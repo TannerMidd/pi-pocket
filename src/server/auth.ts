@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ConfigStore, Role, User } from "./config.ts";
+import { HttpError } from "./errors.ts";
+import type { PushStore } from "./push.ts";
 
+export const PUSH_COOKIE = "pocket_push";
 export const COOKIE = "pocket_auth";
 
 /** How long an invite may last, in minutes: 15 minutes (the default, and always for an owner invite), an hour, a day, or a week. */
@@ -60,13 +63,29 @@ export function quickTunnelHost(request: IncomingMessage): string | undefined {
     return /^[a-z0-9-]+\.trycloudflare\.com$/.test(host) ? host : undefined;
 }
 
+export function pushDevice(request: IncomingMessage): string | undefined {
+    return parseCookies(request.headers.cookie)[PUSH_COOKIE];
+}
+
+export function setPushCookie(
+    request: IncomingMessage,
+    response: ServerResponse,
+    device: string,
+): void {
+    response.setHeader("set-cookie", cookie(request, PUSH_COOKIE, device));
+}
+
 export function setAuthCookie(
     request: IncomingMessage,
     response: ServerResponse,
     token: string,
 ): void {
+    response.setHeader("set-cookie", cookie(request, COOKIE, token));
+}
+
+function cookie(request: IncomingMessage, name: string, value: string): string {
     const parts = [
-        `${COOKIE}=${encodeURIComponent(token)}`,
+        `${name}=${encodeURIComponent(value)}`,
         "Path=/",
         "HttpOnly",
         "SameSite=Lax",
@@ -74,11 +93,14 @@ export function setAuthCookie(
         ...(isHttps(request) ? ["Secure"] : []),
     ];
 
-    response.setHeader("set-cookie", parts.join("; "));
+    return parts.join("; ");
 }
 
 export function clearAuthCookie(response: ServerResponse): void {
-    response.setHeader("set-cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    response.setHeader(
+        "set-cookie",
+        [COOKIE, PUSH_COOKIE].map((name) => `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`),
+    );
 }
 
 /**
@@ -94,8 +116,77 @@ export class Auth {
     /** One-time sign-in links for the owner: the code, and when it ends. Only in memory, so a restart ends them. */
     readonly #links = new Map<string, number>();
 
-    constructor(config: ConfigStore) {
+    readonly #push?: PushStore;
+
+    constructor(config: ConfigStore, push?: PushStore) {
         this.#config = config;
+        this.#push = push;
+    }
+
+    endBrowserPush(user: User, request: IncomingMessage): void {
+        this.#endDevice(user.id, pushDevice(request));
+    }
+
+    #endDevice(userId: string, device: string | undefined): void {
+        if (this.#push !== undefined) {
+            try {
+                this.#push.revokeDevice(userId, device);
+
+                return;
+            } catch {
+                // A failed push.json write needs the same durable fallback as a failed read.
+            }
+        }
+
+        try {
+            this.#config.revokeUserPush(userId);
+        } catch {
+            throw new HttpError(
+                503,
+                "Could not end this browser's notifications. Try again later.",
+            );
+        }
+    }
+
+    switchBrowser(request: IncomingMessage, next: User): void {
+        const current = this.user(request);
+
+        if (current !== undefined && current.id !== next.id) {
+            this.endBrowserPush(current, request);
+        } else if (current === undefined) {
+            // The sign-in cookie may already have expired while the push cookie remains.
+            const device = pushDevice(request);
+
+            if (!device) {
+                return;
+            }
+
+            const previous = this.#deviceUser(device);
+
+            if (previous !== undefined && previous !== next.id) {
+                this.#endDevice(previous, device);
+            }
+        }
+    }
+
+    #deviceUser(device: string): string | undefined {
+        if (this.#push !== undefined) {
+            try {
+                return this.#push.deviceUser(device);
+            } catch {
+                // An unavailable store is not evidence that the browser has no active subscription.
+            }
+        }
+
+        throw new HttpError(503, "Cannot verify this browser's notifications. Try again later.");
+    }
+
+    requirePushDevice(user: User, request: IncomingMessage, expected: unknown): void {
+        const device = pushDevice(request);
+
+        if (!device || device !== expected || this.#deviceUser(device) !== user.id) {
+            throw new HttpError(409, "This notification is no longer current. Open Pi Pocket.");
+        }
     }
 
     user(request: IncomingMessage): User | undefined {

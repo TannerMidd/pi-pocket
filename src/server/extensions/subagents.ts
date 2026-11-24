@@ -55,7 +55,7 @@ import { describe } from "../errors.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
 import { modelLine } from "../model-facts.ts";
-import { requestFor } from "../requests.ts";
+import { requestFor, requestPerson } from "../requests.ts";
 import {
     callTimeoutMs,
     clock,
@@ -161,7 +161,7 @@ async function heldAgain(
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent, through `Courier`. */
 function reporterFor(
     Courier: CourierTask,
-    host: Pick<PocketHost, "notice" | "classifyRunOutcome">,
+    host: Pick<PocketHost, "notice" | "classifyRunOutcome" | "canSteer">,
 ) {
     /**
      * Report how a message ended, or follow it when a Stop held it to go again (`sent`: its submission and request).
@@ -220,6 +220,7 @@ function reporterFor(
                     await putReports(tx, runtime.conversationId, Courier, [
                         {
                             name,
+                            requestedBy: reporter.input.requestedBy,
                             text: `${REPORT_PREFIX}${name} stopped: a person stopped it. Your message waits, held, until a person sends it or drops it; its answer then comes by itself]`,
                         },
                     ]);
@@ -320,10 +321,18 @@ function reporterFor(
                     content: message,
                     whenBusy: followUp ? "followUp" : "steer",
                 } as const;
-                const requestId =
-                    requestedBy === undefined
-                        ? `subagent:${reporter.id}`
-                        : requestFor(requestedBy, `subagent-${reporter.id}`);
+
+                if (
+                    requestedBy === undefined ||
+                    !host.canSteer?.(runtime.conversationId, requestedBy)
+                ) {
+                    return runtime.commit(
+                        () => ({ status: "terminal", outcome: { status: "aborted" } }),
+                        context,
+                    );
+                }
+
+                const requestId = requestFor(requestedBy, `subagent-${reporter.id}`);
                 const submission = await subagent.submit({ ...request, requestId }, context);
                 // Pi Durable leaves a failed run's inbox alone, so a queued follow-up waits for a boundary that never
                 // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
@@ -429,6 +438,13 @@ function reporterFor(
                 const checkpoint = reporter.state.checkpoint;
                 let label: string | undefined;
 
+                if (!host.canSteer?.(runtime.conversationId, reporter.input.requestedBy)) {
+                    return runtime.commit(
+                        () => ({ status: "terminal", outcome: { status: "aborted" } }),
+                        context,
+                    );
+                }
+
                 if (checkpoint.answerId !== undefined && host.classifyRunOutcome !== undefined) {
                     let answer: AssistantMessage | undefined;
 
@@ -441,6 +457,13 @@ function reporterFor(
                     }, context);
 
                     try {
+                        if (!host.canSteer?.(runtime.conversationId, reporter.input.requestedBy)) {
+                            return runtime.commit(
+                                () => ({ status: "terminal", outcome: { status: "aborted" } }),
+                                context,
+                            );
+                        }
+
                         label = await host.classifyRunOutcome(
                             reporter.input.conversationId,
                             checkpoint.answerId,
@@ -467,6 +490,7 @@ function reporterFor(
                         await putReports(tx, runtime.conversationId, Courier, [
                             {
                                 name: reporter.input.name,
+                                requestedBy: reporter.input.requestedBy,
                                 text: `${report}${label === undefined ? "" : `\nReported outcome (Run outcomes classifier; not proof of success): ${label}.`}`,
                             },
                         ]);
@@ -614,7 +638,7 @@ type CourierState =
     | { phase: "send"; batch?: number; text?: string };
 
 /** What the courier asks Pi Pocket about spend limits. */
-type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice">;
+type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice" | "canSteer">;
 
 type CourierTask = ReturnType<typeof courierFor>;
 
@@ -781,6 +805,12 @@ function courierFor(limits: Limits) {
 
                         settleBatch(state, record);
 
+                        if (state.outbox?.length) {
+                            state.outbox = state.outbox.filter((item) =>
+                                limits.canSteer?.(runtime.conversationId, item.requestedBy),
+                            );
+                        }
+
                         if (state.sending === undefined && (state.outbox ?? []).length === 0) {
                             delete state.courier;
                             delete state.held;
@@ -806,13 +836,15 @@ function courierFor(limits: Limits) {
 
                         // A batch taken and not sent yet goes first, under its own id.
                         if (state.sending === undefined) {
-                            const reports = state.outbox ?? [];
+                            const outbox = state.outbox!;
+                            const by = outbox[0]!.requestedBy!;
+                            const reports = outbox.filter((item) => item.requestedBy === by);
                             const batch = (state.batches ?? 0) + 1;
 
                             state.batches = batch;
-                            state.outbox = [];
+                            state.outbox = outbox.filter((item) => item.requestedBy !== by);
                             state.sending = {
-                                request: `subagent-reports:${courier.id}:${batch}`,
+                                request: requestFor(by, `subagent-reports-${courier.id}-${batch}`),
                                 reports,
                             };
                         }
@@ -861,6 +893,26 @@ function courierFor(limits: Limits) {
 
                     if (sending !== undefined) {
                         const parent = (await runtime.conversation(parentId, context))!;
+                        const by = requestPerson(sending.request)?.userId;
+
+                        if (!limits.canSteer?.(parentId, by)) {
+                            return runtime.commit(async (tx) => {
+                                const state = await tx.doc(SubagentsDoc, parentId);
+
+                                if (state.sending?.request === sending.request) {
+                                    const queued = await queuedBatch(tx, parentId, sending.request);
+
+                                    if (queued !== undefined) {
+                                        await unqueue(tx, parentId, queued);
+                                    }
+
+                                    delete state.sending;
+                                }
+
+                                return { status: "running", checkpoint: { phase: "next" } };
+                            }, context);
+                        }
+
                         // Under its own id: a batch sent before is not sent again, and its submission is what it was.
                         const submission = await parent.submit(
                             {
@@ -1119,8 +1171,8 @@ const STOP_MINUTES = 60;
 export const MAX_STOPS = 2;
 
 type StallAction =
-    | { kind: "tool"; conversationId: ConversationId; callId: string }
-    | { kind: "run"; conversationId: ConversationId; taskId: number };
+    | { kind: "tool"; conversationId: ConversationId; callId: string; requestedBy?: string }
+    | { kind: "run"; conversationId: ConversationId; taskId: number; requestedBy?: string };
 
 /** `seen`: each subagent's progress, as last seen, and since when it is so. */
 type StallState =
@@ -1228,6 +1280,12 @@ function stallWatchFor(
                             record.stall = { since };
                         }
 
+                        const requestedBy = host.requesterOf(record.conversationId);
+
+                        if (!host.canSteer?.(parent, requestedBy)) {
+                            continue;
+                        }
+
                         const stall = record.stall!;
                         const on = waitingOn(live);
                         // A call with its own timeout runs until then: no stall before it, no stop.
@@ -1238,6 +1296,7 @@ function stallWatchFor(
                             stall.told = true;
                             reports.push({
                                 name,
+                                requestedBy,
                                 text: `${REPORT_PREFIX}${name} stalled: no progress for ${span(quiet)}, waiting on ${on.what} since ${clock(since)}.${hard > 0 ? ` Pi Pocket stops that ${on.callId === undefined ? "run" : "call"} at ${span(hard)} with no progress.` : ""} Its report still comes by itself]`,
                             });
                         }
@@ -1252,6 +1311,7 @@ function stallWatchFor(
                         if (count >= MAX_STOPS) {
                             reports.push({
                                 name,
+                                requestedBy,
                                 text: `${REPORT_PREFIX}${name} stalled again: no progress for ${span(quiet)}, waiting on ${on.what} since ${clock(since)}. Pi Pocket stopped its work ${MAX_STOPS} times already and stops it no more: stop it, or ask the user what to do]`,
                             });
                             alerts.push(
@@ -1265,17 +1325,20 @@ function stallWatchFor(
 
                         if (on.callId !== undefined && typeof host.stopToolCall === "function") {
                             actions.push({
+                                requestedBy,
                                 kind: "tool",
                                 conversationId: record.conversationId,
                                 callId: on.callId,
                             });
                             reports.push({
                                 name,
+                                requestedBy,
                                 text: `${REPORT_PREFIX}${name} stalled: Pi Pocket stopped ${on.what}, which made no progress for ${span(quiet)} (${which}). The subagent goes on with that call's partial output; its report comes by itself]`,
                             });
                         } else {
                             record.stoppedBy = "deadline";
                             actions.push({
+                                requestedBy,
                                 kind: "run",
                                 conversationId: record.conversationId,
                                 taskId: Number(live.run!.taskId),
@@ -1284,6 +1347,7 @@ function stallWatchFor(
 
                             reports.push({
                                 name,
+                                requestedBy,
                                 text: `${REPORT_PREFIX}${name} stopped by Pi Pocket: no progress for ${span(quiet)}, waiting on ${on.what} (${which}). Send it the work again, or ask the user]${words === undefined ? "" : ` Its last words: “${words}”.`}`,
                             });
                         }
@@ -1325,6 +1389,10 @@ function stallWatchFor(
                 const checkpoint = watch.state.checkpoint as Extract<StallState, { phase: "act" }>;
 
                 for (const action of checkpoint.actions) {
+                    if (!host.canSteer?.(action.conversationId, action.requestedBy)) {
+                        continue;
+                    }
+
                     if (action.kind === "tool") {
                         await host
                             .stopToolCall(action.conversationId, action.callId)
@@ -1551,6 +1619,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
         replay: "unsafe",
         execute: async (args, api, context) => {
             const { action, name, message, followUp } = args;
+            const requestedBy = host.requesterOf(api.conversationId);
             const reply = (text: string, conversationId?: ConversationId) => ({
                 output: [{ type: "text" as const, text }],
                 ...(conversationId === undefined || name === undefined
@@ -1809,6 +1878,10 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 // Reads first: a commit reads the tables only before it writes one.
                 const watched = await working(tx, state.stallWatch);
 
+                if (!host.canSteer?.(api.conversationId, requestedBy)) {
+                    throw new Error("A subagent needs someone who can steer here.");
+                }
+
                 if (action === "spawn") {
                     if (Object.hasOwn(state.agents, name)) {
                         return `${name} already exists; use send.`;
@@ -1861,7 +1934,6 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
                 const record = state.agents[name]!;
                 const conversationId = record.conversationId;
-                const requestedBy = host.requesterOf(api.conversationId);
 
                 // For the subagents bar: what it works on now, and since when.
                 record.asked = message.trim().slice(0, 300);

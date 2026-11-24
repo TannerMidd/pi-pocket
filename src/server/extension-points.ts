@@ -8,11 +8,12 @@
  *   internals: no script to run in it, and a `fill` for a person's value that core never shows.
  */
 import type { Context } from "@earendil-works/chord/context";
+import { defineDoc } from "@earendil-works/pi-durable";
+import type { PocketApp } from "./app.ts";
 import type { Browsers } from "./browser.ts";
 import type { BrowserPage, Target } from "./browser/page.ts";
 import { normalizeUrl } from "./browser/urls.ts";
 import type {
-    Approvals,
     AskAnswer,
     AskChoice,
     AskField,
@@ -60,10 +61,20 @@ function choicesOf(given: unknown): AskChoice[] {
     return choices;
 }
 
+/** One person per asking task. The document retires with the task; answers never enter it. */
+const AskRequester = defineDoc<{ by?: string | null }>({
+    kind: "pocket.ask-requester",
+    version: 1,
+    scope: "task",
+    initial: () => ({}),
+    checkpointWhen: () => false,
+});
+
 export async function ask(
-    approvals: Approvals,
+    app: PocketApp,
     request: AskRequest,
     context: Context,
+    restoredThrough: number,
 ): Promise<AskAnswer> {
     const { conversationId, id, taskId, callId } = request ?? ({} as AskRequest);
 
@@ -132,7 +143,33 @@ export async function ask(
                 ? "Done"
                 : "Send"
             : line(request.submit, "submit", 30);
-    const answer = await approvals.request(
+    const candidate = app.attribution.requesterOf(conversationId);
+    const by = await app.harness.commit(async (tx) => {
+        const task = await tx.task(taskId);
+
+        if (task?.conversationId !== conversationId || task.state.status === "terminal") {
+            return null;
+        }
+
+        const pin = await tx.doc(AskRequester, taskId);
+
+        if (pin.by === undefined) {
+            // A pre-upgrade task has no recorded asker. Do not borrow today's requester after restart.
+            pin.by = Number(taskId) > restoredThrough ? (candidate ?? null) : null;
+        }
+
+        return pin.by;
+    }, context);
+
+    if (
+        by === null ||
+        app.attribution.requesterOf(conversationId) !== by ||
+        !app.steeringUser(conversationId, by)
+    ) {
+        return { answered: false, by: "Pi Pocket" };
+    }
+
+    const answer = await app.approvals.request(
         {
             id,
             conversationId,

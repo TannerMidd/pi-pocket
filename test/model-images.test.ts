@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { forModel, imageWork, modelImage, prepareModelImage } from "../src/server/model-images.ts";
+import {
+    forModel,
+    imageWork,
+    issuedModelImage,
+    modelImage,
+    prepareModelImage,
+} from "../src/server/model-images.ts";
 import { heicToJpeg } from "../src/server/heic.ts";
 
 // A 1×1 PNG, and a 2×2 blue one.
@@ -16,6 +23,14 @@ const BLUE = Buffer.from(
     "base64",
 );
 
+function receipt(path: string, bytes: Buffer) {
+    return {
+        path,
+        mime: "image/png",
+        content: { size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") },
+    };
+}
+
 test("an image prepared at upload is the one a message sends, without making it again", async () => {
     const folder = mkdtempSync(join(tmpdir(), "model-images-"));
 
@@ -23,31 +38,41 @@ test("an image prepared at upload is the one a message sends, without making it 
         const path = join(folder, "a.png");
 
         writeFileSync(path, PNG);
-        prepareModelImage(path, "image/png", PNG.length);
-        const first = await modelImage(path, "image/png");
+        const file = receipt(path, PNG);
+
+        prepareModelImage(file);
+        const first = await issuedModelImage(file);
+
+        assert.equal(first.image.data, PNG.toString("base64"));
 
         assert.equal(first.image.mimeType, "image/png");
         assert.equal(first.note, undefined, "an image that does not change gets no note");
         // The same object each time: the one prepared, not one made again.
-        assert.equal(await modelImage(path, "image/png"), first);
+        assert.equal(await issuedModelImage(file), first);
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
 });
 
-test("an image whose file changed after its upload is read again", async () => {
+test("a prepared image cannot supply another receipt's conversion", async () => {
     const folder = mkdtempSync(join(tmpdir(), "model-images-"));
 
     try {
         const path = join(folder, "a.png");
 
         writeFileSync(path, PNG);
-        prepareModelImage(path, "image/png", PNG.length);
-        const before = await modelImage(path, "image/png");
+        const original = receipt(path, PNG);
+        const wrongDigest = receipt(path, Buffer.alloc(PNG.length));
+        const other = receipt(path, BLUE);
 
+        prepareModelImage(original);
+        await issuedModelImage(original);
+        prepareModelImage(wrongDigest);
+        await assert.rejects(issuedModelImage(wrongDigest));
+        await assert.rejects(issuedModelImage(other));
+        await assert.rejects(issuedModelImage({ ...original, mime: "image/heic" }));
         writeFileSync(path, BLUE);
-        assert.equal((await modelImage(path, "image/png")).image.data, BLUE.toString("base64"));
-        assert.notEqual(before.image.data, BLUE.toString("base64"));
+        assert.equal((await issuedModelImage(other)).image.data, BLUE.toString("base64"));
     } finally {
         rmSync(folder, { recursive: true, force: true });
     }
@@ -65,11 +90,11 @@ test("uploads make two images at a time, and wait at most 24 deep", async () => 
 
         for (const path of paths) {
             copyFileSync(source, path);
-            prepareModelImage(path, "image/png", PNG.length);
+            prepareModelImage(receipt(path, PNG));
         }
 
         assert.deepEqual(imageWork(), { running: 2, waiting: 24 });
-        await Promise.all(paths.map((path) => modelImage(path, "image/png")));
+        await Promise.all(paths.map((path) => issuedModelImage(receipt(path, PNG))));
         assert.deepEqual(imageWork(), { running: 0, waiting: 0 });
     } finally {
         rmSync(folder, { recursive: true, force: true });

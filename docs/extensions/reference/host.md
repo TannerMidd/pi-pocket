@@ -385,7 +385,7 @@ ask(request: AskRequest, context: Context): Promise<AskAnswer>;
 
 Since 0.22.0 · Experimental
 
-Asks the person Pi works for, on a card in the session, as an approval asks. The card shows the request's `title`, its `text`, a field for each of its `fields` (a hidden one for a `secret`), and a button. Only the person Pi works for can send it (the owner, when nobody is known); anyone who can steer can decline it. It notifies that person, as an approval does.
+Asks the person Pi works for, on a card in the session, as an approval asks. The card shows the request's `title`, its `text`, a field for each of its `fields` (a hidden one for a `secret`), and a button. Only the original requester can send it, while they can still steer. Anyone who can steer can decline it. A replay without its original requester is declined instead of asking someone else. It notifies that person, as an approval does.
 
 What they type comes back in the answer's `values`, and nowhere else: not to Pi, into the transcript, or to the other people in the session. A plain Allow, such as from a notification, is refused: each field must be filled in. Do not keep the values in a memo or a document, where a restart would find them. Without a memo, a call that a restart cut off comes back as interrupted, and asks again when Pi tries again. See [`AskRequest`](#askrequest) and [`AskAnswer`](#askanswer).
 

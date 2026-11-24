@@ -1786,9 +1786,20 @@ export class Pip {
 
         // PiP turned off keeps its follows: a report waits until it is on again, as its schedules, watches, and hooks
         // do, so no run starts in its conversation without its rules and tools.
-        const person = this.#app.config.userById(input.userId);
+        const person = this.#app.steeringUser(pipId, input.userId);
+        const canReport = () =>
+            this.#app.steeringUser(input.sessionId, input.userId) !== undefined &&
+            this.ownerOf(pipId) === input.userId;
 
-        if (person !== undefined && !this.available(person)) {
+        if (person === undefined || !canReport()) {
+            return runtime.commit(async (tx) => {
+                await this.#settleFollow(tx, pipId, Number(runtime.taskId));
+
+                return finished;
+            }, context);
+        }
+
+        if (!this.available(person)) {
             return runtime.sleepUntil(
                 runtime.now() + this.holdMs,
                 { phase: "report", text },
@@ -1802,7 +1813,7 @@ export class Pip {
         // The report says what the session did: PiP has looked at it.
         this.#looked(pipId, input.sessionId);
 
-        if (pip !== undefined) {
+        if (pip !== undefined && canReport()) {
             try {
                 if (this.#app.spend.heldBack(pipId, input.userId) === undefined) {
                     await pip.submit(

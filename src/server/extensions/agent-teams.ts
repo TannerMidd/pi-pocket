@@ -68,10 +68,6 @@ const BACKGROUND = { ownership: { kind: "conversation" }, background: true } as 
 const STALLED_MINUTES = 30;
 const STOP_MINUTES = 60;
 
-/** A request id as a person's work when Pi works for one, else nobody's. */
-const requested = (person: string | undefined, key: string) =>
-    person === undefined ? key : requestFor(person, key);
-
 /** How often one quiet linked session's calls are stopped before a person decides; a message to it starts over. */
 const MAX_STOPS = 2;
 /** How long none is at work before the watch ends: a session just started or sent to may not be at work yet. */
@@ -169,6 +165,7 @@ type StallState =
     | { phase: "look"; seen?: Seen; emptySince?: number }
     | {
           phase: "act";
+          requestedBy?: string;
           seen: Seen;
           at: number;
           lines: string[];
@@ -199,7 +196,10 @@ function stallWatchFor(
                 const lead = runtime.conversationId;
                 const { soft, hard: limit } = limits();
                 const at = runtime.now();
-                const busy = (await linked.activity?.(lead)) ?? [];
+                const requestedBy = host.requesterOf(lead);
+                const busy = host.canSteer?.(lead, requestedBy)
+                    ? ((await linked.activity?.(lead)) ?? [])
+                    : [];
                 const before = watch.state.checkpoint.seen ?? {};
                 const seen: Seen = {};
 
@@ -348,6 +348,7 @@ function stallWatchFor(
                             status: "running",
                             checkpoint: {
                                 phase: "act",
+                                requestedBy,
                                 seen,
                                 at,
                                 lines,
@@ -373,10 +374,24 @@ function stallWatchFor(
             // its message, under its own id, goes once. A lead at work takes it at its next pause.
             act: async (watch, runtime, context) => {
                 const checkpoint = watch.state.checkpoint as Extract<StallState, { phase: "act" }>;
+                const by = checkpoint.requestedBy;
+                const mayAct = () =>
+                    !!host.canSteer?.(runtime.conversationId, by) &&
+                    host.requesterOf(runtime.conversationId) === by;
+
+                if (by === undefined || !mayAct()) {
+                    return runtime.commit(
+                        () => ({ status: "running", checkpoint: { phase: "look" } }),
+                        context,
+                    );
+                }
+
                 const lines = [...checkpoint.lines];
 
                 for (const each of checkpoint.stop) {
-                    await linked.stopCall?.(runtime.conversationId, each).catch(() => false);
+                    if (mayAct()) {
+                        await linked.stopCall?.(runtime.conversationId, each).catch(() => false);
+                    }
                 }
 
                 for (const alert of checkpoint.alerts) {
@@ -386,7 +401,10 @@ function stallWatchFor(
                 }
 
                 // The stops are done already. The held lines get their verdicts together.
-                const { said, sent } = await verdictsFor(checkpoint.classify, verdictOf);
+                const { said, sent } = await verdictsFor(
+                    mayAct() ? checkpoint.classify : [],
+                    verdictOf,
+                );
 
                 lines.push(...said);
 
@@ -396,19 +414,21 @@ function stallWatchFor(
                         context,
                     );
 
-                    await conversation?.submit(
-                        {
-                            type: "input",
-                            content: `[linked sessions] ${lines.join(" ")} Their final answers still come by themselves.`,
-                            whenBusy: "steer",
-                            // As the lead's person's work, so a spend limit there holds it back.
-                            requestId: requested(
-                                host.requesterOf(runtime.conversationId),
-                                `linked-stalls-${String(runtime.taskId)}-${checkpoint.at}`,
-                            ),
-                        },
-                        context,
-                    );
+                    if (mayAct()) {
+                        await conversation?.submit(
+                            {
+                                type: "input",
+                                content: `[linked sessions] ${lines.join(" ")} Their final answers still come by themselves.`,
+                                whenBusy: "steer",
+                                // As the lead's person's work, so a spend limit there holds it back.
+                                requestId: requestFor(
+                                    by,
+                                    `linked-stalls-${String(runtime.taskId)}-${checkpoint.at}`,
+                                ),
+                            },
+                            context,
+                        );
+                    }
                 }
 
                 await runtime.commit(async (tx) => {

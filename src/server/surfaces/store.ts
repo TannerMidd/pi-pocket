@@ -142,14 +142,35 @@ export function startWait(
     surface: Surface,
     taskId: string,
     until: number,
+    by: string,
 ): NonNullable<Surface["wait"]> {
     const gen = Math.max(surface.gen ?? 0, surface.wait?.gen ?? 0) + 1;
 
     surface.gen = gen;
-    surface.wait = { taskId, key: `${surface.id}.${gen}`, gen, until };
+    surface.wait = { taskId, key: `${surface.id}.${gen}`, gen, until, by };
 
     return surface.wait;
 }
+
+/** A wait from before requester capture is attributable only when the call that made the card also waits. */
+export function waiterOf(
+    surface: Surface,
+    wait: { taskId: string; by?: string },
+): string | undefined {
+    return wait.by ?? (surface.taskId === wait.taskId ? surface.by : undefined);
+}
+
+export function cardAuthorized(
+    surface: Surface,
+    canSteer: (by: string | undefined) => boolean,
+): boolean {
+    return (
+        canSteer(surface.by) &&
+        (surface.wait === undefined || canSteer(waiterOf(surface, surface.wait)))
+    );
+}
+
+export const ACCESS_ENDED = "Cancelled because the requester can no longer steer this session.";
 
 /** End a surface: its status leaves `open`, its inputs lock, and its final text is what a fork and an export show. */
 export function endSurface(

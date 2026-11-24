@@ -276,7 +276,7 @@ async function stranded(id: ConversationId, request: string, text: string): Prom
     await app.harness.commit(async (tx) => {
         const state = await tx.doc(SubagentsDoc, id);
 
-        state.sending = { request, reports: [{ name: "lost", text }] };
+        state.sending = { request, reports: [{ name: "lost", text, requestedBy: owner(app).id }] };
         state.courier = 999_998 as never;
     }, context);
 }
@@ -286,7 +286,7 @@ test("a batch a stopped courier left behind is delivered once, by the next one",
 
     await stranded(
         id,
-        "subagent-reports:999998:1",
+        `p:${owner(app).id}:subagent-reports-999998-1`,
         "[subagent lost answered, no reply needed] found",
     );
     // The next use of the subagent tool starts a courier, which sends the batch left behind first.
@@ -303,7 +303,7 @@ test("a batch a stopped courier left behind is delivered once, by the next one",
 
 test("a batch a stopped courier had sent already is not sent again", async () => {
     const id = await newSession(app);
-    const request = "subagent-reports:999998:7";
+    const request = `p:${owner(app).id}:subagent-reports-999998-7`;
     const text = "[subagent lost answered, no reply needed] found once";
 
     // It went out before the courier stopped: the parent has it.

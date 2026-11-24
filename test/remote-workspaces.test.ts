@@ -322,7 +322,10 @@ test("a remote session refuses what would act on this machine: a task and a file
     try {
         const id = await newSession(app, uri);
 
-        await assert.rejects(app.background.start(id, { command: "pwd" }), /remote workspaces/);
+        await assert.rejects(
+            app.background.start(id, { requestedBy: owner(app).id, command: "pwd" }),
+            /remote workspaces/,
+        );
         await assert.rejects(app.watches.start(id, owner(app).id), /remote workspaces/);
         assert.equal((await app.memory.project(id, undefined))?.key, uri);
         await say(app, id, "publish");

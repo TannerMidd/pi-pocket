@@ -7,6 +7,7 @@ import {
     type RelayContext,
     type RelayEvent,
     type RelayFile,
+    type RelayOutFile,
     type RelayValues,
 } from "../types.ts";
 
@@ -41,7 +42,6 @@ const FATAL_CLOSES: Readonly<Record<number, string>> = {
 
 interface Session {
     id: string;
-    url: string;
     seq: number | null;
 }
 
@@ -119,6 +119,41 @@ function snowflake(value: unknown): value is string {
     return typeof value === "string" && /^\d{1,20}$/.test(value);
 }
 
+function confirmsAttachments(
+    files: readonly RelayOutFile[],
+    attachments: Message["attachments"],
+): boolean {
+    if (attachments === undefined) {
+        return files.length === 0;
+    }
+
+    if (!Array.isArray(attachments) || attachments.length !== files.length) {
+        return false;
+    }
+
+    const unmatched = [...files];
+    const ids = new Set<string>();
+
+    for (const attachment of attachments) {
+        if (!snowflake(attachment?.id) || ids.has(attachment.id)) {
+            return false;
+        }
+
+        const index = unmatched.findIndex(
+            (file) => file.name === attachment.filename && file.data.byteLength === attachment.size,
+        );
+
+        if (index < 0) {
+            return false;
+        }
+
+        ids.add(attachment.id);
+        unmatched.splice(index, 1);
+    }
+
+    return true;
+}
+
 function newer(a: string, b: string): boolean {
     return BigInt(a) > BigInt(b);
 }
@@ -154,14 +189,9 @@ function readState(saved: Readonly<Record<string, unknown>>): State {
     const state: State = { identifies: [], cursors: {} };
     const session = saved.session as Partial<Session> | undefined;
 
-    if (
-        session !== undefined &&
-        typeof session.id === "string" &&
-        typeof session.url === "string"
-    ) {
+    if (typeof session?.id === "string") {
         state.session = {
             id: session.id,
-            url: session.url,
             seq: typeof session.seq === "number" ? session.seq : null,
         };
     }
@@ -206,6 +236,8 @@ async function api(
     body?: unknown,
     soft = false,
 ): Promise<unknown> {
+    signal.throwIfAborted();
+
     const base = (text(values.apiUrl) || API).replace(/\/+$/, "");
     const form = body instanceof FormData;
     const response = await fetch(`${base}${path}`, {
@@ -411,7 +443,8 @@ async function download(
 }
 
 async function run(context: RelayContext): Promise<void> {
-    const { values, signal } = context;
+    const { signal } = context;
+    const values = { ...context.values };
     const secret = secretOf(values);
     const state = readState(context.state);
     const listed = channelsOf(values);
@@ -419,11 +452,15 @@ async function run(context: RelayContext): Promise<void> {
     const channels = new Map<string, { name?: string; parent?: string }>();
     let chain: Promise<void> = Promise.resolve();
     let failure: unknown;
+    // Only this run can supply a resume address. Saved state cannot choose where a token goes.
+    let resumeAddress: string | undefined;
 
     let closeCurrent: () => void = () => {};
 
     const save = (): void => {
-        context.save(JSON.parse(JSON.stringify(state)) as Record<string, unknown>);
+        if (!signal.aborted) {
+            context.save(JSON.parse(JSON.stringify(state)) as Record<string, unknown>);
+        }
     };
 
     const allowed = (channel: string, guild: string | undefined, parent?: string): boolean => {
@@ -454,6 +491,10 @@ async function run(context: RelayContext): Promise<void> {
 
     // Messages oldest first: emit what passes, then move each channel's cursor.
     const take = async (messages: Message[], fallbackGuild?: string): Promise<void> => {
+        if (signal.aborted) {
+            return;
+        }
+
         const events: RelayEvent[] = [];
         const moved = new Map<string, Cursor>();
 
@@ -525,6 +566,10 @@ async function run(context: RelayContext): Promise<void> {
                         true,
                     );
 
+                    if (signal.aborted) {
+                        return;
+                    }
+
                     if (!Array.isArray(found)) {
                         context.log(
                             `Discord channel ${id} is not readable: check the bot's access.`,
@@ -562,6 +607,10 @@ async function run(context: RelayContext): Promise<void> {
                 true,
             )) as Channel | undefined;
 
+            if (signal.aborted) {
+                return;
+            }
+
             if (channel === undefined) {
                 context.log(`Discord channel ${id} is not readable: check the bot's access.`);
                 continue;
@@ -583,7 +632,7 @@ async function run(context: RelayContext): Promise<void> {
 
     const enqueue = (task: () => Promise<void> | void): void => {
         chain = chain.then(async () => {
-            if (failure !== undefined) {
+            if (signal.aborted || failure !== undefined) {
                 return;
             }
 
@@ -608,9 +657,9 @@ async function run(context: RelayContext): Promise<void> {
                 delete state.misses;
 
                 if (typeof ready.session_id === "string") {
+                    resumeAddress = ready.resume_gateway_url;
                     state.session = {
                         id: ready.session_id,
-                        url: ready.resume_gateway_url ?? state.session?.url ?? "",
                         seq: null,
                     };
                 }
@@ -683,9 +732,12 @@ async function run(context: RelayContext): Promise<void> {
             url?: unknown;
             session_start_limit?: { remaining?: number; reset_after?: number };
         };
+
+        signal.throwIfAborted();
+
         const limit = info.session_start_limit;
 
-        if (limit?.remaining === 0 && (limit.reset_after ?? 0) > 0) {
+        if (state.session === undefined && limit?.remaining === 0 && (limit.reset_after ?? 0) > 0) {
             context.status(
                 `Discord's daily identify limit is used up: waiting ${Math.ceil(limit.reset_after! / 60_000)} min`,
             );
@@ -701,19 +753,27 @@ async function run(context: RelayContext): Promise<void> {
 
     const connect = async (): Promise<Outcome | undefined> => {
         const session = state.session;
-        let address: string;
+        const address =
+            (session !== undefined && resumeAddress) ||
+            text(values.gatewayUrl) ||
+            (await gatewayFromApi());
+
+        if (signal.aborted) {
+            return undefined;
+        }
 
         if (session !== undefined) {
-            address = session.url;
             context.status("Resuming");
         } else {
-            address = text(values.gatewayUrl) || (await gatewayFromApi());
-
-            if (signal.aborted || !(await identifyGate())) {
+            if (!(await identifyGate()) || signal.aborted) {
                 return undefined;
             }
 
             context.status("Connecting");
+        }
+
+        if (signal.aborted) {
+            return undefined;
         }
 
         return new Promise<Outcome>((resolve) => {
@@ -726,10 +786,11 @@ async function run(context: RelayContext): Promise<void> {
             let seq = session?.seq ?? null;
             let closing: ReturnType<typeof setTimeout> | undefined;
             let settled = false;
+            let stopping = false;
 
             const send = (data: unknown): void => {
                 try {
-                    if (socket.readyState === WebSocket.OPEN) {
+                    if (!signal.aborted && !stopping && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify(data));
                     }
                 } catch {
@@ -738,17 +799,20 @@ async function run(context: RelayContext): Promise<void> {
             };
 
             const close = (): void => {
+                if (stopping || settled) {
+                    return;
+                }
+
+                stopping = true;
                 clearTimeout(timer);
+                // A dead gateway never answers the close frame.
+                closing = setTimeout(() => finish(undefined), CLOSE_WAIT);
 
                 try {
                     socket.close(4000);
                 } catch {
                     // Already closed.
                 }
-
-                // Node's WebSocket waits for the gateway to answer the close frame, and a dead connection (the reason
-                // for a missed ACK) never does: the connection ends here all the same.
-                closing ??= setTimeout(() => finish(undefined), CLOSE_WAIT);
             };
 
             const beat = (): void => {
@@ -820,7 +884,6 @@ async function run(context: RelayContext): Promise<void> {
                     case 9:
                         if (payload.d !== true) {
                             invalid = true;
-                            delete state.session;
                         }
 
                         close();
@@ -839,6 +902,10 @@ async function run(context: RelayContext): Promise<void> {
 
                             if (state.session !== undefined && typeof s === "number") {
                                 state.session.seq = s;
+
+                                if (type === "READY" || type === "RESUMED") {
+                                    save();
+                                }
                             }
                         });
                         break;
@@ -859,12 +926,8 @@ async function run(context: RelayContext): Promise<void> {
                 close();
             }, HELLO_WAIT);
 
-            if (signal.aborted) {
-                close();
-            }
-
             socket.addEventListener("message", (message) => {
-                if (settled) {
+                if (signal.aborted || stopping || settled) {
                     return;
                 }
 
@@ -899,11 +962,11 @@ async function run(context: RelayContext): Promise<void> {
                     failure = new RelayError(fatal, { fatal: true });
                 }
 
-                if (code === 4007 || code === 4009) {
-                    delete state.session;
-                }
-
                 void chain.then(() => {
+                    if (invalid || code === 4007 || code === 4009) {
+                        delete state.session;
+                    }
+
                     try {
                         save();
                     } catch (error) {
@@ -915,6 +978,10 @@ async function run(context: RelayContext): Promise<void> {
             };
 
             socket.addEventListener("close", (event) => finish(event.code));
+
+            if (signal.aborted) {
+                onAbort();
+            }
         });
     };
 
@@ -961,6 +1028,10 @@ async function run(context: RelayContext): Promise<void> {
 
             wait = outcome.invalid ? 1000 + Math.random() * 4000 : 1000;
         }
+    } catch (error) {
+        if (!signal.aborted) {
+            throw error;
+        }
     } finally {
         save();
     }
@@ -968,6 +1039,7 @@ async function run(context: RelayContext): Promise<void> {
 
 const discord: RelayConnector = {
     kind: "discord",
+    authenticatedAuthors: true,
     label: "Discord",
     idempotentReply: true,
     // Discord's own limits: 10 files a message; 10 MB each in a server without boosts.
@@ -1051,6 +1123,10 @@ const discord: RelayConnector = {
             throw new Error("The reply has no Discord channel: name one, or set Reply channel.");
         }
 
+        if (reply.confirmDestination && reply.text.length > LIMIT) {
+            throw new Error(`Discord card text exceeds ${LIMIT} characters.`);
+        }
+
         const files = reply.files ?? [];
         const payload = {
             content: cut(reply.text, LIMIT),
@@ -1086,7 +1162,16 @@ const discord: RelayConnector = {
             "POST",
             `/channels/${target}/messages`,
             body,
-        )) as { id?: unknown };
+        )) as Partial<Message>;
+
+        if (reply.confirmDestination) {
+            return snowflake(message?.id) &&
+                message.channel_id === target &&
+                message.content === reply.text &&
+                confirmsAttachments(files, message.attachments)
+                ? { id: message.id, channel: target }
+                : {};
+        }
 
         return typeof message.id === "string" ? { id: message.id } : {};
     },

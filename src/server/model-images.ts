@@ -1,13 +1,13 @@
 /**
  * Attached images, made small enough for the model. Making one takes a second or more (`resizeImage`), so it starts as
  * the upload ends (`prepareModelImage`), while the person still writes: the message that sends it finds it ready
- * (`modelImage`). A file not prepared (after a restart, or one that left the cache) is made then.
+ * (`issuedModelImage`). A file not prepared (after a restart, or one that left the cache) is made then.
  */
-import { statSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
 import { HEIC_TYPES, heicToJpeg } from "./heic.ts";
+import { type BoundUpload, withUploadBytes } from "./upload-content.ts";
 
 /** Attached images that also go to the model itself, when it takes images. */
 export const IMAGE_TYPES = new Set([
@@ -35,8 +35,10 @@ const AHEAD = 24;
  */
 export type ModelImage = { image: ImageContent; note?: string };
 
-/** A prepared image, with the file's stamp before it was read: a file changed since is read again. */
-const prepared = new Map<string, { stamp: string; made: Promise<ModelImage> }>();
+type IssuedImage = BoundUpload & { mime: string };
+const cacheKey = ({ path, mime, content }: IssuedImage) =>
+    JSON.stringify([path, mime, content.size, content.sha256]);
+const prepared = new Map<string, Promise<ModelImage>>();
 let running = 0;
 const queue: (() => void)[] = [];
 
@@ -73,90 +75,93 @@ export function forModel(mime: string, size: number): boolean {
     return IMAGE_TYPES.has(mime) && size <= MAX_INLINE_IMAGE;
 }
 
-const stampOf = (info: { mtimeMs: number; size: number }) => `${info.mtimeMs}:${info.size}`;
-
 /**
  * An image file for the model, at most 2000 pixels a side as Pi's read tool sends images: models refuse bigger ones once
  * a conversation holds many, and then every request fails until they leave its context. A HEIC or
  * HEIF photo is made JPEG first. The note says what differs from the file: the format, then the
  * size in the words of Pi's read tool.
  */
-function make(path: string, mimeType: string, first: boolean): Promise<ModelImage> {
-    return inTurn(async () => {
-        let bytes: Uint8Array = await readFile(path);
-        let type = mimeType;
+async function convert(bytes: Uint8Array, mimeType: string): Promise<ModelImage> {
+    let type = mimeType;
 
-        if (HEIC_TYPES.has(mimeType)) {
-            bytes = await heicToJpeg(bytes);
-            type = "image/jpeg";
-        }
+    if (HEIC_TYPES.has(mimeType)) {
+        bytes = await heicToJpeg(bytes);
+        type = "image/jpeg";
+    }
 
-        const image = await resizeImage(bytes, type);
+    const image = await resizeImage(bytes, type);
 
-        if (image === null) {
-            throw new Error("it could not be made small enough for the model");
-        }
+    if (image === null) {
+        throw new Error("it could not be made small enough for the model");
+    }
 
-        const notes: string[] = [];
+    const notes: string[] = [];
 
-        if (image.mimeType !== mimeType) {
-            notes.push(`[Image: shown to you as ${image.mimeType.split("/")[1]!.toUpperCase()}.]`);
-        }
+    if (image.mimeType !== mimeType) {
+        notes.push(`[Image: shown to you as ${image.mimeType.split("/")[1]!.toUpperCase()}.]`);
+    }
 
-        const size = formatDimensionNote(image);
+    const size = formatDimensionNote(image);
 
-        if (size !== undefined) {
-            notes.push(size);
-        }
+    if (size !== undefined) {
+        notes.push(size);
+    }
 
-        return {
-            image: { type: "image", mimeType: image.mimeType, data: image.data },
-            note: notes.length === 0 ? undefined : notes.join(" "),
-        };
-    }, first);
+    return {
+        image: { type: "image", mimeType: image.mimeType, data: image.data },
+        note: notes.length === 0 ? undefined : notes.join(" "),
+    };
 }
 
-/** Start making an uploaded image ready for the model, if it is one: its failure shows when a message sends it. */
-export function prepareModelImage(path: string, mimeType: string, size: number): void {
-    if (!forModel(mimeType, size) || prepared.has(path) || queue.length >= AHEAD) {
+function makeIssued(file: IssuedImage, first: boolean) {
+    return inTurn(() => withUploadBytes(file, (bytes) => convert(bytes, file.mime)), first);
+}
+
+/** Start making an uploaded image ready for the model, if it is one. */
+export function prepareModelImage(file: IssuedImage): void {
+    const key = cacheKey(file);
+
+    if (!forModel(file.mime, file.content.size) || prepared.has(key) || queue.length >= AHEAD) {
         return;
     }
 
-    let stamp: string;
+    const made = makeIssued(file, false);
 
-    try {
-        stamp = stampOf(statSync(path));
-    } catch {
-        return;
-    }
-
-    const made = make(path, mimeType, false);
-
-    made.catch(() => undefined);
-    prepared.set(path, { stamp, made });
+    made.catch(() => {
+        if (prepared.get(key) === made) {
+            prepared.delete(key);
+        }
+    });
+    prepared.set(key, made);
 
     while (prepared.size > KEPT) {
         prepared.delete(prepared.keys().next().value!);
     }
 }
 
-/** An attached image as the model gets it: the one prepared at upload while its file is unchanged, or made now. */
-export async function modelImage(path: string, mimeType: string): Promise<ModelImage> {
-    const entry = prepared.get(path);
-
-    if (entry !== undefined) {
-        try {
-            const made = await entry.made;
-
-            if (stampOf(await stat(path)) === entry.stamp) {
-                return made;
-            }
-        } catch {
-            // A failed one is made again, below.
-        }
-
-        prepared.delete(path);
+/** Reuse only a conversion of the bytes and MIME from the validated upload receipt. */
+export async function issuedModelImage(file: IssuedImage): Promise<ModelImage> {
+    if (!forModel(file.mime, file.content.size)) {
+        throw new Error("Not an inline image");
     }
 
-    return make(path, mimeType, true);
+    const made = prepared.get(cacheKey(file));
+
+    if (made !== undefined) {
+        try {
+            return await made;
+        } catch {
+            // Retry a failed background conversion at send time.
+        }
+    }
+
+    return makeIssued(file, true);
+}
+
+/** Convert a workspace image or a buffer already verified by the caller. */
+export function modelImage(source: string | Buffer, mimeType: string): Promise<ModelImage> {
+    return inTurn(
+        async () => convert(typeof source === "string" ? await readFile(source) : source, mimeType),
+        true,
+    );
 }

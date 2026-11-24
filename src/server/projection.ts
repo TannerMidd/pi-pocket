@@ -14,6 +14,7 @@ import {
     type FromPiData,
     NOTE_ENTRY,
     TURN_NOTE_ENTRY,
+    UPLOAD_INPUT,
     type TurnNoteData,
     SHELL_ENTRY,
     type ShellData,
@@ -554,6 +555,8 @@ export function projectEntry(
     const presentations = options?.presentations;
 
     switch (entry.kind) {
+        case UPLOAD_INPUT:
+
         case "pi.user": {
             const pieces = userPieces(message);
             const spec =

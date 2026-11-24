@@ -129,7 +129,9 @@ test(
                         : { json: { ok: true, result: { message_id: calls.length } } };
                 case "/BOT/sendDocument":
                 case "/BOT/sendMessage":
-                    return { json: { ok: true, result: { message_id: calls.length } } };
+                    return {
+                        json: { ok: true, result: { message_id: calls.length, chat: { id: 10 } } },
+                    };
                 default:
                     return { status: 404, json: { ok: false } };
             }
@@ -375,6 +377,14 @@ test(
                         },
                     },
                 };
+            }
+
+            if (url.pathname.endsWith("/joined_rooms")) {
+                return { json: { joined_rooms: ["!r:local"] } };
+            }
+
+            if (url.pathname.endsWith("/state/m.room.encryption")) {
+                return { status: 404, json: { errcode: "M_NOT_FOUND" } };
             }
 
             if (url.pathname === "/_matrix/client/v1/media/download/local/gone") {

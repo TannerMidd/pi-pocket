@@ -90,7 +90,11 @@ export class Transcripts {
             let conversation = id;
             let through = Number.POSITIVE_INFINITY;
 
-            for (;;) {
+            const seen = new Set<ConversationId>();
+
+            while (!seen.has(conversation)) {
+                seen.add(conversation);
+
                 if (entry.conversationId === conversation) {
                     return entryId <= through ? entry : undefined;
                 }
@@ -98,13 +102,19 @@ export class Transcripts {
                 const parent: ConversationRecord["parent"] = (await tx.conversation(conversation))
                     ?.parent;
 
-                if (parent === undefined) {
+                if (
+                    parent === undefined ||
+                    !Number.isSafeInteger(parent.at) ||
+                    Number(parent.at) <= 0
+                ) {
                     return undefined;
                 }
 
                 through = Math.min(through, parent.at as unknown as number);
                 conversation = parent.conversationId;
             }
+
+            return undefined;
         }, context);
     }
 

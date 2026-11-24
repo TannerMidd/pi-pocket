@@ -26,6 +26,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import { issueUpload } from "../src/server/upload-references.ts";
 
 const chromium = findBrowser();
 const real = {
@@ -1911,11 +1912,11 @@ test("a sent HEIC photo shows the JPEG the model got", real, async () => {
     });
     const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
     const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+    const file = { path, name: "photo.heic", mime: "image/heic", size: photo.length };
 
     writeFileSync(path, photo);
-    await say(app, id, "look at this", [
-        { path, name: "photo.heic", mime: "image/heic", size: photo.length },
-    ]);
+    await issueUpload(app, id, file);
+    await say(app, id, "look at this", [file]);
 
     await fresh();
     await goTo(id);

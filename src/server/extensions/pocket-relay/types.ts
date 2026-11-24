@@ -22,12 +22,29 @@ export interface RelayField {
 
 export type RelayValues = Readonly<Record<string, string | number | boolean | undefined>>;
 
-/** Who wrote a message, as the service says. `id` is what the owner lists as trusted. */
+/** A source's attribution. Only a connector with `authenticatedAuthors` identifies an account. */
 export interface RelayAuthor {
     id: string;
     name: string;
     /** A bot or a service's own post: the relay drops these, so it never hears itself. */
     bot?: boolean;
+}
+
+/** Names and feed keys identify no account, even when they match a configured owner ID. */
+export function authenticatedAccount(
+    connector: RelayConnector,
+    author: RelayAuthor,
+): string | undefined {
+    return connector.authenticatedAuthors === true &&
+        author.bot !== true &&
+        typeof author.id === "string" &&
+        author.id.trim() !== ""
+        ? author.id
+        : undefined;
+}
+
+export function isOwnerAccount(ownerIds: readonly string[], account?: string): boolean {
+    return account !== undefined && ownerIds.includes(account);
 }
 
 /** One thing that came: a chat message, a feed's item, an API's record. */
@@ -101,8 +118,17 @@ export interface RelayContext {
 }
 
 /** What a reply sends: Pi's text, and where it goes. */
+export interface RelayReceipt {
+    id?: string;
+    /** The chat destination of a complete, untruncated card delivery. Omit it if not confirmed. */
+    channel?: string;
+    thread?: string;
+}
+
 export interface RelayReply {
     text: string;
+    /** A card or its echo: do not truncate, and confirm its destination after the whole send succeeds. */
+    confirmDestination?: boolean;
     /** The event it answers, when Pi named one: its channel and thread are the reply's. */
     to?: RelayEvent;
     /** Where it goes: the event's channel, else the connector's default. */
@@ -123,6 +149,8 @@ export interface RelayConnector {
     fields: readonly RelayField[];
     /** It can tell mentions (`RelayEvent.mentioned`): the owner can then take only those. */
     mentions?: boolean;
+    /** Every non-bot author.id is a stable account ID authenticated by the configured service. */
+    authenticatedAuthors?: true;
     /**
      * poll: `poll` is called every `interval` seconds (the owner's `interval` field when the connector has one).
      * stream: `run` keeps a connection; the relay calls it again, with backoff, when it ends or throws.
@@ -159,7 +187,7 @@ export interface RelayConnector {
     reply?(
         context: Pick<RelayContext, "values" | "signal" | "log">,
         reply: RelayReply,
-    ): Promise<{ id?: string } | void>;
+    ): Promise<RelayReceipt | void>;
 }
 
 /**

@@ -7,13 +7,35 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 /** Where shared things wait until the page picks them up; see `web/share.js`. */
 const SHARE_CACHE = "pocket-share";
 
-self.addEventListener("push", (event) => {
-    let data = {};
+/** The service may deliver a queued message after sign-out or a change of account. */
+async function currentDevice(device) {
+    if (typeof device !== "string" || !device) {
+        return false;
+    }
+
+    try {
+        const response = await fetch("/api/push/device", {
+            credentials: "same-origin",
+            cache: "no-store",
+        });
+
+        return response.ok && (await response.json()).device === device;
+    } catch {
+        return false;
+    }
+}
+
+async function showPush(event) {
+    let data;
 
     try {
         data = event.data?.json() ?? {};
     } catch {
-        data = { title: "Pi Pocket", body: event.data?.text() ?? "" };
+        return;
+    }
+
+    if (!(await currentDevice(data?.device))) {
+        return;
     }
 
     const approval = data.approval;
@@ -25,21 +47,21 @@ self.addEventListener("push", (event) => {
           ]
         : [];
 
-    event.waitUntil(
-        Promise.all([
-            self.registration.showNotification(data.title || "Pi Pocket", {
-                body: data.body || "",
-                tag: data.tag,
-                renotify: Boolean(data.tag),
-                icon: "/icon.svg",
-                actions,
-                data: { url: data.url || "/", approval },
-            }),
-            // A dot on the home-screen icon; the app sets the real count once it opens.
-            self.navigator.setAppBadge?.().catch(() => {}),
-        ]),
-    );
-});
+    await Promise.all([
+        self.registration.showNotification(data.title || "Pi Pocket", {
+            body: data.body || "",
+            tag: data.tag,
+            renotify: Boolean(data.tag),
+            icon: "/icon.svg",
+            actions,
+            data: { url: data.url || "/", approval, device: data.device },
+        }),
+        // A dot on the home-screen icon; the app sets the real count once it opens.
+        self.navigator.setAppBadge?.().catch(() => {}),
+    ]);
+}
+
+self.addEventListener("push", (event) => event.waitUntil(showPush(event)));
 
 /** Answer an approval with this device's sign-in. Only a failure shows: the notification going away is the answer. */
 async function answerApproval(approval, allow, data) {
@@ -50,7 +72,7 @@ async function answerApproval(approval, allow, data) {
             method: "POST",
             credentials: "same-origin",
             headers: { "X-Pocket": "1", "content-type": "application/json" },
-            body: JSON.stringify({ allow }),
+            body: JSON.stringify({ source: "push", device: data.device, allow }),
         });
 
         if (!response.ok) {
@@ -105,7 +127,11 @@ self.addEventListener("notificationclick", (event) => {
     const data = event.notification.data ?? {};
 
     if ((event.action === "allow" || event.action === "deny") && data.approval) {
-        event.waitUntil(answerApproval(data.approval, event.action === "allow", data));
+        event.waitUntil(
+            currentDevice(data.device).then(
+                (valid) => valid && answerApproval(data.approval, event.action === "allow", data),
+            ),
+        );
 
         return;
     }

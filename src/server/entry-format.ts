@@ -12,6 +12,8 @@ export const FILE_BLOCK = '<file name="';
 export const CONTEXT_BLOCK = "<pocket-context";
 /** The entry kind of a note about what a person did (`Commands.note`). */
 export const NOTE_ENTRY = "pocket.note";
+/** A user input with server-validated upload references. */
+export const UPLOAD_INPUT = "pocket.upload-input";
 /** The entry kind of a turn note (`turn-notes.ts`): not the person's words. */
 export const TURN_NOTE_ENTRY = "pocket.turn-note";
 

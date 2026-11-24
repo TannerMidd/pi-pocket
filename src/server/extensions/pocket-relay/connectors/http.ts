@@ -59,7 +59,7 @@ const fields: readonly RelayField[] = [
         name: "authorIdField",
         label: "Author id field",
         type: "text",
-        description: "Optional. Dot path in an item to the author's id.",
+        description: "Optional. Dot path to the author ID for rate limits, not authentication.",
     },
     {
         name: "authorNameField",
@@ -274,6 +274,8 @@ async function fetchSameOrigin(
     let next = init;
 
     for (let hops = 0; ; hops += 1) {
+        signal.throwIfAborted();
+
         const response = await fetch(target, { ...next, redirect: "manual", signal });
         const location = response.headers.get("location");
 
@@ -383,7 +385,7 @@ function check(values: RelayValues): string | undefined {
     return undefined;
 }
 
-function toEvent(item: unknown, values: RelayValues, url: string): RelayEvent | undefined {
+export function toEvent(item: unknown, values: RelayValues, url: string): RelayEvent {
     const idField = text(values, "idField") || "id";
     const rawId = pick(item, idField);
     const id =
@@ -405,7 +407,7 @@ function toEvent(item: unknown, values: RelayValues, url: string): RelayEvent | 
     return {
         id,
         text: body,
-        author: { id: authorId || authorName || host, name: authorName || authorId || host },
+        author: { id: authorId || host, name: authorName || authorId || host },
         ...(channel === "" ? {} : { channel }),
     };
 }
@@ -442,6 +444,9 @@ async function poll(context: RelayContext): Promise<void> {
     }
 
     const raw = await readCapped(response);
+
+    context.signal.throwIfAborted();
+
     let data: unknown;
 
     try {
@@ -462,17 +467,14 @@ async function poll(context: RelayContext): Promise<void> {
     const nextCursor = lastCursor === "" ? cursor : lastCursor;
     // The list runs oldest first: without a cursor, the newest MAX_ITEMS are the ones to watch.
     const list = useCursor ? whole : whole.slice(-MAX_ITEMS);
-    const events = list.flatMap((item) => {
-        const event = toEvent(item, values, base);
-
-        return event === undefined ? [] : [event];
-    });
+    const events = list.map((item) => toEvent(item, values, base));
 
     if (useCursor) {
         if (!baseline && events.length > 0) {
             await context.emit(events);
         }
 
+        context.signal.throwIfAborted();
         context.save({ started: true, cursor: nextCursor });
 
         return;
@@ -495,6 +497,7 @@ async function poll(context: RelayContext): Promise<void> {
 
     const current = new Set(events.map((event) => keyOf(event.id)).reverse());
 
+    context.signal.throwIfAborted();
     context.save({
         started: true,
         seen: [...current, ...seen.filter((key) => !current.has(key))].slice(0, SEEN_LIMIT),
@@ -548,8 +551,12 @@ async function reply(
     try {
         const id = pick(JSON.parse(await readCapped(response)), "id");
 
+        context.signal.throwIfAborted();
+
         return typeof id === "string" || typeof id === "number" ? { id: String(id) } : undefined;
     } catch {
+        context.signal.throwIfAborted();
+
         return undefined;
     }
 }

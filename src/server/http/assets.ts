@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { closeSync, createReadStream, openSync, readFileSync, readSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { type ReadableFile, withUploadBytes } from "../upload-content.ts";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
 import {
@@ -393,9 +396,35 @@ export async function serveFile(
 }
 
 /** An image file from this machine, for `![alt](path)` in replies and for uploaded attachments. */
-export function serveImage(request: IncomingMessage, response: ServerResponse, file: string): void {
-    if (!IMAGE_EXTENSIONS.has(extname(file).toLowerCase())) {
+export function serveImage(
+    request: IncomingMessage,
+    response: ServerResponse,
+    file: ReadableFile,
+): void | Promise<void> {
+    if (!IMAGE_EXTENSIONS.has(extname(typeof file === "string" ? file : file.path).toLowerCase())) {
         throw new HttpError(415, "Only image files can be shown");
+    }
+
+    if (typeof file !== "string") {
+        if (file.content.size > MAX_IMAGE_FILE) {
+            throw new HttpError(413, "Image too large to show");
+        }
+
+        return withUploadBytes(file, async (bytes) => {
+            const type = sniffImage(bytes.subarray(0, 1024));
+
+            if (!type) {
+                throw new HttpError(415, "That file is not an image");
+            }
+
+            response.writeHead(200, {
+                "content-type": type,
+                "content-length": bytes.length,
+                "cache-control": "private, no-store",
+                "content-security-policy": IMAGE_CSP,
+            });
+            await pipeline(Readable.from([bytes]), response);
+        });
     }
 
     let size: number;

@@ -30,7 +30,7 @@ export default function createGoals(host: PocketHost) {
                 const goal = (await input.read.snapshot(GoalDoc, input.conversationId, context))
                     ?.goal;
 
-                if (goal?.status !== "working") {
+                if (goal?.status !== "working" || !host.canSteer?.(input.conversationId, goal.by)) {
                     return undefined;
                 }
 
@@ -60,6 +60,10 @@ export default function createGoals(host: PocketHost) {
                             await api.memo<boolean>(STARTED_MEMO, true, context);
                         }
 
+                        if (!host.canSteer?.(api.conversationId, goal.by)) {
+                            return undefined;
+                        }
+
                         const ran = started
                             ? CUT_OFF
                             : await host.goals.run(api.conversationId, goal.command, context);
@@ -78,7 +82,11 @@ export default function createGoals(host: PocketHost) {
                         check,
                     );
 
-                    if (now?.status !== "working" || !host.goals.mayContinue(api.conversationId)) {
+                    if (
+                        now?.status !== "working" ||
+                        !host.canSteer?.(api.conversationId, goal.by) ||
+                        !host.goals.mayContinue(api.conversationId)
+                    ) {
                         return undefined;
                     }
 

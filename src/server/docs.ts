@@ -13,6 +13,7 @@ import {
     type EntryId,
     type TaskId,
 } from "@earendil-works/pi-durable";
+import type { ManagedFolderProof } from "./managed-storage.ts";
 import type { SurfacesState } from "./surfaces/types.ts";
 import type { Repeat } from "./when.ts";
 import type { Worktree } from "./worktrees.ts";
@@ -48,6 +49,10 @@ export type SessionMeta = {
     archived?: boolean;
     /** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
     forkedFrom?: { id: number; entryId?: number };
+    /** Exact uploads on the inherited inputs or the input this fork was created to resend. */
+    inheritedUploads?: string[];
+    /** A retained filename alone is not authority to read mutable bytes. */
+    inheritedUploadContent?: Record<string, { size: number; sha256: string }>;
     /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */
     linkedFrom?: { id: number };
     /**
@@ -81,7 +86,13 @@ export type RemovedSession = {
     worktree?: Worktree;
     /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
     forkedFrom?: { id: number; entryId?: number };
-    /** Uploads folders a live fork still reads (`workspace.ts`). */
+    /** Directory scopes captured in the removal commit. Older records authorize no file deletion. */
+    folders?: {
+        uploads: Record<string, ManagedFolderProof>;
+        background: Record<string, ManagedFolderProof>;
+        worktree?: ManagedFolderProof;
+    };
+    /** Upload folders still retained or awaiting owner review. */
     keepUploads?: number[];
     done?: number;
     left?: string[];
@@ -103,6 +114,19 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     ...rebased,
     scope: "session",
     initial: () => ({ items: {} }),
+});
+
+/** The server records each completed upload before it returns the descriptor. Forks issue their own uploads. */
+export const IssuedUploadsDoc = defineDoc<{
+    files: Record<string, { name: string; mime: string; size: number; sha256: string }>;
+}>({
+    kind: "pocket.issued-uploads",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ files: {} }),
 });
 
 /** Interrupt handoffs not yet admitted as messages: retries find the same durable task, even after a restart. */
@@ -413,7 +437,7 @@ export type SubagentRecord = {
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
-export type PendingReport = { name: string; text: string };
+export type PendingReport = { name: string; text: string; requestedBy?: string };
 
 /** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
 export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({

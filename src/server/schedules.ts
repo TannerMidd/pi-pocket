@@ -340,7 +340,9 @@ export class Schedules {
                 return { status: "running", checkpoint: { phase: "wait" } };
             }
 
-            if (stopped === undefined) {
+            const refusal = this.#stopped(conversationId, item);
+
+            if (refusal === undefined) {
                 // A queue lookup or commit wait can pass the window's end after the first check.
                 if (
                     item.every !== undefined &&
@@ -361,8 +363,8 @@ export class Schedules {
                 delete doc.items[id];
                 addActivity(
                     await tx.doc(ChatDoc, conversationId),
-                    stopped.who,
-                    `scheduled “${snippet(item.text, 60)}”, which was cancelled: ${stopped.why}.`,
+                    refusal.who,
+                    `scheduled “${snippet(item.text, 60)}”, which was cancelled: ${refusal.why}.`,
                     runtime.now(),
                 );
 
@@ -451,7 +453,10 @@ export class Schedules {
 
             // Another schedule of this session compacts now: its settings are not the conversation's own, so this one
             // sends without compacting, as for a busy session.
-            if (Object.values(items).some((each) => each.compacting === true)) {
+            if (
+                this.#stopped(conversationId, item) !== undefined ||
+                Object.values(items).some((each) => each.compacting === true)
+            ) {
                 return { status: "running", checkpoint: { phase: "send", compacted: true } };
             }
 
@@ -494,9 +499,12 @@ export class Schedules {
             let compaction: TaskId<CompactionResult> | undefined;
 
             try {
-                compaction = await (
-                    await app.conversation(conversationId)
-                ).compact(undefined, context);
+                const conversation = await app.conversation(conversationId);
+                const item = await stored(runtime, id, context);
+
+                if (item !== undefined && this.#stopped(conversationId, item) === undefined) {
+                    compaction = await conversation.compact(undefined, context);
+                }
             } catch (error) {
                 app.log(
                     `A schedule in session ${String(conversationId)} did not compact before sending: ${describe(error)}`,
@@ -616,9 +624,7 @@ export class Schedules {
         const userId = schedule.by ?? schedule.requestedBy;
 
         if (userId === undefined) {
-            const why = app.spend.heldBack(conversationId);
-
-            return why === undefined ? undefined : { who: pi, why };
+            return { who: pi, why: "no requester is known" };
         }
 
         const person = app.config.userById(userId);
@@ -629,18 +635,14 @@ export class Schedules {
         };
         const who = schedule.by === undefined ? pi : named;
 
-        if (
-            person === undefined ||
-            person.role === "viewer" ||
-            !app.canSee(person, conversationId)
-        ) {
+        if (app.steeringUser(conversationId, userId) === undefined) {
             return {
                 who,
                 why: `${schedule.by === undefined ? named.name : "they"} can no longer steer here`,
             };
         }
 
-        const why = app.spend.heldBack(conversationId, person.id);
+        const why = app.spend.heldBack(conversationId, userId);
 
         return why === undefined ? undefined : { who, why };
     }
@@ -712,6 +714,11 @@ export class Schedules {
 
         return app.harness.commit(async (tx) => {
             const doc = await tx.doc(ScheduleDoc, conversationId);
+
+            if (app.steeringUser(conversationId, by?.id ?? request.requestedBy) === undefined) {
+                throw new HttpError(403, "A schedule needs someone who can steer here.");
+            }
+
             const same =
                 request.key === undefined
                     ? undefined

@@ -81,7 +81,12 @@ function fakeApi(tools: ToolRegistration[], extensions: ReturnType<typeof define
     };
 }
 
-const host = { approvals: new Approvals(() => undefined) } as unknown as PocketHost;
+const host = {
+    approvals: new Approvals(
+        () => undefined,
+        () => false,
+    ),
+} as unknown as PocketHost;
 const codemodeTool = createCodemode(host).tools![0]!;
 
 const run = async (fake: Fake, code: string) => {
@@ -188,9 +193,14 @@ test("store() values last across scripts; failed scripts keep their output and c
 });
 
 test("with Lancet Guard asking, each nested call waits for its own answer, even in parallel", async () => {
-    const approvals = new Approvals(() => undefined);
+    const approvals = new Approvals(
+        () => "alex",
+        (_id, by) => by === "alex",
+    );
     const guardHost = {
         approvals,
+        requesterOf: () => "alex",
+        canSteer: (_id: unknown, by: string) => by === "alex",
         guard: {
             judge: async (_tool: string, args: { command: string }) => ({
                 subject: args.command,

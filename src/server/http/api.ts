@@ -223,6 +223,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "logout" && method === "POST") {
+            auth.endBrowserPush(user, request);
             clearAuthCookie(response);
 
             return json(response, 200, { ok: true });
@@ -233,13 +234,13 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "users" && second !== undefined && third === "remove" && method === "POST") {
-            app.removeUser(user, second);
+            await app.removeUser(user, second);
 
             return json(response, 200, { ok: true });
         }
 
         if (first === "users" && second !== undefined && third === undefined && method === "POST") {
-            app.setAccess(user, second, await readJson(request));
+            await app.setAccess(user, second, await readJson(request));
 
             return json(response, 200, app.people(user));
         }
@@ -623,7 +624,19 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "approvals" && second !== undefined && method === "POST") {
-            const body = await readJson<{ allow?: boolean; values?: unknown }>(request);
+            const body = await readJson<{
+                allow?: boolean;
+                values?: unknown;
+                source?: unknown;
+                device?: unknown;
+            }>(request);
+
+            if (body.source === "push") {
+                auth.requirePushDevice(user, request, body.device);
+            } else if (body.source !== "app" && parseCookies(request.headers.cookie)[COOKIE]) {
+                // Older workers send only { allow }. Never mistake one for an in-app decision.
+                throw new HttpError(409, "Reload Pi Pocket to answer this approval.");
+            }
 
             // An id may hold a slash, which the path decoded into a part of its own: a codemode script's calls are
             // named `<call>/<n>`. `values` answer an ask's fields (`host.ask`), and go to the asker alone.

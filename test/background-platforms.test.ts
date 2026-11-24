@@ -1,4 +1,13 @@
-import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
+import {
+    type App,
+    cleanUp,
+    newSession,
+    openApp,
+    owner,
+    root,
+    scriptedModel,
+    until,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -88,6 +97,7 @@ if (psDenied) {
 processTest("a task runs, prints, and ends with its exit code", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
         command: "echo one; sleep 0.3; echo two; exit 3",
         notify: false,
     });
@@ -103,6 +113,7 @@ processTest("a task runs, prints, and ends with its exit code", async () => {
 processTest("a stop ends the task and a child it started, also one its shell left", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
         command: `${child("waits.pid")} & first=$!; ${child("left.pid")} > /dev/null 2>&1 & echo started; wait $first`,
         notify: false,
     });
@@ -122,6 +133,7 @@ processTest("a stop ends the task and a child it started, also one its shell lef
 processTest("a task whose shell exits runs while its child runs", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
         command: `${child("daemon.pid")} > /dev/null 2>&1 & exit 0`,
         notify: false,
     });
@@ -135,7 +147,11 @@ processTest("a task whose shell exits runs while its child runs", async () => {
 
 processTest("a stop never ends a process that took the task's pid", async () => {
     const id = await newSession(app);
-    const item = await app.background.start(id, { command: child("real.pid"), notify: false });
+    const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
+        command: child("real.pid"),
+        notify: false,
+    });
     const real = await pidIn(item, "real.pid");
     // Another process, which is not the task's, in a group of its own, as a task's leader would be.
     const decoy = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -160,6 +176,7 @@ processTest("a stop never ends a process that took the task's pid", async () => 
 processTest("a task quiet for its limit is stopped, with what it printed", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
         command: `echo begun; ${child("quiet.pid")}`,
         quietMinutes: 0.05,
         notify: false,
@@ -176,6 +193,7 @@ processTest("a task quiet for its limit is stopped, with what it printed", async
 processTest("a restarted server finds a task's processes, and its stop ends them", async () => {
     const id = await newSession(app);
     const item = await app.background.start(id, {
+        requestedBy: owner(app).id,
         command: `${child("restart.pid")} > /dev/null 2>&1 & while [ ! -f release ]; do sleep 0.1; done; ${child("after.pid")} > /dev/null 2>&1 & echo released`,
         notify: false,
     });

@@ -14,6 +14,7 @@ import { SurfacesDoc } from "../docs.ts";
 import { describe, HttpError } from "../errors.ts";
 import { type Actor, actAs } from "./act.ts";
 import { controlsFor } from "./bindings.ts";
+import { cardAuthorized } from "./store.ts";
 import { render } from "./text.ts";
 import type { RelayView, Surface, Target } from "./types.ts";
 
@@ -24,13 +25,29 @@ const NUMBERS = /^(?:s(\d+)\s+)?(\d+(?:[ ,]+\d+)*)$/i;
 const FILL = /^(?:s(\d+)\s+)?(\d+):\s*([^]+)$/i;
 
 /** Where a card went in a chat. */
-export type SurfaceWhere = { connector: string; channel?: string; thread?: string };
-
-/** What a message from a chat says about a card, as `fromRelay` takes it. */
-export type RelayMessage = {
+export type SurfaceWhere = {
+    /** The immutable connector id, not its name. */
     connector: string;
+    routeRevision: string;
     channel?: string;
     thread?: string;
+};
+
+export type PreparedRelay = RelayView & {
+    generation: string;
+    text: string;
+    rev: number;
+    where: SurfaceWhere;
+};
+
+export type RelayReceipt = { id?: string; channel?: string; thread?: string };
+
+const present = (value: unknown): value is string =>
+    typeof value === "string" && value.trim() !== "";
+
+/** What a message from a chat says about a card, as `fromRelay` takes it. */
+export type RelayMessage = SurfaceWhere & {
+    isCurrent?: () => boolean;
     /** The id of the message it answers, when the service tells. */
     replyTo?: string;
     /** The relay's id of this message: one that is tried again after a restart acts once. */
@@ -39,11 +56,32 @@ export type RelayMessage = {
     author: { id: string; name?: string };
     /** The ids of the owner's own accounts on the service. */
     ownerIds: readonly string[];
+    /** Only the relay vouches for an authenticated account, never the message text or name. */
+    trusted?: boolean;
     /** The user id the connector works for. */
     by: string;
 };
 
-export type RelayEcho = RelayView & { generation?: string };
+export type RelayEcho = RelayView & {
+    generation: string;
+    thread?: string;
+    isCurrent: () => boolean;
+};
+
+/** The connector needs a current steering person even for a viewer operating an anyone control. */
+export function relayActor(message: RelayMessage, person: Actor | undefined): Actor | undefined {
+    if (person === undefined || person.id !== message.by) {
+        return undefined;
+    }
+
+    return message.trusted === true && message.ownerIds.includes(message.author.id)
+        ? { id: person.id, name: person.name, role: person.role }
+        : {
+              id: `relay:${message.author.id}`,
+              name: message.author.name ?? message.author.id,
+              role: "viewer",
+          };
+}
 
 export type RelayOutcome =
     | { handled: true; reply: string; surface?: string; echo?: RelayEcho }
@@ -52,19 +90,22 @@ export type RelayOutcome =
 /** How many answers of the relay are kept for each card, for the replies that name them. */
 const ECHOES = 5;
 
-/**
- * The relay's text of an open card, and a record of where it goes: its connector, channel and thread, the card's `pv`,
- * and the target of each number. A card shown again to the same place replaces the record.
- */
+/** Prepare the numbered text. Only the latest preparation can be confirmed; until then the last delivery still stands. */
 export async function prepareRelay(
     app: PocketApp,
     id: ConversationId,
     sid: string,
     where: SurfaceWhere,
-): Promise<{ text: string }> {
+): Promise<PreparedRelay> {
+    if (!present(where.connector) || !present(where.routeRevision)) {
+        throw new HttpError(
+            409,
+            "Cannot verify this connector: send the card again after a restart",
+        );
+    }
+
     return app.harness.commit(async (tx) => {
-        const doc = await tx.doc(SurfacesDoc, id);
-        const surface = doc.items[sid];
+        const surface = (await tx.doc(SurfacesDoc, id)).items[sid];
 
         if (surface === undefined) {
             throw new HttpError(404, `No surface ${sid} here`);
@@ -75,53 +116,67 @@ export async function prepareRelay(
         }
 
         const out = render(surface as Surface, "relay");
+        const generation = randomUUID();
 
-        surface.relay = {
-            connector: where.connector,
-            channel: where.channel ?? "",
-            ...(where.thread === undefined ? {} : { thread: where.thread }),
-            generation: randomUUID(),
-            pv: surface.pv,
+        surface.relayPreparation = generation;
+
+        return {
+            text: out.text,
             map: out.map,
+            pv: surface.pv,
+            rev: surface.rev,
+            where,
+            generation,
         };
-
-        return { text: out.text };
     }, context);
 }
 
-/**
- * What the chat tells of a card it carried: the id of the message, for the replies that name it, and the channel and
- * thread it went to, so a card sent with no `reply_to` answers only there.
- */
+/** Activate the numbering only for the matching complete send, in the destination the connector confirmed. */
 export async function recordSent(
     app: PocketApp,
     id: ConversationId,
     sid: string,
-    msgId: string | undefined,
-    where?: { channel?: string; thread?: string },
+    prepared: PreparedRelay,
+    receipt: RelayReceipt,
+    isCurrent: () => boolean,
 ): Promise<void> {
-    if (msgId === undefined && where?.channel === undefined && where?.thread === undefined) {
-        return;
-    }
-
     await app.harness.commit(async (tx) => {
         const surface = (await tx.doc(SurfacesDoc, id)).items[sid];
 
-        if (surface?.relay === undefined) {
+        if (surface === undefined || surface.relayPreparation !== prepared.generation) {
             return;
         }
 
-        if (msgId !== undefined) {
-            surface.relay.msgId = msgId;
+        delete surface.relayPreparation;
+
+        const { where } = prepared;
+        const { channel, thread } = receipt;
+
+        if (
+            !isCurrent() ||
+            surface.status !== "open" ||
+            surface.rev !== prepared.rev ||
+            surface.pv !== prepared.pv ||
+            !present(channel) ||
+            (thread !== undefined && !present(thread)) ||
+            (where.channel !== undefined && where.channel !== channel) ||
+            ((where.channel !== undefined || where.thread !== undefined) &&
+                where.thread !== thread) ||
+            (receipt.id !== undefined && !present(receipt.id))
+        ) {
+            return;
         }
 
-        if (surface.relay.channel === "" && where?.channel !== undefined) {
-            surface.relay.channel = where.channel;
-        }
-
-        if (surface.relay.thread === undefined && where?.thread !== undefined) {
-            surface.relay.thread = where.thread;
-        }
+        surface.relay = {
+            connector: where.connector,
+            routeRevision: where.routeRevision,
+            channel,
+            ...(thread === undefined ? {} : { thread }),
+            ...(present(receipt.id) ? { msgId: receipt.id } : {}),
+            generation: prepared.generation,
+            pv: prepared.pv,
+            map: prepared.map,
+        };
     }, context);
 }
 
@@ -143,60 +198,109 @@ export async function recordEcho(
             surface?.relay === undefined ||
             surface.relay.msgId === msgId ||
             echo === undefined ||
+            !present(msgId) ||
+            echo.isCurrent?.() !== true ||
+            !cardAuthorized(surface, (by) => app.steeringUser(id, by) !== undefined) ||
+            !present(echo.generation) ||
             surface.relay.generation !== echo.generation
         ) {
             return;
         }
 
-        const kept = (surface.relay.echoes ?? []).filter(
-            (each) => (typeof each === "string" ? each : each.id) !== msgId,
-        );
+        const kept = surface.relay.echoes ?? [];
 
-        surface.relay.echoes = [...kept, { id: msgId, map: echo.map, pv: echo.pv }].slice(-ECHOES);
+        if (kept.some((each) => (typeof each === "string" ? each : each.id) === msgId)) {
+            return;
+        }
+
+        const view = {
+            id: msgId,
+            map: echo.map,
+            pv: echo.pv,
+            ...(echo.thread === undefined ? {} : { thread: echo.thread }),
+        };
+
+        surface.relay.echoes = [...kept, view].slice(-ECHOES);
     }, context);
 }
 
 /** What a reply to an ended card is told: one text, for every sender. */
 const ENDED = "That card has ended. Look at the newest one.";
 
-/**
- * The card an incoming message is about. A message that replies to a card of Pi's (its message, or an answer of the
- * relay about it) is about that card, in whatever thread the service puts the reply: when it has ended, the answer is
- * `"ended"`, never another card. Any other is about a card only by its name (`s3 1`), open, in the thread it went to.
- */
+type CardMatch = { surface: Surface; view: RelayView; messageId?: string };
+
+/** A direct reply may start a thread rooted at this very message (Slack qualifies its ids with the channel). */
+function inThread(message: RelayMessage, thread: string | undefined, msgId?: string): boolean {
+    return (
+        thread === message.thread ||
+        (thread === undefined &&
+            present(msgId) &&
+            present(message.thread) &&
+            message.replyTo === msgId &&
+            (message.thread === msgId || `${message.channel}:${message.thread}` === msgId))
+    );
+}
+
+/** Select only a view delivered by this connector instance to this exact place. Legacy records have no verified revision. */
 function cardFor(
     items: Record<string, Surface>,
     message: RelayMessage,
     named: string | undefined,
-): Surface | "ended" | undefined {
-    const there = Object.values(items).filter(
-        (surface) =>
-            surface.relay !== undefined &&
-            surface.relay.connector === message.connector &&
-            (surface.relay.channel === "" || surface.relay.channel === message.channel) &&
-            (named === undefined || surface.id === `s${named}`),
-    );
-    const replied =
-        message.replyTo === undefined
-            ? undefined
-            : there.find(
-                  (surface) =>
-                      surface.relay!.msgId === message.replyTo ||
-                      surface.relay!.echoes?.some(
-                          (each) => (typeof each === "string" ? each : each.id) === message.replyTo,
-                      ) === true,
-              );
-
-    if (replied !== undefined) {
-        return replied.status === "open" ? replied : "ended";
+): CardMatch | undefined {
+    if (
+        !present(message.channel) ||
+        !present(message.connector) ||
+        !present(message.routeRevision)
+    ) {
+        return undefined;
     }
 
-    // A bare number is only a card's when it names the card (`s5 1`): otherwise it is a message for Pi, as any other.
-    return named === undefined
-        ? undefined
-        : there.find(
-              (surface) => surface.status === "open" && surface.relay!.thread === message.thread,
-          );
+    const matches: CardMatch[] = [];
+
+    for (const surface of Object.values(items)) {
+        const relay = surface.relay;
+
+        if (
+            relay === undefined ||
+            !present(relay.generation) ||
+            relay.connector !== message.connector ||
+            relay.channel !== message.channel ||
+            relay.routeRevision !== message.routeRevision ||
+            (named !== undefined && surface.id !== `s${named}`)
+        ) {
+            continue;
+        }
+
+        const views = [
+            { view: relay as RelayView, id: relay.msgId, thread: relay.thread },
+            ...(relay.echoes ?? []).flatMap((echo) =>
+                typeof echo === "string"
+                    ? []
+                    : [{ view: echo as RelayView, id: echo.id, thread: echo.thread }],
+            ),
+        ];
+        const direct = present(message.replyTo)
+            ? views.find((each) => each.id === message.replyTo)
+            : undefined;
+        const view =
+            direct !== undefined
+                ? inThread(message, direct.thread, direct.id)
+                    ? direct
+                    : undefined
+                : named !== undefined && surface.status === "open"
+                  ? views.findLast((each) => each.thread === message.thread)
+                  : undefined;
+
+        if (view !== undefined) {
+            matches.push({
+                surface,
+                view: view.view,
+                ...(view.id === undefined ? {} : { messageId: view.id }),
+            });
+        }
+    }
+
+    return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** What the numbers of a message do: the body of an act, and the values worked out from the card as it is then. */
@@ -291,27 +395,20 @@ export async function fromRelay(
     const named = (fill ?? numbers)![1];
     const picked = fill === null ? numbers![2]!.split(/[ ,]+/) : [fill[2]!];
     const surfaces = (await app.harness.snapshot(SurfacesDoc, id, context))?.items ?? {};
-    const surface = cardFor(surfaces, message, named);
+    const matched = cardFor(surfaces, message, named);
+    const resolveActor = () => relayActor(message, app.steeringUser(id, message.by));
+    const actor = resolveActor();
 
-    if (surface === undefined) {
+    if (matched === undefined || message.isCurrent?.() !== true || actor === undefined) {
         return { handled: false };
     }
 
-    if (surface === "ended") {
+    const { surface, view } = matched;
+    const generation = surface.relay!.generation!;
+
+    if (surface.status !== "open") {
         return { handled: false, refusal: ENDED };
     }
-
-    const owner = message.ownerIds.includes(message.author.id)
-        ? app.config.userById(message.by)
-        : undefined;
-    const actor: Actor =
-        owner !== undefined
-            ? { id: owner.id, name: owner.name, role: owner.role }
-            : {
-                  id: `relay:${message.author.id}`,
-                  name: message.author.name ?? message.author.id,
-                  role: "viewer",
-              };
 
     // Permission first: a sender who may use no control learns nothing of the card, and Pi hears the message.
     if (!Object.values(controlsFor(surface, actor)).some(Boolean)) {
@@ -320,16 +417,7 @@ export async function fromRelay(
 
     // Only the owner's own accounts hear why: others get the same short refusal whatever went wrong.
     const said = (detail: string) =>
-        owner === undefined ? `That did not work on card ${surface.id}.` : detail;
-
-    const relay = surface.relay!;
-    const echo =
-        named === undefined
-            ? relay.echoes?.find(
-                  (each) => (typeof each === "string" ? each : each.id) === message.replyTo,
-              )
-            : relay.echoes?.at(-1);
-    const view = echo !== undefined && typeof echo !== "string" ? echo : relay;
+        actor.role === "viewer" ? `That did not work on card ${surface.id}.` : detail;
 
     if (view.pv !== surface.pv) {
         return { handled: false, refusal: `Card ${surface.id} changed. Look at the new one.` };
@@ -338,19 +426,39 @@ export async function fromRelay(
     const made = plan(surface, view, picked, fill === null ? undefined : fill[3]!.trim());
 
     if (typeof made === "string") {
-        return owner === undefined ? { handled: false } : { handled: false, refusal: made };
+        return actor.role === "viewer" ? { handled: false } : { handled: false, refusal: made };
     }
 
     try {
-        const result = await actAs(
-            app,
-            id,
-            actor,
-            surface.id,
-            made.body,
-            made.derive,
-            message.eventId,
-        );
+        const result = await actAs(app, id, actor, surface.id, made.body, {
+            derive: made.derive,
+            once: message.eventId,
+            checkRoute: (items) => {
+                const still = cardFor(items, message, named);
+
+                if (
+                    message.isCurrent?.() !== true ||
+                    still?.surface.relay?.generation !== generation ||
+                    still.messageId !== matched.messageId
+                ) {
+                    throw new HttpError(409, "This chat route changed");
+                }
+            },
+            resolveActor: () => {
+                const current = resolveActor();
+
+                if (current === undefined) {
+                    throw new HttpError(403, "This connector can no longer steer here.");
+                }
+
+                return current;
+            },
+        });
+
+        // A service can return the original message id on a retry. Never bind it to a freshly rendered echo.
+        if (result.replayed === true) {
+            return { handled: true, surface: surface.id, reply: `${surface.id}: already handled.` };
+        }
 
         if (made.label !== undefined) {
             return {
@@ -362,7 +470,19 @@ export async function fromRelay(
 
         const after = (await app.harness.snapshot(SurfacesDoc, id, context))?.items[surface.id];
 
-        if (after === undefined) {
+        const canEcho = () => {
+            const current = resolveActor();
+
+            return (
+                message.isCurrent?.() === true &&
+                current?.id === actor.id &&
+                current.role === actor.role &&
+                after !== undefined &&
+                cardAuthorized(after, (by) => app.steeringUser(id, by) !== undefined)
+            );
+        };
+
+        if (after?.relay?.generation !== generation || !canEcho()) {
             return { handled: true, surface: surface.id, reply: `${surface.id}: done.` };
         }
 
@@ -372,9 +492,19 @@ export async function fromRelay(
             handled: true,
             surface: surface.id,
             reply: out.text,
-            echo: { pv: after.pv, map: out.map, generation: after.relay?.generation },
+            echo: {
+                pv: after.pv,
+                map: out.map,
+                generation,
+                isCurrent: canEcho,
+                ...(message.thread === undefined ? {} : { thread: message.thread }),
+            },
         };
     } catch (error) {
+        if (resolveActor() === undefined) {
+            return { handled: false };
+        }
+
         const status = error instanceof HttpError ? error.status : 500;
 
         return {
@@ -396,12 +526,13 @@ export interface SurfacesRelayApi {
         conversationId: ConversationId,
         surface: string,
         where: SurfaceWhere,
-    ): Promise<{ text: string }>;
-    sent(
+    ): Promise<PreparedRelay>;
+    confirm(
         conversationId: ConversationId,
         surface: string,
-        messageId: string | undefined,
-        where?: { channel?: string; thread?: string },
+        prepared: PreparedRelay,
+        receipt: RelayReceipt,
+        isCurrent: () => boolean,
     ): Promise<void>;
     /** The relay answered an action on a card with a message of this id: a reply to it acts on the card too. */
     echoed(

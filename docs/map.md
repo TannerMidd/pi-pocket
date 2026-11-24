@@ -9,7 +9,7 @@ Where things are in Pi Pocket, for agents working on it. [index.md](index.md) li
 ## Data (`~/.pi-pocket/`, or `PI_POCKET_DIR`)
 
 - `pocket.sqlite`: Pi Durable's storage: conversations, entries, tasks, and Pi Pocket's documents.
-- `config.json`: people, roles, hashed tokens, settings. `push.json`: VAPID keys and push subscriptions. `provider-limits.json`: the limits that runs wait for now, kept only as a hint (a missing or damaged file means no limit is known).
+- `config.json`: people, roles, hashed tokens, settings. `push.json`: VAPID keys, notification preferences, and push subscriptions bound to a sign-in and browser. `provider-limits.json`: the limits that runs wait for now, kept only as a hint (a missing or damaged file means no limit is known).
 - `launcher.json`: the launcher's access choice. `serve-mount.json`: the Tailscale Serve mount the launcher made, named by port, so a later start can clear it.
 - `launcher.lock` and `harness.lock` (each with a `.identity` file): one launcher per data folder, and one server per data folder.
 - `launcher-running.json`: the launcher that runs, and its server's local address, for the desktop apps ([desktop-app.md](desktop-app.md)).
@@ -365,7 +365,7 @@ The maskable icon places the 352 × 352 artwork on a 512 × 512 page with 80-pix
 - Browsers only see committed state. Nothing is shown before it is stored.
 - Document kinds, scopes, and fork settings are stored data: never change them.
 - Hooks get only `memo` and `snapshot`. Anything a replay must not repeat goes in a memo or behind an idempotent request id.
-- Whose work Pi does comes from request ids (`requests.ts`): a message sent for someone needs their id in its request id; one without it leaves Pi working for whoever it worked for before. At startup, what a crash kept out of the authors document is read back from Pi Durable's records.
+- Whose work Pi does comes from request ids (`requests.ts`): a message sent for someone needs their id in its request id; one without it clears the requester. Recovery does not give unattributed work the previous person's authority. At startup, what a crash kept out of the authors document is read back from Pi Durable's records.
 - A tool is `replay: "safe"` only if running it twice is harmless.
 - Extensions reach the app only through `PocketHost`, and add to it only through `web` (`extension-web.ts`).
 - A part of the web app that reaches a side edge of the screen keeps clear of a phone's notch with `var(--inset-l)` and `var(--inset-r)` (`style.css`; the safe-area insets, 0 on most screens). Give the part the inset, not the layout, so its background still runs to the edge.

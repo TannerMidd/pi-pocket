@@ -411,25 +411,51 @@ test("the limits in force bound what a session can schedule", async () => {
         limits.chars = 100;
         limits.repeatMinutes = 1;
         limits.aheadDays = 2;
-        await app.schedules.add(id, { when: "every 1m", text: "often", zone: "UTC" });
-        await app.schedules.add(id, { when: "in 1d", text: "tomorrow", zone: "UTC" });
-        await assert.rejects(app.schedules.add(id, { when: "in 1h", text: "third" }), {
-            status: 409,
-            message: /2 scheduled messages at most/,
+        await app.schedules.add(id, {
+            requestedBy: owner(app).id,
+            when: "every 1m",
+            text: "often",
+            zone: "UTC",
         });
-        await assert.rejects(app.schedules.add(id, { when: "in 3d", text: "far" }), {
-            status: 400,
-            message: /up to 2 days ahead/,
+        await app.schedules.add(id, {
+            requestedBy: owner(app).id,
+            when: "in 1d",
+            text: "tomorrow",
+            zone: "UTC",
         });
-        await assert.rejects(app.schedules.add(id, { when: "in 1h", text: "x".repeat(101) }), {
-            status: 413,
-            message: /limited to 100 characters/,
-        });
+        await assert.rejects(
+            app.schedules.add(id, { requestedBy: owner(app).id, when: "in 1h", text: "third" }),
+            {
+                status: 409,
+                message: /2 scheduled messages at most/,
+            },
+        );
+        await assert.rejects(
+            app.schedules.add(id, { requestedBy: owner(app).id, when: "in 3d", text: "far" }),
+            {
+                status: 400,
+                message: /up to 2 days ahead/,
+            },
+        );
+        await assert.rejects(
+            app.schedules.add(id, {
+                requestedBy: owner(app).id,
+                when: "in 1h",
+                text: "x".repeat(101),
+            }),
+            {
+                status: 413,
+                message: /limited to 100 characters/,
+            },
+        );
         limits.repeatMinutes = 60;
-        await assert.rejects(app.schedules.add(id, { when: "every 30m", text: "often" }), {
-            status: 400,
-            message: /at most every 60 minutes/,
-        });
+        await assert.rejects(
+            app.schedules.add(id, { requestedBy: owner(app).id, when: "every 30m", text: "often" }),
+            {
+                status: 400,
+                message: /at most every 60 minutes/,
+            },
+        );
     } finally {
         Object.assign(limits, DEFAULT_SCHEDULE_LIMITS);
     }
