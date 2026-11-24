@@ -7,7 +7,7 @@ const money = (amount) => `$${amount.toFixed(2)}`;
 const largest = (rows) => rows.reduce((max, row) => Math.max(max, row.spent), 1);
 
 /** A spend limit, and (for the owner) a way to change it. */
-function SpendLimit({ budget, editable, save }) {
+function SpendLimit({ budget, editable, save, label }) {
     const [draft, setDraft] = useState(null);
     const field = useRef(null);
     const change = useRef(null);
@@ -33,6 +33,7 @@ function SpendLimit({ budget, editable, save }) {
             editable
                 ? html`<button
                     class="link small spend-change"
+                    aria-label=${label}
                     ref=${change}
                     onClick=${() => setDraft(budget === undefined ? "" : String(budget))}
                 >
@@ -86,6 +87,94 @@ function Usage({ row, max }) {
     ><span></span></span>`;
 }
 
+function SessionRow({ session, max, budget, lead, owner, save }) {
+    return html`<div class="spend-row">
+        <span class="grow" title=${session.title}>${session.title}</span>
+        <${Usage} row=${{ spent: session.spent, budget }} max=${max} />
+        <span class="mono">${money(session.spent)}</span>
+        ${
+            lead
+                ? html`<span class="muted small">Team lead</span>
+                  <span class="spend-change" aria-hidden="true"></span>`
+                : html`<${SpendLimit}
+                    budget=${budget}
+                    editable=${owner}
+                    save=${save({ session: session.id })}
+                    label=${`Change limit for ${session.title}`}
+                />`
+        }
+    </div>`;
+}
+
+function SessionSpend({ data, owner, save }) {
+    const teams = data.teams ?? [];
+    const members = new Set(teams.flatMap((team) => team.members.map((member) => member.id)));
+    const budgets = new Map(data.sessions.map((session) => [session.id, session.budget]));
+    const single = data.sessions.filter((session) => !members.has(session.id));
+    const max = Math.max(largest(data.sessions), largest(teams));
+
+    return html`${
+        teams.length > 0 &&
+        html`<div class="group spend-teams">
+            <div class="group-title">Teams</div>
+            <p class="muted small">
+                Team totals cover the sessions you can see, including their subagents. The lead's limit applies to the whole team.
+            </p>
+            ${teams.map((team) => {
+                const title = team.members[0].title;
+                const budget = budgets.get(team.lead);
+
+                return html`<section
+                    class="sheet-list spend-team"
+                    key=${team.lead}
+                    aria-label=${`Team led by ${title}`}
+                >
+                    <div class="spend-row spend-team-total">
+                        <h3 class="grow">Team total</h3>
+                        <${Usage} row=${{ spent: team.spent, budget }} max=${max} />
+                        <strong class="mono">${money(team.spent)}</strong>
+                        <${SpendLimit}
+                            budget=${budget}
+                            editable=${owner}
+                            save=${save({ session: team.lead })}
+                            label=${`Change team limit for ${title}`}
+                        />
+                    </div>
+                    ${team.members.map(
+                        (member) => html`<${SessionRow}
+                            key=${member.id}
+                            session=${member}
+                            max=${max}
+                            budget=${member.id === team.lead ? undefined : budgets.get(member.id)}
+                            lead=${member.id === team.lead}
+                            owner=${owner}
+                            save=${save}
+                        />`,
+                    )}
+                </section>`;
+            })}
+        </div>`
+    }
+    ${
+        (single.length > 0 || teams.length === 0) &&
+        html`<div class="group">
+            <div class="group-title">${teams.length ? "Other sessions" : "Sessions"}</div>
+            <div class="sheet-list">
+                ${single.map(
+                    (session) => html`<${SessionRow}
+                        key=${session.id}
+                        session=${session}
+                        max=${max}
+                        budget=${session.budget}
+                        owner=${owner}
+                        save=${save}
+                    />`,
+                )}
+            </div>
+        </div>`
+    }`;
+}
+
 /** What Pi spent, by person and by session, with the owner's limits. */
 export function SpendSheet() {
     const owner = store.state.me?.role === "owner";
@@ -96,7 +185,6 @@ export function SpendSheet() {
     }, []);
     const save = (target) => async (budget) => setData(await api("spend", { ...target, budget }));
     const peopleMax = largest(data?.people ?? []);
-    const sessionsMax = largest(data?.sessions ?? []);
 
     return html`<${Sheet} title="Spend" onClose=${closeSheet} wide=${true}>
         ${data === null && html`<${Loader} label="Adding it up" />`}
@@ -128,23 +216,7 @@ export function SpendSheet() {
                     )}
                 </div>
             </div>
-            <div class="group">
-                <div class="group-title">Sessions</div>
-                <div class="sheet-list">
-                    ${data.sessions.map(
-                        (session) => html`<div class="spend-row" key=${session.id}>
-                            <span class="grow">${session.title}</span>
-                            <${Usage} row=${session} max=${sessionsMax} />
-                            <span class="mono">${money(session.spent)}</span>
-                            <${SpendLimit}
-                                budget=${session.budget}
-                                editable=${owner}
-                                save=${save({ session: session.id })}
-                            />
-                        </div>`,
-                    )}
-                </div>
-            </div>`
+            <${SessionSpend} data=${data} owner=${owner} save=${save} />`
         }
     <//>`;
 }

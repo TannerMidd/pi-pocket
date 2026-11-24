@@ -2076,3 +2076,102 @@ test(
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
     },
 );
+
+test(
+    "Spend shows a team total without a limit and keeps member costs separate",
+    real,
+    async (t) => {
+        await fresh();
+        const lead = await newSession(app);
+        const child = await newSession(app);
+        const members = [
+            { id: Number(lead), title: "Plan the release", spent: 2 },
+            { id: Number(child), title: "Review the release", spent: 3 },
+        ];
+        let grouped = true;
+
+        t.mock.method(app.spend, "summary", () => {
+            const budget = app.sessionMeta(lead)?.budget;
+
+            return {
+                total: 7,
+                people: [],
+                sessions: [
+                    { ...members[0], ...(budget === undefined ? {} : { budget, spent: 5 }) },
+                    members[1],
+                    { id: Number(first), title: "Other work", spent: 2 },
+                ],
+                ...(grouped ? { teams: [{ lead: Number(lead), spent: 5, members }] } : {}),
+            };
+        });
+        const open = () =>
+            page.evaluate(`(await import("/store.js")).openSheet({ type: "spend" })`);
+        const rows = () =>
+            inPage<
+                string[][]
+            >(`return JSON.stringify([...document.querySelectorAll('.spend-row')].map(row =>
+        [row.querySelector('.grow').textContent.trim(), row.querySelector('.mono').textContent.trim()]))`);
+        const fits = () =>
+            inPage<boolean>(`return JSON.stringify([...document.querySelectorAll('.spend-row > :not(.grow)')]
+        .every(el => el.getBoundingClientRect().right <= el.closest('.sheet-list').getBoundingClientRect().right))`);
+
+        const setLimit = async (value: number) => {
+            await page.evaluate(`
+                const input = document.querySelector('.limit-edit input');
+                input.value = '${value}';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            `);
+            await tap(".limit-edit .primary:not(:disabled)");
+        };
+
+        const expected = [
+            ["Team total", "$5.00"],
+            ["Plan the release", "$2.00"],
+            ["Review the release", "$3.00"],
+            ["Other work", "$2.00"],
+        ];
+
+        await open();
+        await until(async () => (await rows()).length > 0, "the spend rows");
+        assert.deepEqual(await rows(), expected);
+        assert.equal(await fits(), true, "the amounts and controls fit on a phone");
+        await tap('button[aria-label="Change team limit for Plan the release"]');
+        await setLimit(1_000_001);
+        await until(
+            () =>
+                inPage<boolean>(`return JSON.stringify((await import('/store.js')).store.state.notices
+            .some(notice => notice.message.includes('budget must be'))) `),
+            "the limit error",
+        );
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector('.limit-edit input').value)`,
+            ),
+            "1000001",
+            "a refused change keeps the draft",
+        );
+        await setLimit(10);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.spend-team-total').textContent.includes('limit $10.00'))`,
+                ),
+            "the saved team limit",
+        );
+        assert.equal(app.sessionMeta(lead)?.budget, 10);
+        assert.equal(app.sessionMeta(child)?.budget, undefined);
+        assert.deepEqual(
+            await rows(),
+            expected,
+            "the team limit does not replace the lead's own cost",
+        );
+        await page.setViewport(VIEWPORTS.desktop);
+        assert.equal(await fits(), true, "the same breakdown fits on desktop");
+
+        grouped = false;
+        await fresh();
+        await open();
+        await until(async () => (await rows()).length > 0, "the legacy summary");
+        assert.deepEqual(await rows(), [["Plan the release", "$5.00"], ...expected.slice(2)]);
+    },
+);

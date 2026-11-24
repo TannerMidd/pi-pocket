@@ -12534,6 +12534,29 @@ textarea.notes {
     text-align: right;
 }
 
+.spend-teams > .sheet-list {
+    margin-top: 10px;
+}
+
+.spend-team > .spend-row:not(.spend-team-total) {
+    padding-inline-start: 24px;
+}
+
+.spend-team .grow {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.spend-team-total {
+    background: var(--card);
+}
+
+.spend-team-total h3 {
+    margin: 0;
+    font: inherit;
+    font-weight: 600;
+}
+
 .spend-change {
     width: 56px;
     flex: none;
