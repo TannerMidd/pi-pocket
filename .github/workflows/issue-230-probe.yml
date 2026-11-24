@@ -1,0 +1,21 @@
+name: Issue 230 Darwin flake probe
+on:
+    push:
+        branches: [investigate/031-nix-230]
+permissions:
+    contents: read
+jobs:
+    build:
+        runs-on: macos-15
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+              with:
+                  persist-credentials: false
+            - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+            - name: Build the locked package and run its install checks
+              run: |
+                  uname -ms
+                  nix --version
+                  nix build -L --no-write-lock-file .#pi-pocket
+                  ./result/bin/pi-pocket --help
