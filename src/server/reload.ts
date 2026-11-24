@@ -956,19 +956,23 @@ export class ExtensionLoader {
                 continue;
             }
 
-            try {
-                this.#watchers.push(
-                    watch(
-                        directory,
-                        (_event, name) =>
-                            name !== null && this.#changed(basename(name.toString()), directory),
-                    ),
-                );
-            } catch (error) {
+            const warn = (error: unknown) =>
                 this.#notify(
                     "warning",
                     `Extensions in ${directory} are not reloaded when edited: ${describe(error)}`,
                 );
+
+            try {
+                const watcher = watch(
+                    directory,
+                    (_event, name) =>
+                        name !== null && this.#changed(basename(name.toString()), directory),
+                );
+
+                watcher.on("error", warn);
+                this.#watchers.push(watcher);
+            } catch (error) {
+                warn(error);
             }
         }
     }
@@ -1209,7 +1213,11 @@ function stampOf(path: string): string | undefined {
  * Calls `onChange` shortly after a file or folder under `directory` is added, removed, or written: not after an event
  * that leaves it as it was (`stampOf`).
  */
-export function watchTree(directory: string, onChange: (file: string) => void): () => void {
+export function watchTree(
+    directory: string,
+    onChange: (file: string) => void,
+    warn: (message: string) => void = console.warn,
+): () => void {
     const stamps = new Map<string, string>();
 
     const keep = (name: string, stamp: string | undefined) =>
@@ -1249,6 +1257,10 @@ export function watchTree(directory: string, onChange: (file: string) => void): 
         clearTimeout(timer);
         timer = setTimeout(settle, 200);
     });
+
+    watcher.on("error", (error) =>
+        warn(`Changes under ${directory} will not reload: ${describe(error)}`),
+    );
 
     return () => {
         clearTimeout(timer);

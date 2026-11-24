@@ -43,6 +43,7 @@ stdenv.mkDerivation {
       ../src
       ../web
       ../test
+      ../nix/tests/installed.mjs
       ../docs
       # The installers: test/packaging-app.test.ts runs bundle-app.mjs and place-app.mjs.
       ../packaging
@@ -130,7 +131,7 @@ stdenv.mkDerivation {
     "$out/bin/pi-pocket" --help
     PI_POCKET_TEST_PACKAGE="$out" \
       PI_POCKET_TEST_EXTENSION=${./tests/extension.ts} \
-      node --test ${./tests/installed.mjs}
+      node --test nix/tests/installed.mjs
     runHook postInstallCheck
   '';
 
