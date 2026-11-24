@@ -194,7 +194,13 @@ export function createDocks(env) {
                 value=${text}
                 onInput=${(event) => setText(event.currentTarget.value)}
                 onKeyDown=${(event) => {
-                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    if (
+                        event.key === "Enter" &&
+                        (event.metaKey || event.ctrlKey) &&
+                        !event.isComposing &&
+                        event.keyCode !== 229 &&
+                        event.key !== "Process"
+                    ) {
                         event.preventDefault();
                         void submit();
                     }
