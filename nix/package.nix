@@ -79,6 +79,8 @@ stdenv.mkDerivation {
   dontBuild = true;
   dontStrip = true;
 
+  # The HTTP and installed-package tests start servers on loopback.
+  __darwinAllowLocalNetworking = true;
   doCheck = true;
   nativeCheckInputs =
     runtimePackages
