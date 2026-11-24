@@ -23,7 +23,12 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { LinkedSessionCallsDoc, type SessionMeta, TurnsDoc } from "../src/server/docs.ts";
+import {
+    LinkedSessionCallsDoc,
+    type SessionMeta,
+    SubagentsDoc,
+    TurnsDoc,
+} from "../src/server/docs.ts";
 import { LinkedSessions } from "../src/server/linked-sessions.ts";
 
 let app: App;
@@ -557,6 +562,61 @@ test("one session starts 12 linked sessions, and no count refuses one", async ()
 
     assert.equal(started.length, 12);
     assert.equal(new Set(started.map((session) => session.id)).size, 12);
+});
+
+test("Spend totals visible team members and their subagents once, with or without a budget", async () => {
+    const lead = await source();
+    const { session: child } = await start(lead);
+    const { session: sibling } = await start(lead);
+    const helper = await app.harness.commit(async (tx) => {
+        const agent = await tx.createConversation({ ownership: { kind: "ownerless" } });
+
+        (await tx.doc(SubagentsDoc, child)).agents.helper = {
+            conversationId: agent.id,
+            reported: [],
+        };
+
+        return agent.id;
+    }, context);
+
+    await recordCost(app, lead, 1);
+    await recordCost(app, child, 2);
+    await recordCost(app, helper, 4);
+    await recordCost(app, sibling, 8);
+    const scoped = app.config.addUser("Partial team", "guest", [String(lead), String(child)]).user;
+    const childOnly = app.config.addUser("Child only", "guest", [String(child)]).user;
+
+    for (const budget of [null, 30]) {
+        await app.spend.setSessionBudget(owner(app), lead, budget);
+        const group = app.spend
+            .summary(owner(app))
+            .teams.find((team) => team.lead === Number(lead));
+
+        assert.ok(group);
+        assert.equal(group.spent, 15);
+        assert.equal(group.members[0]?.id, Number(lead));
+        assert.deepEqual(
+            new Map(group.members.map((member) => [member.id, member.spent])),
+            new Map([
+                [Number(lead), 1],
+                [Number(child), 6],
+                [Number(sibling), 8],
+            ]),
+        );
+        const partial = app.spend.summary(scoped);
+
+        assert.equal(partial.teams.length, 1);
+        assert.equal(partial.teams[0]?.spent, 7);
+        assert.deepEqual(
+            partial.teams[0]?.members.map(({ id }) => id),
+            [Number(lead), Number(child)],
+        );
+        assert.equal(
+            partial.sessions.find(({ id }) => id === Number(lead))?.spent,
+            budget === null ? 1 : 7,
+        );
+        assert.deepEqual(app.spend.summary(childOnly).teams, []);
+    }
 });
 
 test("a session that started others shows what counts against its limit: theirs too", async () => {
