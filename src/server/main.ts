@@ -151,24 +151,17 @@ const stop = async (code: number) => {
     }
 
     if (launcher && process.connected && process.send !== undefined) {
-        // Once the app and database are closed, `process.exit` can still hang in libuv's threadpool
-        // cleanup if a background filesystem call is stuck in the OS. Telling the launcher first
-        // lets it stop the process and still act on `code`.
+        // Give the launcher the intended code before process.exit can block. Do not wait on broken IPC.
         await new Promise<void>((resolve) => {
-            let settled = false;
+            const fallback = setTimeout(resolve, 250);
 
             const done = () => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(fallback);
-                    resolve();
-                }
+                clearTimeout(fallback);
+                resolve();
             };
 
-            const fallback = setTimeout(done, 250);
-
             try {
-                process.send?.({ type: "stopping", code }, undefined, undefined, done);
+                process.send?.({ type: "stopping", code }, done);
             } catch {
                 done();
             }
