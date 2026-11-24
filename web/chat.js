@@ -4,6 +4,7 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Avatar, initials, personColor } from "./avatar.js";
+import { isComposingKey } from "./box-keys.js";
 import { notesDrafts } from "./notes-drafts.js";
 import {
     actions,
@@ -344,6 +345,7 @@ function ChatTab({ highlight, focus }) {
     const [mention, setMention] = useState(null);
     const log = useRef(null);
     const box = useRef(null);
+    const compositionEndedAt = useRef(null);
     const pinned = new Set((view.pins ?? []).map((pin) => pin.chatId).filter(Boolean));
 
     // The newest message, not the count: the chat keeps its last 500, so the count stops changing.
@@ -559,7 +561,25 @@ function ChatTab({ highlight, focus }) {
             value=${text}
             placeholder=${collab() ? "Message… @ to mention" : "Message the people here…"}
             onInput=${(event) => update(event.currentTarget.value, event.currentTarget.selectionStart)}
+            onCompositionStart=${() => {
+                compositionEndedAt.current = null;
+            }}
+            onCompositionEnd=${(event) => {
+                compositionEndedAt.current = event.timeStamp;
+            }}
             onKeyDown=${(event) => {
+                const endedAt = compositionEndedAt.current;
+
+                compositionEndedAt.current = null;
+
+                if (isComposingKey(event, endedAt)) {
+                    if (!event.isComposing && event.keyCode !== 229 && event.key !== "Process") {
+                        event.preventDefault();
+                    }
+
+                    return;
+                }
+
                 if (
                     candidates.length > 0 &&
                     (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))
@@ -577,7 +597,7 @@ function ChatTab({ highlight, focus }) {
                     return;
                 }
 
-                if (event.key === "Enter" && !event.shiftKey && !coarse && !event.isComposing) {
+                if (event.key === "Enter" && !event.shiftKey && !coarse) {
                     event.preventDefault();
                     send();
                 }
@@ -872,7 +892,7 @@ export function ChatSheet() {
 
 /** Esc in the panel leaves its field, and never counts toward the two that stop Pi. */
 function keepEscape(event) {
-    if (event.key !== "Escape" || event.defaultPrevented) {
+    if (event.key !== "Escape" || event.defaultPrevented || isComposingKey(event)) {
         return;
     }
 

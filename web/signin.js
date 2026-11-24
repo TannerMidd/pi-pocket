@@ -1,6 +1,7 @@
 // The sign-in screen, for a browser that is not signed in.
 
 import { useState } from "preact/hooks";
+import { isComposingKey } from "./box-keys.js";
 import { html } from "./ui.js";
 
 export function SignIn() {
@@ -49,7 +50,7 @@ export function SignIn() {
                 autocomplete="off"
                 spellcheck=${false}
                 onInput=${(event) => setValue(event.currentTarget.value)}
-                onKeyDown=${(event) => event.key === "Enter" && go()}
+                onKeyDown=${(event) => event.key === "Enter" && !isComposingKey(event) && go()}
             />
             <button class="button primary" onClick=${go}>Sign in</button>
         </div>

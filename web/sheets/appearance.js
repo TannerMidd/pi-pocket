@@ -1,5 +1,6 @@
 // Appearance: the theme and the colors, and how the app looks and moves.
 import { useEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import {
     actions,
     api,
@@ -304,7 +305,8 @@ function TextSize({ size }) {
                 onChange=${(event) =>
                     commit(event.currentTarget.value === "" ? size : event.currentTarget.value)}
                 onBlur=${() => setDraft(null)}
-                onKeyDown=${(event) => event.key === "Enter" && event.currentTarget.blur()}
+                onKeyDown=${(event) =>
+                    event.key === "Enter" && !isComposingKey(event) && event.currentTarget.blur()}
             />
             <span>px</span>
         </label>

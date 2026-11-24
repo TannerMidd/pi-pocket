@@ -256,21 +256,33 @@ test(
             return (await inPage<string[]>(`return JSON.stringify(globalThis.modes)`))[0];
         };
 
-        await busy(true);
-        assert.equal(await sentMode({ ctrlKey: true }), "followUp", "Steer: queued");
-        await chip("Queue");
-        assert.equal(await sentMode({ metaKey: true }), "steer", "Queue: steers");
-        assert.equal(
-            await inPage<string>(
-                `return JSON.stringify(document.querySelector('[aria-checked="true"]').textContent)`,
-            ),
-            "Queue",
-            "the chip stays",
-        );
-        await chip("Interrupt");
-        assert.equal(await sentMode({ ctrlKey: true }), "interrupt", "Interrupt: as Enter");
-        await busy(false);
-        assert.equal(await sentMode({ ctrlKey: true }), "followUp", "idle: as Enter");
+        await inPage(`globalThis.savedFetch = globalThis.fetch; return "null"`);
+
+        try {
+            await busy(true);
+            assert.equal(await sentMode({ ctrlKey: true }), "followUp", "Steer: queued");
+            await chip("Queue");
+            assert.equal(await sentMode({ metaKey: true }), "steer", "Queue: steers");
+            assert.equal(
+                await inPage<string>(
+                    `return JSON.stringify(document.querySelector('[aria-checked="true"]').textContent)`,
+                ),
+                "Queue",
+                "the chip stays",
+            );
+            await chip("Interrupt");
+            assert.equal(await sentMode({ ctrlKey: true }), "interrupt", "Interrupt: as Enter");
+            await busy(false);
+            assert.equal(await sentMode({ ctrlKey: true }), "followUp", "idle: as Enter");
+        } finally {
+            await inPage(`
+                if (globalThis.savedFetch) {
+                    globalThis.fetch = globalThis.savedFetch;
+                    delete globalThis.savedFetch;
+                }
+                return "null";
+            `);
+        }
     },
 );
 
@@ -314,5 +326,166 @@ test(
             "another session open",
         );
         await inPage(`(await import("/store.js")).closeSheet(); return "null"`);
+    },
+);
+
+test(
+    "IME Enter committing English while busy never steers, and a following Enter sends as steer",
+    real,
+    async () => {
+        const setBusy = (on: boolean) =>
+            inPage(`
+                const { store } = await import("/store.js");
+                store.set((state) => ({ view: { ...state.view, live: { ...state.view.live, busy: ${on} } } }));
+                return "null";
+            `);
+
+        await until(
+            () =>
+                inPage<boolean>(
+                    `const { store } = await import("/store.js"); return JSON.stringify(store.state.view.conversation?.id === store.state.conversationId && Boolean(document.querySelector(".composer textarea")))`,
+                ),
+            "the active session composer",
+        );
+        await setBusy(true);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelectorAll('.composer [role="radio"]').length > 0)`,
+                ),
+            "send mode chips",
+        );
+        await inPage(`
+            const steer = [...document.querySelectorAll('.composer [role="radio"]')].find((each) =>
+                each.textContent.includes("Steer"),
+            );
+            steer?.click();
+            globalThis.prevImeFetch = globalThis.fetch;
+            globalThis.imeModes = [];
+            globalThis.fetch = async (url, init) => {
+                if (String(url).endsWith("/submit")) {
+                    globalThis.imeModes.push(JSON.parse(init.body).mode);
+                }
+
+                return new Response("{}", { headers: { "content-type": "application/json" } });
+            };
+            return "null";
+        `);
+
+        try {
+            const safari = await inPage<{
+                keyCode: number;
+                notPrevented: boolean;
+                modes: string[];
+                value: string;
+            }>(`
+                const box = document.querySelector(".composer textarea");
+                box.focus();
+                box.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+                box.value = "hello";
+                box.dispatchEvent(new Event("input", { bubbles: true }));
+                box.setSelectionRange(box.value.length, box.value.length);
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                box.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "hello" }));
+                const ev = new KeyboardEvent("keydown", {
+                    key: "Enter",
+                    code: "Enter",
+                    keyCode: 229,
+                    which: 229,
+                    isComposing: false,
+                    bubbles: true,
+                    cancelable: true,
+                });
+                const notPrevented = box.dispatchEvent(ev);
+                await new Promise((resolve) => setTimeout(resolve, 40));
+                return JSON.stringify({
+                    keyCode: ev.keyCode,
+                    notPrevented,
+                    modes: [...globalThis.imeModes],
+                    value: box.value,
+                });
+            `);
+
+            assert.equal(safari.keyCode, 229);
+            assert.equal(safari.notPrevented, true, "native 229 keydown is not prevented");
+            assert.deepEqual(safari.modes, [], "Safari reversed-order IME Enter must not submit");
+            assert.equal(safari.value, "hello", "draft stays intact without a newline");
+
+            const leaked = await inPage<{
+                firstNotPrevented: boolean;
+                modesAfterFirst: string[];
+                valueAfterFirst: string;
+                secondNotPrevented: boolean;
+            }>(`
+                const box = document.querySelector(".composer textarea");
+                box.focus();
+                box.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+                box.value = "hello";
+                box.dispatchEvent(new Event("input", { bubbles: true }));
+                box.setSelectionRange(box.value.length, box.value.length);
+                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                box.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "hello" }));
+                const firstNotPrevented = box.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                        key: "Enter",
+                        code: "Enter",
+                        keyCode: 13,
+                        which: 13,
+                        isComposing: false,
+                        bubbles: true,
+                        cancelable: true,
+                    }),
+                );
+                await Promise.resolve();
+                const modesAfterFirst = [...globalThis.imeModes];
+                const valueAfterFirst = box.value;
+                const secondNotPrevented = box.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                        key: "Enter",
+                        code: "Enter",
+                        keyCode: 13,
+                        which: 13,
+                        isComposing: false,
+                        bubbles: true,
+                        cancelable: true,
+                    }),
+                );
+                return JSON.stringify({
+                    firstNotPrevented,
+                    modesAfterFirst,
+                    valueAfterFirst,
+                    secondNotPrevented,
+                });
+            `);
+
+            assert.equal(
+                leaked.firstNotPrevented,
+                false,
+                "leaked bare Enter right after compositionend is prevented",
+            );
+            assert.deepEqual(leaked.modesAfterFirst, [], "leaked bare Enter must not submit");
+            assert.equal(leaked.valueAfterFirst, "hello", "draft stays intact without a newline");
+            assert.equal(leaked.secondNotPrevented, false, "second plain Enter is handled to send");
+            await until(
+                async () =>
+                    (await inPage<string[]>(`return JSON.stringify(globalThis.imeModes)`)).length >
+                    0,
+                "second Enter submits",
+            );
+            assert.deepEqual(
+                await inPage<string[]>(`return JSON.stringify(globalThis.imeModes)`),
+                ["steer"],
+                "second plain Enter sends as steer",
+            );
+        } finally {
+            await inPage(`
+                if (globalThis.prevImeFetch) {
+                    globalThis.fetch = globalThis.prevImeFetch;
+                    delete globalThis.prevImeFetch;
+                }
+                return "null";
+            `);
+            await setBusy(false);
+        }
     },
 );

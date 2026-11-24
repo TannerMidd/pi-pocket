@@ -4,6 +4,7 @@
 // It opens in the folder of the session you are in, so New session here is a tap away without walking the tree;
 // favorites, each person's own and on all their devices, sit first among the places; Ctrl/⌘+1…9 starts in one.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import {
     actions,
     api,
@@ -105,7 +106,7 @@ function LineInput({ value, placeholder, label, onSubmit, onCancel, class: class
             onInput=${(event) => setText(event.currentTarget.value)}
             onKeyDown=${(event) => {
                 // Esc lets go of the line, not the whole picker.
-                if (event.key === "Escape") {
+                if (event.key === "Escape" && !isComposingKey(event)) {
                     event.stopPropagation();
                     onCancel();
                 }
@@ -314,7 +315,7 @@ export function CwdSheet({ mode, fromList = false }) {
                 !favorite ||
                 event.altKey ||
                 event.shiftKey ||
-                event.isComposing ||
+                isComposingKey(event) ||
                 sheet?.type !== "cwd" ||
                 sheet.mode !== "new" ||
                 store.state.launcher
@@ -360,7 +361,7 @@ export function CwdSheet({ mode, fromList = false }) {
     // The list's keys, as a file dialog's: arrows select, Enter goes into the selected folder (or opens the one you are
     // in), Ctrl+Enter opens, Backspace goes up, letters jump to a folder, and / or ~ starts a path.
     const onKeyDown = (event) => {
-        if (event.target !== list.current || event.isComposing) {
+        if (event.target !== list.current || isComposingKey(event)) {
             return;
         }
 

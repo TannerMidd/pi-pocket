@@ -1,6 +1,7 @@
 // Model providers: signing in and out, the models subagents may use, and the dialog a
 // sign-in uses to ask for a code or a key.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { api, attempt, closeSheet, closeSignIn, signInAnswered, store } from "../store.js";
 import { html, Icon, Loader, MODEL_SEARCH_AT, Sheet } from "../ui.js";
 import { RefreshModelsButton, RefreshModelsStatus } from "../model-refresh.js";
@@ -604,7 +605,7 @@ function AuthFrame({ title, onClose, inline, focusKey, children }) {
         }
 
         const escape = (event) => {
-            if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
+            if (event.key === "Escape" && !isComposingKey(event)) {
                 event.stopImmediatePropagation();
                 close.current();
             }
@@ -725,7 +726,10 @@ export function AuthDialog({ inline = false }) {
                             placeholder=${prompt.placeholder ?? ""}
                             value=${value}
                             onInput=${(event) => setValue(event.currentTarget.value)}
-                            onKeyDown=${(event) => event.key === "Enter" && answer({ value })}
+                            onKeyDown=${(event) =>
+                                event.key === "Enter" &&
+                                !isComposingKey(event) &&
+                                answer({ value })}
                         />
                         <button
                             class="button primary"

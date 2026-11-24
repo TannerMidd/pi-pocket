@@ -178,11 +178,30 @@ export function setBoxKeys(list) {
 }
 
 /**
+ * Whether a keydown belongs to an input method's composition: active composition, WebKit's 229
+ * keyCode after `compositionend`, `"Process"`, or an unmodified Enter leaking within 30 ms of
+ * `compositionend` (`endedAt`).
+ */
+export function isComposingKey(event, endedAt = null) {
+    if (Boolean(event.isComposing) || event.keyCode === 229 || event.key === "Process") {
+        return true;
+    }
+
+    return (
+        event.key === "Enter" &&
+        !(event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) &&
+        typeof endedAt === "number" &&
+        typeof event.timeStamp === "number" &&
+        Math.abs(event.timeStamp - endedAt) < 30
+    );
+}
+
+/**
  * Give a keydown in a message box to the first module's key that it is. `box` is what the module's `run` gets: the
  * box's text, its selection, and `set`. True when a module took the key: the box then does nothing more with it.
  */
 export function boxKey(event, box) {
-    if (event.isComposing || event.keyCode === 229) {
+    if (isComposingKey(event)) {
         return false;
     }
 

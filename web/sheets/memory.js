@@ -1,5 +1,6 @@
 // Memory: the lessons Pi keeps, for this session's project, for everywhere, and for this session alone.
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { api, attempt, closeSheet, navigate, notify, openSheet, store } from "../store.js";
 import { html, Sheet, timeAgo } from "../ui.js";
 
@@ -403,6 +404,7 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     const [text, setText] = useState(initial);
     const [scope, setScope] = useState("project");
     const [busy, setBusy] = useState(false);
+    const compositionEndedAt = useRef(null);
 
     const title = pendingOnly ? "Pending memories" : "Memory";
 
@@ -521,8 +523,30 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
                     maxlength=${data.limits.text}
                     value=${text}
                     onInput=${(event) => setText(event.currentTarget.value)}
+                    onCompositionStart=${() => {
+                        compositionEndedAt.current = null;
+                    }}
+                    onCompositionEnd=${(event) => {
+                        compositionEndedAt.current = event.timeStamp;
+                    }}
                     onKeyDown=${(event) => {
-                        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+                        const endedAt = compositionEndedAt.current;
+
+                        compositionEndedAt.current = null;
+
+                        if (isComposingKey(event, endedAt)) {
+                            if (
+                                !event.isComposing &&
+                                event.keyCode !== 229 &&
+                                event.key !== "Process"
+                            ) {
+                                event.preventDefault();
+                            }
+
+                            return;
+                        }
+
+                        if (event.key === "Enter" && !event.shiftKey) {
                             event.preventDefault();
                             add();
                         }

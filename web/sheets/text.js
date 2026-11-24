@@ -1,5 +1,6 @@
 // One text field and a button: renaming, resetting, instructions, compacting, and your name.
 import { useState } from "preact/hooks";
+import { isComposingKey } from "../box-keys.js";
 import { attempt, closeSheet } from "../store.js";
 import { html, Sheet } from "../ui.js";
 
@@ -42,7 +43,8 @@ export function TextSheet({
                         value=${value}
                         placeholder=${placeholder}
                         onInput=${(event) => setValue(event.currentTarget.value)}
-                        onKeyDown=${(event) => event.key === "Enter" && save()}
+                        onKeyDown=${(event) =>
+                            event.key === "Enter" && !isComposingKey(event) && save()}
                     />`
             }
         </div>

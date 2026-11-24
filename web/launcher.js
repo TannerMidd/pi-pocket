@@ -2,6 +2,7 @@
 // onto a theme shows it at once; Enter keeps it, Escape goes back. Start with > for actions only, @ for sessions, # for
 // themes.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { isComposingKey } from "./box-keys.js";
 import { browserAvailable, toggleBrowser } from "./browser.js";
 import { folderColor } from "./avatar.js";
 import {
@@ -992,7 +993,7 @@ export function Launcher({ leaving, returnTo }) {
         // field, which takes focus before the key lands: a letter, a dead key (an accent to come), an input method's
         // keys, or AltGr's (Ctrl+Alt on Windows); not a shortcut. The keys that move and open work from the launcher too.
         const onDialog = event.target === dialog.current;
-        const composing = event.isComposing || event.keyCode === 229 || key === "Process";
+        const composing = isComposingKey(event);
         const altGr = event.ctrlKey && event.altKey;
         const typing =
             (key.length === 1 || key === "Backspace" || key === "Dead" || composing) &&

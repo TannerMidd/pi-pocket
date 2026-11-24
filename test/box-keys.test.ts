@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 type Key = { ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean; key: string };
-type Event = Partial<Key> & { code?: string; isComposing?: boolean; keyCode?: number };
+type Event = Partial<Key> & {
+    code?: string;
+    isComposing?: boolean;
+    keyCode?: number;
+    timeStamp?: number;
+};
 type Box = {
     where: string;
     text: string;
@@ -30,6 +35,7 @@ type BoxKeys = {
         write: (text: string, start: number, end: number) => void,
     ): Box;
     setBoxKeys(list: () => Source[]): void;
+    isComposingKey(event: Event, endedAt?: number | null): boolean;
     boxKey(event: Event, box: Box): boolean;
     boxKeyRows(): [string, string][];
 };
@@ -119,6 +125,8 @@ test("the first module's key takes it; false lets it through; a throw lets it th
     assert.equal(keys.boxKey(event("t", { ctrlKey: true }), box), false);
     assert.equal(failures.length, 1);
     assert.equal(keys.boxKey({ ...event("w", { ctrlKey: true }), isComposing: true }, box), false);
+    assert.equal(keys.boxKey({ ...event("w", { ctrlKey: true }), keyCode: 229 }, box), false);
+    assert.equal(keys.boxKey({ ...event("Process", { ctrlKey: true }) }, box), false);
     assert.equal(keys.boxKey(event("x", { ctrlKey: true }), box), false);
     assert.deepEqual(keys.boxKeyRows()[0], ["Ctrl W", "first (Mod)"]);
     keys.setBoxKeys(() => []);
@@ -145,4 +153,94 @@ test("set writes through the box's own editing, with the caret kept in the text"
         ["abc", 0, 0],
     ]);
     assert.throws(() => box.set(5 as unknown as string));
+});
+
+test("isComposingKey detects active IME keys and an Enter leaking near compositionend", () => {
+    assert.equal(keys.isComposingKey({ ...event("Enter"), isComposing: true }), true);
+    assert.equal(
+        keys.isComposingKey({ ...event("Enter"), isComposing: false, keyCode: 229 }),
+        true,
+        "Safari reversed order keyCode 229",
+    );
+    assert.equal(
+        keys.isComposingKey({ ...event("Process"), isComposing: false, keyCode: 0 }),
+        true,
+        "Process key",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            { ...event("Enter"), isComposing: false, keyCode: 13, timeStamp: 1005 },
+            1000,
+        ),
+        true,
+        "Enter within 30ms after compositionend",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            { ...event("Enter"), isComposing: false, keyCode: 13, timeStamp: 998 },
+            1000,
+        ),
+        true,
+        "Enter with timeStamp slightly earlier than compositionend (-2ms)",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            { ...event("Enter"), isComposing: false, keyCode: 13, timeStamp: 1030 },
+            1000,
+        ),
+        false,
+        "Enter at 30ms is not suppressed",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            { ...event("Enter"), isComposing: false, keyCode: 13, timeStamp: 1050 },
+            1000,
+        ),
+        false,
+        "Enter after 30ms is not suppressed",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            { ...event("a"), isComposing: false, keyCode: 65, timeStamp: 1005 },
+            1000,
+        ),
+        false,
+        "non-Enter key within 30ms is not suppressed",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            {
+                ...event("Enter", { shiftKey: true }),
+                isComposing: false,
+                keyCode: 13,
+                timeStamp: 1005,
+            },
+            1000,
+        ),
+        false,
+        "Shift+Enter within 30ms is not suppressed",
+    );
+    assert.equal(
+        keys.isComposingKey(
+            {
+                ...event("Enter", { metaKey: true }),
+                isComposing: false,
+                keyCode: 13,
+                timeStamp: 1005,
+            },
+            1000,
+        ),
+        false,
+        "Meta+Enter within 30ms is not suppressed",
+    );
+    assert.equal(
+        keys.isComposingKey({
+            ...event("Enter"),
+            isComposing: false,
+            keyCode: 13,
+            timeStamp: 1005,
+        }),
+        false,
+        "Enter without compositionend timestamp",
+    );
 });
