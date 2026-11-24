@@ -9,6 +9,7 @@ import { basename, join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import { retireArtifacts, startAssetSweep } from "./artifacts.ts";
 import {
     ArtifactSharesDoc,
     DeletedDoc,
@@ -459,6 +460,7 @@ export class SessionCleanup {
         }
 
         if (removed.size > 0) {
+            startAssetSweep(this.#app);
             await this.#releaseUploads().catch((error: unknown) =>
                 this.#app.log(`Kept uploads could not be checked: ${describe(error)}`),
             );
@@ -483,7 +485,8 @@ export class SessionCleanup {
             return { id: Number(id), done: false, why: plan.blocked };
         }
 
-        const tree = app.conversationsOf(id).map(Number);
+        const conversations = app.conversationsOf(id);
+        const tree = conversations.map(Number);
         const numbers = new Set(tree);
         const worktree =
             plan.worktree?.state === "clean" ? app.sessionMeta(id)?.worktree : undefined;
@@ -535,12 +538,8 @@ export class SessionCleanup {
                 }
             }
 
-            const shares = await tx.doc(ArtifactSharesDoc);
-
-            for (const [key, share] of Object.entries(shares.items)) {
-                if (numbers.has(Number(share.conversation))) {
-                    delete shares.items[key];
-                }
+            for (const conversation of conversations) {
+                await retireArtifacts(tx, conversation, null);
             }
 
             const links = await tx.doc(PublicLinksDoc);

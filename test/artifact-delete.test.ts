@@ -1,16 +1,18 @@
 import { type App, cleanUp, context, openApp, owner, say, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { AgentDoc, type ConversationId } from "@earendil-works/pi-durable";
 import {
     ArtifactAssetDoc,
     ArtifactBodyDoc,
     ArtifactsDoc,
     ArtifactStateDoc,
     DesignCommentsDoc,
+    SubagentsDoc,
 } from "../src/server/docs.ts";
 import * as artifacts from "../src/server/artifacts.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
@@ -208,6 +210,77 @@ test("an asset's bytes go once no artifact uses them, and no stored revision kee
         db.close();
         app = await openApp(scriptedModel(), dataDir);
     }
+});
+
+test("removing an archived session retires its artifacts, not assets another session uses", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: work });
+    execFileSync(
+        "git",
+        [
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        { cwd: work },
+    );
+    const other = await session();
+    const { id } = await app.commands.createSession(owner(app), { cwd: work, worktree: true });
+    const child = await app.harness.commit(async (tx) => {
+        const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+
+        (await tx.doc(AgentDoc, child.id)).cwd = work;
+        (await tx.doc(SubagentsDoc, id)).agents.helper = { conversationId: child.id, reported: [] };
+
+        return child.id;
+    }, context);
+    const me = app.config.ownerToken;
+    const shared = { name: "shared.txt", content: "keep with other session" };
+    const remove = () => call(me, "POST", "/api/x/session-cleanup/remove", { ids: [id] });
+
+    await publish(id, "old", { assets: [{ name: "old.txt", content: "only in old version" }] });
+    await publish(id, "new", { assets: [shared], removeAssets: ["old.txt"] });
+    await publish(id, "another page", { id: "another" });
+    await publish(child, "subagent page", {
+        assets: [{ name: "child.txt", content: "subagent only" }],
+    });
+    const childIndex = await app.harness.snapshot(ArtifactsDoc, child, context);
+    const childHash = childIndex!.items.demo!.versions[0]!.assets!["child.txt"]!.hash;
+
+    await publish(other, "other", { assets: [shared] });
+    const share = await app.shares.create(id, owner(app), { id: "demo" });
+    const otherShare = await app.shares.create(other, owner(app), { id: "demo" });
+    const index = await app.harness.snapshot(ArtifactsDoc, id, context);
+    const own = index!.items.demo!.versions[0]!.assets!["old.txt"]!.hash;
+
+    assert.equal(JSON.parse((await remove()).text).outcomes[0].done, false, "archive first");
+    await app.commands.updateSession(id, owner(app), { archived: true });
+    await app.commands.updateSession(other, owner(app), { archived: true });
+    const clean = await call(me, "POST", "/api/x/session-cleanup/clean-up", { ids: [id] });
+
+    assert.equal(JSON.parse(clean.text).outcomes[0].done, true, clean.text);
+    assert.equal(await body(id, 1), "old", "archive and worktree cleanup keep artifacts");
+    assert.ok(await app.shares.open(share.token));
+
+    assert.equal(JSON.parse((await remove()).text).outcomes[0].done, true);
+    assert.equal((await call(me, "DELETE", `/api/c/${id}/artifacts/demo`)).status, 404);
+    assert.equal(await app.shares.open(share.token), undefined);
+    assert.equal(await body(id, 1), undefined);
+    assert.equal(await body(id, 2), undefined);
+    assert.equal(await app.harness.snapshot(ArtifactBodyDoc, id, "another@1", context), undefined);
+    assert.deepEqual((await app.harness.snapshot(ArtifactsDoc, id, context))?.items, {});
+    await artifacts.sweeping;
+    assert.equal(await app.harness.snapshot(ArtifactAssetDoc, own, context), undefined);
+    assert.equal(await body(child, 1), undefined);
+    assert.equal(await app.harness.snapshot(ArtifactAssetDoc, childHash, context), undefined);
+    assert.equal(JSON.parse((await remove()).text).outcomes[0].done, false, "already removed");
+    assert.equal(await body(other, 1), "other");
+    assert.ok(await app.artifactAsset(other, "demo", 1, shared.name));
+    assert.ok(await app.shares.open(otherShare.token));
 });
 
 test("bytes stored again while the sweep reads stay", async () => {

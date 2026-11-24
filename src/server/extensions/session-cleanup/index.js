@@ -166,7 +166,7 @@ export default function setup(pocket) {
                               </strong>
                               ${` the app. Pi Pocket removes its own files of ${going.length === 1 ? "it" : "them"}: `}
                               <strong>${bytes(size)}</strong>
-                              ${" (worktrees, uploads, and background logs)."}
+                              ${" (worktrees, uploads, and background logs). All artifact versions in the removed sessions are deleted too."}
                           </p>
                           <p class="muted">${stays(going.length)}</p>
                           ${ends && html`<p class="muted small">${ends}</p>`}
