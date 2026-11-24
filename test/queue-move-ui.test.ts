@@ -5,6 +5,7 @@ import {
     lastText,
     newSession,
     openApp,
+    owner,
     root,
     scriptedModel,
     until,
@@ -181,6 +182,7 @@ test(
         const releaseViews = delayViews(t, id);
 
         assert.equal((await page.click({ selector: move })).covered, undefined);
+        await until(() => moves.has(path), "the move reply");
         assert.deepEqual(moves.get(path), [200]);
         assert.equal((await inbox(id))[0]?.mode, "followUp");
         assert.equal(app.isBusy(id), true);
@@ -225,6 +227,49 @@ test("two quick clicks on Move to queue leave one Queue card without an error", 
     await until(() => !app.isBusy(id), "Pi to finish both messages");
 });
 
+test("a late move reply does not undo a newer change from another client", real, async (t) => {
+    const { id, releaseBash, path } = await startSteer(t);
+    const [item] = await inbox(id);
+
+    assert.ok(item);
+    const submissionId = Number(item.id);
+
+    // Hold only the first HTTP reply. The browser still receives both moves through normal views.
+    await page.evaluate(`
+        const { actions } = await import('/store.js');
+        const held = new Promise(resolve => { window.releaseReply = resolve; });
+        const fetchNow = window.fetch;
+        window.fetch = async (...args) => {
+            const response = await fetchNow(...args);
+            await held;
+            return response;
+        };
+        try {
+            window.firstMove = actions.move(${submissionId}, 'followUp');
+        } finally {
+            window.fetch = fetchNow;
+        }
+    `);
+    await until(async () => (await textOf(move)) === "Steer now", "the first move's view");
+    await app.commands.moveQueued(id, owner(app), submissionId, "steer");
+    await until(async () => (await textOf(move)) === "Move to queue", "the newer move's view");
+    assert.equal(
+        await page.evaluate(`
+            window.releaseReply();
+            await window.firstMove;
+            return (await import('/store.js')).store.state.view.inbox[0].mode;
+        `),
+        "steer",
+    );
+    assert.equal((await page.click({ selector: move })).covered, undefined);
+    await until(async () => (await textOf(move)) === "Steer now", "a normal move to Queue");
+    await until(() => moves.get(path)?.length === 2, "both move replies");
+    assert.deepEqual(moves.get(path), [200, 200]);
+    assert.equal((await inbox(id))[0]?.mode, "followUp");
+    releaseBash();
+    await until(() => !app.isBusy(id), "Pi to finish both messages");
+});
+
 test("a move from a stale card says when the Steer has already gone to Pi", real, async (t) => {
     const { id, releaseBash, path } = await startSteer(t);
     const releaseViews = delayViews(t, id);
@@ -235,6 +280,7 @@ test("a move from a stale card says when the Steer has already gone to Pi", real
         "Pi to take the Steer at the tool boundary",
     );
     assert.equal((await page.click({ selector: move })).covered, undefined);
+    await until(() => moves.has(path), "the stale move reply");
     assert.deepEqual(moves.get(path), [409]);
     await until(
         async () =>
