@@ -150,6 +150,24 @@ const stop = async (code: number) => {
         console.error("Close failed:", error);
     }
 
+    if (launcher && process.connected && process.send !== undefined) {
+        // Give the launcher the intended code before process.exit can block. Do not wait on broken IPC.
+        await new Promise<void>((resolve) => {
+            const fallback = setTimeout(resolve, 250);
+
+            const done = () => {
+                clearTimeout(fallback);
+                resolve();
+            };
+
+            try {
+                process.send?.({ type: "stopping", code }, done);
+            } catch {
+                done();
+            }
+        });
+    }
+
     process.exit(code);
 };
 

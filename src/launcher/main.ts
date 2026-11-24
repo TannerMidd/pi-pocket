@@ -34,6 +34,7 @@ import {
 import { RUNNING_FILE, removeRunning, writeRunning } from "./desktop.ts";
 import { fail, parseArgs } from "./options.ts";
 import { removeStaleServe, TailscaleServe } from "./serve.ts";
+import { createStopWatchdog } from "./stop-watchdog.ts";
 // The two server modules the launcher runs itself: both import only Node's own, so an update cannot break the launcher.
 import { takeLock } from "../server/lock.ts";
 import {
@@ -648,12 +649,33 @@ function startServer(first: boolean): void {
               }
           }, UPDATE_START_LIMIT_MS)
         : undefined;
+    const stopWatchdog = createStopWatchdog(() => {
+        if (child !== proc || !proc.kill("SIGKILL")) {
+            return false;
+        }
+
+        log(yellow("  The server did not finish exiting after closing: stopped it."));
+
+        return true;
+    });
 
     child = proc;
     pipeLines(proc.stdout, (line) => log(line));
     pipeLines(proc.stderr, (line) => log(line));
-    proc.on("message", (message: { type?: string; loginPath?: string }) => {
-        if (message?.type !== "ready" || child !== proc) {
+    proc.on("message", (message: { type?: string; loginPath?: string; code?: number }) => {
+        if (child !== proc) {
+            return;
+        }
+
+        if (message?.type === "stopping") {
+            if (typeof message.code === "number" && Number.isInteger(message.code)) {
+                stopWatchdog.noteStopping(message.code);
+            }
+
+            return;
+        }
+
+        if (message?.type !== "ready") {
             return;
         }
 
@@ -681,8 +703,10 @@ function startServer(first: boolean): void {
         }
     });
 
-    const exited = (code: number | null, signal: NodeJS.Signals | null) => {
+    const exited = (rawCode: number | null, rawSignal: NodeJS.Signals | null) => {
         clearTimeout(watchdog);
+
+        const { code, signal } = stopWatchdog.resolveExit(rawCode, rawSignal);
 
         if (child !== proc) {
             return;
