@@ -307,3 +307,84 @@ test("a call with its own timeout is neither stalled nor stopped before it", asy
     assert.equal((await agent(id, "own-x")).stall?.told, undefined, "no stall before it");
     await stop(id, "own-x");
 });
+
+test("a send resets the stall wait on the harness clock, and answers stamp answeredAt on it", async () => {
+    settings(30, 0);
+    const id = await session();
+
+    await say(id, "spawn clock-x");
+    await until(async () => (await call(id, "clock-x")) !== undefined, "the call");
+    const child = (await agent(id, "clock-x")).conversationId;
+
+    try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        offset += 20 * 60_000;
+        const nudgedAt = app.now();
+
+        await say(id, "nudge clock-x");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        offset += 20 * 60_000;
+        const afterAdvance = app.now();
+
+        // Wait past Courier's 2 s gather window so any spurious stall report lands in the inbox.
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        assert.deepEqual(
+            (await inbox(id)).filter((text) => text.includes(" stalled: ")),
+            [],
+            "20 minutes after a nudge is below the 30-minute soft limit",
+        );
+        assert.deepEqual(
+            (await app.harness.snapshot(SubagentsDoc, id, context))?.outbox ?? [],
+            [],
+            "no stall report queued in outbox",
+        );
+
+        await app.commands.abort(child, owner(app));
+        await until(
+            async () =>
+                (await inbox(id)).some((text) =>
+                    text.includes("clock-x stopped: a person stopped it"),
+                ),
+            "the report of the Stop",
+        );
+        const stopped = await agent(id, "clock-x");
+
+        assert.ok(
+            stopped.askedAt !== undefined && stopped.askedAt >= nudgedAt,
+            `askedAt (${stopped.askedAt}) should use the harness clock (>= ${nudgedAt})`,
+        );
+        assert.ok(
+            stopped.answeredAt !== undefined &&
+                stopped.answeredAt >= stopped.askedAt &&
+                stopped.answeredAt >= afterAdvance,
+            `stopped answeredAt (${stopped.answeredAt}) should use the harness clock and not precede askedAt (${stopped.askedAt})`,
+        );
+
+        await until(
+            async () => (await inbox(id)).some((text) => text.includes("Your message waits, held")),
+            "word that the message waits, held",
+        );
+        await until(() => !app.isBusy(child), "the subagent stopped");
+        assert.equal(await app.commands.sendHeld(child, owner(app)), 1);
+        await until(
+            async () =>
+                (await inbox(id)).some((text) =>
+                    /\[subagent clock-x answered[^]*One more thing/.test(text),
+                ),
+            "the answer to the held message",
+        );
+        const answered = await agent(id, "clock-x");
+
+        assert.ok(
+            answered.answeredAt !== undefined &&
+                answered.askedAt !== undefined &&
+                answered.answeredAt >= answered.askedAt &&
+                answered.answeredAt >= afterAdvance,
+            `answeredAt (${answered.answeredAt}) should use the harness clock and not precede askedAt (${answered.askedAt})`,
+        );
+    } finally {
+        if (app.isBusy(child)) {
+            await stop(id, "clock-x");
+        }
+    }
+});
