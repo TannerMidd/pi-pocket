@@ -2951,7 +2951,35 @@ export const actions = {
     setAccess: (userId, patch) => api(`users/${encodeURIComponent(userId)}`, patch),
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
-    move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
+    move: async (submissionId, mode) => {
+        const id = current();
+        const before = store.state.view.inbox.find((item) => item.id === submissionId);
+        const result = await api(`c/${id}/move`, { submissionId, mode });
+
+        if (result?.ok !== true) {
+            throw new ApiError(undefined, "The server did not confirm the move. Check the queue.");
+        }
+
+        // A mode change is saved before the reply. Show it without waiting for the view, but do not replace a card
+        // the view has since updated or removed. An Interrupt is a task that has yet to send, not a mode change.
+        const { view } = store.state;
+
+        if (
+            mode !== "interrupt" &&
+            before !== undefined &&
+            before.mode !== mode &&
+            !changingAccount &&
+            current() === id &&
+            view.conversation?.id === id &&
+            view.inbox.includes(before)
+        ) {
+            const inbox = view.inbox.map((item) => (item === before ? { ...item, mode } : item));
+
+            store.set({ view: { ...view, inbox } });
+        }
+
+        return result;
+    },
     editQueued: (submissionId, id = current()) => api(`c/${id}/edit-queued`, { submissionId }),
     /** What a Stop held: send them all, or drop one or take it back into the box, by its key. */
     sendHeld: () => api(`c/${current()}/held`, { action: "send" }),
