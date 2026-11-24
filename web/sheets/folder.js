@@ -17,6 +17,7 @@ import {
     store,
 } from "../store.js";
 import { sessionStarted } from "../extension-ui.js";
+import { crumbsOf, joined, whole } from "../folder-paths.js";
 import { APPLE, html, Icon, Sheet, shortPath } from "../ui.js";
 import { piSessionsAvailable } from "./pi-sessions.js";
 
@@ -27,12 +28,9 @@ const ALWAYS_DEFAULT_KEY = "pocket.folderAlwaysDefault";
 /** Touch screens go into a folder on a tap; a mouse selects on a click and goes in on a double click. */
 const touch = matchMedia("(pointer: coarse)").matches;
 
-/** A folder's path with a name added: `/a` and `b` make `/a/b`, `/` and `b` make `/b`. */
-const joined = (folder, name) => `${folder.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
-
 /** Whether a failure says a folder is not there yet, and so could be made: only a whole path, as the server makes no other. */
 const notThere = (error, target) =>
-    error.status === 404 && /isn't there/.test(error.message) && /^\s*[~/]/.test(target);
+    error.status === 404 && /isn't there/.test(error.message) && whole(target);
 
 /** A folder's name: the last part of its path, or ~ for home and / for the root. */
 function nameOf(path, home) {
@@ -41,21 +39,6 @@ function nameOf(path, home) {
     }
 
     return path.replace(/\/+$/, "").split("/").pop() || "/";
-}
-
-/** The path as steps to click back up to: ~ or /, then each folder under it. */
-function crumbsOf(path, home) {
-    const underHome = Boolean(home) && (path === home || path.startsWith(`${home}/`));
-    const start = underHome ? home : "";
-    const crumbs = [{ name: underHome ? "~" : "/", path: underHome ? home : "/" }];
-    let at = start;
-
-    for (const part of path.slice(start.length).split("/").filter(Boolean)) {
-        at = `${at}/${part}`;
-        crumbs.push({ name: part, path: at });
-    }
-
-    return crumbs;
 }
 
 /** Recent folders' labels: each one's name, with its parent's where two have the same name. */
@@ -355,7 +338,7 @@ export function CwdSheet({ mode, fromList = false }) {
     };
 
     /** A path typed: whole, or from the folder you are in. */
-    const goTo = (text) => load(/^[~/]/.test(text) ? text : joined(folder, text));
+    const goTo = (text) => load(whole(text) ? text : joined(folder, text));
 
     // The list's keys, as a file dialog's: arrows select, Enter goes into the selected folder (or opens the one you are
     // in), Ctrl+Enter opens, Backspace goes up, letters jump to a folder, and / or ~ starts a path.
@@ -487,7 +470,7 @@ export function CwdSheet({ mode, fromList = false }) {
                     ? html`<${LineInput}
                           class="fp-path-input"
                           value=${editing}
-                          placeholder="A path: ~/code or /srv"
+                          placeholder="A path: ~/code, /srv or D:"
                           label="Go to a path"
                           onSubmit=${goTo}
                           onCancel=${() => {
