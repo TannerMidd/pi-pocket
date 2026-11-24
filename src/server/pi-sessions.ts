@@ -12,9 +12,7 @@
  * finished gets a result saying so (Pi's says "No result provided"). Where Pi would send a tool result whose call is
  * not there (a stray one, or one whose call a context edit took out), Pi Durable leaves it out, as providers refuse it.
  */
-import { createReadStream } from "node:fs";
 import { open } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import type { Message } from "@earendil-works/pi-ai";
 import {
     buildSessionProjection,
@@ -55,6 +53,8 @@ const PREVIEW_MESSAGES = 6;
 const PREVIEW_TEXT = 600;
 /** How much of a file a preview reads at a time, from its end. */
 const TAIL_CHUNK = 1024 * 1024;
+/** How much of a file is read at a time when continuing a session. */
+const READ_CHUNK = 64 * 1024;
 /** How much of a file's start holds its header line, at most. */
 const HEADER_BYTES = 64 * 1024;
 const TITLE_LENGTH = 80;
@@ -154,20 +154,20 @@ function textOf(message: Message): string {
 }
 
 /**
- * A session file's entries, read a line at a time, as `parseSessionEntries` reads them: a line that is not JSON (a
- * last one cut off while Pi writes it) is skipped. A file is never held whole as text, so its size has no limit but
- * the memory its entries take: big files are mostly images, kept once as their entries' strings.
+ * A session file's entries, read a line at a time, as `parseSessionEntries` reads them: lines split
+ * on LF alone, so `U+2028` and `U+2029` that `JSON.stringify` leaves unescaped stay inside their
+ * entry, and each line is decoded once whole so a character split between chunks stays whole. A
+ * line that is not JSON (a last one cut off while Pi writes it) is skipped. A file is never held
+ * whole as text, so its size has no limit but the memory its entries take: big files are mostly
+ * images, kept once as their entries' strings.
  */
 async function readSessionEntries(path: string): Promise<FileEntry[]> {
     const entries: FileEntry[] = [];
-    const lines = createInterface({
-        input: createReadStream(path, { encoding: "utf8" }),
-        crlfDelay: Infinity,
-    });
+    const handle = await open(path, "r");
 
-    for await (const line of lines) {
+    const take = (line: string) => {
         if (line.trim() === "") {
-            continue;
+            return;
         }
 
         try {
@@ -175,6 +175,49 @@ async function readSessionEntries(path: string): Promise<FileEntry[]> {
         } catch {
             // As Pi reads it: the line is left out.
         }
+    };
+
+    try {
+        // The bytes of the line being read, from earlier chunks.
+        let rest: Buffer[] = [];
+
+        for (;;) {
+            const part = Buffer.allocUnsafe(READ_CHUNK);
+            const { bytesRead } = await handle.read(part, 0, READ_CHUNK, null);
+
+            if (bytesRead === 0) {
+                break;
+            }
+
+            const chunk = part.subarray(0, bytesRead);
+            let start = 0;
+
+            while (start < chunk.length) {
+                const at = chunk.indexOf(10, start);
+
+                if (at === -1) {
+                    break;
+                }
+
+                const slice = chunk.subarray(start, at);
+
+                take(
+                    (rest.length === 0 ? slice : Buffer.concat([...rest, slice])).toString("utf8"),
+                );
+                rest = [];
+                start = at + 1;
+            }
+
+            if (start < chunk.length) {
+                rest.push(chunk.subarray(start));
+            }
+        }
+
+        if (rest.length > 0) {
+            take(Buffer.concat(rest).toString("utf8"));
+        }
+    } finally {
+        await handle.close();
     }
 
     return entries;

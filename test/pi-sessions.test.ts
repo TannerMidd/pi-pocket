@@ -453,3 +453,33 @@ test("a tool result without its call: Pi would send it, providers refuse it, Pi 
     assert.ok(piContext(path).some((message) => message.role === "toolResult"));
     assert.deepEqual(await pocketContext(id), without);
 });
+
+test("messages with U+2028 or U+2029 stay whole, and characters at a read chunk edge stay whole", async () => {
+    const manager = SessionManager.inMemory(work);
+    const withSeparators = "line one\u2028line two\u2029paragraph two";
+
+    manager.appendMessage({ role: "user", content: withSeparators, timestamp: 1 });
+    manager.appendMessage(fauxAssistantMessage([fauxText("kept \u2028 and \u2029 too")]));
+    manager.appendMessage({
+        role: "user",
+        content: `${"x".repeat(64 * 1024)}é tail`,
+        timestamp: 2,
+    });
+    manager.appendMessage(fauxAssistantMessage([fauxText("done")]));
+    const path = save(manager, "unicode-separators");
+    const file = readFileSync(path);
+    // The file is read in 64 KiB chunks: shortened, the first chunk ends inside "é".
+    const cut = file.indexOf("é") - (64 * 1024 - 1);
+
+    writeFileSync(path, file.toString("utf8").replace("x".repeat(cut), ""));
+    assert.equal(readFileSync(path).indexOf("é"), 64 * 1024 - 1);
+
+    const { id } = await app.commands.continuePiSession(owner(app), path);
+    const messages = await pocketContext(id);
+
+    assert.deepEqual(messages, piContext(path));
+    assert.equal(messages.length, 4);
+    assert.equal(messages[0]!.content, withSeparators);
+    assert.deepEqual(messages[1]!.content, [{ type: "text", text: "kept \u2028 and \u2029 too" }]);
+    assert.match(String(messages[2]!.content), /é tail$/);
+});
