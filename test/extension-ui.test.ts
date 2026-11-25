@@ -1057,8 +1057,30 @@ test("many extension buttons scroll in Tools without moving the primary rail", r
             "the last tool runs",
         );
         assert.equal(await scrolled(), before, "opening the last tool does not scroll the rail");
+
+        await page.evaluate(`
+            (await import("/theme.js")).setPrefs({ density: "tight" });
+            return "null";
+        `);
+        await page.setViewport({ width: 390, height: 844, scale: 2, mobile: true });
+        await openTools();
+        await until(() => has(rail("Many 0")), "the first tool on a phone");
+        const touch = await inPage<{ tool: number; all: number }>(`
+            const height = (el) => parseFloat(getComputedStyle(el).minHeight);
+            const all = [...document.querySelectorAll(".nav-menu .menu-name")]
+                .find((el) => el.textContent.trim() === "All places")
+                .closest(".list-item");
+            return JSON.stringify({
+                tool: height(document.querySelector(${JSON.stringify(rail("Many 0"))})),
+                all: height(all),
+            });
+        `);
+
+        assert.equal(touch.tool, 44);
+        assert.equal(touch.all, 44);
     } finally {
         await withMeter(`globalThis.manyRail?.forEach(handle => handle.remove()); return "null";`);
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "comfortable" });`);
         await page.setViewport(DESKTOP);
     }
 });
