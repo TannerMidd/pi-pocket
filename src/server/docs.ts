@@ -662,8 +662,19 @@ export const ScheduleDoc = defineDoc<{ items: Record<string, Schedule> }>({
 
 /** A command Pi started in the background (`background.ts`), and how it ended. */
 export type BackgroundTask = {
-    /** Short and stable: what Pi uses to read, stop, or name it. */
+    /** Short and stable: identifies this attempt, including its processes and output. */
     id: string;
+    /** A legacy row is a standalone job, never grouped by command or process. */
+    jobId?: string;
+    attempt?: number;
+    resumedFrom?: string;
+    superseded?: true;
+    processObservedAt?: number;
+    processAlive?: boolean;
+    lastOutputAt?: number;
+    outputBytes?: number;
+    timedOut?: true;
+    launchFailed?: true;
     command: string;
     cwd: string;
     /** Its process, the leader of its own process group; 0 while it is starting. */
@@ -711,16 +722,54 @@ export type BackgroundTask = {
     read: number;
 };
 
+export type BackgroundJobSummary = {
+    jobId: string;
+    attemptId: string;
+    attempt: number;
+    resumedFrom?: string;
+    startedAt: number;
+    endedAt?: number;
+    status: BackgroundTask["status"];
+    outcome?: "exited" | "timeout" | "failure" | "stopped" | "lost";
+    processObservedAt?: number;
+    processAlive?: boolean;
+    lastOutputAt?: number;
+    outputBytes?: number;
+    code?: number;
+};
+
+export type BackgroundState = {
+    items: Record<string, BackgroundTask>;
+    /** Monotonic attempt IDs cannot alias a pruned attempt's processes or its watch. */
+    nextAttemptId?: number;
+    /** Adverse attempts have their own retention, independent of later successful launcher exits. */
+    adverse?: BackgroundJobSummary[];
+};
+
 /** Commands Pi runs in the background. A fork starts without them: their processes belong to the session they were started in. */
-export const BackgroundDoc = defineDoc<{ items: Record<string, BackgroundTask> }>({
+export const BackgroundDoc = defineDoc<BackgroundState>({
     kind: "pocket.background",
     version: 1,
     ...rebased,
     scope: "conversation",
     history: "latest",
     fork: "initial",
-    initial: () => ({ items: {} }),
+    initial: () => ({ items: {}, nextAttemptId: 1 }),
 });
+
+/** One compact receipt per keyed start. Trimming task rows or logs never permits a second launch. */
+export const BackgroundCallDoc = defineDocFamily<{ attemptId: string; requestedBy?: string }, null>(
+    {
+        kind: "pocket.background-call",
+        version: 1,
+        ...rebased,
+        family: true,
+        scope: "conversation",
+        history: "latest",
+        fork: "initial",
+        initial: () => ({ attemptId: "" }),
+    },
+);
 
 /** The last check of a goal: whether it passed, its exit code, and the end of its output. */
 export type GoalCheck = { passed: boolean; code: number; at: number; tail: string };

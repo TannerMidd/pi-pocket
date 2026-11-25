@@ -166,6 +166,7 @@ import { whyUnanswered } from "./subagent-runs.ts";
 import { Schedules } from "./schedules.ts";
 import { CoreSecrets } from "./secrets.ts";
 import { BackgroundTasks } from "./background.ts";
+import { readJobSupervision } from "./job-supervision.ts";
 import { SessionCleanup } from "./session-cleanup.ts";
 import { Shares } from "./share.ts";
 import { CommandEnvs, HiddenValues, wrapEnv } from "./hidden.ts";
@@ -1063,6 +1064,7 @@ export class PocketApp {
             schedules: this.schedules,
             sessionCleanup: this.sessionCleanup,
             background: this.background,
+            jobSupervision: (id, after) => readJobSupervision(this, id, undefined, after),
             goals: this.goals,
             browsers: this.browsers,
             pip: this.pip,

@@ -79,6 +79,7 @@ type Internal =
     | "schedules"
     | "sessionCleanup"
     | "background"
+    | "jobSupervision"
     | "goals"
     | "browsers"
     | "memory"

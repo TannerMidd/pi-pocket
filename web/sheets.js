@@ -358,7 +358,7 @@ function sheetBody(sheet) {
             break;
         case "background":
             body = view.conversation
-                ? html`<${BackgroundSheet} key=${sheet.task ?? ""} task=${sheet.task} />`
+                ? html`<${BackgroundSheet} key=${`${view.conversation.id}:${sheet.task ?? ""}`} task=${sheet.task} />`
                 : null;
             break;
         case "schedules":

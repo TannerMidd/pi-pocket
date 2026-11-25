@@ -8,6 +8,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
+import { readJobSupervision } from "../job-supervision.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
@@ -730,6 +731,14 @@ export async function conversationRoutes(
                 endedAt: item.endedAt ?? null,
             })),
         });
+    }
+
+    if (third === "background" && fourth === "jobs" && parts.length === 4 && method === "GET") {
+        return json(
+            response,
+            200,
+            await readJobSupervision(app, id, user, url.searchParams.get("after") ?? undefined),
+        );
     }
 
     // What a background task printed, from a byte on: `from` is where the last look ended, and `to` where this one did.

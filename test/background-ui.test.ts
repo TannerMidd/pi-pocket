@@ -8,6 +8,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -91,6 +92,78 @@ after(async () => {
     await app?.close();
     cleanUp();
 });
+
+test(
+    "the lead sees a worker's quiet replacement and earlier timeout without seeing its output",
+    real,
+    async () => {
+        const lead = await newSession(app);
+
+        await say(app, lead, "Start a worker");
+        await app.linkedSessions.reports(lead, { take: false }, "no-reports");
+        const { session: worker } = await app.linkedSessions.start(
+            lead,
+            { message: "Check the sample" },
+            "sample-worker",
+        );
+
+        await until(() => !app.isBusy(worker), "the worker's turn to end");
+        const options = { notify: false, requestedBy: owner(app).id };
+        const a = await app.background.start(worker, {
+            ...options,
+            command: "echo sample-worker-output; sleep 60",
+            quietMinutes: 0.01,
+        });
+
+        try {
+            await until(
+                async () =>
+                    (await app.background.jobs(worker)).recentAdverse[0]?.outcome === "timeout",
+                "first attempt to time out",
+            );
+            const b = await app.background.start(worker, {
+                ...options,
+                command: "sleep 61",
+                quietMinutes: 0,
+                jobId: a.jobId!,
+                expectedAttempt: a.id,
+            });
+
+            await page.setViewport(VIEWPORTS.mobile);
+            await page.navigate(`${base}/s/${lead}`);
+            await see(
+                `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+                "lead session",
+            );
+            await inPage(
+                `(await import("/store.js")).openSheet({ type: "background" }); return "null"`,
+            );
+            await see(
+                `return JSON.stringify(document.querySelector(".job-status") !== null)`,
+                "job status",
+            );
+            await inPage(`document.querySelector(".job-status").open = true; return "null"`);
+            await see(
+                `return JSON.stringify(document.querySelector(".job-status")?.textContent.includes(${JSON.stringify(b.id)}))`,
+                "replacement attempt",
+            );
+            const text = await inPage<string>(
+                `return JSON.stringify(document.querySelector(".job-status").innerText)`,
+            );
+
+            assert.ok(text.includes(a.id));
+            assert.match(text, /Timed out/);
+            assert.match(text, /Attempt 2/);
+            assert.doesNotMatch(text, /sample-worker-output|sleep 61/);
+        } finally {
+            for (const item of await app.background.list(worker)) {
+                if (item.status === "running") {
+                    await app.background.stop(worker, item.id);
+                }
+            }
+        }
+    },
+);
 
 test("a background task's end shows as a card with its last lines", real, async () => {
     const id = await newSession(app);
