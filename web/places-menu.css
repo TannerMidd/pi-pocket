@@ -1,6 +1,6 @@
 /* The shared navigation frame contains real sheets. Its host owns drawer placement. */
 .grouped-menu {
-    --menu-pad: calc(24px * var(--space-x));
+    --menu-pad: calc(20px * var(--space-x));
     background: var(--card);
 }
 
@@ -8,14 +8,14 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 4px 8px;
-    padding: 28px var(--menu-pad) 24px;
+    padding: calc(20px * var(--space-y)) var(--menu-pad) calc(16px * var(--space-y));
     border-bottom: var(--border) solid var(--hair);
 }
 
 .grouped-menu .sheet-eyebrow {
     grid-area: 1 / 1;
     color: var(--muted);
-    font: 500 11px / 1.5 var(--mono);
+    font: 500 10px / 1.5 var(--mono);
     text-transform: uppercase;
     letter-spacing: 0.14em;
 }
@@ -29,7 +29,7 @@
     grid-area: 2 / 1;
     margin: 0;
     color: var(--text);
-    font-size: 24px;
+    font-size: 16px;
     line-height: 1.3;
     font-weight: 600;
     overflow-wrap: anywhere;
@@ -37,8 +37,8 @@
 }
 
 .grouped-menu .sheet-head > .icon-button {
-    width: 44px;
-    height: 44px;
+    width: 34px;
+    height: 34px;
     color: var(--muted);
 }
 
@@ -64,17 +64,17 @@
 
 .grouped-menu .sheet-body {
     gap: 0;
-    padding: 12px var(--menu-pad) 16px;
+    padding: calc(12px * var(--space-y)) var(--menu-pad) calc(16px * var(--space-y));
 }
 
 .grouped-menu .menu-group {
-    padding: 12px 0 16px;
+    padding: calc(8px * var(--space-y)) 0 calc(12px * var(--space-y));
     margin: 0;
     border: 0;
 }
 
 .grouped-menu .menu-group + .menu-group {
-    padding-top: 16px;
+    padding-top: calc(12px * var(--space-y));
     border-top: var(--border) solid var(--hair);
 }
 
@@ -83,8 +83,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-height: 32px;
-    margin-bottom: 4px;
+    min-height: calc(24px + 8px * var(--space-y));
+    margin-bottom: 2px;
 }
 
 .grouped-menu .group-title {
@@ -99,9 +99,9 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    min-height: 44px;
-    margin-right: -8px;
-    padding: 0 8px;
+    min-height: 36px;
+    margin-right: calc(-8px * var(--space-x));
+    padding: 0 calc(8px * var(--space-x));
     color: var(--text);
     font-size: 12px;
     font-weight: 500;
@@ -116,7 +116,8 @@
 .grouped-menu .place {
     gap: 8px;
     min-width: 0;
-    height: 72px;
+    min-height: calc(40px + 12px * var(--space-y));
+    height: auto;
 }
 
 .grouped-menu .place:not(.on) {
@@ -135,10 +136,10 @@
     justify-content: flex-start;
     gap: 0 12px;
     width: calc(100% + 16px);
-    min-height: max(44px, calc(48px * var(--space-y)));
-    padding: 8px;
-    margin: 0 -8px;
-    font-size: 15px;
+    min-height: calc(32px + 12px * var(--space-y));
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x));
+    margin: 0 calc(-8px * var(--space-x));
+    font-size: 13.5px;
     font-weight: 400;
     line-height: 1.5;
     color: var(--text);
@@ -191,11 +192,11 @@
 
 @media (max-width: 699px) {
     .grouped-menu .sheet-head {
-        padding-block: 22px 8px;
+        padding-block: 18px 8px;
     }
 
     .grouped-menu .sheet-head h2 {
-        font-size: 22px;
+        font-size: 16px;
     }
 
     .grouped-menu .sheet-head > .sheet-back {
@@ -212,11 +213,14 @@
         padding-block: 8px 12px;
     }
 
-    .grouped-menu .list-item {
-        min-height: 44px;
+    .grouped-menu .sheet-head > .icon-button {
+        width: 40px;
+        height: 40px;
     }
 
-    .grouped-menu .place {
-        height: 64px;
+    .grouped-menu .list-item,
+    .grouped-menu .place,
+    .menu-all {
+        min-height: 44px;
     }
 }

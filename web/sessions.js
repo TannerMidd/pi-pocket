@@ -2854,7 +2854,7 @@ function Rail({ folded = false, mobile = false }) {
                 π
             </button>`
         }
-        ${place("sessions", "Sessions", html`<${Icon} name="chat" size=${22} />`, {
+        ${place("sessions", "Sessions", html`<${Icon} name="chat" size=${19} />`, {
             title: mobile
                 ? "Sessions"
                 : `Sessions (${keys} ${folded ? "unfolds" : "folds"} the list)`,
@@ -2877,7 +2877,7 @@ function Rail({ folded = false, mobile = false }) {
             </button>`
         }
         ${folded && html`<${RailTiles} />`}
-        ${place("activity", "Activity", html`<${Icon} name="pulse" size=${22} />`, {
+        ${place("activity", "Activity", html`<${Icon} name="pulse" size=${19} />`, {
             count: busy || live,
             alert: failing(agents) > 0 || agents.waiting > 0,
             description: [
@@ -2890,15 +2890,15 @@ function Rail({ folded = false, mobile = false }) {
                 .filter(Boolean)
                 .join(", "),
         })}
-        ${place("tools", "Tools", html`<${Icon} name="grid" size=${22} />`, {
+        ${place("tools", "Tools", html`<${Icon} name="grid" size=${19} />`, {
             news: server?.pip && (pip?.busy || (!pipOpen && pipUnread())),
         })}
         ${place(
             "account",
             "Account",
             me
-                ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${28} />`
-                : html`<${Icon} name="users" size=${22} />`,
+                ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${22} />`
+                : html`<${Icon} name="users" size=${19} />`,
             { title: `${me?.name ?? "Account"} · ${role}` },
         )}
     </nav>`;
@@ -2930,7 +2930,7 @@ const RAIL_KEYS = [
 /** Drawn again only when what it reads changes (`RAIL_KEYS`): not as an answer streams. */
 export const RailNav = drawnFor(RAIL_KEYS, Rail);
 
-/** The sidebar's list is this wide at least and at most; the rail beside it stays 88px. */
+/** The sidebar's list is this wide at least and at most; the rail beside it stays 64px. */
 const LIST_MIN = 204;
 const LIST_MAX = 464;
 

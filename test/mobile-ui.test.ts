@@ -323,6 +323,70 @@ test(
 );
 
 test(
+    "Places navigation: rail and menu use the app's row scale at every density",
+    real,
+    async () => {
+        await fresh();
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        await page.click({ selector: '.topbar [aria-label="Menu"]' });
+        await reach({ sheet: "menu" }, "the menu");
+
+        try {
+            for (const [density, height] of [
+                ["comfortable", "44px"],
+                ["compact", "40.4px"],
+                ["tight", "37.4px"],
+            ] as const) {
+                await page.evaluate(`
+                    (await import("/theme.js")).setPrefs({ density: ${JSON.stringify(density)} });
+                `);
+                const measured = await inPage<{ density: string; minimum: string }>(`
+                    const style = getComputedStyle(document.querySelector(".desktop-rail .rail-place"));
+                    return JSON.stringify({
+                        density: document.documentElement.dataset.density,
+                        minimum: style.minHeight,
+                    });
+                `);
+
+                assert.equal(measured.minimum, height, `${density} rail rows`);
+                assert.equal(measured.density, density);
+                const scale = await inPage<{
+                    rail: number;
+                    drawer: number;
+                    brand: number;
+                    row: number;
+                    title: number;
+                    label: number;
+                }>(`
+                    const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+                    const style = (selector) => getComputedStyle(document.querySelector(selector));
+                    return JSON.stringify({
+                        rail: parseFloat(style(".desktop-rail").width),
+                        drawer: parseFloat(style(".nav-menu").width),
+                        brand: parseFloat(style(".rail-brand").width),
+                        row: parseFloat(style(".nav-menu .menu-row").minHeight),
+                        title: parseFloat(style(".nav-menu h2").fontSize),
+                        label: parseFloat(style(".rail-label").fontSize),
+                    });
+                `);
+
+                assert.ok(Math.abs(scale.rail - 64) < 0.1);
+                assert.ok(Math.abs(scale.drawer - 320) < 0.1);
+                assert.ok(Math.abs(scale.brand - 32) < 0.1);
+                assert.equal(scale.row, parseFloat(height));
+                assert.equal(scale.title, 16);
+                assert.equal(scale.label, 11);
+            }
+        } finally {
+            await page.evaluate(
+                `(await import("/theme.js")).setPrefs({ density: "comfortable" });`,
+            );
+        }
+    },
+);
+
+test(
     "Places navigation: phone rail opens a modal and Sessions returns to the list",
     real,
     async () => {

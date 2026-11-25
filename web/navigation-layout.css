@@ -42,7 +42,7 @@
 
 @media (min-width: 700px) {
     .sheet-host[data-navigation] {
-        --navigation-width: 352px;
+        --navigation-width: 320px;
     }
     .sheet-host[data-navigation] .overlay {
         inset: 0;
