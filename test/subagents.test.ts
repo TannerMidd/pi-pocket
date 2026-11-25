@@ -474,9 +474,11 @@ test("past its spend limit, an idle parent starts no turn for a report: it waits
 test("reports taken out of the queue by something other than a person go again, and reach Pi once", async () => {
     const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 8 });
 
+    // Both reports, not only the first: the two subagents answer a moment apart, and a Stop after the first would
+    // find one report waiting, not two.
     await until(
-        async () => (await queued(id)) === 1,
-        "the reports in the busy parent's queue",
+        async () => (await queued(id)) === 1 && (await held(id)).waiting === 2,
+        "both reports in the busy parent's queue",
         15_000,
     );
     // Not Stop: the run ends as Pi Durable ends it, which withdraws what waits. The courier sends them again; as

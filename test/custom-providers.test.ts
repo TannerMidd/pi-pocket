@@ -295,9 +295,14 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
         "a key or No key is required",
     );
 
-    // Another server's change while this save checks its file is not undone.
+    // Another server's change while this save checks its file is not undone. Their file is one Pi accepts: the save
+    // finds it changed whether this write comes before Pi reads the file or after, which a slow runner decides.
     const saving = app.customProviders.create({ name: "Late", baseUrl, noKey: true, models: [] });
-    const theirs = '{"providers":{"theirs":{}}}';
+    const theirs = JSON.stringify({
+        providers: {
+            theirs: { baseUrl, api: "openai-completions", apiKey: "sk-theirs", models: [] },
+        },
+    });
 
     await new Promise((resolve) => setImmediate(resolve));
     writeFileSync(modelsFile, theirs);
