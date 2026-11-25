@@ -4,7 +4,7 @@
 export const DEVICES = {
     mobile: { label: "Phone", w: 390, h: 844, icon: "phone" },
     tablet: { label: "Tablet", w: 820, h: 1180, icon: "tablet" },
-    desktop: { label: "Desktop", w: 1280, h: 800, icon: "monitor" },
+    desktop: { label: "Desktop", w: 1920, h: 1080, icon: "monitor" },
     slide: { label: "Slide", w: 1280, h: 720, icon: "monitor" },
 };
 

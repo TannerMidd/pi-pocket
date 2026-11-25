@@ -38,11 +38,11 @@ test("on a phone the zoom that nobody chose is the width of the room, and the pa
 
 test("a frame's size is its device's, or the person's own kept between 200 and 4000", () => {
     assert.deepEqual(devices.sizeOf("mobile"), { w: 390, h: 844 });
-    assert.deepEqual(devices.sizeOf("desktop"), { w: 1280, h: 800 });
+    assert.deepEqual(devices.sizeOf("desktop"), { w: 1920, h: 1080 });
     assert.deepEqual(devices.sizeOf("slide"), { w: 1280, h: 720 });
     assert.deepEqual(devices.sizeOf("custom", { w: 100, h: 9000 }), { w: 200, h: 4000 });
     assert.deepEqual(devices.sizeOf("custom", { w: "700", h: "x" }), { w: 700, h: 600 });
-    assert.deepEqual(devices.sizeOf("nonsense"), { w: 1280, h: 800 });
+    assert.deepEqual(devices.sizeOf("nonsense"), { w: 1920, h: 1080 });
     assert.equal(devices.exportViewport("tablet", {}), "tablet");
     assert.equal(devices.exportViewport("custom", { w: 400, h: 400 }), "mobile");
     assert.equal(devices.exportViewport("custom", { w: 900, h: 400 }), "tablet");
