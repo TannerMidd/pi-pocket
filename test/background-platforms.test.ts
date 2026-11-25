@@ -160,12 +160,12 @@ test("Windows absence requires coverage of the gated command, not just an empty 
     const requests: string[] = [];
     const helper = {
         ask: async (line: string) => {
-            const [command, , pid] = line.split(" ");
+            const [command] = line.split(" ");
 
             requests.push(line);
 
-            if (command === "job" && pid === "42" && mode === "failed-assignment") {
-                return "no";
+            if (command === "cover") {
+                return mode === "failed-assignment" ? "no" : "covered 100";
             }
 
             if (command === "watch" && mode === "failed-monitor") {
@@ -178,51 +178,84 @@ test("Windows absence requires coverage of the gated command, not just an empty 
         holds: () => false,
         failed: undefined,
     };
-    let gate = new PassThrough();
+    let released = false;
     const fake = t.mock.method(childProcess, "spawn", (_shell: string, args: string[]) => {
         assert.deepEqual(args.slice(0, 2), ["-p", "-c"]);
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+
+        stdout.write("42\n");
+        stdin.on("data", (data: Buffer) => {
+            const word = data.toString().trim();
+
+            if (word === "go") {
+                released = true;
+            } else {
+                assert.match(requests.at(-1)!, /^pin \w+ 41 42$/);
+                stdout.write(`${word} ${mode === "wrong-shell" ? "49" : "42"}\n`);
+            }
+        });
 
         return Object.assign(new EventEmitter(), {
             pid: 41,
-            stdin: gate,
+            stdin,
+            stdout,
             unref: () => {},
-            kill: () => true,
+            kill: (signal?: number) => signal !== 0 || mode !== "exited-launcher",
         });
     });
 
     syncBuiltinESMExports();
 
     try {
-        for (mode of ["covered", "failed-assignment", "unseen-shell", "failed-monitor"]) {
+        for (mode of [
+            "covered",
+            "exited-launcher",
+            "wrong-shell",
+            "failed-assignment",
+            "failed-monitor",
+        ]) {
             const task = { pid: 0, marker: mode, files: join(root, mode), startedAt: Date.now() };
             const processes = new WindowsProcesses(helper);
 
             t.mock.method(processes, "shell", () => "synthetic-shell");
-            gate = new PassThrough();
             requests.length = 0;
+            released = false;
+            // This plausible table and stale PID file must not establish launch identity.
             table = "list 41,1,100 42,41,110";
             job = "members";
-            writeFileSync(`${task.files}.pid`, mode === "unseen-shell" ? "49\n" : "42\n");
+            writeFileSync(`${task.files}.pid`, "42\n");
 
             const launched = processes.spawn("", root, {}, task, () => {
-                assert.equal(gate.readableLength, 0);
+                assert.equal(released, false);
                 const key = readFileSync(`${task.files}.pids`, "utf8").match(/^job (\w+)$/m)![1];
                 const receipt = Buffer.from(`${task.files}.pids`).toString("base64");
 
-                assert.deepEqual(requests.slice(-3), [
-                    `job ${key} 41 100 hold`,
-                    `job ${key} 42 110`,
+                assert.deepEqual(requests, [
+                    `pin ${key} 41 42`,
+                    `cover ${key}`,
                     `watch ${key} ${receipt}`,
                 ]);
             });
 
             if (mode === "covered") {
-                await launched;
-                assert.equal(gate.read()?.toString(), "go\n");
+                assert.deepEqual(await launched, { pid: 41, start: 100 });
+                assert.equal(released, true);
             } else {
-                await assert.rejects(launched, /cover the gated command|monitor the Windows job/);
-                assert.equal(gate.read(), null, "no command runs without durable coverage");
-                assert.ok(!/^job /m.test(readFileSync(`${task.files}.pids`, "utf8")));
+                await assert.rejects(
+                    launched,
+                    /verified|cover the gated command|monitor the Windows job/,
+                );
+                assert.equal(released, false, "no command runs without durable coverage");
+                assert.equal(existsSync(`${task.files}.pids`), false);
+
+                if (mode === "wrong-shell" || mode === "exited-launcher") {
+                    await processes.signal(task, "SIGKILL");
+                    assert.ok(
+                        !requests.some((line) => /^(cover|kill) /.test(line)),
+                        "no assignment or PID kill after a failed proof",
+                    );
+                }
             }
 
             // A grandchild can remain after an unobserved parent exits. Its ppid does not identify it.
@@ -433,6 +466,49 @@ processTest("a task quiet for its limit is stopped, with what it printed", async
 
 const windowsTest = (name: string, run: () => Promise<void>) =>
     test(name, { skip: process.platform !== "win32" && "needs Windows job objects" }, run);
+
+test(
+    "Windows refuses a gated shell that exits after its handle is pinned",
+    { skip: process.platform !== "win32" },
+    async (t) => {
+        const backend = new WindowsProcesses();
+        const shell = backend.shell();
+        const task = {
+            pid: 0,
+            marker: "exit-at-pin",
+            files: join(root, "exit-at-pin"),
+            startedAt: Date.now(),
+        };
+        const launch = childProcess.spawn;
+        const hook = t.mock.method(childProcess, "spawn", (...args: Parameters<typeof spawn>) => {
+            if (args[0] === shell) {
+                // A real Git Bash reports its real Windows PID, waits for the challenge, then exits normally.
+                return launch(
+                    shell,
+                    ["-p", "-c", 'read -r p < /proc/$$/winpid; echo "$p"; IFS= read -r _'],
+                    args[2],
+                );
+            }
+
+            return launch(...args);
+        });
+
+        syncBuiltinESMExports();
+
+        try {
+            await assert.rejects(
+                backend.spawn("", root, process.env, task),
+                /process identity could not be verified/,
+            );
+            assert.equal(existsSync(`${task.files}.pids`), false);
+            assert.equal(await backend.members(task, true), undefined);
+        } finally {
+            hook.mock.restore();
+            syncBuiltinESMExports();
+            backend.close();
+        }
+    },
+);
 
 const waitForFile = (name: string) =>
     `for ((n=0; n<1200; n++)); do [ -f '${name}' ] && break; sleep 0.1; done`;
