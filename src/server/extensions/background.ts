@@ -112,7 +112,9 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                     literal("list"),
                     literal("stop"),
                 ]),
-                command: opt(str({ description: "start: the bash command to run" })),
+                command: opt(
+                    str({ description: "start: the bash command to run (up to 4,000 characters)" }),
+                ),
                 notify: opt(
                     bool({
                         description: "start: get a message when it ends (default true)",
@@ -240,6 +242,17 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
         name: BACKGROUND_EXTENSION,
         tasks: [background.task],
         tools: [tool],
-        sections: [section("background_tasks", () => guide(...quietNote()))],
+        sections: [
+            // Offered, or for scripts alone (codemode's Only mode).
+            section("background_tasks", ({ agent }) =>
+                agent.tools.some((tool) => tool.name === "background") ||
+                agent.callable.some(
+                    (tool) =>
+                        tool.name === "background" && tool.callers?.includes("model") === false,
+                )
+                    ? guide(...quietNote())
+                    : undefined,
+            ),
+        ],
     });
 }
