@@ -190,6 +190,14 @@
     }
 }
 
+@media (pointer: coarse), (max-width: 699px) {
+    .grouped-menu .list-item,
+    .grouped-menu .place,
+    .menu-all {
+        min-height: 44px;
+    }
+}
+
 @media (max-width: 699px) {
     .grouped-menu .sheet-head {
         padding-block: 18px 8px;
@@ -216,11 +224,5 @@
     .grouped-menu .sheet-head > .icon-button {
         width: 40px;
         height: 40px;
-    }
-
-    .grouped-menu .list-item,
-    .grouped-menu .place,
-    .menu-all {
-        min-height: 44px;
     }
 }

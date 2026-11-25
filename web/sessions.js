@@ -2897,7 +2897,7 @@ function Rail({ folded = false, mobile = false }) {
             "account",
             "Account",
             me
-                ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${22} />`
+                ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${20} />`
                 : html`<${Icon} name="users" size=${19} />`,
             { title: `${me?.name ?? "Account"} · ${role}` },
         )}

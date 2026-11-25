@@ -383,6 +383,35 @@ test(
                 `(await import("/theme.js")).setPrefs({ density: "comfortable" });`,
             );
         }
+
+        await page.setViewport({ ...VIEWPORTS.mobile, width: 844, height: 390 });
+        const landscape = await inPage<{ visible: number; height: number }>(`
+            const buttons = [...document.querySelectorAll(".mobile-rail .rail-place")]
+                .filter((el) => el.getClientRects().length);
+            return JSON.stringify({
+                visible: buttons.length,
+                height: Math.min(...buttons.map((el) => el.getBoundingClientRect().height)),
+            });
+        `);
+
+        assert.equal(landscape.visible, 4, "all destinations remain available on a short screen");
+        assert.ok(landscape.height >= 44);
+
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "tight" });`);
+        await page.setViewport({ ...VIEWPORTS.tablet, width: 1024, height: 768 });
+        const touch = await inPage<{ brand: number; row: number; tile: number }>(`
+            const height = (selector) =>
+                parseFloat(getComputedStyle(document.querySelector(selector)).minHeight);
+            return JSON.stringify({
+                brand: parseFloat(getComputedStyle(document.querySelector(".rail-brand")).height),
+                row: height(".nav-menu .menu-row"),
+                tile: height(".nav-menu .place"),
+            });
+        `);
+
+        assert.equal(touch.brand, 44);
+        assert.equal(touch.row, 44);
+        assert.equal(touch.tile, 44);
     },
 );
 

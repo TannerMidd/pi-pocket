@@ -16,6 +16,13 @@
         serif;
 }
 
+@media (pointer: coarse) {
+    .places-rail .rail-brand {
+        width: 44px;
+        height: 44px;
+    }
+}
+
 .places-rail .rail-place {
     display: flex;
     flex-direction: column;
@@ -139,23 +146,20 @@
         gap: 2px;
     }
 
-    .grouped-menu .tool-place-row .place,
-    .grouped-menu .menu-group .tool-row {
-        min-height: 44px;
-    }
-
     .mobile-rail .rail-place.on::before {
         display: none;
-    }
-
-    .mobile-rail .rail-account .avatar {
-        width: 20px;
-        height: 20px;
     }
 
     .drawer > .sessions,
     .home-list > .sessions {
         padding-left: calc(12px + var(--inset-l));
+    }
+}
+
+/* The old short-screen rule hides icon rails. The four primary destinations must remain available. */
+@media (max-height: 500px) {
+    .places-rail > .rail-place {
+        display: flex;
     }
 }
 
@@ -183,6 +187,13 @@
     background: transparent;
     border: 0;
     border-radius: var(--r-control);
+}
+
+@media (max-width: 959px), (pointer: coarse) {
+    .grouped-menu .tool-place-row .place,
+    .grouped-menu .menu-group .tool-row {
+        min-height: 44px;
+    }
 }
 
 .grouped-menu .tool-place-row .place-label,
