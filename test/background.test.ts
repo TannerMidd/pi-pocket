@@ -9,6 +9,7 @@ import {
     openApp,
     owner,
     root,
+    say as sayIn,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -30,7 +31,7 @@ import {
     StartCutOff,
     wait,
 } from "../src/server/background.ts";
-import { BackgroundDoc } from "../src/server/docs.ts";
+import { BackgroundDoc, SubagentsDoc } from "../src/server/docs.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
 import { runningNow } from "../src/server/running.ts";
 
@@ -1541,3 +1542,144 @@ test(
         assert.match(told[0]!, new RegExp(`Task ${theirs.id} stopped by a person`));
     },
 );
+
+test("background_tasks section is gated on background tool availability and notes the command limit", async () => {
+    const sectionsByPrompt = new Map<string, Record<string, string>>();
+    const gatingModel = scriptedModel(async (request) => {
+        const { role, text } = lastText(request as never);
+        const sections = Object.assign(
+            {},
+            ...(request.messages as { role: string; sections?: Record<string, string> }[])
+                .filter((message) => message.role === "system")
+                .map((message) => message.sections ?? {}),
+        ) as Record<string, string>;
+
+        if (role === "user" && text.startsWith("child:")) {
+            sectionsByPrompt.set(text, sections);
+
+            return fauxAssistantMessage([fauxText("observed")]);
+        }
+
+        if (role === "user" && text === "spawn:trimmed") {
+            return fauxAssistantMessage(
+                [
+                    fauxToolCall("subagent", {
+                        action: "spawn",
+                        name: "trimmed",
+                        message: "child:trimmed",
+                        tools: ["read"],
+                    }),
+                ],
+                { stopReason: "toolUse" },
+            );
+        }
+
+        if (role === "user" && text === "spawn:direct") {
+            return fauxAssistantMessage(
+                [
+                    fauxToolCall("subagent", {
+                        action: "spawn",
+                        name: "direct",
+                        message: "child:direct",
+                        tools: ["read", "background"],
+                    }),
+                ],
+                { stopReason: "toolUse" },
+            );
+        }
+
+        if (role === "user" && text === "spawn:scripted-bg") {
+            return fauxAssistantMessage(
+                [
+                    fauxToolCall("codemode", {
+                        code: 'return await tools.subagent({ action: "spawn", name: "scripted-bg", message: "child:scripted-bg", tools: ["read", "background"] })',
+                    }),
+                ],
+                { stopReason: "toolUse" },
+            );
+        }
+
+        if (role === "user" && text === "spawn:scripted-no-bg") {
+            return fauxAssistantMessage(
+                [
+                    fauxToolCall("codemode", {
+                        code: 'return await tools.subagent({ action: "spawn", name: "scripted-no-bg", message: "child:scripted-no-bg", tools: ["read"] })',
+                    }),
+                ],
+                { stopReason: "toolUse" },
+            );
+        }
+
+        return fauxAssistantMessage([fauxText("done")]);
+    });
+    const gatingApp = await openApp(gatingModel, join(root, "background-section-gating"));
+
+    try {
+        await gatingApp.setExtensionEnabled(owner(gatingApp), "tool-search.ts", false);
+        const parent = await newSession(gatingApp);
+        const parentAgent = await (await gatingApp.conversation(parent)).agent(context);
+        const backgroundTool = parentAgent.tools.find((tool) => tool.name === "background");
+
+        assert.ok(backgroundTool, "expected background tool on parent");
+        const commandDescription = (
+            backgroundTool.parameters as {
+                properties?: { command?: { description?: string } };
+            }
+        ).properties?.command?.description;
+
+        assert.match(commandDescription ?? "", /4,000 characters/);
+
+        const spawnAndObserve = async (name: string) => {
+            await sayIn(gatingApp, parent, `spawn:${name}`);
+            let child: ConversationId | undefined;
+
+            await until(async () => {
+                child = (await gatingApp.harness.snapshot(SubagentsDoc, parent, context))?.agents[
+                    name
+                ]?.conversationId;
+
+                return (
+                    child !== undefined &&
+                    sectionsByPrompt.has(`child:${name}`) &&
+                    !gatingApp.isBusy(child)
+                );
+            }, `subagent ${name} prompt observation`);
+
+            return {
+                agent: await (await gatingApp.conversation(child!)).agent(context),
+                sections: sectionsByPrompt.get(`child:${name}`)!,
+            };
+        };
+
+        const trimmed = await spawnAndObserve("trimmed");
+
+        assert.ok(!trimmed.agent.tools.some((tool) => tool.name === "background"));
+        assert.ok(!trimmed.agent.callable.some((tool) => tool.name === "background"));
+        assert.equal(trimmed.sections.background_tasks, undefined);
+
+        const direct = await spawnAndObserve("direct");
+
+        assert.ok(direct.agent.tools.some((tool) => tool.name === "background"));
+        assert.match(direct.sections.background_tasks ?? "", /Use the background tool/);
+
+        gatingApp.setExtensionSettings(owner(gatingApp), "codemode", { mode: "only" });
+
+        const scriptedBg = await spawnAndObserve("scripted-bg");
+
+        assert.ok(!scriptedBg.agent.tools.some((tool) => tool.name === "background"));
+        assert.ok(
+            scriptedBg.agent.callable.some(
+                (tool) => tool.name === "background" && tool.callers?.includes("model") === false,
+            ),
+        );
+        assert.match(scriptedBg.sections.background_tasks ?? "", /Use the background tool/);
+
+        const scriptedNoBg = await spawnAndObserve("scripted-no-bg");
+
+        assert.ok(!scriptedNoBg.agent.tools.some((tool) => tool.name === "background"));
+        assert.ok(!scriptedNoBg.agent.callable.some((tool) => tool.name === "background"));
+        assert.equal(scriptedNoBg.sections.background_tasks, undefined);
+    } finally {
+        await gatingApp.close();
+    }
+});
