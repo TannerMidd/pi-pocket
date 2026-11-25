@@ -3298,6 +3298,17 @@ export function openSheet(sheet) {
     store.set((state) => ({ ...sheetChange(sheet, state), drawer: false }));
 }
 
+/** A rail or top-bar trigger starts a new navigation trail. Tapping the open destination closes it. */
+export function toggleNavigation(sheet) {
+    const current = store.state.sheet;
+
+    if (current?.type === sheet.type && current.section === sheet.section) {
+        closeSheet();
+    } else {
+        openSheet({ ...sheet, navigationRoot: true });
+    }
+}
+
 /**
  * Put text into the message box in the session's place (after what is there: on a new paragraph, or with `inline`,
  * after a space), and files to attach, and close any sheet so it shows. The box of the conversation in that place

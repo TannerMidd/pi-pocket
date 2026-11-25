@@ -421,7 +421,7 @@ rail(spec: RailSpec): Added<RailSpec>;
 
 Since 0.14.0 · Stable
 
-Adds a button on the rail, after the app's own tools. It shows in the sidebar, in the drawer, and on a phone's home screen. See [`RailSpec`](#railspec).
+Adds a button under **Tools** in the navigation rail or phone's bottom bar. See [`RailSpec`](#railspec).
 
 ### `menu`
 
@@ -793,7 +793,7 @@ A button on the rail.
 - `iconPath`: an icon of your own, as the `d` of a stroked SVG path in a 24 × 24 box.
 - `badge`: a short count or word on the button. `0`, `NaN`, `-Infinity`, `""`, `"0"`, `null`, and `false` show no badge, as the app's own counts do at 0. A count that is too large shows a maximum with `+`. Long text is cut, also in the button's label, without cutting a character in two. [Limits](limits.md#browser-modules) gives the numbers.
 
-Modules' rail buttons have a fixed height together. When they need more, they scroll.
+The Tools drawer scrolls to show all the buttons.
 
 ### `MenuSpec`
 

@@ -94,25 +94,29 @@ const setBox = (text: string) =>
         return "null";
     `);
 
-/** The Design panel, open: the rail's button, once the module has loaded. */
+/** Open the Design panel from Tools after the module loads. */
 async function openDesign(target = page) {
-    await waitFor(
-        "the Design rail button",
-        `return JSON.stringify(Boolean(document.querySelector('nav[aria-label="Sessions and tools"] button[aria-label="Design"]')))`,
-        target,
-    );
-
     if (
         !(await evaluate<boolean>(
             target,
             `return JSON.stringify(Boolean(document.querySelector(".dsn")))`,
         ))
     ) {
-        await pressed(
-            'nav[aria-label="Sessions and tools"] button[aria-label="Design"]',
-            undefined,
+        const tools = '[data-nav="tools"]';
+        const design = '.nav-menu .rail-ext[title="Design"]';
+
+        await waitFor(
+            "the Tools button",
+            `return JSON.stringify(!!document.querySelector('${tools}'))`,
             target,
         );
+        await pressed(tools, undefined, target);
+        await waitFor(
+            "the Design tool",
+            `return JSON.stringify(!!document.querySelector('${design}'))`,
+            target,
+        );
+        await pressed(design, undefined, target);
     }
 
     await waitFor(

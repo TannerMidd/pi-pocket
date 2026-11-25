@@ -15,6 +15,7 @@ import { usePipResize } from "./pip-window.js";
 import {
     api,
     attempt,
+    closeSheet,
     giveBackQuote,
     isRow,
     navigate,
@@ -1553,15 +1554,19 @@ export function PipRailButton() {
     const unread = pipUnread();
 
     return html`<button
-        class=${`rail-button rail-pip ${pip?.busy ? "lit" : ""} ${pipOpen ? "open" : ""}`}
+        class=${`list-item menu-row tool-row rail-button rail-pip ${pip?.busy ? "lit" : ""} ${pipOpen ? "open" : ""}`}
         data-part="rail-button"
         data-state=${railState(pipOpen, Boolean(pip?.busy))}
         title="PiP, your assistant (Alt+A)"
         aria-label=${["PiP", pip?.busy && "working", unread && "something new"].filter(Boolean).join(", ")}
         aria-pressed=${pipOpen}
-        onClick=${togglePip}
+        onClick=${() => {
+            closeSheet();
+            togglePip();
+        }}
     >
         <${Icon} name="pip" size=${18} />
+        <span class="tool-label">PiP</span>
         ${unread && html`<span class="rail-news" aria-hidden="true"></span>`}
     </button>`;
 }

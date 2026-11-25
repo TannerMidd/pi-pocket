@@ -1783,9 +1783,11 @@ export function closeExtPanel() {
     store.set({ extPanel: null });
 }
 
+const canShowPanel = (state) => state.conversationId !== null && !state.missing;
+
 /** The extension panel shows now: one asked for, in a conversation that is there. `App` draws it by this. */
 export function extPanelShown(state = store.state) {
-    return state.extPanel !== null && state.conversationId !== null && !state.missing;
+    return state.extPanel !== null && canShowPanel(state);
 }
 
 /** The `close` a panel's component gets: it closes that panel of that version while it shows, and no other panel. */
@@ -1968,37 +1970,46 @@ export function browserModuleState(module) {
 // ─── Where they show ─────────────────────────────────────────────────────────
 
 /**
- * The rail's buttons that extensions added, after the app's own tools. They take the room they need: a rail with more
- * buttons than room scrolls as a whole, and fades the edge where more is (`useScrollMore`).
+ * Rail buttons appear in Tools. A panel target names its place so Tools can show the button there only once.
  */
-export function ExtensionRailButtons() {
-    const buttons = added("rail");
+export function extensionRailItems() {
+    const available = added("rail").filter(
+        ({ spec }) => spec.panel === undefined || canShowPanel(store.state),
+    );
 
-    if (buttons.length === 0) {
-        return null;
-    }
+    return available.map(({ record, spec }) => {
+        const open = opened(record, spec);
+        const toggles = spec.page !== undefined || spec.panel !== undefined;
+        const badge = badgeFor(spec);
 
-    return html`<div class="rail-exts">
-        ${buttons.map(({ record, spec }) => {
-            const open = opened(record, spec);
-            const toggles = spec.page !== undefined || spec.panel !== undefined;
-            const badge = badgeFor(spec);
-
-            return html`<button
+        return {
+            panelPlace: spec.panel === undefined ? null : itemId(record, { id: spec.panel }),
+            node: html`<button
                 key=${`${record.module}:${spec.id}`}
-                class=${`rail-button rail-ext ${open ? "open" : ""}`}
+                class=${`list-item menu-row tool-row rail-button rail-ext ${open ? "open" : ""}`}
                 data-part="rail-button"
                 data-state=${railState(open)}
                 title=${spec.title}
                 aria-label=${badge === "" ? spec.title : `${spec.title}, ${badge}`}
                 aria-pressed=${toggles ? open : undefined}
-                onClick=${() => (open ? closeOf(spec) : activate(record, spec))}
+                onClick=${() => {
+                    if (spec.sheet === undefined) {
+                        closeSheet();
+                    }
+
+                    if (open) {
+                        closeOf(spec);
+                    } else {
+                        activate(record, spec);
+                    }
+                }}
             >
                 <${Icon} path=${pathOf(spec)} size=${18} />
+                <span class="tool-label">${spec.title}</span>
                 ${badge !== "" && html`<span class="rail-count">${badge}</span>`}
-            </button>`;
-        })}
-    </div>`;
+            </button>`,
+        };
+    });
 }
 
 /** Close what a button opened: its page or its panel. */

@@ -12,6 +12,7 @@ import {
     until,
     work,
 } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -258,6 +259,210 @@ test("back closes the open file, then the Files tile, then leaves the session", 
     await back();
     await reach({ path: "/" }, "back to the list");
 });
+
+test(
+    "Places navigation: desktop menu docks beside the session and keeps its draft",
+    real,
+    async () => {
+        await fresh();
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        const box = ".pane .composer textarea";
+        const menu = '.topbar [aria-label="Menu"]';
+
+        assert.ok(await page.waitFor({ selector: box }));
+        await page.type({ selector: box }, "Navigation draft");
+        await page.click({ selector: menu });
+        await reach({ sheet: "menu" }, "the session menu");
+        const layout = await inPage<{ nav: string[]; quick: string[]; adjacent: boolean }>(`
+        const tile = document.querySelector('.place[data-place="files"]');
+        const panel = tile.closest('.sheet, [role="region"]');
+        const area = panel.getBoundingClientRect();
+        const pane = document.querySelector('.pane').getBoundingClientRect();
+        const list = document.querySelector('.sidebar').getBoundingClientRect();
+        return JSON.stringify({
+            nav: [...document.querySelectorAll('.desktop-rail [data-nav]')].map(el => el.dataset.nav),
+            quick: [...panel.querySelectorAll('.place')].map(el => el.dataset.place),
+            adjacent: list.width > 0 && pane.left >= list.right - 2 &&
+                area.left >= pane.right - 2 && Math.abs(area.right - innerWidth) <= 24,
+        });
+    `);
+
+        assert.deepEqual(layout.nav, ["sessions", "activity", "tools", "account"]);
+        assert.deepEqual(layout.quick, ["files", "changes", "find"]);
+        assert.ok(layout.adjacent, "the drawer does not cover the list or conversation");
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="region"]' }));
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1024 });
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="dialog"][aria-modal="true"]' }));
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="region"]' }));
+        await clickNavigation(page, { selector: ".nav-menu .menu-all" });
+        assert.ok(await page.waitFor({ selector: '.place[data-place="artifacts"]' }));
+        await page.press("Escape");
+        await reach({ sheet: "menu" }, "one step back to the session menu");
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.activeElement.innerText.trim() === 'All places')`,
+                ),
+            "focus returns to All places",
+        );
+        await page.press("Escape");
+        await reach({ sheet: null }, "the conversation");
+        await until(
+            () =>
+                inPage<boolean>(`return JSON.stringify(document.activeElement.matches('${menu}'))`),
+            "focus returns to Menu",
+        );
+        assert.equal(
+            await inPage(`return JSON.stringify(document.querySelector('${box}').value)`),
+            "Navigation draft",
+        );
+        await page.type({ selector: box }, "");
+    },
+);
+
+test(
+    "Places navigation: phone rail opens a modal and Sessions returns to the list",
+    real,
+    async () => {
+        await fresh();
+        await tap(row(first));
+        await reach({ path: `/s/${first}` }, "the conversation");
+        const rail = ".mobile-rail";
+        const buttons = await inPage<{ name: string; x: number; y: number; height: number }[]>(`
+        return JSON.stringify([...document.querySelectorAll('${rail} [data-nav]')]
+            .filter(el => el.getClientRects().length).map(el => {
+                const rect = el.getBoundingClientRect();
+                return { name: el.dataset.nav, x: rect.x, y: rect.y, height: rect.height };
+            }));
+    `);
+
+        assert.deepEqual(
+            buttons.map(({ name }) => name),
+            ["sessions", "activity", "tools", "account"],
+        );
+        assert.ok(
+            buttons.every(
+                (b, i) =>
+                    b.height >= 40 && b.y === buttons[0]!.y && (!i || b.x > buttons[i - 1]!.x),
+            ),
+        );
+
+        assert.ok(
+            buttons[0]!.y + buttons[0]!.height >= VIEWPORTS.mobile.height - 12,
+            "the rail is at the bottom edge",
+        );
+
+        for (const id of ["activity", "tools", "account"]) {
+            const opener = `${rail} [data-nav="${id}"]`;
+
+            await page.click({ selector: opener });
+            await reach({ sheet: id, path: `/s/${first}` }, `the ${id} drawer`);
+            assert.ok(await page.waitFor({ selector: '[role="dialog"][aria-modal="true"]' }));
+            await page.press("Tab");
+            assert.ok(
+                await inPage<boolean>(
+                    `return JSON.stringify(!!document.activeElement.closest('[role="dialog"]'))`,
+                ),
+                "Tab stays in the dialog",
+            );
+            await back();
+            await reach(
+                { sheet: null, layers: 0, path: `/s/${first}` },
+                "Back closes only the drawer",
+            );
+        }
+
+        await page.click({ selector: `${rail} [data-nav="sessions"]` });
+        await reach({ path: "/" }, "the session list");
+        assert.ok(await page.waitFor({ selector: row(first) }));
+    },
+);
+
+for (const size of ["desktop", "mobile"] as const) {
+    test(
+        `Places navigation: Escape from Appearance restores App settings on ${size}`,
+        real,
+        async () => {
+            await fresh();
+            await page.setViewport(VIEWPORTS[size]);
+            await page.evaluate(`(await import('/store.js')).openSheet({ type: 'appearance' })`);
+            await reach({ sheet: "appearance", layers: 1 }, "standalone Appearance");
+            await page.press("Escape");
+            await reach({ sheet: null, layers: 0 }, "Escape closes standalone Appearance");
+
+            await clickNavigation(page, { selector: '[data-nav="account"]' });
+            await clickNavigation(page, { label: "App settings" });
+            assert.ok(await page.waitFor({ selector: '.nav-menu[aria-label="App settings"]' }));
+            await clickNavigation(page, {
+                selector: ".nav-menu .menu-group .list-item:first-of-type",
+            });
+            await reach({ sheet: "appearance", layers: 3 }, "Appearance from Account");
+            await page.press("Escape");
+            await reach({ sheet: "menu", layers: 2 }, "Back to App settings");
+            await until(
+                () =>
+                    inPage<boolean>(`const button = document.activeElement;
+            return JSON.stringify(!!button.closest('.nav-menu[aria-label="App settings"]') &&
+                button.matches('button') && button.firstElementChild?.textContent === 'Appearance');`),
+                "the Appearance row regains focus",
+            );
+        },
+    );
+}
+
+test(
+    "Places navigation: a scoped viewer sees Find but no file tools or owner controls",
+    real,
+    async () => {
+        const viewer = app.config.addUser("Navigation reader", "viewer", [String(first)]);
+        const guests = new Browsers({
+            dataDir: mkdtempSync(join(root, "places-viewer-")),
+            load: async () => undefined,
+            save: () => {},
+        });
+
+        try {
+            const guest = await guests.open(1);
+            const places = async () =>
+                JSON.parse(
+                    await guest.evaluate(
+                        `return JSON.stringify([...document.querySelectorAll('.nav-menu .place')].map(el => el.dataset.place))`,
+                    ),
+                ) as string[];
+
+            await guest.setViewport(VIEWPORTS.mobile);
+            await guest.navigate(`${base}/login?token=${encodeURIComponent(viewer.token)}`);
+            await guest.navigate(`${base}/s/${first}`);
+            assert.ok(await guest.waitFor({ selector: '.topbar [aria-label="Menu"]' }));
+            await guest.click({ selector: '.topbar [aria-label="Menu"]' });
+            assert.ok(await guest.waitFor({ selector: '.nav-menu .place[data-place="find"]' }));
+            assert.deepEqual(await places(), ["find"]);
+            await clickNavigation(guest, { selector: ".nav-menu .menu-all" });
+            assert.ok(
+                await guest.waitFor({ selector: '.nav-menu .place[data-place="artifacts"]' }),
+            );
+
+            for (const id of ["files", "changes", "pip"]) {
+                assert.ok(!(await places()).includes(id), `no ${id} for the viewer`);
+            }
+
+            await guest.press("Escape");
+            await clickNavigation(guest, { label: "App settings" });
+            assert.ok(await guest.waitFor({ selector: '.nav-menu[aria-label="App settings"]' }));
+            const settings = await guest.evaluate(
+                `return document.querySelector('.nav-menu').innerText`,
+            );
+
+            assert.match(settings, /Appearance/);
+            assert.doesNotMatch(settings, /Providers|Restart server|Refresh models/);
+        } finally {
+            await guests.closeAll({ final: true });
+            app.config.removeUser(viewer.user.id);
+        }
+    },
+);
 
 test("local Markdown file links use the viewer", real, async () => {
     const linked = await newSession(app);
@@ -1781,7 +1986,7 @@ test(
             });
             await until(
                 () =>
-                    run<boolean>(`return !!document.querySelector(".home-list > .rail")`).catch(
+                    run<boolean>(`return !!document.querySelector(".mobile-rail")`).catch(
                         () => false,
                     ),
                 "the session list",
@@ -1827,14 +2032,14 @@ test(
                 );
             };
 
-            await clear(".home-list > .rail button, .home-list > .rail .avatar");
+            await clear(".mobile-rail [data-nav]");
             await enter(notched);
             await clear(".topbar button");
             await clear(".composer-wrap .composer");
 
             const plain = await visit(0);
 
-            assert.deepEqual(await edges(plain, ".home-list > .rail"), [{ left: 0, right: 56 }]);
+            assert.deepEqual(await edges(plain, ".mobile-rail"), [{ left: 0, right: WIDTH }]);
             await enter(plain);
             assert.deepEqual(
                 await plain<string[]>(`

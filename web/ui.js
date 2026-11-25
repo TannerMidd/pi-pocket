@@ -1909,12 +1909,15 @@ export const BOTTOM_SHEETS = matchMedia("(max-width: 699px)");
  */
 export const WIDE = matchMedia("(min-width: 960px)");
 
+/** A session list, a working pane, and a navigation drawer fit side by side. */
+export const NAV_BESIDE = matchMedia("(min-width: 1200px)");
+
 /** No pointer that hovers (a touch screen): what only hovering shows, such as a row's buttons, is not drawn. */
 export const NO_HOVER = matchMedia("(hover: none)");
 
 // Each changing (a window resized, a phone turned, a mouse plugged in) draws the app again, with or without them: a sheet
 // open as the phone turns gets its drag to close, or lets go of it.
-for (const query of [WIDE, NO_HOVER, BOTTOM_SHEETS]) {
+for (const query of [WIDE, NAV_BESIDE, NO_HOVER, BOTTOM_SHEETS]) {
     query.addEventListener("change", () => store.set({}));
 }
 
@@ -1952,17 +1955,38 @@ export function Sheet({
     const onBack = useContext(SheetBack);
     const info = useContext(SheetInfo);
 
+    const beside = info?.navigation === "beside";
+
     useDragToClose(ref, { dir: "down", onClose, enabled: BOTTOM_SHEETS.matches });
 
     // Not the Esc that ends an input method's composing, which belongs to the field.
     useEffect(() => {
-        const onKey = (event) =>
-            event.key === "Escape" && !event.isComposing && event.keyCode !== 229 && onClose();
+        const onKey = (event) => {
+            if (
+                event.key !== "Escape" ||
+                event.isComposing ||
+                event.keyCode === 229 ||
+                (info?.navigationTrail &&
+                    (event.defaultPrevented ||
+                        store.state.launcher ||
+                        store.state.auth ||
+                        info.closing))
+            ) {
+                return;
+            }
+
+            if (info?.navigationTrail) {
+                event.preventDefault();
+                (onBack ?? onClose)();
+            } else {
+                onClose();
+            }
+        };
 
         addEventListener("keydown", onKey);
 
         return () => removeEventListener("keydown", onKey);
-    }, [onClose]);
+    }, [onClose, onBack, info?.navigationTrail, info?.closing]);
     // Keys go to the sheet, not the message box behind it, unless something inside already took focus. Its field marked
     // autofocus takes them where a keyboard is at hand (the browser skips the attribute, the page already having focus);
     // on touch screens the sheet does, so no keyboard pops up over it.
@@ -1976,7 +2000,7 @@ export function Sheet({
 
             (field ?? sheet).focus({ preventScroll: true });
         }
-    }, []);
+    }, [beside]);
 
     return html`<div
         class="overlay"
@@ -1991,8 +2015,8 @@ export function Sheet({
             data-size=${wide ? "wide" : undefined}
             data-state=${info?.closing ? "closing" : undefined}
             ref=${ref}
-            role="dialog"
-            aria-modal="true"
+            role=${beside ? "region" : "dialog"}
+            aria-modal=${beside ? undefined : "true"}
             aria-label=${title}
             tabindex="-1"
             onKeyDown=${scrollFromKeys}
@@ -2013,6 +2037,11 @@ export function Sheet({
                 </button>
             </header>
             <div class="sheet-body" data-part="sheet-body">${children}</div>
+            ${
+                info?.navigation &&
+                !BOTTOM_SHEETS.matches &&
+                html`<footer class="navigation-keys"><kbd>Esc</kbd> ${onBack ? "Go back" : "Close menu"}</footer>`
+            }
         </section>
     </div>`;
 }

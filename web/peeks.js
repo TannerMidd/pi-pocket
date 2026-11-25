@@ -18,6 +18,7 @@ import {
     api,
     attempt,
     canSteer,
+    closeSheet,
     navigate,
     notify,
     openId,
@@ -168,15 +169,19 @@ export function PeeksRailButton() {
     const on = peeksOn();
 
     return html`<button
-        class=${`rail-button rail-peeks ${on ? "open" : ""}`}
+        class=${`list-item menu-row tool-row rail-button rail-peeks ${on ? "open" : ""}`}
         data-part="rail-button"
         data-state=${railState(on)}
         title=${on ? "Hide peek tiles (Alt+P)" : "Peek at other sessions (Alt+P)"}
         aria-label="Peek tiles"
         aria-pressed=${on}
-        onClick=${togglePeeks}
+        onClick=${() => {
+            closeSheet();
+            togglePeeks();
+        }}
     >
         <${Icon} name="tiles" size=${19} />
+        <span class="tool-label">Peek tiles</span>
     </button>`;
 }
 

@@ -19,7 +19,7 @@ Besides Appearance: the launcher's **Themes** (Ctrl/⌘+K, then `#`) lists the t
 
 ## Make a theme
 
-1. Open Appearance: the palette button on the rail, Menu → **Appearance**, or **Appearance** in the launcher (Ctrl/⌘+K).
+1. Open Appearance: Menu → **Appearance**, or **Appearance** in the launcher (Ctrl/⌘+K).
 2. Choose the theme to start from, and tap **Duplicate**. Give it a name. Pi Pocket copies it into a folder of its own and chooses it. **Duplicate colors** does the same for the colors in use.
 3. Tap **Edit with Pi**. A session starts in the theme's folder, with a message ready that tells Pi where this guide is. Say what you want: "make my messages bubbles on the right", "a warmer accent", "a square message box".
 

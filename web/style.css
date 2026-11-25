@@ -16707,13 +16707,11 @@ textarea.notes {
     }
 }
 
-.nav-menu .list-item > :first-child,
 .places-sheet .list-item > :first-child {
     flex: none;
     white-space: nowrap;
 }
 
-.nav-menu .list-item > :last-child:not(:first-child),
 .places-sheet .list-item > :last-child:not(:first-child) {
     flex: 1;
     min-width: 0;
@@ -16735,39 +16733,8 @@ textarea.notes {
 }
 
 @media (min-width: 700px) {
-    /* Sheet still owns focus and Esc; its existing sheet trail owns Back, even from a child sheet. */
-    .nav-menu-host .overlay {
-        padding: 0;
-        background: none;
-    }
-    .nav-menu {
-        position: fixed;
-        left: var(--menu-left, calc(100vw - 368px));
-        top: var(--menu-top, 64px);
-        width: 360px;
-        max-height: var(--menu-height, calc(100dvh - 72px));
-        border-radius: calc(var(--r-window) + 2px);
-        box-shadow: var(--pop);
-        animation: pop 0.25s var(--ease-out);
-    }
-    .nav-menu .sheet-head {
-        height: auto;
-        min-height: 0;
-        padding: 10px 12px 2px 16px;
-        border: 0;
-    }
-    .nav-menu .grip,
-    .nav-menu .sheet-head h2::before {
+    .nav-menu .grip {
         display: none;
-    }
-    .nav-menu .sheet-head h2 {
-        margin: 0;
-        font-size: 13px;
-        font-weight: 600;
-    }
-    .nav-menu .sheet-head .icon-button {
-        width: 28px;
-        height: 28px;
     }
 }
 

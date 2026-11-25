@@ -32,6 +32,8 @@ export function textSizeOf(value) {
     return Math.min(MAX_TEXT, Math.max(MIN_TEXT, Math.round(size / STEP_TEXT) * STEP_TEXT));
 }
 
+export const SIDEBAR_WIDTH = 432;
+
 const DEFAULTS = {
     /**
      * The colors: "desktop" follows the Omarchy theme of the machine Pi Pocket runs on; otherwise a key of THEMES, or the
@@ -60,8 +62,8 @@ const DEFAULTS = {
     width: "comfortable",
     /** The sidebar on wide screens: "open", or "rail" (icons and numbered sessions only). */
     sidebar: "open",
-    /** The open sidebar's width, its borders, the rail, and the list's: a 254px list. */
-    sidebarWidth: 312,
+    /** A labeled rail and a readable session list. A saved width still wins. */
+    sidebarWidth: SIDEBAR_WIDTH,
     /**
      * How sessions are switched: false for the sidebar's list; true for tabs, a strip of the numbered sessions above the
      * conversation (`session-tabs.js`), which Appearance pairs with the folded sidebar.
@@ -122,7 +124,7 @@ const SOFT_KEY = "pocket.softTiles";
 
 /**
  * What this browser saved. The sidebar's usual width was 300 before the rail went beside the list, then 324, and is
- * 312 with soft tiles. The text size was the whole app's, 12 to 16; it is now the conversation's, a step larger.
+ * was 312 with soft tiles. The text size was the whole app's, 12 to 16; it is now the conversation's, a step larger.
  */
 function savedPrefs() {
     const saved = readJson(KEY, {});
@@ -161,8 +163,8 @@ const WIDTHS = {
     full: { "--transcript-width": "100%", "--composer-width": "100%" },
 };
 
-/** The open sidebar's width as it shows: the rail and its borders, and a list 204–464px wide. */
-const sidebarWidth = (p) => `${Math.min(524, Math.max(264, p.sidebarWidth))}px`;
+/** Keep previously chosen narrow widths, and allow room for the labeled rail beside a 464px list. */
+const sidebarWidth = (p) => `${Math.min(556, Math.max(264, p.sidebarWidth))}px`;
 
 /** This browser's own choices: what it saved, over the defaults. */
 let own = { ...DEFAULTS, ...savedPrefs() };

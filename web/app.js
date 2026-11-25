@@ -69,6 +69,7 @@ import {
     scoped,
     start,
     store,
+    toggleNavigation,
     workspaceOrder,
 } from "./store.js";
 import { prefs, setPrefs, startTheme } from "./theme.js";
@@ -195,14 +196,13 @@ defineItem("topbar", {
     fixed: true,
     render: () =>
         html`<button
-            class="icon-button"
+            class="icon-button navigation-trigger"
             aria-label="Menu"
             title="Menu"
-            aria-haspopup="dialog"
-            aria-expanded=${store.state.sheet?.type === "menu"}
-            onClick=${() => openSheet({ type: "menu" })}
+            aria-expanded=${store.state.sheet?.type === "menu" && !store.state.sheet.section}
+            onClick=${() => toggleNavigation({ type: "menu" })}
         >
-            <${Icon} name="more" />
+            <${Icon} name="sidebar" size=${16} /><span>Menu</span>
         </button>`,
 });
 
@@ -266,7 +266,7 @@ function Topbar() {
                 aria-label=${`${title}${folder ? `, in ${folder}` : ""}: session menu`}
                 title=${cwd ? `${shortPath(cwd, server?.home)}\nSession menu` : "Session menu"}
                 disabled=${!conversation || store.state.me == null}
-                onClick=${() => openSheet({ type: "menu" })}
+                onClick=${() => toggleNavigation({ type: "menu" })}
             ></button>
             <span class="title-main" data-part="topbar-title" aria-hidden="true">${title}</span>
             <span class="title-sub" data-part="topbar-sub">
@@ -558,7 +558,7 @@ function App() {
             ${
                 sidebar &&
                 html`<div class="sidebar-clip">
-                        <${RailNav} foldable=${true} folded=${rail} />
+                        <${RailNav} folded=${rail} />
                         ${!rail && html`<${SessionList} />`}
                     </div>
                     ${!rail && html`<${ResizeHandle} />`}`
@@ -589,11 +589,11 @@ function App() {
                             ? html`<${PipBoardBox}><${StatusLine} /><//>`
                             : html`<${Composer} key=${state.conversationId} />`)
                     }`
-                          : html`<div class="home-list" data-part="home-list">
-                          <${RailNav} />
-                          <${SessionList} />
-                      </div>
-                      ${sidebar && html`<${Splash} />`}`
+                          : sidebar
+                            ? html`<${Splash} />`
+                            : html`<div class="home-list" data-part="home-list">
+                                  <${SessionList} />
+                              </div>`
             }
         </div>
         ${
@@ -619,9 +619,10 @@ function App() {
             inConversation &&
             html`<${PeopleHost} shown=${people} replaced=${browsing || filing || paneling} />`
         }
+        ${!sidebar && html`<${RailNav} mobile=${true} />`}
         <${Drawer} />
         <${PipHost} />
-        <${Sheets} />
+        <${Sheets} sideOccupied=${browsing || filing || paneling || people || peekColumn || state.pipOpen} />
         <${QuoteReplyButton} />
         <${LauncherHost} />
         <${Notices} />
