@@ -676,6 +676,8 @@ export type BackgroundTask = {
     /** On a running attempt, the watch committed its quiet stop and must finish it after restart. */
     timedOut?: true;
     launchFailed?: true;
+    /** The launcher ended this attempt before it called the process adapter. No process can belong to it. */
+    neverSpawned?: true;
     command: string;
     cwd: string;
     /** Its process, the leader of its own process group; 0 while it is starting. */

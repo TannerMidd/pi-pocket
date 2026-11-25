@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import { BackgroundDoc } from "../src/server/docs.ts";
-import { taskProcesses, type TaskProcesses } from "../src/server/processes.ts";
+import { taskProcesses, type TaskProcesses, type TaskRef } from "../src/server/processes.ts";
 
 const skip = !existsSync("/proc/self/stat") && "requires /proc";
 const model = scriptedModel();
@@ -339,6 +339,114 @@ test(
         );
         assert.doesNotMatch(JSON.stringify(recentAdverse), /sample-/);
         await assert.rejects(app.background.start(id, request), { status: 410 });
+        await assertNoNotification(id);
+    },
+);
+
+test(
+    "only a proven pre-spawn failure permits a retry without process evidence",
+    { skip },
+    async (t) => {
+        const id = await session();
+        const requestedBy = owner(app).id;
+        const first = {
+            id: "aaaaaa",
+            jobId: "synthetic-job",
+            command: "synthetic first attempt",
+            cwd: app.cwdOf(id),
+            pid: 0,
+            status: "exited" as const,
+            code: 1,
+            startedAt: 1,
+            endedAt: 2,
+            taskId: 1 as TaskId,
+            requestedBy,
+            notify: false,
+            read: 0,
+        };
+        const processes = Object.getPrototypeOf(taskProcesses()) as TaskProcesses;
+        const members = t.mock.method(processes, "members", async (ref: TaskRef) =>
+            ref.marker.endsWith(`/${first.id}`) ? [] : undefined,
+        );
+        const signal = t.mock.method(processes, "signal", async () => {});
+        let evidencePath: string | undefined;
+        const spawn = t.mock.method(
+            processes,
+            "spawn",
+            async (_script: string, _cwd: string, _env: NodeJS.ProcessEnv, task: TaskRef) => {
+                evidencePath = task.files + ".pids";
+                writeFileSync(evidencePath, "synthetic partial process evidence");
+
+                throw new Error("ambiguous adapter failure");
+            },
+        );
+
+        t.mock.method(processes, "left", async () => []);
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(BackgroundDoc, id)).items[first.id] = first;
+        }, context);
+        const resume = (expectedAttempt: string) =>
+            app.background.start(id, {
+                jobId: first.jobId,
+                expectedAttempt,
+                key: `replace-${expectedAttempt}`,
+                command: "synthetic replacement",
+                requestedBy,
+                notify: false,
+            });
+
+        const env = t.mock.method(app.commandEnvs, "for", async () => {
+            throw new Error("synthetic preparation failure");
+        });
+
+        await assert.rejects(resume(first.id), /synthetic preparation failure/);
+        env.mock.restore();
+
+        assert.equal(spawn.mock.callCount(), 0);
+        assert.equal(signal.mock.callCount(), 0);
+        await app.close();
+        await open();
+        const failed = await resume(first.id);
+
+        assert.equal(failed.neverSpawned, true);
+        assert.equal(failed.processAlive, false);
+        assert.ok(failed.processObservedAt !== undefined);
+        assert.equal(failed.launchFailed, true);
+        assert.equal(failed.resumedFrom, first.id);
+        assert.equal(failed.attempt, 2);
+        assert.equal(spawn.mock.callCount(), 0, "replaying the failed reservation must not launch");
+
+        // The adapter cannot prove absence for either replacement. Only the launcher's own proof permits a retry.
+        await assert.rejects(resume(failed.id), /ambiguous adapter failure/);
+        const uncertain = await resume(failed.id);
+
+        assert.equal(uncertain.neverSpawned, undefined);
+        assert.equal(uncertain.pid, 0);
+        assert.equal(uncertain.attempt, 3);
+        assert.ok(
+            evidencePath && existsSync(evidencePath),
+            "keep the evidence of a possible launch",
+        );
+        assert.ok(uncertain.processObservedAt !== undefined);
+        assert.equal(uncertain.processAlive, undefined);
+        await assert.rejects(resume(uncertain.id), { status: 409 });
+        assert.equal(spawn.mock.callCount(), 1);
+        assert.ok(
+            members.mock.calls.some(({ arguments: [ref] }) =>
+                ref.marker.endsWith(`/${uncertain.id}`),
+            ),
+        );
+        const { jobs, recentAdverse } = await app.background.jobs(id);
+
+        assert.deepEqual(
+            jobs.map((job) => job.attemptId),
+            [uncertain.id],
+        );
+        assert.deepEqual(
+            new Set(recentAdverse.map((job) => job.attemptId)),
+            new Set([first.id, failed.id, uncertain.id]),
+        );
+        assert.ok(recentAdverse.every((job) => job.outcome === "failure"));
         await assertNoNotification(id);
     },
 );

@@ -10,10 +10,11 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import childProcess, { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { EventEmitter, once } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
 import { PassThrough } from "node:stream";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
@@ -123,7 +124,6 @@ test("Windows membership needs process identity, not a PID probe", async (t) => 
     fails = "";
     table = "list 41,1,200 42,41,0";
     assert.equal(await members(), undefined, "a known child has an unreadable start");
-    assert.equal(await processes.startOf(42), undefined);
     assert.equal(processes.aliveSync(task), false);
     table = "list 41,1,0 42,41,102";
     assert.deepEqual(await members(), [42], "the verified child is sufficient on its own");
@@ -156,12 +156,19 @@ test("Windows membership needs process identity, not a PID probe", async (t) => 
 test("Windows absence requires coverage of the gated command, not just an empty job", async (t) => {
     let table = "list";
     let job = "members";
-    let rejectShell = false;
+    let mode = "";
+    const requests: string[] = [];
     const helper = {
         ask: async (line: string) => {
             const [command, , pid] = line.split(" ");
 
-            if (command === "job" && pid === "42" && rejectShell) {
+            requests.push(line);
+
+            if (command === "job" && pid === "42" && mode === "failed-assignment") {
+                return "no";
+            }
+
+            if (command === "watch" && mode === "failed-monitor") {
                 return "no";
             }
 
@@ -172,32 +179,51 @@ test("Windows absence requires coverage of the gated command, not just an empty 
         failed: undefined,
     };
     let gate = new PassThrough();
-    const fake = t.mock.method(childProcess, "spawn", () =>
-        Object.assign(new EventEmitter(), { pid: 41, stdin: gate, unref: () => {} }),
-    );
+    const fake = t.mock.method(childProcess, "spawn", (_shell: string, args: string[]) => {
+        assert.deepEqual(args.slice(0, 2), ["-p", "-c"]);
+
+        return Object.assign(new EventEmitter(), {
+            pid: 41,
+            stdin: gate,
+            unref: () => {},
+            kill: () => true,
+        });
+    });
 
     syncBuiltinESMExports();
 
     try {
-        for (const mode of ["covered", "failed-assignment", "unseen-shell"]) {
+        for (mode of ["covered", "failed-assignment", "unseen-shell", "failed-monitor"]) {
             const task = { pid: 0, marker: mode, files: join(root, mode), startedAt: Date.now() };
             const processes = new WindowsProcesses(helper);
 
             t.mock.method(processes, "shell", () => "synthetic-shell");
             gate = new PassThrough();
-            rejectShell = mode === "failed-assignment";
+            requests.length = 0;
             table = "list 41,1,100 42,41,110";
             job = "members";
             writeFileSync(`${task.files}.pid`, mode === "unseen-shell" ? "49\n" : "42\n");
 
-            await processes.spawn("", root, {}, task, () => {
+            const launched = processes.spawn("", root, {}, task, () => {
                 assert.equal(gate.readableLength, 0);
-                assert.equal(
-                    /^job /m.test(readFileSync(`${task.files}.pids`, "utf8")),
-                    mode === "covered",
-                );
+                const key = readFileSync(`${task.files}.pids`, "utf8").match(/^job (\w+)$/m)![1];
+                const receipt = Buffer.from(`${task.files}.pids`).toString("base64");
+
+                assert.deepEqual(requests.slice(-3), [
+                    `job ${key} 41 100 hold`,
+                    `job ${key} 42 110`,
+                    `watch ${key} ${receipt}`,
+                ]);
             });
-            assert.equal(gate.read()?.toString(), "go\n");
+
+            if (mode === "covered") {
+                await launched;
+                assert.equal(gate.read()?.toString(), "go\n");
+            } else {
+                await assert.rejects(launched, /cover the gated command|monitor the Windows job/);
+                assert.equal(gate.read(), null, "no command runs without durable coverage");
+                assert.ok(!/^job /m.test(readFileSync(`${task.files}.pids`, "utf8")));
+            }
 
             // A grandchild can remain after an unobserved parent exits. Its ppid does not identify it.
             table = "list 99,73,120";
@@ -211,6 +237,7 @@ test("Windows absence requires coverage of the gated command, not just an empty 
                     await recovered.members({ ...task, marker: "different" }, true),
                     undefined,
                 );
+                appendFileSync(`${task.files}.pids`, "truncated pid");
                 assert.deepEqual(await recovered.members(task, true), []);
                 job = "none";
                 assert.deepEqual(await new WindowsProcesses(helper).members(task, true), []);
@@ -222,6 +249,26 @@ test("Windows absence requires coverage of the gated command, not just an empty 
         fake.mock.restore();
         syncBuiltinESMExports();
     }
+});
+
+test("Windows recovery waits for a complete, matching receipt from the previous helper", async () => {
+    const task = { pid: 0, marker: "offline", files: join(root, "offline"), startedAt: 0 };
+    const file = `${task.files}.pids`;
+    const key = createHash("sha256").update(task.marker).digest("hex").slice(0, 32);
+    const restarted = new WindowsProcesses({
+        ask: async (line) => (line === "list" ? "list 99,73,0" : "none"),
+        failed: undefined,
+        holds: () => false,
+        close: () => {},
+    });
+
+    writeFileSync(file, `job ${key}\n99 101\nempty other-attempt\n`);
+    assert.equal(await restarted.members(task, true), undefined);
+    appendFileSync(file, `empty ${key}`);
+    assert.equal(await restarted.members(task, true), undefined, "no torn record");
+    appendFileSync(file, "\n");
+    assert.deepEqual(await restarted.members(task, true), []);
+    assert.equal(await restarted.members({ ...task, marker: "replacement" }, true), undefined);
 });
 
 test("Windows recovery does not identify a process by its PID file and a timestamp window", async () => {
@@ -383,6 +430,182 @@ processTest("a task quiet for its limit is stopped, with what it printed", async
     assert.equal((await app.background.read(id, item.id))?.text, "begun\n");
     await until(() => !running(quiet), "its process to be ended", 15_000);
 });
+
+const windowsTest = (name: string, run: () => Promise<void>) =>
+    test(name, { skip: process.platform !== "win32" && "needs Windows job objects" }, run);
+
+const waitForFile = (name: string) =>
+    `for ((n=0; n<1200; n++)); do [ -f '${name}' ] && break; sleep 0.1; done`;
+
+async function offline(run: () => Promise<void>): Promise<void> {
+    await app.close();
+
+    try {
+        await run();
+    } finally {
+        app = await openApp(model, dataDir);
+        quick();
+    }
+}
+
+windowsTest(
+    "Windows records natural completion during downtime before authorizing a resume",
+    async () => {
+        const id = await newSession(app);
+        const item = await app.background.start(id, {
+            requestedBy: owner(app).id,
+            command: `${waitForFile("offline-release")}; exit 7`,
+            notify: false,
+        });
+        const file = join(app.backgroundFolder(id)!, `${item.id}.pids`);
+        const hasReceipt = () => /^empty [a-f0-9]{32}\n/m.test(readFileSync(file, "utf8"));
+
+        assert.equal(hasReceipt(), false);
+        await offline(async () => {
+            writeFileSync(join(item.cwd, "offline-release"), "");
+            await until(hasReceipt, "the disconnected helper to record zero members", 30_000);
+        });
+
+        await until(
+            async () => (await one(id)).status === "exited",
+            "the recovered watch to finish",
+            30_000,
+        );
+        assert.equal((await one(id)).code, 7);
+        assert.equal(await app.background.aliveNow(id, item), false);
+
+        const next = await app.background.start(id, {
+            requestedBy: owner(app).id,
+            jobId: item.jobId!,
+            expectedAttempt: item.id,
+            command: "echo after-downtime",
+            notify: false,
+        });
+
+        assert.notEqual(next.id, item.id);
+        assert.equal(next.jobId, item.jobId);
+        await until(
+            async () => (await app.background.read(id, next.id))?.text === "after-downtime\n",
+            "resume after downtime",
+            30_000,
+        );
+    },
+);
+
+windowsTest(
+    "Windows keeps a covered descendant created after shutdown until it exits",
+    async () => {
+        const id = await newSession(app);
+        const item = await app.background.start(id, {
+            requestedBy: owner(app).id,
+            command: `${waitForFile("create-offline-child")}; ( ${waitForFile("end-offline-child")} ) >/dev/null 2>&1 & exit 5`,
+            notify: false,
+        });
+        const prefix = join(app.backgroundFolder(id)!, item.id);
+        const hasReceipt = () =>
+            /^empty [a-f0-9]{32}\n/m.test(readFileSync(`${prefix}.pids`, "utf8"));
+
+        try {
+            await offline(async () => {
+                writeFileSync(join(item.cwd, "create-offline-child"), "");
+                await until(
+                    () => existsSync(`${prefix}.exit`) && !running(item.pid),
+                    "the original launcher to end offline",
+                    30_000,
+                );
+                assert.equal(hasReceipt(), false);
+            });
+
+            assert.equal(
+                await app.background.aliveNow(id, item),
+                true,
+                "the original job still identifies the child",
+            );
+            assert.equal((await one(id)).status, "running");
+            await offline(async () => {
+                writeFileSync(join(item.cwd, "end-offline-child"), "");
+                await until(
+                    hasReceipt,
+                    "the original monitor to observe the last descendant ending",
+                    30_000,
+                );
+            });
+
+            await until(
+                async () => (await one(id)).status === "exited",
+                "the recovered watch to finish",
+                30_000,
+            );
+            assert.equal((await one(id)).code, 5);
+            assert.equal(await app.background.aliveNow(id, item), false);
+        } finally {
+            writeFileSync(join(item.cwd, "end-offline-child"), "");
+        }
+    },
+);
+
+test(
+    "Windows recovery replaces a failed monitor while its covered job is openable",
+    { skip: process.platform !== "win32" },
+    async (t) => {
+        const first = new WindowsProcesses();
+        const second = new WindowsProcesses();
+        const task = {
+            pid: 0,
+            marker: `${root}#takeover`,
+            files: join(root, "takeover"),
+            startedAt: Date.now(),
+        };
+        const release = join(root, "release-takeover");
+        let helper: ChildProcess | undefined;
+        const launch = childProcess.spawn;
+        const hook = t.mock.method(childProcess, "spawn", (...args: Parameters<typeof spawn>) => {
+            const child = launch(...args);
+
+            if (args[0].endsWith("powershell.exe")) {
+                helper = child;
+            }
+
+            return child;
+        });
+
+        syncBuiltinESMExports();
+
+        try {
+            const started = await first.spawn(
+                waitForFile("release-takeover"),
+                root,
+                process.env,
+                task,
+            );
+
+            assert.ok(helper, "this backend started its own helper");
+            const exited = once(helper, "exit");
+
+            assert.ok(helper.kill());
+            await exited;
+            const members = await second.members(
+                { ...task, pid: started.pid, startTicks: started.start },
+                true,
+            );
+
+            assert.ok(members?.includes(started.pid));
+            second.close();
+            writeFileSync(release, "");
+            await until(
+                () => /^empty [a-f0-9]{32}\n/m.test(readFileSync(`${task.files}.pids`, "utf8")),
+                "the replacement monitor to record completion after EOF",
+                30_000,
+            );
+        } finally {
+            hook.mock.restore();
+            syncBuiltinESMExports();
+            writeFileSync(release, "");
+            first.close();
+            second.close();
+        }
+    },
+);
 
 processTest("a restarted server finds a task's processes, and its stop ends them", async () => {
     const id = await newSession(app);

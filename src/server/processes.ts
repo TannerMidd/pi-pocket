@@ -35,7 +35,6 @@ export interface TaskProcesses {
         task: TaskRef,
         authorize?: () => void,
     ): Promise<{ pid: number; start?: number }>;
-    startOf(pid: number): Promise<number | undefined>;
     /** Undefined when the process table cannot establish whether the task has members. */
     members(task: TaskRef, fresh?: boolean): Promise<number[] | undefined>;
     /** At once, from what is known now: for a count while the watches are off. */
@@ -46,8 +45,8 @@ export interface TaskProcesses {
     signal(task: TaskRef, name: Signal, authorize?: () => void): Promise<void>;
     /** Before the task's record: a stop came first, or the record failed. */
     killSpawned(task: TaskRef, pid: number): Promise<void>;
-    /** A start a crash cut off; `start` only when it is sure. */
-    find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined>;
+    /** A start a crash cut off. Null means no process; undefined means the backend cannot tell. */
+    find(task: TaskRef): Promise<{ pid: number; start?: number } | null | undefined>;
     close(): void;
 }
 
@@ -444,6 +443,7 @@ class DarwinTable implements ProcTable {
 
     forget(): void {
         this.#scan = undefined;
+        this.#env.clear();
     }
 }
 
@@ -487,15 +487,20 @@ function groupMembers(
 
     const leader = group.find((each) => each.pid === item.pid);
 
-    if (leader !== undefined && own(leader)) {
+    if (leader !== undefined && item.startTicks !== undefined && leader.start !== item.startTicks) {
+        // A marked process in a reused group can be stopped individually, but never signal this group.
+        return group.some((each) => table.marked(each.pid, item.marker, guess)) ? undefined : [];
+    }
+
+    if (
+        (leader !== undefined && own(leader)) ||
+        group.some((each) => table.marked(each.pid, item.marker, guess))
+    ) {
         return group.map((each) => each.pid);
     }
 
-    return group.some((each) => table.marked(each.pid, item.marker, guess))
-        ? group.map((each) => each.pid)
-        : item.startTicks === undefined
-          ? undefined
-          : [];
+    // An unmarked child can outlive the leader. The numeric group alone proves neither ownership nor absence.
+    return group.length > 0 || item.startTicks === undefined ? undefined : [];
 }
 
 function markedProcesses(table: ProcTable, marker: string): Proc[] {
@@ -516,8 +521,13 @@ class PosixProcesses implements TaskProcesses {
     /** Looks take turns: each one's view is the shared table. */
     #turn: Promise<unknown> = Promise.resolve();
 
-    #look<T>(read: () => T): Promise<T> {
+    #look<T>(read: () => T, forSignal = false): Promise<T> {
         const look = this.#turn.then(async () => {
+            // Two macOS processes can have the same PID and start second. Never signal from a cached environment.
+            if (forSignal && this.#table.coarse) {
+                this.#table.forget();
+            }
+
             this.#table.begin();
 
             for (let round = 0; round < 4; round++) {
@@ -548,12 +558,28 @@ class PosixProcesses implements TaskProcesses {
         return "bash";
     }
 
-    async spawn(script: string, cwd: string, env: NodeJS.ProcessEnv): Promise<{ pid: number }> {
-        return { pid: spawnDetached("bash", script, cwd, env).pid! };
-    }
+    async spawn(
+        script: string,
+        cwd: string,
+        env: NodeJS.ProcessEnv,
+        task: TaskRef,
+    ): Promise<{ pid: number; start?: number }> {
+        const child = spawnDetached("bash", script, cwd, env);
+        const pid = child.pid!;
+        // Linux can read this child before Node can reap it. An asynchronous ps must also identify the launcher.
+        const start = this.#table.coarse
+            ? await this.#look(() => {
+                  const info = this.#table.stat(pid, true);
 
-    startOf(pid: number): Promise<number | undefined> {
-        return this.#look(() => this.#table.stat(pid)?.start);
+                  return info?.pgid === pid && this.#table.marked(pid, task.marker)
+                      ? info.start
+                      : undefined;
+              }).catch(() => undefined)
+            : this.#table.stat(pid)?.start;
+
+        return start === undefined || child.exitCode !== null || child.signalCode !== null
+            ? { pid }
+            : { pid, start };
     }
 
     members(task: TaskRef, fresh = false): Promise<number[] | undefined> {
@@ -585,14 +611,16 @@ class PosixProcesses implements TaskProcesses {
     }
 
     async signal(task: TaskRef, name: Signal, authorize?: () => void): Promise<void> {
-        if ((await this.#look(() => groupMembers(this.#table, task, true)))?.length) {
+        if ((await this.#look(() => groupMembers(this.#table, task, true), true))?.length) {
             authorize?.();
             kill(-task.pid, name);
         }
 
-        for (const each of await this.#look(() => markedProcesses(this.#table, task.marker))) {
+        const marked = await this.#look(() => markedProcesses(this.#table, task.marker), true);
+
+        for (const each of marked) {
             authorize?.();
-            kill(each.pid === each.pgid ? -each.pid : each.pid, name);
+            kill(each.pid === each.pgid && each.pid !== task.pid ? -each.pid : each.pid, name);
         }
 
         this.#table.forget();
@@ -602,12 +630,12 @@ class PosixProcesses implements TaskProcesses {
         await this.signal(task, "SIGKILL");
     }
 
-    async find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined> {
+    async find(task: TaskRef): Promise<{ pid: number; start?: number } | null> {
         return this.#look(() => {
             const found = markedProcesses(this.#table, task.marker);
 
             if (found.length === 0) {
-                return undefined;
+                return null;
             }
 
             const leader =
@@ -663,6 +691,78 @@ public static class PiPocketProcesses {
 
     const uint QUERY = 0x1000, SYNCHRONIZE = 0x100000, TERMINATE = 0x1, SET_QUOTA = 0x100, DUP_HANDLE = 0x40;
     static readonly Dictionary<string, IntPtr> jobs = new Dictionary<string, IntPtr>();
+    sealed class Monitor { public IntPtr file, lease; public int failures; }
+    static readonly Dictionary<string, Monitor> monitors = new Dictionary<string, Monitor>();
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Accounting {
+        public long user, kernel, periodUser, periodKernel;
+        public uint faults, total, active, terminated;
+    }
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "QueryInformationJobObject")]
+    static extern bool QueryAccounting(IntPtr job, int kind, out Accounting info, int length, out int returned);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool WriteFile(IntPtr file, byte[] data, int size, out int written, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateMutexW(IntPtr attributes, bool owner, string name);
+
+    // Keep one monitor across restarts. Only the existence of the mutex matters, not thread ownership.
+    // Hold the file handle until publication: never look up the receipt path after the server disconnects.
+    static string Watch(string key, string encodedPath, bool create) {
+        if (!jobs.ContainsKey(key)) { return "no"; }
+        if (monitors.ContainsKey(key)) { return "ok"; }
+        string path = Encoding.UTF8.GetString(Convert.FromBase64String(encodedPath));
+        IntPtr lease = CreateMutexW(IntPtr.Zero, false, "Local\\pi-pocket-watch-" + key);
+        int error = Marshal.GetLastWin32Error();
+        if (lease == IntPtr.Zero) { return "error monitor " + error; }
+        if (error == 183) { CloseHandle(lease); return "held"; } // ERROR_ALREADY_EXISTS
+        // FILE_APPEND_DATA; share read, write and delete; OPEN_ALWAYS or OPEN_EXISTING; FILE_FLAG_WRITE_THROUGH.
+        IntPtr file = CreateFileW(path, 4, 7, IntPtr.Zero, create ? 4u : 3u, 0x80000000, IntPtr.Zero);
+        if (file == new IntPtr(-1)) {
+            error = Marshal.GetLastWin32Error();
+            CloseHandle(lease);
+            return "error receipt " + error;
+        }
+        monitors.Add(key, new Monitor { file = file, lease = lease });
+        return "ok";
+    }
+
+    static void Drop(string key) {
+        IntPtr handle;
+        if (jobs.TryGetValue(key, out handle)) { CloseHandle(handle); jobs.Remove(key); }
+        Monitor monitor;
+        if (monitors.TryGetValue(key, out monitor)) {
+            CloseHandle(monitor.file); CloseHandle(monitor.lease); monitors.Remove(key);
+        }
+    }
+
+    // EOF includes a server crash. Once the covered job reaches zero, none of its processes can start another.
+    // Only a successful kernel query of zero permits a receipt. The leading newline separates it from a torn pid record.
+    public static void Drain() {
+        foreach (string key in new List<string>(jobs.Keys)) {
+            if (!monitors.ContainsKey(key)) { Drop(key); }
+        }
+        while (monitors.Count > 0) {
+            foreach (string key in new List<string>(monitors.Keys)) {
+                Monitor monitor = monitors[key];
+                Accounting info;
+                int returned, size = Marshal.SizeOf(typeof(Accounting));
+                if (QueryAccounting(jobs[key], 1, out info, size, out returned) && returned == size) {
+                    if (info.active > 0) { monitor.failures = 0; continue; }
+                    byte[] data = Encoding.ASCII.GetBytes("\nempty " + key + "\n");
+                    int written;
+                    if (WriteFile(monitor.file, data, data.Length, out written, IntPtr.Zero) && written == data.Length) {
+                        Drop(key); continue;
+                    }
+                }
+                if (++monitor.failures >= 5) { Drop(key); } // No receipt: recovery must stay uncertain.
+            }
+            if (monitors.Count > 0) { System.Threading.Thread.Sleep(1000); }
+        }
+    }
 
     // The start of a live process in ms since 1601; -1 when it is gone, 0 when it is not ours to read.
     static long Start(IntPtr process) {
@@ -804,12 +904,18 @@ public static class PiPocketProcesses {
             case "list": return List();
             case "kill": return Kill(uint.Parse(words[1]), long.Parse(words[2]));
             case "job": return Job(words[1], uint.Parse(words[2]), long.Parse(words[3]), words.Length > 4);
-            case "members": return Members(words[1]);
+            case "watch": return Watch(words[1], words[2], true);
+            case "members":
+                string members = Members(words[1]);
+                if (words.Length == 3 && (members == "members" || members.StartsWith("members "))) {
+                    Watch(words[1], words[2], false);
+                }
+                return members;
             case "killjob":
                 job = Find(words[1]);
                 return job != IntPtr.Zero && TerminateJobObject(job, 1) ? "ok" : "no";
             case "drop":
-                if (jobs.TryGetValue(words[1], out job)) { CloseHandle(job); jobs.Remove(words[1]); }
+                Drop(words[1]);
                 return "ok";
             default: return "error unknown " + words[0];
         }
@@ -827,11 +933,13 @@ try { Add-Type -TypeDefinition $env:PI_POCKET_PROCESSES_CS } catch {
 }
 [Console]::Out.WriteLine('ready')
 [Console]::Out.Flush()
-while ($null -ne ($line = [Console]::In.ReadLine())) {
-    try { $answer = [PiPocketProcesses]::Run($line) } catch { $answer = 'error ' + ($_.Exception.Message -replace '\\s+', ' ') }
-    [Console]::Out.WriteLine($answer)
-    [Console]::Out.Flush()
-}
+try {
+    while ($null -ne ($line = [Console]::In.ReadLine())) {
+        try { $answer = [PiPocketProcesses]::Run($line) } catch { $answer = 'error ' + ($_.Exception.Message -replace '\\s+', ' ') }
+        [Console]::Out.WriteLine($answer)
+        [Console]::Out.Flush()
+    }
+} finally { [PiPocketProcesses]::Drain() }
 `;
 
 type Waiting = { resolve: (line: string) => void; reject: (error: Error) => void };
@@ -868,6 +976,7 @@ class Helper {
             {
                 stdio: ["pipe", "pipe", "pipe"],
                 windowsHide: true,
+                detached: true,
                 env: { ...process.env, PI_POCKET_PROCESSES_CS: HELPER_CS },
             },
         );
@@ -944,7 +1053,7 @@ class Helper {
             this.failed = undefined;
         } catch (error) {
             this.failed = `Background tasks on Windows need Windows PowerShell with Add-Type, to follow and stop their processes: ${(error as Error).message}`;
-            this.close();
+            this.close(true);
 
             throw error;
         }
@@ -973,7 +1082,7 @@ class Helper {
                 ++this.#late >= 2
             ) {
                 this.#late = 0;
-                this.close();
+                this.close(true);
             }
 
             throw error;
@@ -988,14 +1097,17 @@ class Helper {
         }
     }
 
-    close(): void {
+    close(stuck = false): void {
         clearTimeout(this.#idle);
 
         const current = this.#current;
 
         this.#current = undefined;
         current?.child.stdin?.end();
-        current?.child.kill();
+
+        if (stuck) {
+            current?.child.kill();
+        }
     }
 }
 
@@ -1099,6 +1211,11 @@ export class WindowsProcesses implements TaskProcesses {
 
         const at = Date.now();
         const answer = await this.#helper.ask("list");
+
+        if (!/^list(?: \d+,\d+,\d+)*$/.test(answer)) {
+            throw new Error("Invalid process table from the process helper.");
+        }
+
         const all = new Map<number, WinProc>();
 
         for (const word of answer.split(" ").slice(1)) {
@@ -1121,7 +1238,9 @@ export class WindowsProcesses implements TaskProcesses {
             try {
                 const key = this.#key(task);
 
-                for (const line of readFileSync(`${task.files}.pids`, "utf8").split("\n")) {
+                for (const line of readFileSync(`${task.files}.pids`, "utf8")
+                    .split("\n")
+                    .slice(0, -1)) {
                     if (line === `job ${key}` || line === `empty ${key}`) {
                         this.#coverage.set(task.marker, line.startsWith("job ") ? "job" : "empty");
                         continue;
@@ -1206,9 +1325,18 @@ export class WindowsProcesses implements TaskProcesses {
         return uncertain && members.length === 0 ? undefined : members;
     }
 
-    async #job(task: TaskRef): Promise<{ pid: number; start: number }[] | undefined> {
+    #receipt(task: TaskRef): string {
+        return Buffer.from(`${task.files}.pids`).toString("base64");
+    }
+
+    async #job(
+        task: TaskRef,
+        covered: boolean,
+    ): Promise<{ pid: number; start: number }[] | undefined> {
         const key = this.#key(task);
-        const answer = await this.#helper.ask(`members ${key}`);
+        const answer = await this.#helper.ask(
+            `members ${key}${covered ? ` ${this.#receipt(task)}` : ""}`,
+        );
 
         // A job that a helper before a restart made is found again by its name, while the task's first process runs.
         if (answer === "none") {
@@ -1241,7 +1369,8 @@ export class WindowsProcesses implements TaskProcesses {
             throw new Error("No Git Bash on this machine.");
         }
 
-        const child = spawn(shell, ["-c", WINDOWS_GATE + script], {
+        // Do not run environment startup hooks before job assignment. The command gets its own bash after the gate.
+        const child = spawn(shell, ["-p", "-c", WINDOWS_GATE + script], {
             cwd,
             detached: true,
             windowsHide: true,
@@ -1304,24 +1433,33 @@ export class WindowsProcesses implements TaskProcesses {
             const members = this.#members(ref, all, []) ?? [];
             let covered = gatedPid !== undefined && members.includes(gatedPid);
 
+            // A failed assignment can still create a job handle. Drop it on rollback too.
+            this.#jobs.add(key);
+
             for (const each of members) {
                 // The first process holds a handle to its job too, so its name stays across a restart of the server.
                 const answer = await this.#helper
                     .ask(`job ${key} ${each} ${known.get(each)}${each === pid ? " hold" : ""}`)
                     .catch(() => "no");
 
-                // Without a job, its tree alone holds it: a process whose parent ended before a look found it is not
-                // followed.
-                if (answer === "ok") {
-                    this.#jobs.add(key);
-                } else {
+                if (answer !== "ok") {
                     covered = false;
                 }
             }
 
-            if (covered) {
-                this.#recordCoverage(task, "job");
+            if (!covered) {
+                throw new Error(
+                    "The process helper could not cover the gated command with its Windows job.",
+                );
             }
+
+            if ((await this.#helper.ask(`watch ${key} ${this.#receipt(task)}`)) !== "ok") {
+                throw new Error(
+                    "The process helper could not monitor the Windows job through a server restart.",
+                );
+            }
+
+            this.#recordCoverage(task, "job");
 
             authorize?.();
             child.stdin!.end("go\n");
@@ -1329,6 +1467,7 @@ export class WindowsProcesses implements TaskProcesses {
             // No word at the gate: the wrapper exits without running the command.
             child.stdin!.end();
             child.kill();
+            this.#done(task);
 
             throw error;
         }
@@ -1336,14 +1475,8 @@ export class WindowsProcesses implements TaskProcesses {
         return { pid, start };
     }
 
-    async startOf(pid: number): Promise<number | undefined> {
-        const start = (await this.#list(true)).get(pid)?.start;
-
-        return start !== undefined && start > 0 ? start : undefined;
-    }
-
     #recordCoverage(task: TaskRef, state: "job" | "empty"): void {
-        appendFileSync(`${task.files}.pids`, `${state} ${this.#key(task)}\n`);
+        appendFileSync(`${task.files}.pids`, `\n${state} ${this.#key(task)}\n`, { flush: true });
         this.#coverage.set(task.marker, state);
     }
 
@@ -1356,7 +1489,10 @@ export class WindowsProcesses implements TaskProcesses {
         let job: { pid: number; start: number }[] | undefined;
 
         try {
-            [job, all] = await Promise.all([this.#job(task), this.#list(fresh)]);
+            [job, all] = await Promise.all([
+                this.#job(task, coverage === "job"),
+                this.#list(fresh),
+            ]);
         } catch {
             // The helper could not check identity. A PID probe proves neither membership nor absence.
             return undefined;
@@ -1364,17 +1500,33 @@ export class WindowsProcesses implements TaskProcesses {
 
         const members = this.#members(task, all, job ?? []);
 
-        if (members?.length !== 0) {
+        if (members !== undefined && members.length > 0) {
             return members;
         }
 
-        if (coverage !== "empty" && (coverage !== "job" || job?.length !== 0)) {
+        if (job !== undefined && job.length > 0) {
+            return undefined;
+        }
+
+        let empty = coverage === "empty";
+
+        if (!empty && job === undefined) {
+            // The previous helper can publish after this server loaded the pid file.
+            try {
+                empty = readFileSync(`${task.files}.pids`, "utf8")
+                    .split("\n")
+                    .slice(0, -1)
+                    .includes(`empty ${this.#key(task)}`);
+            } catch {}
+        }
+
+        if (!empty && (coverage !== "job" || job?.length !== 0)) {
             // A vanished parent or job name cannot exclude an unobserved descendant.
             return undefined;
         }
 
         if (fresh) {
-            if (coverage !== "empty") {
+            if (!empty) {
                 try {
                     this.#recordCoverage(task, "empty");
                 } catch {
@@ -1464,8 +1616,14 @@ export class WindowsProcesses implements TaskProcesses {
     }
 
     /** A crash can leave the PID file behind. Its timestamp does not identify the current holder of that PID. */
-    async find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined> {
-        const pid = (await this.members(task, true))?.[0];
+    async find(task: TaskRef): Promise<{ pid: number; start?: number } | null | undefined> {
+        const members = await this.members(task, true);
+
+        if (members?.length === 0) {
+            return null;
+        }
+
+        const pid = members?.[0];
         const start = pid === undefined ? undefined : this.#known.get(task.marker)?.get(pid);
 
         return pid !== undefined && start !== undefined ? { pid, start } : undefined;

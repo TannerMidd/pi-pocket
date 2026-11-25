@@ -127,6 +127,12 @@ function segmentIndex(name: string): number {
 type WatchInput = { backgroundId: string };
 type WatchState = { phase: "watch" } | { phase: "tell" };
 type Runtime = TaskRuntime<WatchInput, WatchState, null, object>;
+type ProcessEvidence = {
+    group: boolean | undefined;
+    left: number[];
+    processAlive: boolean | undefined;
+    processObservedAt: number;
+};
 
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
@@ -374,6 +380,7 @@ export class BackgroundTasks {
     #split = false;
     readonly #procs: TaskProcesses = taskProcesses();
     readonly #controls = new Map<string, Promise<void>>();
+    readonly #launching = new Set<string>();
     /** The durable task behind each background command; the background extension installs it. */
     readonly task: Task<WatchInput, WatchState, null, object>;
 
@@ -631,21 +638,35 @@ export class BackgroundTasks {
         item: BackgroundTask,
         fresh = false,
     ): Promise<boolean | undefined> {
+        if (item.neverSpawned) {
+            return false;
+        }
+
         const members = await this.#procs.members(this.#ref(conversationId, item), fresh);
 
         return members === undefined ? undefined : members.length > 0;
     }
 
-    async #processEvidence(conversationId: ConversationId, item: BackgroundTask) {
+    async #processEvidence(
+        conversationId: ConversationId,
+        item: BackgroundTask,
+    ): Promise<ProcessEvidence> {
         const group = await this.#alive(conversationId, item, true);
         const left = await this.#left(conversationId, item);
 
-        return { left, processAlive: left.length > 0 || group, processObservedAt: this.#app.now() };
+        return {
+            group,
+            left,
+            processAlive: left.length > 0 || group,
+            processObservedAt: this.#app.now(),
+        };
     }
 
     /** The processes with a task's marker that still run outside its group: what it left behind. */
     #left(conversationId: ConversationId, item: BackgroundTask): Promise<number[]> {
-        return this.#procs.left(this.#ref(conversationId, item));
+        return item.neverSpawned
+            ? Promise.resolve([])
+            : this.#procs.left(this.#ref(conversationId, item));
     }
 
     /** Send a signal to every process of a task: its group, and each process with its marker, found afresh. */
@@ -703,10 +724,9 @@ export class BackgroundTasks {
                 if (await this.#recover(runtime, item, context)) {
                     return;
                 }
-            } else {
-                await wait(this.timing.look, aborted);
             }
 
+            await wait(this.timing.look, aborted);
             item = await this.#stored(conversationId, id);
         }
 
@@ -722,20 +742,6 @@ export class BackgroundTasks {
 
         const watched = item;
 
-        // An end is looked at twice, a moment apart, with a fresh scan: a child a command leaves can be in the middle of
-        // starting its program as the command ends, when its environment, and so its marker, reads empty.
-        const groupAlive = async (fresh: boolean) => {
-            const alive = await this.#alive(conversationId, watched, fresh);
-
-            if (alive !== false) {
-                return alive;
-            }
-
-            await wait(Math.min(200, this.timing.look * 2), aborted);
-
-            return this.#alive(conversationId, watched, true);
-        };
-
         // Its log is kept short at each tick, apart from the looks at its processes: a command that writes faster than
         // the log can be kept (more than `runaway` bytes in a tick) is stopped, before it fills the disk.
         const tick = Math.min(TICK_MS, this.timing.look);
@@ -746,6 +752,7 @@ export class BackgroundTasks {
         const history: { at: number; end: number }[] = [{ at: measured, end: written }];
         let looked = Date.now();
         let lastObservation = 0;
+        let completion: ProcessEvidence | undefined;
         let timeoutPending = watched.timedOut === true;
         let runaway: string | undefined;
         // When its output last grew: one quiet for longer than its limit is stopped, and Pi is told.
@@ -812,13 +819,19 @@ export class BackgroundTasks {
             if (quietDue || Date.now() - looked >= this.timing.look) {
                 looked = Date.now();
                 const observationDue = looked - lastObservation >= 15_000;
-                const alive = await groupAlive(quietDue || observationDue);
+                let alive = await this.#alive(conversationId, watched, quietDue || observationDue);
 
-                if (
-                    alive === false ||
-                    (alive === undefined && this.#exitCodes(conversationId, id) !== undefined)
-                ) {
-                    break;
+                // A child can still be starting its program when the wrapper writes its exit code.
+                if (alive === false) {
+                    await wait(Math.min(200, this.timing.look * 2), aborted);
+                    const fresh = await this.#processEvidence(conversationId, watched);
+
+                    if (fresh.group === false) {
+                        completion = fresh;
+                        break;
+                    }
+
+                    alive = fresh.group;
                 }
 
                 // Commit the decision before the signal. A recovered watch finishes the same attempt's stop.
@@ -872,7 +885,7 @@ export class BackgroundTasks {
 
         // The wrapper's file: a command stopped or killed with its wrapper leaves none.
         const codes = this.#exitCodes(conversationId, id);
-        const observation = await this.#processEvidence(conversationId, watched);
+        const observation = completion ?? (await this.#processEvidence(conversationId, watched));
         let pruned: string[] = [];
 
         await runtime.commit(async (tx) => {
@@ -968,9 +981,19 @@ export class BackgroundTasks {
      */
     async #recover(runtime: Runtime, item: BackgroundTask, context: Context): Promise<boolean> {
         const conversationId = runtime.conversationId;
+
+        // Slow preparation or assignment is not a crash. Only the local launcher can release its gate.
+        if (this.#launching.has(this.#marker(conversationId, item.id))) {
+            return false;
+        }
+
         const found = await this.#procs.find(this.#ref(conversationId, item));
 
-        if (found !== undefined) {
+        if (found === undefined) {
+            return false;
+        }
+
+        if (found !== null) {
             await this.#app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
 
@@ -993,6 +1016,11 @@ export class BackgroundTasks {
 
         const codes = this.#exitCodes(conversationId, item.id);
         const observation = await this.#processEvidence(conversationId, item);
+
+        if (observation.processAlive !== false) {
+            return false;
+        }
+
         let pruned: string[] = [];
 
         await runtime.commit(async (tx) => {
@@ -1395,6 +1423,7 @@ export class BackgroundTasks {
                 (item) =>
                     item.status !== "running" &&
                     item.status !== "starting" &&
+                    !this.#launching.has(this.#marker(conversationId, item.id)) &&
                     !this.#needsStopHandle(item),
             )
             .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
@@ -1694,6 +1723,7 @@ export class BackgroundTasks {
                 previous !== undefined &&
                 (previous.status === "starting" ||
                     previous.status === "running" ||
+                    this.#launching.has(this.#marker(conversationId, previous.id)) ||
                     observed?.endedAt === undefined ||
                     cannotConfirmEmpty)
             ) {
@@ -1781,7 +1811,10 @@ export class BackgroundTasks {
         }
 
         const item = reserved.item;
-        let pid: number | undefined;
+        const launch = this.#marker(conversationId, item.id);
+
+        this.#launching.add(launch);
+        let spawnAttempted = false;
 
         try {
             const added = await app.commandEnvs.for(
@@ -1803,17 +1836,27 @@ export class BackgroundTasks {
             requireRequester();
             this.#needsSplit();
 
-            const { pid: spawned, start } = await this.#spawn(
-                conversationId,
-                item,
-                added,
-                authorize,
-            );
+            const env = this.#spawnEnv(conversationId, item, added);
+            const ref = this.#ref(conversationId, item);
 
-            pid = spawned;
+            // The adapter can throw after it creates a process but before it returns a PID.
+            spawnAttempted = true;
+            const { pid: spawned, start } = await this.#procs
+                .spawn(WRAPPER, item.cwd, env, ref, authorize)
+                .catch((error: Error) => {
+                    authorize?.();
+
+                    throw new HttpError(500, error.message);
+                });
+
+            item.pid = spawned;
+
+            if (start !== undefined && Number.isFinite(start)) {
+                item.startTicks = start;
+            }
+
             await this.beforeRecord?.();
 
-            const startTicks = start ?? (await this.#procs.startOf(spawned));
             const recorded = await app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
 
@@ -1827,25 +1870,26 @@ export class BackgroundTasks {
                 stored.status = "running";
                 stored.pid = spawned;
 
-                if (startTicks !== undefined && !Number.isNaN(startTicks)) {
-                    stored.startTicks = startTicks;
+                if (item.startTicks !== undefined) {
+                    stored.startTicks = item.startTicks;
                 }
 
                 return true;
             }, context);
 
             if (!recorded) {
-                await this.#procs.killSpawned(this.#ref(conversationId, item), spawned);
+                await this.#forget(conversationId, item, true, false);
             }
 
             return (await this.#stored(conversationId, item.id)) ?? item;
         } catch (error) {
-            // Never started, or started and not recorded: the reservation goes, and so does any process.
             if (!(error instanceof StartCutOff)) {
-                await this.#forget(conversationId, item, signal?.aborted === true, pid);
+                await this.#forget(conversationId, item, signal?.aborted === true, !spawnAttempted);
             }
 
             throw error;
+        } finally {
+            this.#launching.delete(launch);
         }
     }
 
@@ -1855,8 +1899,10 @@ export class BackgroundTasks {
 
         this.#split ||=
             shell !== undefined &&
-            spawnSync(shell, ["-c", "command -v split"], { stdio: "ignore", windowsHide: true })
-                .status === 0;
+            spawnSync(shell, ["-p", "-c", "command -v split"], {
+                stdio: "ignore",
+                windowsHide: true,
+            }).status === 0;
 
         if (!this.#split) {
             throw new HttpError(
@@ -1866,53 +1912,71 @@ export class BackgroundTasks {
         }
     }
 
-    async #spawn(
+    #spawnEnv(
         conversationId: ConversationId,
         item: BackgroundTask,
         added: Record<string, string>,
-        authorize?: () => void,
-    ): Promise<{ pid: number; start?: number }> {
+    ): NodeJS.ProcessEnv {
         this.#dir(conversationId, true);
 
-        try {
-            return await this.#procs.spawn(
-                WRAPPER,
-                item.cwd,
-                {
-                    ...process.env,
-                    ...added,
-                    [BACKGROUND_MARKER]: this.#marker(conversationId, item.id),
-                    PI_POCKET_BACKGROUND_COMMAND: item.command,
-                    PI_POCKET_BACKGROUND_EXIT: this.#exitFile(conversationId, item.id),
-                    PI_POCKET_BACKGROUND_LOG: this.#logPrefix(conversationId, item.id),
-                    PI_POCKET_BACKGROUND_SEGMENT: String(item.segment ?? SEGMENT_BYTES),
-                },
-                this.#ref(conversationId, item),
-                authorize,
-            );
-        } catch (error) {
-            authorize?.();
-
-            throw new HttpError(500, (error as Error).message);
-        }
+        return {
+            ...process.env,
+            ...added,
+            [BACKGROUND_MARKER]: this.#marker(conversationId, item.id),
+            PI_POCKET_BACKGROUND_COMMAND: item.command,
+            PI_POCKET_BACKGROUND_EXIT: this.#exitFile(conversationId, item.id),
+            PI_POCKET_BACKGROUND_LOG: this.#logPrefix(conversationId, item.id),
+            PI_POCKET_BACKGROUND_SEGMENT: String(item.segment ?? SEGMENT_BYTES),
+        };
     }
 
-    /** Take back a reservation whose start failed: its watch, its record, its files, and any process it has. */
+    /** Finish a failed reservation and keep the replacement in its job's history. */
     async #forget(
         conversationId: ConversationId,
         item: BackgroundTask,
         cancelled: boolean,
-        pid?: number,
+        neverSpawned: boolean,
     ): Promise<void> {
-        if (pid !== undefined) {
-            await this.#procs.killSpawned(this.#ref(conversationId, item), pid);
+        if (!neverSpawned) {
+            if (item.pid > 0) {
+                await this.#procs
+                    .killSpawned(this.#ref(conversationId, item), item.pid)
+                    .catch(() => undefined);
+            }
+
+            await this.#signal(conversationId, item, "SIGKILL").catch(() => undefined);
         }
 
-        await this.#signal(conversationId, item, "SIGKILL");
-
-        const pruned = await this.#app.harness.commit(async (tx) => {
+        const observation = neverSpawned
+            ? { processAlive: false, processObservedAt: this.#app.now(), left: [] }
+            : await this.#processEvidence(conversationId, item).catch(() => ({
+                  processAlive: undefined,
+                  processObservedAt: this.#app.now(),
+                  left: [],
+              }));
+        const removed = await this.#app.harness.commit(async (tx) => {
             const doc = await tx.doc(BackgroundDoc, conversationId);
             const stored = doc.items[item.id];
+
+            if (stored !== undefined) {
+                if (neverSpawned) {
+                    stored.neverSpawned = true;
+                } else if (item.pid > 0) {
+                    stored.pid = item.pid;
+
+                    if (item.startTicks !== undefined) {
+                        stored.startTicks = item.startTicks;
+                    } else {
+                        delete stored.startTicks;
+                    }
+                }
+
+                recordObservation(stored, observation);
+
+                if (observation.left.length > 0) {
+                    stored.left = observation.left;
+                }
+            }
 
             if (stored?.status === "starting") {
                 stored.status = cancelled ? "stopped" : "lost";
@@ -1923,8 +1987,8 @@ export class BackgroundTasks {
                     stored.launchFailed = true;
                 }
 
-                if (stored.resumedFrom === undefined) {
-                    // A failed initial start leaves no task in the legacy list. Keep the outcome, not its command.
+                if (stored.resumedFrom === undefined && observation.processAlive === false) {
+                    // Only a proved-empty initial failure can give up its stop handle.
                     doc.adverse = recentAdverse([
                         summary(conversationId, stored),
                         ...(doc.adverse ?? []),
@@ -1933,11 +1997,14 @@ export class BackgroundTasks {
                 }
             }
 
-            return this.#prune(doc, tx, conversationId);
+            const pruned = await this.#prune(doc, tx, conversationId);
+
+            // A retained attempt still needs its Windows identity and completion records.
+            return doc.items[item.id] === undefined ? [item.id, ...pruned] : pruned;
         }, context);
 
         await this.#app.harness.abortTask(item.taskId, context).catch(() => undefined);
-        this.#removeFiles(conversationId, [item.id, ...pruned]);
+        this.#removeFiles(conversationId, removed);
     }
 
     /**
@@ -2338,7 +2405,7 @@ export class BackgroundTasks {
 
     /** From what is known at once: for a count, tests, and checks. */
     alive(conversationId: ConversationId, item: BackgroundTask): boolean {
-        return this.#procs.aliveSync(this.#ref(conversationId, item));
+        return !item.neverSpawned && this.#procs.aliveSync(this.#ref(conversationId, item));
     }
 
     /** From a fresh look. */
