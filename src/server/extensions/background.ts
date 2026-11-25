@@ -166,7 +166,10 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                 throw new Error("Only jobs takes a page cursor (after).");
             }
 
-            if ((guarded || args.action === "jobs") && typeof host.jobSupervision !== "function") {
+            if (
+                (guarded && typeof background.controlJob !== "function") ||
+                (args.action === "jobs" && typeof host.jobSupervision !== "function")
+            ) {
                 throw new Error("Job supervision needs a newer running server.");
             }
 
@@ -191,24 +194,31 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                     throw new Error("start needs a command.");
                 }
 
-                const requestedBy = host.requesterOf(api.conversationId);
-                const item = await background.start(
-                    api.conversationId,
-                    {
-                        command: args.command,
-                        key,
-                        ...(guarded
-                            ? { jobId: args.jobId!, expectedAttempt: args.expectedAttempt! }
-                            : {}),
-                        ...(args.notify === undefined ? {} : { notify: args.notify }),
-                        ...(typeof args.quietMinutes === "number" &&
-                        Number.isFinite(args.quietMinutes)
-                            ? { quietMinutes: args.quietMinutes }
-                            : {}),
-                        ...(requestedBy === undefined ? {} : { requestedBy }),
-                    },
-                    context.abortSignal,
-                );
+                const request = {
+                    command: args.command,
+                    key,
+                    ...(args.notify === undefined ? {} : { notify: args.notify }),
+                    ...(typeof args.quietMinutes === "number" && Number.isFinite(args.quietMinutes)
+                        ? { quietMinutes: args.quietMinutes }
+                        : {}),
+                };
+                const requestedBy = guarded ? undefined : host.requesterOf(api.conversationId);
+                const item = guarded
+                    ? await background.controlJob(
+                          api.conversationId,
+                          {
+                              action: "start",
+                              ...request,
+                              jobId: args.jobId!,
+                              expectedAttempt: args.expectedAttempt!,
+                          },
+                          context.abortSignal,
+                      )
+                    : await background.start(
+                          api.conversationId,
+                          { ...request, ...(requestedBy === undefined ? {} : { requestedBy }) },
+                          context.abortSignal,
+                      );
 
                 // This call, run again after a restart cut its start off: it is not started twice.
                 if (item.status === "starting") {
@@ -229,15 +239,20 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
             }
 
             if (args.action === "stop" && guarded) {
-                const item = await background.stopJob(
+                const item = await background.controlJob(
                     api.conversationId,
-                    args.jobId!,
-                    args.expectedAttempt!,
-                    host.requesterOf(api.conversationId),
+                    { action: "stop", jobId: args.jobId!, expectedAttempt: args.expectedAttempt! },
                     context.abortSignal,
                 );
 
-                return reply(`${item.id}: ${outcome(item)}.`);
+                const remaining =
+                    item.processAlive === undefined
+                        ? " Process identity is unknown; termination is not confirmed."
+                        : item.processAlive
+                          ? " Verified processes still run."
+                          : "";
+
+                return reply(`${item.id}: ${outcome(item)}.${remaining}`);
             }
 
             if (args.id === undefined) {

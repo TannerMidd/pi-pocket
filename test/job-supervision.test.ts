@@ -10,7 +10,8 @@ import {
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { after, before, test } from "node:test";
+import { after, before, test, type TestContext } from "node:test";
+import { taskProcesses, type TaskProcesses } from "../src/server/processes.ts";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { BackgroundDoc, LinkedSessionPeersDoc, SessionsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
@@ -94,6 +95,142 @@ async function worker(lead: ConversationId) {
 
     return { id, address };
 }
+
+async function guardedFixture(t: TestContext) {
+    const id = await newSession(app);
+    const original = owner(app).id;
+    const guest = app.config.addUser("second requester", "guest", [String(id)]).user;
+    const processes = Object.getPrototypeOf(taskProcesses()) as TaskProcesses;
+    let requester: string | undefined = original;
+
+    t.after(() => app.config.removeUser(guest.id));
+    t.mock.method(app.attribution, "requesterOf", () => requester);
+    t.mock.method(processes, "unsupported", async () => undefined);
+    t.mock.method(processes, "left", async () => []);
+    const members = t.mock.method(processes, "members", async () => []);
+    const signal = t.mock.method(processes, "signal", async () => {});
+    const spawn = t.mock.method(processes, "spawn", async () => {
+        throw new Error("Unexpected fake spawn");
+    });
+
+    await seed(id);
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(BackgroundDoc, id)).items.bbbbbb!.requestedBy = original;
+    }, context);
+
+    return {
+        id,
+        change: () => {
+            requester = guest.id;
+        },
+        members,
+        signal,
+        spawn,
+        target: { jobId: "aaaaaa", expectedAttempt: "bbbbbb" },
+    };
+}
+
+test("a requester change during the resume probe cannot reserve a new attempt", async (t) => {
+    const { id, change, members, target, spawn } = await guardedFixture(t);
+
+    members.mock.mockImplementation(async () => {
+        change();
+
+        return [];
+    });
+    const before = await app.harness.snapshot(BackgroundDoc, id, context);
+
+    await assert.rejects(
+        app.background.controlJob(id, {
+            action: "start",
+            ...target,
+            command: "synthetic",
+            key: "guard-test",
+        }),
+        { status: 403 },
+    );
+    assert.deepEqual(await app.harness.snapshot(BackgroundDoc, id, context), before);
+    assert.equal(spawn.mock.callCount(), 0);
+});
+
+test("a requester change after reservation prevents spawn", async (t) => {
+    const { id, change, target, spawn } = await guardedFixture(t);
+    const before = app.background.beforeSpawn;
+
+    t.after(() => {
+        app.background.beforeSpawn = before;
+    });
+    app.background.beforeSpawn = async () => change();
+    await assert.rejects(
+        app.background.controlJob(id, { action: "start", ...target, command: "synthetic" }),
+        { status: 403 },
+    );
+    assert.equal(spawn.mock.callCount(), 0);
+});
+
+test("a queued durable abort checks the tool requester at admission", async (t) => {
+    const { id, change, target, signal } = await guardedFixture(t);
+
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(BackgroundDoc, id)).items.bbbbbb!.status = "running";
+    }, context);
+    const cancelled: boolean[] = [];
+    const abort = t.mock.method(
+        app.harness,
+        "abortTask",
+        async (...[_task, admission]: Parameters<typeof app.harness.abortTask>) => {
+            cancelled.push(admission.abortSignal?.aborted ?? false);
+            change();
+            cancelled.push(admission.abortSignal?.aborted ?? false);
+            admission.abortSignal?.throwIfAborted();
+
+            return "terminal" as const;
+        },
+    );
+
+    await assert.rejects(app.background.controlJob(id, { action: "stop", ...target }), {
+        status: 403,
+    });
+    assert.equal(abort.mock.callCount(), 1);
+    assert.deepEqual(cancelled, [false, true]);
+    assert.equal(signal.mock.callCount(), 0);
+    assert.equal(
+        (await app.harness.snapshot(BackgroundDoc, id, context))?.items.bbbbbb?.status,
+        "running",
+    );
+});
+
+test("a guarded stop cannot escalate for a replacement requester; a signed-in human can still stop", async (t) => {
+    const { id, change, target, members, signal } = await guardedFixture(t);
+    const before = await app.harness.snapshot(BackgroundDoc, id, context);
+    const grace = app.background.timing.grace;
+
+    t.after(() => {
+        app.background.timing.grace = grace;
+    });
+    app.background.timing.grace = 0;
+    members.mock.mockImplementation(async () => [123456]);
+    signal.mock.mockImplementation(async () => change());
+    await assert.rejects(app.background.controlJob(id, { action: "stop", ...target }), {
+        status: 403,
+    });
+    assert.deepEqual(
+        signal.mock.calls.map((c) => c.arguments[1]),
+        ["SIGTERM"],
+    );
+    assert.deepEqual(await app.harness.snapshot(BackgroundDoc, id, context), before);
+
+    const stop = await fetch(`${base}/${id}/background/1/stop`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+    });
+
+    assert.equal(stop.status, 200);
+    assert.deepEqual(
+        signal.mock.calls.map((c) => c.arguments[1]),
+        ["SIGTERM", "SIGTERM", "SIGKILL"],
+    );
+});
 
 test("an explicit read sees archived workers with reports and notify off; a peer address alone grants nothing", async () => {
     const lead = await newSession(app);

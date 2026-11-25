@@ -709,7 +709,15 @@ export interface PocketHost {
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
     readonly background: Pick<
         BackgroundTasks,
-        "start" | "read" | "stop" | "stopJob" | "list" | "limits" | "task" | "describe"
+        | "start"
+        | "read"
+        | "stop"
+        | "stopJob"
+        | "controlJob"
+        | "list"
+        | "limits"
+        | "task"
+        | "describe"
     >;
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;

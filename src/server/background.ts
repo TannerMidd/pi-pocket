@@ -1512,16 +1512,66 @@ export class BackgroundTasks {
             : this.#control(conversationId, request.expectedAttempt, start);
     }
 
+    /** A guarded tool mutation stays bound to the requester who started this call. */
+    async controlJob(
+        conversationId: ConversationId,
+        control: { jobId: string; expectedAttempt: string } & (
+            ({ action: "start" } & Omit<BackgroundStart, "requestedBy">) | { action: "stop" }
+        ),
+        signal?: AbortSignal,
+    ): Promise<BackgroundTask> {
+        const requestedBy = this.#app.attribution.requesterOf(conversationId);
+
+        if (requestedBy === undefined) {
+            throw new HttpError(403, "A job control needs a current requester.");
+        }
+
+        const authorize = () => {
+            signal?.throwIfAborted();
+
+            if (
+                this.#app.attribution.requesterOf(conversationId) !== requestedBy ||
+                this.#app.steeringUser(conversationId, requestedBy) === undefined
+            ) {
+                throw new HttpError(403, "The current requester cannot control this job.");
+            }
+        };
+
+        authorize();
+
+        if (control.action === "stop") {
+            return this.stopJob(
+                conversationId,
+                control.jobId,
+                control.expectedAttempt,
+                requestedBy,
+                signal,
+                authorize,
+            );
+        }
+
+        const result = await this.#control(conversationId, control.expectedAttempt, () =>
+            this.#start(conversationId, { ...control, requestedBy }, signal, authorize),
+        );
+
+        authorize();
+
+        return result;
+    }
+
     async #start(
         conversationId: ConversationId,
         request: BackgroundStart,
         signal?: AbortSignal,
+        authorize?: () => void,
     ): Promise<BackgroundTask> {
         const app = this.#app;
 
         this.#check(conversationId);
 
         const requireRequester = () => {
+            authorize?.();
+
             if (app.steeringUser(conversationId, request.requestedBy) === undefined) {
                 throw new HttpError(403, "A background task needs someone who can steer here.");
             }
@@ -1717,6 +1767,7 @@ export class BackgroundTasks {
                 read: 0,
             };
 
+            authorize?.();
             doc.items[id] = item;
 
             return { item: JSON.parse(JSON.stringify(item)) as BackgroundTask, fresh: true };
@@ -1724,6 +1775,8 @@ export class BackgroundTasks {
 
         // A call run again finds what it reserved, and never starts it twice: a start cut off is recovered by its watch.
         if (!reserved.fresh) {
+            authorize?.();
+
             return reserved.item;
         }
 
@@ -1750,7 +1803,12 @@ export class BackgroundTasks {
             requireRequester();
             this.#needsSplit();
 
-            const { pid: spawned, start } = await this.#spawn(conversationId, item, added);
+            const { pid: spawned, start } = await this.#spawn(
+                conversationId,
+                item,
+                added,
+                authorize,
+            );
 
             pid = spawned;
             await this.beforeRecord?.();
@@ -1758,6 +1816,8 @@ export class BackgroundTasks {
             const startTicks = start ?? (await this.#procs.startOf(spawned));
             const recorded = await app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[item.id];
+
+                authorize?.();
 
                 // Stopped while it started: it does not run on.
                 if (stored?.status !== "starting") {
@@ -1810,6 +1870,7 @@ export class BackgroundTasks {
         conversationId: ConversationId,
         item: BackgroundTask,
         added: Record<string, string>,
+        authorize?: () => void,
     ): Promise<{ pid: number; start?: number }> {
         this.#dir(conversationId, true);
 
@@ -1827,8 +1888,11 @@ export class BackgroundTasks {
                     PI_POCKET_BACKGROUND_SEGMENT: String(item.segment ?? SEGMENT_BYTES),
                 },
                 this.#ref(conversationId, item),
+                authorize,
             );
         } catch (error) {
+            authorize?.();
+
             throw new HttpError(500, (error as Error).message);
         }
     }
@@ -2177,8 +2241,10 @@ export class BackgroundTasks {
         expectedAttempt: string,
         requestedBy: string | undefined,
         signal?: AbortSignal,
+        checkCurrent?: () => void,
     ): Promise<BackgroundTask> {
         const authorize = () => {
+            checkCurrent?.();
             signal?.throwIfAborted();
 
             if (this.#app.steeringUser(conversationId, requestedBy) === undefined) {
@@ -2193,6 +2259,8 @@ export class BackgroundTasks {
             authorize();
             const target = currentAttempt(conversationId, doc?.items ?? {}, jobId, expectedAttempt);
             const result = await this.#stop(conversationId, target.id, "pi", authorize);
+
+            authorize();
 
             if (result === undefined) {
                 throw new HttpError(409, "The expected attempt is no longer available.");
