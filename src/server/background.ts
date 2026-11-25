@@ -1321,13 +1321,27 @@ export class BackgroundTasks {
         }
     }
 
-    /** Keep a daemon's stop handle until a fresh scan can release it. Never scan processes inside a transaction. */
+    #needsStopHandle(item: BackgroundTask): boolean {
+        return !!item.left?.length || (item.processAlive ?? item.processObservedAt !== undefined);
+    }
+
+    /** Release a terminal stop handle only after a fresh scan. Never scan processes inside a transaction. */
     async #retireDaemons(conversationId: ConversationId, items: Record<string, BackgroundTask>) {
         const cleared = new Map<string, number>();
 
         for (const item of Object.values(items)) {
-            if (item.left?.length && (await this.#left(conversationId, item)).length === 0) {
-                cleared.set(item.id, this.#app.now());
+            if (
+                item.status === "starting" ||
+                item.status === "running" ||
+                !this.#needsStopHandle(item)
+            ) {
+                continue;
+            }
+
+            const observation = await this.#processEvidence(conversationId, item);
+
+            if (observation.processAlive === false) {
+                cleared.set(item.id, observation.processObservedAt);
             }
         }
 
@@ -1341,7 +1355,7 @@ export class BackgroundTasks {
             for (const [id, at] of cleared) {
                 const row = doc.items[id];
 
-                if (row?.left?.length) {
+                if (row !== undefined && row.processObservedAt === items[id]!.processObservedAt) {
                     delete row.left;
                     row.processAlive = false;
                     row.processObservedAt = at;
@@ -1379,7 +1393,9 @@ export class BackgroundTasks {
         const ended = Object.values(items)
             .filter(
                 (item) =>
-                    item.status !== "running" && item.status !== "starting" && !item.left?.length,
+                    item.status !== "running" &&
+                    item.status !== "starting" &&
+                    !this.#needsStopHandle(item),
             )
             .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
             .slice(this.sizes.keepEnded)
@@ -2042,38 +2058,67 @@ export class BackgroundTasks {
             return undefined;
         }
 
-        // Ended: what it left running (a daemon) is stopped, found again by its marker.
+        // A terminal attempt can still have verified group members, even when no daemon escaped.
         if (item.status !== "running" && item.status !== "starting") {
-            if (
-                (await this.#left(conversationId, item)).length > 0 ||
-                (item.left?.length ?? 0) > 0
-            ) {
-                authorize?.();
-                await this.#kill(conversationId, { ...item, pid: 0 });
-                const left = await this.#left(conversationId, item);
-                const observedAt = this.#app.now();
+            const observe = () => this.#processEvidence(conversationId, item);
+            let observation = await observe();
 
-                await this.#app.harness.commit(async (tx) => {
-                    const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
-
-                    if (stored !== undefined) {
-                        stored.processAlive = left.length > 0;
-                        stored.processObservedAt = observedAt;
-
-                        if (left.length > 0) {
-                            stored.left = left;
-                        } else {
-                            delete stored.left;
-                        }
-                    }
-                }, context);
+            if (observation.processAlive === true) {
+                await this.#kill(conversationId, item, authorize);
+                observation = await observe();
             }
+
+            await this.#app.harness.commit(async (tx) => {
+                const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
+
+                authorize?.();
+
+                if (stored !== undefined) {
+                    recordObservation(stored, observation);
+
+                    if (observation.left.length > 0) {
+                        stored.left = observation.left;
+                    } else {
+                        delete stored.left;
+                    }
+                }
+            }, context);
 
             return this.#stored(conversationId, id);
         }
 
-        // The task's abort stops the processes and records it; a task already gone is stopped here.
-        await this.#app.harness.abortTask(item.taskId, context).catch(() => undefined);
+        if (
+            authorize !== undefined &&
+            (await this.#processEvidence(conversationId, item)).processAlive === undefined
+        ) {
+            throw new HttpError(
+                409,
+                "Process identity is unknown. This guarded stop did not signal the attempt.",
+            );
+        }
+
+        authorize?.();
+        // Durable checks this context when its queued abort enters the mutation line. After admission,
+        // the watch owns cleanup even if the requester changes.
+        const stopContext: Context =
+            authorize === undefined
+                ? context
+                : {
+                      get abortSignal() {
+                          try {
+                              authorize();
+                          } catch (error) {
+                              return AbortSignal.abort(error);
+                          }
+
+                          return context.abortSignal;
+                      },
+                      telemetry: context.telemetry,
+                      value: context.value.bind(context),
+                  };
+
+        await this.#app.harness.abortTask(item.taskId, stopContext).catch(() => undefined);
+        authorize?.();
 
         const until = Date.now() + this.timing.grace + 3000;
         let now = await this.#stored(conversationId, id);
