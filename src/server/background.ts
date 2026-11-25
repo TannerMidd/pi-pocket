@@ -172,7 +172,7 @@ function currentAttempt(
 function summary(conversationId: ConversationId, item: BackgroundTask): BackgroundJobSummary {
     const outcome = item.launchFailed
         ? "failure"
-        : item.timedOut || (item.status === "stopped" && item.why?.endsWith(", its quiet limit"))
+        : item.status === "stopped" && (item.timedOut || item.why?.endsWith(", its quiet limit"))
           ? "timeout"
           : item.status === "stopped" || item.status === "lost"
             ? item.status
@@ -199,6 +199,19 @@ function summary(conversationId: ConversationId, item: BackgroundTask): Backgrou
         ...(item.lastOutputAt === undefined ? {} : { lastOutputAt: item.lastOutputAt }),
         ...(item.outputBytes === undefined ? {} : { outputBytes: item.outputBytes }),
     };
+}
+
+function recordObservation(
+    stored: BackgroundTask,
+    observation: { processAlive: boolean | undefined; processObservedAt: number },
+): void {
+    stored.processObservedAt = observation.processObservedAt;
+
+    if (observation.processAlive === undefined) {
+        delete stored.processAlive;
+    } else {
+        stored.processAlive = observation.processAlive;
+    }
 }
 
 function recentAdverse(items: BackgroundJobSummary[]): BackgroundJobSummary[] {
@@ -702,14 +715,16 @@ export class BackgroundTasks {
 
         // An end is looked at twice, a moment apart, with a fresh scan: a child a command leaves can be in the middle of
         // starting its program as the command ends, when its environment, and so its marker, reads empty.
-        const ended = async () => {
-            if (await this.#alive(conversationId, watched)) {
-                return false;
+        const groupAlive = async (fresh: boolean) => {
+            const alive = await this.#alive(conversationId, watched, fresh);
+
+            if (alive !== false) {
+                return alive;
             }
 
             await wait(Math.min(200, this.timing.look * 2), aborted);
 
-            return !(await this.#alive(conversationId, watched, true));
+            return this.#alive(conversationId, watched, true);
         };
 
         // Its log is kept short at each tick, apart from the looks at its processes: a command that writes faster than
@@ -722,7 +737,7 @@ export class BackgroundTasks {
         const history: { at: number; end: number }[] = [{ at: measured, end: written }];
         let looked = Date.now();
         let lastObservation = 0;
-        let timedOut = false;
+        let timeoutPending = watched.timedOut === true;
         let runaway: string | undefined;
         // When its output last grew: one quiet for longer than its limit is stopped, and Pi is told.
         let grew = performance.now();
@@ -730,6 +745,11 @@ export class BackgroundTasks {
 
         for (;;) {
             stop();
+
+            if (timeoutPending) {
+                await this.#kill(conversationId, watched);
+                break;
+            }
 
             if (this.#app.steeringUser(conversationId, watched.requestedBy) === undefined) {
                 runaway = "its requester can no longer steer here";
@@ -775,25 +795,46 @@ export class BackgroundTasks {
                 grew = performance.now();
             }
 
-            if (quietMs > 0 && performance.now() - grew >= quietMs) {
-                timedOut = true;
-                runaway = `it printed nothing for ${duration(quietMs)}, its quiet limit`;
-                await this.#kill(conversationId, watched);
-                break;
-            }
+            const quietDue = quietMs > 0 && performance.now() - grew >= quietMs;
 
             written = now;
             measured = Date.now();
 
-            if (Date.now() - looked >= this.timing.look) {
+            if (quietDue || Date.now() - looked >= this.timing.look) {
                 looked = Date.now();
+                const observationDue = looked - lastObservation >= 15_000;
+                const alive = await groupAlive(quietDue || observationDue);
 
-                if (await ended()) {
+                if (
+                    alive === false ||
+                    (alive === undefined && this.#exitCodes(conversationId, id) !== undefined)
+                ) {
                     break;
                 }
 
-                // Timestamp positive observations, but do not commit on every look or every output byte.
-                if (Date.now() - lastObservation >= 15_000) {
+                // Commit the decision before the signal. A recovered watch finishes the same attempt's stop.
+                if (quietDue && alive === true) {
+                    await runtime.commit(async (tx) => {
+                        const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
+
+                        if (
+                            stored?.status === "running" &&
+                            this.#end(conversationId, stored) === now
+                        ) {
+                            stored.timedOut = true;
+                            stored.why = `it printed nothing for ${duration(quietMs)}, its quiet limit`;
+                            timeoutPending = true;
+                        }
+
+                        return undefined;
+                    }, context);
+
+                    if (timeoutPending) {
+                        continue;
+                    }
+                }
+
+                if (observationDue) {
                     lastObservation = Date.now();
                     const at = this.#app.now();
                     const evidence = this.#outputEvidence(conversationId, watched);
@@ -802,8 +843,9 @@ export class BackgroundTasks {
                         const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
 
                         if (stored?.status === "running") {
-                            Object.assign(stored, evidence, {
-                                processAlive: true,
+                            Object.assign(stored, evidence);
+                            recordObservation(stored, {
+                                processAlive: alive,
                                 processObservedAt: at,
                             });
                         }
@@ -841,10 +883,11 @@ export class BackgroundTasks {
             }
 
             this.#ended(stored, codes, left);
-            Object.assign(stored, this.#outputEvidence(conversationId, stored), observation);
+            Object.assign(stored, this.#outputEvidence(conversationId, stored));
+            recordObservation(stored, observation);
 
-            if (timedOut) {
-                stored.timedOut = true;
+            if (stored.timedOut) {
+                stored.status = "stopped";
             }
 
             if (runaway !== undefined) {

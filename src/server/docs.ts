@@ -673,6 +673,7 @@ export type BackgroundTask = {
     processAlive?: boolean;
     lastOutputAt?: number;
     outputBytes?: number;
+    /** On a running attempt, the watch committed its quiet stop and must finish it after restart. */
     timedOut?: true;
     launchFailed?: true;
     command: string;

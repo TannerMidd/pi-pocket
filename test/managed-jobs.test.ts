@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import { BackgroundDoc } from "../src/server/docs.ts";
+import { taskProcesses, type TaskProcesses } from "../src/server/processes.ts";
 
 const skip = !existsSync("/proc/self/stat") && "requires /proc";
 const model = scriptedModel();
@@ -138,7 +139,13 @@ test(
         appendFileSync(join(data, "background", String(id), `${a.id}.log.aaaaaa`), "late A line\n");
         await until(() => existsSync(join(cwd, "starts-b.txt")), "B to reach its wait");
 
+        await until(
+            async () => (await row(b.id))?.processAlive === true,
+            "B to be observed before restart",
+        );
         await app.close();
+        const reopenedAt = Date.now();
+
         await open();
 
         assert.equal((await app.background.start(id, firstRequest)).id, a.id);
@@ -152,10 +159,11 @@ test(
                 status: 409,
             },
         );
-        await until(
-            async () => (await app.background.jobs(id)).jobs[0]?.processAlive === true,
-            "an observation of the quiet B process",
-        );
+        await until(async () => {
+            const current = (await app.background.jobs(id)).jobs[0];
+
+            return current?.processAlive === true && (current.processObservedAt ?? 0) > reopenedAt;
+        }, "a new observation of B after the server reopened");
         const { jobs, recentAdverse } = await app.background.jobs(id);
 
         assert.deepEqual(
@@ -203,6 +211,102 @@ test(
         await assertNoNotification(id);
     },
 );
+
+for (const cut of ["before termination", "after termination"] as const) {
+    test(`recovery finishes the committed timeout: shutdown ${cut}`, { skip }, async (t) => {
+        const id = await session();
+        const procs = Object.getPrototypeOf(taskProcesses()) as TaskProcesses;
+        const signal = procs.signal;
+        let reasonAtFirstSignal: string | undefined;
+        let closing: Promise<void> | undefined;
+
+        t.mock.method(
+            procs,
+            "signal",
+            async function (this: TaskProcesses, ...args: Parameters<TaskProcesses["signal"]>) {
+                const [ref, name] = args;
+                const attemptId = ref.marker.split("/").at(-1)!;
+
+                if (name === "SIGTERM") {
+                    const item = (await app.harness.snapshot(BackgroundDoc, id, context))?.items[
+                        attemptId
+                    ];
+
+                    reasonAtFirstSignal =
+                        item?.status === "running" && item.timedOut ? item.why : undefined;
+                }
+
+                if (cut === "after termination") {
+                    await signal.apply(this, args);
+                }
+
+                if (name === (cut === "before termination" ? "SIGTERM" : "SIGKILL")) {
+                    closing = app.harness.close(context);
+                }
+            },
+        );
+        const item = await app.background.start(id, {
+            command: "sleep 30",
+            notify: false,
+            requestedBy: owner(app).id,
+            quietMinutes: 0.001,
+        });
+
+        await until(() => closing !== undefined, "the injected shutdown");
+        await closing;
+        t.mock.restoreAll();
+        await app.close();
+        await open();
+        assert.match(reasonAtFirstSignal ?? "", /quiet limit/);
+        await until(
+            async () => (await app.background.jobs(id)).recentAdverse[0]?.outcome === "timeout",
+            "the committed timeout to finish",
+        );
+        const row = (await app.harness.snapshot(BackgroundDoc, id, context))?.items[item.id];
+
+        assert.equal(row?.status, "stopped");
+        assert.equal(row.why, reasonAtFirstSignal);
+        assert.equal(row.processAlive, false);
+        assert.equal(await app.background.aliveNow(id, row), false);
+        await assertNoNotification(id);
+    });
+}
+
+test("a confirmed exit at the quiet deadline keeps its exit code", { skip }, async (t) => {
+    const id = await session();
+
+    app.background.beforeRecord = async () => {
+        const [reserved] = await app.background.list(id);
+        const path = join(data, "background", String(id), `${reserved!.id}.exit`);
+
+        await until(
+            () => existsSync(path) && readFileSync(path, "utf8").trim() === "7 0",
+            "the wrapper to record its exit",
+        );
+        t.mock.method(Object.getPrototypeOf(taskProcesses()), "members", async () => []);
+    };
+
+    try {
+        const item = await app.background.start(id, {
+            command: "exit 7",
+            notify: false,
+            requestedBy: owner(app).id,
+            quietMinutes: Number.EPSILON,
+        });
+
+        await until(
+            async () => (await app.background.list(id))[0]?.endedAt !== undefined,
+            "the finished attempt",
+        );
+        const row = (await app.harness.snapshot(BackgroundDoc, id, context))?.items[item.id];
+
+        assert.equal(row?.status, "exited");
+        assert.equal(row.code, 7);
+        assert.equal(row.timedOut, undefined);
+    } finally {
+        app.background.beforeRecord = undefined;
+    }
+});
 
 test(
     "a failed initial launch remains visible without putting its command in the lead's history",
