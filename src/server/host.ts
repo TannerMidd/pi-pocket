@@ -22,6 +22,7 @@ import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
 import type { SessionCleanup } from "./session-cleanup.ts";
 import type { BackgroundTasks } from "./background.ts";
+import type { JobSupervision } from "./job-supervision.ts";
 import type { Updates } from "./updates.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
@@ -703,10 +704,20 @@ export interface PocketHost {
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
     /** Archived sessions cleaned up and removed from the app. */
     readonly sessionCleanup: Pick<SessionCleanup, "plan" | "cleanUp" | "remove">;
+    /** A bounded status view for this session and its visible immediate workers. */
+    jobSupervision(source: ConversationId, after?: string): Promise<JobSupervision>;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
     readonly background: Pick<
         BackgroundTasks,
-        "start" | "read" | "stop" | "list" | "limits" | "task" | "describe"
+        | "start"
+        | "read"
+        | "stop"
+        | "stopJob"
+        | "controlJob"
+        | "list"
+        | "limits"
+        | "task"
+        | "describe"
     >;
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;

@@ -12356,6 +12356,34 @@ textarea.notes {
 }
 
 /* Background: the session's commands in one row, the open one's command, and what it prints as it runs. */
+.job-status {
+    border-bottom: 1px solid var(--hair);
+    padding-bottom: 8px;
+    overflow-wrap: anywhere;
+}
+
+.job-status summary {
+    cursor: pointer;
+    padding: 10px 0;
+    font-weight: 600;
+}
+
+.job-status h3 {
+    font-size: 1em;
+    margin: 10px 0 4px;
+}
+
+.job-status ul {
+    padding: 0;
+    margin: 4px 0;
+    list-style: none;
+}
+
+.job-status li {
+    padding: 8px 0;
+    border-top: 1px solid var(--hair);
+}
+
 .background-tasks {
     display: flex;
     min-width: 0;

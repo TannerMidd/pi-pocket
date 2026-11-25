@@ -222,6 +222,36 @@ test(
     },
 );
 
+test("a job tool call never treats an incomplete resume as a new command", { skip }, async () => {
+    const id = await session();
+    const run = (args: Record<string, unknown>) => say(id, `bg ${JSON.stringify(args)}`);
+
+    await run({ action: "start", command: "echo should-not-run", jobId: "missing" });
+    assert.deepEqual(await items(id), []);
+    assert.match(await answers(id), /give both jobId and expectedAttempt/);
+
+    await run({ action: "start", command: "echo first; exit 2", notify: false });
+    await until(async () => (await one(id))?.status === "exited", "first attempt to exit");
+    const first = await one(id);
+
+    await run({ action: "jobs" });
+    assert.ok((await answers(id)).includes(first.id));
+    await run({
+        action: "start",
+        command: "sleep 60",
+        notify: false,
+        jobId: first.jobId,
+        expectedAttempt: first.id,
+    });
+    const second = (await items(id)).find((item) => item.id !== first.id)!;
+
+    assert.equal(second.status, "running");
+    await run({ action: "stop", jobId: first.jobId, expectedAttempt: first.id });
+    assert.equal((await items(id)).find((item) => item.id === second.id)?.status, "running");
+    await run({ action: "stop", jobId: first.jobId, expectedAttempt: second.id });
+    assert.equal((await items(id)).find((item) => item.id === second.id)?.status, "stopped");
+});
+
 test("tasks that end together cost Pi one message, and a card each", { skip }, async () => {
     const id = await session();
     const first = await app.background.start(id, {
@@ -891,14 +921,47 @@ test(
         await until(async () => (await one(id)).status === "exited", "the task to end");
         assert.deepEqual((await one(id)).left, [daemon]);
         assert.equal(running(daemon), true);
+        const [summary] = (await app.background.jobs(id)).jobs;
+
+        assert.equal(summary?.outcome, "exited", "the launcher's exit code is not a work verdict");
+        assert.equal(summary?.processAlive, true, "the last observation still saw a process");
+        await assert.rejects(
+            app.background.start(id, {
+                requestedBy: owner(app).id,
+                command: "echo do-not-replace",
+                jobId: item.jobId!,
+                expectedAttempt: item.id,
+            }),
+            { status: 409 },
+        );
         await until(
             async () => (await userTexts(id)).some((text) => text.includes(`pid ${daemon}`)),
             "Pi told what it left",
         );
 
-        await app.background.stop(id, item.id);
-        await until(() => !running(daemon), "the daemon to be stopped");
-        assert.equal((await one(id)).left, undefined);
+        const kept = app.background.sizes.keepEnded;
+
+        try {
+            app.background.sizes.keepEnded = 1;
+            const newer = await app.background.start(id, {
+                requestedBy: owner(app).id,
+                command: "true",
+                notify: false,
+            });
+
+            await until(
+                async () =>
+                    (await items(id)).find((task) => task.id === newer.id)?.status === "exited",
+                "newer command to end",
+            );
+            await app.background.sweep();
+            await app.background.stopJob(id, item.jobId!, item.id, owner(app).id);
+            await until(() => !running(daemon), "the daemon to be stopped");
+            assert.equal((await items(id)).find((task) => task.id === item.id)?.left, undefined);
+        } finally {
+            app.background.sizes.keepEnded = kept;
+            await app.background.stop(id, item.id);
+        }
     },
 );
 

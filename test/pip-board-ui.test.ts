@@ -257,7 +257,12 @@ test("Board: the ways in open it, and Back, Alt+A, and its × close it", real, a
     await type(BOARD_BOX, "");
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session");
-    assert.equal(await inPage(`document.querySelector('.pane .composer textarea').value`), "");
+    await see(
+        `${STORE}.store.state.view.conversation?.id === ${Number(background)} &&
+            document.querySelector('${BOX}') !== null`,
+        "the original session's composer after closing PiP",
+    );
+    assert.equal(await inPage(`document.querySelector('${BOX}').value`), "");
 
     // A notification's link, from a fresh tab at home.
     await page.navigate(`${base}/?pip=1`);
