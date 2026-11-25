@@ -9529,8 +9529,14 @@ div.group-head {
     font-weight: 400;
 }
 
+/* Not now (Undo in a subagent, or while Pi works): greyed out, its hint saying why. */
+.message-minor:disabled {
+    color: var(--faint);
+    cursor: default;
+}
+
 @media (hover: hover) {
-    .message-minor:hover {
+    .message-minor:not(:disabled):hover {
         background: var(--hover);
     }
 }
