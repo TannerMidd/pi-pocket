@@ -9,7 +9,10 @@ import {
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import childProcess, { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -18,6 +21,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { context } from "./helpers.ts";
 import { type BackgroundTask, wait } from "../src/server/background.ts";
 import { BackgroundDoc } from "../src/server/docs.ts";
+import { taskProcesses, type TaskRef, WindowsProcesses } from "../src/server/processes.ts";
 
 const model = scriptedModel(() => fauxAssistantMessage([fauxText("noted")]));
 const dataDir = join(root, "platforms");
@@ -70,6 +74,170 @@ async function pidIn(item: BackgroundTask, file: string): Promise<number> {
 
     return Number(readFileSync(path, "utf8"));
 }
+
+test("Windows membership needs process identity, not a PID probe", async (t) => {
+    const task: TaskRef = {
+        pid: 41,
+        startTicks: 100,
+        marker: "synthetic",
+        files: join(root, "synthetic-attempt"),
+        startedAt: 0,
+    };
+    const calls: string[] = [];
+    let table = "list 41,1,100 42,41,102";
+    let job = "none";
+    let fails = "";
+    const processes = new WindowsProcesses({
+        ask: async (line) => {
+            const command = line.split(" ")[0];
+
+            calls.push(line);
+
+            if (command === fails) {
+                throw new Error("synthetic helper failure");
+            }
+
+            return command === "list" ? table : command === "members" ? job : "ok";
+        },
+        failed: undefined,
+        holds: () => false,
+        close: () => {},
+    });
+    const probe = t.mock.method(process, "kill", () => true);
+    const members = () => processes.members(task, true);
+
+    assert.equal(processes.aliveSync(task), false, "a missing snapshot proves nothing");
+    assert.deepEqual(await members(), [41, 42]);
+    assert.equal(processes.aliveSync(task), true);
+
+    const later = Date.now() + 6000;
+    const clock = t.mock.method(Date, "now", () => later);
+
+    assert.equal(processes.aliveSync(task), false, "an expired snapshot proves nothing");
+    clock.mock.restore();
+
+    for (fails of ["members", "list"]) {
+        assert.equal(await members(), undefined, `${fails} failed after a positive observation`);
+    }
+
+    fails = "";
+    table = "list 41,1,200 42,41,0";
+    assert.equal(await members(), undefined, "a known child has an unreadable start");
+    assert.equal(await processes.startOf(42), undefined);
+    assert.equal(processes.aliveSync(task), false);
+    table = "list 41,1,0 42,41,102";
+    assert.deepEqual(await members(), [42], "the verified child is sufficient on its own");
+    table = "list 41,1,0";
+    assert.equal(await members(), undefined, "the leader has an unreadable start");
+
+    table = "list 41,1,200 42,41,201 43,41,0";
+    job = "members 77,0";
+    assert.equal(await members(), undefined, "the helper could not identify a job member");
+    job = "members 77,300";
+    assert.equal(await members(), undefined, "the job and table do not agree about a member");
+    assert.ok(!calls.some((line) => line.startsWith("drop ")), "keep the job on uncertainty");
+    job = "none";
+    const noStart = { ...task, marker: "another", files: join(root, "no-start"), startTicks: 0 };
+
+    assert.equal(await processes.members(noStart, true), undefined, "no recorded identity");
+    assert.equal(await members(), undefined, "a reused leader cannot exclude unseen descendants");
+    await processes.signal(task, "SIGKILL");
+    assert.ok(!calls.some((line) => line.startsWith("kill ")), "do not kill by PID alone");
+    table = "list 77,1,300";
+    job = "members 77,300";
+    assert.deepEqual(await members(), [77], "the checked job member survives its launcher");
+    assert.deepEqual(await processes.members({ ...task, pid: 0 }, true), [77]);
+    assert.deepEqual(await processes.find({ ...task, pid: 0 }), { pid: 77, start: 300 });
+    await processes.signal(task, "SIGKILL");
+    assert.ok(calls.includes("kill 77 300"), "the kill request includes the verified start");
+    assert.equal(probe.mock.callCount(), 0);
+});
+
+test("Windows absence requires coverage of the gated command, not just an empty job", async (t) => {
+    let table = "list";
+    let job = "members";
+    let rejectShell = false;
+    const helper = {
+        ask: async (line: string) => {
+            const [command, , pid] = line.split(" ");
+
+            if (command === "job" && pid === "42" && rejectShell) {
+                return "no";
+            }
+
+            return command === "members" ? job : command === "list" ? table : "ok";
+        },
+        close: () => {},
+        holds: () => false,
+        failed: undefined,
+    };
+    let gate = new PassThrough();
+    const fake = t.mock.method(childProcess, "spawn", () =>
+        Object.assign(new EventEmitter(), { pid: 41, stdin: gate, unref: () => {} }),
+    );
+
+    syncBuiltinESMExports();
+
+    try {
+        for (const mode of ["covered", "failed-assignment", "unseen-shell"]) {
+            const task = { pid: 0, marker: mode, files: join(root, mode), startedAt: Date.now() };
+            const processes = new WindowsProcesses(helper);
+
+            t.mock.method(processes, "shell", () => "synthetic-shell");
+            gate = new PassThrough();
+            rejectShell = mode === "failed-assignment";
+            table = "list 41,1,100 42,41,110";
+            job = "members";
+            writeFileSync(`${task.files}.pid`, mode === "unseen-shell" ? "49\n" : "42\n");
+
+            await processes.spawn("", root, {}, task, () => {
+                assert.equal(gate.readableLength, 0);
+                assert.equal(
+                    /^job /m.test(readFileSync(`${task.files}.pids`, "utf8")),
+                    mode === "covered",
+                );
+            });
+            assert.equal(gate.read()?.toString(), "go\n");
+
+            // A grandchild can remain after an unobserved parent exits. Its ppid does not identify it.
+            table = "list 99,73,120";
+            job = "none";
+            assert.equal(await new WindowsProcesses(helper).members(task, true), undefined);
+            job = "members";
+            const recovered = new WindowsProcesses(helper);
+
+            if (mode === "covered") {
+                assert.equal(
+                    await recovered.members({ ...task, marker: "different" }, true),
+                    undefined,
+                );
+                assert.deepEqual(await recovered.members(task, true), []);
+                job = "none";
+                assert.deepEqual(await new WindowsProcesses(helper).members(task, true), []);
+            } else {
+                assert.equal(await recovered.members(task, true), undefined);
+            }
+        }
+    } finally {
+        fake.mock.restore();
+        syncBuiltinESMExports();
+    }
+});
+
+test("Windows recovery does not identify a process by its PID file and a timestamp window", async () => {
+    const task = { pid: 0, marker: "legacy", files: join(root, "legacy"), startedAt: Date.now() };
+    const start = task.startedAt + 11_644_473_600_000;
+    const processes = new WindowsProcesses({
+        ask: async (line) => (line === "list" ? `list 41,1,${start}` : "none"),
+        close: () => {},
+        holds: () => false,
+        failed: undefined,
+    });
+
+    writeFileSync(`${task.files}.pid`, "41");
+    assert.equal(await processes.find(task), undefined);
+    assert.equal(await processes.members(task, true), undefined);
+});
 
 // The Darwin Nix builder can deny /bin/ps. Outside that builder, a broken ps must fail the tests.
 const psDenied =
@@ -166,6 +334,32 @@ processTest("a stop never ends a process that took the task's pid", async () => 
     await app.harness.commit(async (tx) => {
         (await tx.doc(BackgroundDoc, id)).items[item.id]!.pid = decoy.pid!;
     }, context);
+
+    if (process.platform !== "win32") {
+        const { startTicks: _missing, ...noStart } = item;
+        const backend = taskProcesses();
+
+        try {
+            await backend.killSpawned(
+                {
+                    pid: 0,
+                    marker: `${dataDir}#not-this-attempt`,
+                    files: "",
+                    startedAt: item.startedAt,
+                },
+                decoy.pid!,
+            );
+        } finally {
+            backend.close();
+        }
+
+        assert.equal(
+            await app.background.aliveNow(id, { ...noStart, pid: decoy.pid! }),
+            undefined,
+            "a leader without a saved start must carry the attempt marker",
+        );
+    }
+
     await app.background.stop(id, item.id);
     await wait(1500);
     assert.equal(running(decoy.pid!), true, "the decoy runs on");
@@ -220,4 +414,32 @@ processTest("a restarted server finds a task's processes, and its stop ends them
         "the children to be ended after the restart",
         15_000,
     );
+
+    if (process.platform === "win32") {
+        await until(
+            async () => (await app.background.aliveNow(id, item)) === false,
+            "the covered Windows job to be empty",
+            15_000,
+        );
+        await app.close();
+        app = await openApp(model, dataDir);
+        quick();
+        assert.equal(await app.background.aliveNow(id, item), false);
+
+        const next = await app.background.start(id, {
+            requestedBy: owner(app).id,
+            jobId: item.jobId!,
+            expectedAttempt: item.id,
+            command: "echo resumed",
+            notify: false,
+        });
+
+        assert.notEqual(next.id, item.id);
+        assert.equal(next.jobId, item.jobId);
+        await until(
+            async () => (await app.background.read(id, next.id))?.text === "resumed\n",
+            "the replacement command to run",
+            30_000,
+        );
+    }
 });

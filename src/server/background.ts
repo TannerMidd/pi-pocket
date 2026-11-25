@@ -413,11 +413,12 @@ export class BackgroundTasks {
                     if (stored?.status === "running" || stored?.status === "starting") {
                         stored.status = "stopped";
                         stored.endedAt = this.#app.now();
-                        Object.assign(
-                            stored,
-                            observation,
-                            this.#outputEvidence(conversationId, stored),
-                        );
+
+                        if (observation !== undefined) {
+                            recordObservation(stored, observation);
+                        }
+
+                        Object.assign(stored, this.#outputEvidence(conversationId, stored));
                         // Stopped, not ended of itself: Pi did it, or someone here, so no message about it is needed.
                         stored.notify = false;
                     }
@@ -629,16 +630,17 @@ export class BackgroundTasks {
         conversationId: ConversationId,
         item: BackgroundTask,
         fresh = false,
-    ): Promise<boolean> {
-        return (await this.#procs.members(this.#ref(conversationId, item), fresh)).length > 0;
+    ): Promise<boolean | undefined> {
+        const members = await this.#procs.members(this.#ref(conversationId, item), fresh);
+
+        return members === undefined ? undefined : members.length > 0;
     }
 
     async #processEvidence(conversationId: ConversationId, item: BackgroundTask) {
-        const processAlive =
-            (await this.#alive(conversationId, item, true)) ||
-            (await this.#left(conversationId, item)).length > 0;
+        const group = await this.#alive(conversationId, item, true);
+        const left = await this.#left(conversationId, item);
 
-        return { processAlive, processObservedAt: this.#app.now() };
+        return { left, processAlive: left.length > 0 || group, processObservedAt: this.#app.now() };
     }
 
     /** The processes with a task's marker that still run outside its group: what it left behind. */
@@ -651,13 +653,19 @@ export class BackgroundTasks {
         conversationId: ConversationId,
         item: BackgroundTask,
         name: "SIGTERM" | "SIGKILL",
+        authorize?: () => void,
     ): Promise<void> {
-        return this.#procs.signal(this.#ref(conversationId, item), name);
+        return this.#procs.signal(this.#ref(conversationId, item), name, authorize);
     }
 
     /** Ask every process of a task to stop, and force what is left after the grace period. */
-    async #kill(conversationId: ConversationId, item: BackgroundTask): Promise<void> {
-        await this.#signal(conversationId, item, "SIGTERM");
+    async #kill(
+        conversationId: ConversationId,
+        item: BackgroundTask,
+        authorize?: () => void,
+    ): Promise<void> {
+        authorize?.();
+        await this.#signal(conversationId, item, "SIGTERM", authorize);
 
         const until = Date.now() + this.timing.grace;
 
@@ -669,7 +677,8 @@ export class BackgroundTasks {
             await wait(100);
         }
 
-        await this.#signal(conversationId, item, "SIGKILL");
+        authorize?.();
+        await this.#signal(conversationId, item, "SIGKILL", authorize);
     }
 
     /** Wait while any process of the task runs, then record how it ended. */
@@ -747,7 +756,7 @@ export class BackgroundTasks {
             stop();
 
             if (timeoutPending) {
-                await this.#kill(conversationId, watched);
+                await this.#kill(conversationId, watched, stop);
                 break;
             }
 
@@ -863,11 +872,7 @@ export class BackgroundTasks {
 
         // The wrapper's file: a command stopped or killed with its wrapper leaves none.
         const codes = this.#exitCodes(conversationId, id);
-        const left = await this.#left(conversationId, watched);
-        const observation = {
-            processAlive: left.length > 0 || (await this.#alive(conversationId, watched, true)),
-            processObservedAt: this.#app.now(),
-        };
+        const observation = await this.#processEvidence(conversationId, watched);
         let pruned: string[] = [];
 
         await runtime.commit(async (tx) => {
@@ -882,7 +887,7 @@ export class BackgroundTasks {
                 return finished;
             }
 
-            this.#ended(stored, codes, left);
+            this.#ended(stored, codes, observation.left);
             Object.assign(stored, this.#outputEvidence(conversationId, stored));
             recordObservation(stored, observation);
 
@@ -987,6 +992,7 @@ export class BackgroundTasks {
         }
 
         const codes = this.#exitCodes(conversationId, item.id);
+        const observation = await this.#processEvidence(conversationId, item);
         let pruned: string[] = [];
 
         await runtime.commit(async (tx) => {
@@ -997,11 +1003,9 @@ export class BackgroundTasks {
                 return finished;
             }
 
-            this.#ended(stored, codes);
-            Object.assign(stored, this.#outputEvidence(conversationId, stored), {
-                processAlive: false,
-                processObservedAt: this.#app.now(),
-            });
+            this.#ended(stored, codes, observation.left);
+            Object.assign(stored, this.#outputEvidence(conversationId, stored));
+            recordObservation(stored, observation);
             pruned = await this.#prune(doc, tx, conversationId);
 
             return stored.notify
@@ -1547,21 +1551,20 @@ export class BackgroundTasks {
             request.expectedAttempt === undefined
                 ? undefined
                 : await this.#stored(conversationId, request.expectedAttempt);
-        const hasProcesses =
+        const cannotConfirmEmpty =
             observed !== undefined &&
             observed.requestedBy === request.requestedBy &&
             jobIdentity(conversationId, observed) === request.jobId &&
             !observed.superseded &&
             observed.status !== "running" &&
             observed.status !== "starting" &&
-            ((await this.#alive(conversationId, observed, true)) ||
+            ((await this.#alive(conversationId, observed, true)) !== false ||
                 (await this.#left(conversationId, observed)).length !== 0);
 
         // Reserved with its watch in one commit: the limit and the key hold for starts at the same time.
         const reserved = await app.harness.commit(async (tx) => {
             const doc = await tx.doc(BackgroundDoc, conversationId);
 
-            requireRequester();
             const items = Object.values(doc.items);
             const receipt =
                 request.key === undefined
@@ -1578,6 +1581,8 @@ export class BackgroundTasks {
                     : receipt.attemptId !== ""
                       ? doc.items[receipt.attemptId]
                       : items.find((item) => item.key === request.key);
+
+            requireRequester();
 
             if (
                 (same !== undefined && same.requestedBy !== request.requestedBy) ||
@@ -1624,11 +1629,11 @@ export class BackgroundTasks {
                 (previous.status === "starting" ||
                     previous.status === "running" ||
                     observed?.endedAt === undefined ||
-                    hasProcesses)
+                    cannotConfirmEmpty)
             ) {
                 throw new HttpError(
                     409,
-                    "The expected attempt is active or still has processes. Check jobs before resuming.",
+                    "Cannot confirm the expected attempt ended with no remaining processes. Check jobs before resuming.",
                 );
             }
 
@@ -2079,20 +2084,19 @@ export class BackgroundTasks {
         }
 
         if (now?.status === "running" || now?.status === "starting") {
-            await this.#kill(conversationId, now);
+            await this.#kill(conversationId, now, authorize);
             const observation = await this.#processEvidence(conversationId, now);
 
             await this.#app.harness.commit(async (tx) => {
                 const stored = (await tx.doc(BackgroundDoc, conversationId)).items[id];
 
+                authorize?.();
+
                 if (stored?.status === "running" || stored?.status === "starting") {
                     stored.status = "stopped";
                     stored.endedAt = this.#app.now();
-                    Object.assign(
-                        stored,
-                        observation,
-                        this.#outputEvidence(conversationId, stored),
-                    );
+                    recordObservation(stored, observation);
+                    Object.assign(stored, this.#outputEvidence(conversationId, stored));
                 }
             }, context);
             now = await this.#stored(conversationId, id);
@@ -2225,7 +2229,7 @@ export class BackgroundTasks {
     }
 
     /** From a fresh look. */
-    aliveNow(conversationId: ConversationId, item: BackgroundTask): Promise<boolean> {
+    aliveNow(conversationId: ConversationId, item: BackgroundTask): Promise<boolean | undefined> {
         return this.#alive(conversationId, item, true);
     }
 }

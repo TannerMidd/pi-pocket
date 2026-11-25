@@ -6,7 +6,7 @@
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { win32 } from "node:path";
 
 export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
@@ -33,15 +33,17 @@ export interface TaskProcesses {
         cwd: string,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
+        authorize?: () => void,
     ): Promise<{ pid: number; start?: number }>;
     startOf(pid: number): Promise<number | undefined>;
-    members(task: TaskRef, fresh?: boolean): Promise<number[]>;
+    /** Undefined when the process table cannot establish whether the task has members. */
+    members(task: TaskRef, fresh?: boolean): Promise<number[] | undefined>;
     /** At once, from what is known now: for a count while the watches are off. */
     aliveSync(task: TaskRef): boolean;
     /** The processes with the task's marker that run outside its group. */
     left(task: TaskRef): Promise<number[]>;
     stillLeft(task: TaskRef, pids: readonly number[]): Promise<number[]>;
-    signal(task: TaskRef, name: Signal): Promise<void>;
+    signal(task: TaskRef, name: Signal, authorize?: () => void): Promise<void>;
     /** Before the task's record: a stop came first, or the record failed. */
     killSpawned(task: TaskRef, pid: number): Promise<void>;
     /** A start a crash cut off; `start` only when it is sure. */
@@ -446,7 +448,12 @@ class DarwinTable implements ProcTable {
 }
 
 /** Once the leader is gone, a member counts only while one carries the marker: a group id can be reused. */
-function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: boolean): number[] {
+function groupMembers(
+    table: ProcTable,
+    item: TaskRef,
+    fresh: boolean,
+    guess?: boolean,
+): number[] | undefined {
     if (item.pid <= 0 || (item.boot !== undefined && item.boot !== table.boot)) {
         return [];
     }
@@ -480,13 +487,15 @@ function groupMembers(table: ProcTable, item: TaskRef, fresh: boolean, guess?: b
 
     const leader = group.find((each) => each.pid === item.pid);
 
-    if (leader !== undefined && (item.startTicks === undefined || own(leader))) {
+    if (leader !== undefined && own(leader)) {
         return group.map((each) => each.pid);
     }
 
     return group.some((each) => table.marked(each.pid, item.marker, guess))
         ? group.map((each) => each.pid)
-        : [];
+        : item.startTicks === undefined
+          ? undefined
+          : [];
 }
 
 function markedProcesses(table: ProcTable, marker: string): Proc[] {
@@ -547,7 +556,7 @@ class PosixProcesses implements TaskProcesses {
         return this.#look(() => this.#table.stat(pid)?.start);
     }
 
-    members(task: TaskRef, fresh = false): Promise<number[]> {
+    members(task: TaskRef, fresh = false): Promise<number[] | undefined> {
         return this.#look(() => groupMembers(this.#table, task, fresh));
     }
 
@@ -557,7 +566,7 @@ class PosixProcesses implements TaskProcesses {
         }
 
         // At once, from the table as it is, outside the looks' turns: an environment not read yet counts as the task's.
-        return groupMembers(this.#table, task, true, true).length > 0;
+        return (groupMembers(this.#table, task, true, true)?.length ?? 0) > 0;
     }
 
     async left(task: TaskRef): Promise<number[]> {
@@ -575,20 +584,22 @@ class PosixProcesses implements TaskProcesses {
         });
     }
 
-    async signal(task: TaskRef, name: Signal): Promise<void> {
-        if ((await this.#look(() => groupMembers(this.#table, task, true))).length > 0) {
+    async signal(task: TaskRef, name: Signal, authorize?: () => void): Promise<void> {
+        if ((await this.#look(() => groupMembers(this.#table, task, true)))?.length) {
+            authorize?.();
             kill(-task.pid, name);
         }
 
         for (const each of await this.#look(() => markedProcesses(this.#table, task.marker))) {
+            authorize?.();
             kill(each.pid === each.pgid ? -each.pid : each.pid, name);
         }
 
         this.#table.forget();
     }
 
-    async killSpawned(_task: TaskRef, pid: number): Promise<void> {
-        kill(-pid, "SIGKILL");
+    async killSpawned(task: TaskRef): Promise<void> {
+        await this.signal(task, "SIGKILL");
     }
 
     async find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined> {
@@ -614,9 +625,6 @@ class PosixProcesses implements TaskProcesses {
 
     close(): void {}
 }
-
-/** Milliseconds from 1601, Windows' epoch of its process times, to 1970. */
-const WINDOWS_EPOCH_MS = 11_644_473_600_000;
 
 /**
  * A job has no limits: one that allows a breakaway lets Git Bash's runtime leave it, and one that ends its processes
@@ -676,6 +684,8 @@ public static class PiPocketProcesses {
             for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry)) {
                 if (entry.th32ProcessID != 0) { parents[entry.th32ProcessID] = entry.th32ParentProcessID; }
             }
+            int last = Marshal.GetLastWin32Error();
+            if (last != 18) { error = "error snapshot enumeration " + last; } // ERROR_NO_MORE_FILES is the normal end.
         } finally { CloseHandle(snapshot); }
         return parents;
     }
@@ -694,7 +704,7 @@ public static class PiPocketProcesses {
             if (error != null) { return error; }
             StringBuilder text = new StringBuilder("list");
             foreach (KeyValuePair<uint, uint> each in second) {
-                if (!first.ContainsKey(each.Key)) { continue; }
+                // A process new to this snapshot has no held handle: report its start as unknown.
                 long start = 0;
                 IntPtr process;
                 if (held.TryGetValue(each.Key, out process)) { start = Start(process); }
@@ -728,6 +738,10 @@ public static class PiPocketProcesses {
         if (jobs.TryGetValue(key, out job)) { return job; }
         job = OpenJobObjectW(0x1F001F, false, "Local\\pi-pocket-" + key);
         if (job != IntPtr.Zero) { jobs[key] = job; }
+        else {
+            int error = Marshal.GetLastWin32Error();
+            if (error != 2) { throw new System.ComponentModel.Win32Exception(error); }
+        }
         return job;
     }
 
@@ -760,20 +774,22 @@ public static class PiPocketProcesses {
                 bool ok = QueryInformationJobObject(job, 3, buffer, bytes, out returned);
                 int assigned = Marshal.ReadInt32(buffer), listed = Marshal.ReadInt32(buffer, 4);
                 if (!ok && Marshal.GetLastWin32Error() != 234) { return "error members " + Marshal.GetLastWin32Error(); }
-                if (listed < assigned && size < 1 << 20) { continue; }
+                if (listed < assigned || !ok) {
+                    if (size < 1 << 20) { continue; }
+                    return "error incomplete job membership";
+                }
                 // Each with its start, read through a handle that is still in the job: a pid that a process outside it
                 // took since the job's list is left out.
                 StringBuilder text = new StringBuilder("members");
                 for (int at = 0; at < listed; at++) {
                     uint pid = (uint)Marshal.ReadIntPtr(buffer, 8 + at * IntPtr.Size).ToInt64();
                     IntPtr process = OpenProcess(QUERY | SYNCHRONIZE, false, pid);
-                    if (process == IntPtr.Zero) { continue; }
+                    if (process == IntPtr.Zero) { text.Append(' ').Append(pid).Append(",0"); continue; }
                     try {
                         bool inJob;
                         long start = Start(process);
-                        if (start > 0 && IsProcessInJob(process, job, out inJob) && inJob) {
-                            text.Append(' ').Append(pid).Append(',').Append(start);
-                        }
+                        if (!IsProcessInJob(process, job, out inJob)) { text.Append(' ').Append(pid).Append(",0"); }
+                        else { text.Append(' ').Append(pid).Append(',').Append(inJob && start > 0 ? start : 0); }
                     } finally { CloseHandle(process); }
                 }
                 return text.ToString();
@@ -914,7 +930,7 @@ class Helper {
         return { child, ready, waiting };
     }
 
-    async ask(line: string): Promise<string> {
+    async ask(line: string, authorize?: () => void): Promise<string> {
         clearTimeout(this.#idle);
 
         const current = (this.#current ??= this.#start());
@@ -933,13 +949,13 @@ class Helper {
             throw error;
         }
 
-        const answer = new Promise<string>((resolve, reject) =>
-            current.waiting.push({ resolve, reject }),
-        );
-
-        current.child.stdin!.write(`${line}\n`);
-
         try {
+            authorize?.();
+            const answer = new Promise<string>((resolve, reject) =>
+                current.waiting.push({ resolve, reject }),
+            );
+
+            current.child.stdin!.write(`${line}\n`);
             const text = await withTimeout(answer, 30_000, "The process helper did not answer");
 
             this.#late = 0;
@@ -1028,20 +1044,25 @@ function findGitBash(): string | undefined {
  * runs, for a start a crash cut off, and waits for a line on its input: the job holds it before it starts anything.
  */
 const WINDOWS_GATE =
-    'pidf=$PI_POCKET_BACKGROUND_PIDFILE; unset PI_POCKET_BACKGROUND_PIDFILE; read -r winpid < /proc/$$/winpid; printf "%s" "$winpid" > "$pidf"; IFS= read -r _gate; [ "$_gate" = go ] || exit 1; exec 0< /dev/null; ';
+    'pidf=$PI_POCKET_BACKGROUND_PIDFILE; unset PI_POCKET_BACKGROUND_PIDFILE; read -r winpid < /proc/$$/winpid; printf "%s\\n" "$winpid" > "$pidf"; IFS= read -r _gate; [ "$_gate" = go ] || exit 1; exec 0< /dev/null; ';
 
-class WindowsProcesses implements TaskProcesses {
+type WindowsHelper = Pick<Helper, "ask" | "close" | "failed" | "holds">;
+
+export class WindowsProcesses implements TaskProcesses {
     readonly boot = undefined;
-    readonly #helper = new Helper();
+    readonly #helper: WindowsHelper;
     #shell: string | undefined | null = null;
     #scan: { at: number; all: Map<number, WinProc> } | undefined;
     /** Pid to start, also in `<files>.pids`. */
     #known = new Map<string, Map<number, number>>();
     #jobs = new Set<string>();
+    /** Only a job that held the gated command before release can prove it left no survivors. */
+    #coverage = new Map<string, "job" | "empty">();
     /** What this server spawned: a handle Node keeps while the process runs, so its pid cannot be another's. */
-    #children = new Map<number, ChildProcess>();
+    #children = new Map<string, ChildProcess>();
 
-    constructor() {
+    constructor(helper: WindowsHelper = new Helper()) {
+        this.#helper = helper;
         this.#helper.holds = () => this.#jobs.size > 0;
     }
 
@@ -1098,7 +1119,14 @@ class WindowsProcesses implements TaskProcesses {
             known = new Map();
 
             try {
+                const key = this.#key(task);
+
                 for (const line of readFileSync(`${task.files}.pids`, "utf8").split("\n")) {
+                    if (line === `job ${key}` || line === `empty ${key}`) {
+                        this.#coverage.set(task.marker, line.startsWith("job ") ? "job" : "empty");
+                        continue;
+                    }
+
                     const [pid, start] = line.split(" ").map(Number);
 
                     if (pid! > 0 && start! > 0) {
@@ -1111,7 +1139,7 @@ class WindowsProcesses implements TaskProcesses {
         }
 
         // Also when a look before its start (a stop with no pid yet) made the map: the first process is always known.
-        if (task.pid > 0 && task.startTicks !== undefined) {
+        if (task.pid > 0 && task.startTicks !== undefined && task.startTicks > 0) {
             known.set(task.pid, task.startTicks);
         }
 
@@ -1126,13 +1154,10 @@ class WindowsProcesses implements TaskProcesses {
         task: TaskRef,
         all: Map<number, WinProc>,
         job: { pid: number; start: number }[],
-    ): number[] {
-        if (task.pid <= 0 || task.startTicks === undefined) {
-            return [];
-        }
-
+    ): number[] | undefined {
         const known = this.#knownOf(task);
         const found: string[] = [];
+        let uncertain = all.has(task.pid) && !known.has(task.pid);
 
         const add = (pid: number, start: number) => {
             known.set(pid, start);
@@ -1143,11 +1168,9 @@ class WindowsProcesses implements TaskProcesses {
         const knownNow = (pid: number, start: number) => known.get(pid) === start;
 
         for (const each of job) {
-            if (
-                each.start > 0 &&
-                !knownNow(each.pid, each.start) &&
-                all.get(each.pid)?.start === each.start
-            ) {
+            if (each.start <= 0 || all.get(each.pid)?.start !== each.start) {
+                uncertain = true;
+            } else if (!knownNow(each.pid, each.start)) {
                 add(each.pid, each.start);
             }
         }
@@ -1155,14 +1178,16 @@ class WindowsProcesses implements TaskProcesses {
         for (const info of [...all.values()].sort((a, b) => a.start - b.start)) {
             const parent = known.get(info.ppid);
 
-            if (
-                parent !== undefined &&
-                !knownNow(info.pid, info.start) &&
-                info.start > 0 &&
-                all.get(info.ppid)?.start === parent &&
-                info.start >= parent
-            ) {
-                add(info.pid, info.start);
+            if (info.start === 0 && known.has(info.pid)) {
+                uncertain = true;
+            }
+
+            if (parent !== undefined && all.get(info.ppid)?.start === parent) {
+                if (info.start === 0) {
+                    uncertain = true;
+                } else if (!knownNow(info.pid, info.start) && info.start >= parent) {
+                    add(info.pid, info.start);
+                }
             }
         }
 
@@ -1174,27 +1199,33 @@ class WindowsProcesses implements TaskProcesses {
             }
         }
 
-        return [...known]
+        const members = [...known]
             .filter(([pid, start]) => all.get(pid)?.start === start)
             .map(([pid]) => pid);
+
+        return uncertain && members.length === 0 ? undefined : members;
     }
 
-    async #job(task: TaskRef): Promise<{ pid: number; start: number }[]> {
+    async #job(task: TaskRef): Promise<{ pid: number; start: number }[] | undefined> {
         const key = this.#key(task);
         const answer = await this.#helper.ask(`members ${key}`);
 
         // A job that a helper before a restart made is found again by its name, while the task's first process runs.
-        if (answer !== "none") {
-            this.#jobs.add(key);
+        if (answer === "none") {
+            return undefined;
         }
 
-        return answer === "none"
-            ? []
-            : answer
-                  .split(" ")
-                  .slice(1)
-                  .map((word) => word.split(",").map(Number))
-                  .map(([pid, start]) => ({ pid: pid!, start: start! }));
+        if (!/^members(?: \d+,\d+)*$/.test(answer)) {
+            throw new Error("Invalid job membership from the process helper.");
+        }
+
+        this.#jobs.add(key);
+
+        return answer
+            .split(" ")
+            .slice(1)
+            .map((word) => word.split(",").map(Number))
+            .map(([pid, start]) => ({ pid: pid!, start: start! }));
     }
 
     async spawn(
@@ -1202,6 +1233,7 @@ class WindowsProcesses implements TaskProcesses {
         cwd: string,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
+        authorize?: () => void,
     ): Promise<{ pid: number; start: number }> {
         const shell = this.shell();
 
@@ -1226,8 +1258,8 @@ class WindowsProcesses implements TaskProcesses {
 
         const pid = child.pid;
 
-        this.#children.set(pid, child);
-        child.once("exit", () => this.#children.delete(pid));
+        this.#children.set(task.marker, child);
+        child.once("exit", () => this.#children.delete(task.marker));
         child.unref();
         (child.stdin as unknown as { unref?: () => void }).unref?.();
 
@@ -1237,7 +1269,20 @@ class WindowsProcesses implements TaskProcesses {
             // Its bash runs under Git's launcher: once the bash wrote its pid, both wait at the gate, started before the
             // job was there, so each goes into it before the command starts. While it waits, Node's handle on the
             // launcher holds its pid: the start read now is its own.
-            for (let tries = 0; tries < 400 && !existsSync(`${task.files}.pid`); tries++) {
+            let gatedPid: number | undefined;
+
+            for (let tries = 0; tries < 400; tries++) {
+                const pidFile = `${task.files}.pid`;
+
+                if (existsSync(pidFile)) {
+                    const line = readFileSync(pidFile, "utf8");
+
+                    if (/^[1-9]\d*\r?\n$/.test(line)) {
+                        gatedPid = Number(line);
+                        break;
+                    }
+                }
+
                 if (child.exitCode !== null) {
                     break;
                 }
@@ -1256,8 +1301,10 @@ class WindowsProcesses implements TaskProcesses {
             const key = this.#key(task);
             const ref = { ...task, pid, startTicks: start };
             const known = this.#knownOf(ref);
+            const members = this.#members(ref, all, []) ?? [];
+            let covered = gatedPid !== undefined && members.includes(gatedPid);
 
-            for (const each of this.#members(ref, all, [])) {
+            for (const each of members) {
                 // The first process holds a handle to its job too, so its name stays across a restart of the server.
                 const answer = await this.#helper
                     .ask(`job ${key} ${each} ${known.get(each)}${each === pid ? " hold" : ""}`)
@@ -1267,8 +1314,17 @@ class WindowsProcesses implements TaskProcesses {
                 // followed.
                 if (answer === "ok") {
                     this.#jobs.add(key);
+                } else {
+                    covered = false;
                 }
             }
+
+            if (covered) {
+                this.#recordCoverage(task, "job");
+            }
+
+            authorize?.();
+            child.stdin!.end("go\n");
         } catch (error) {
             // No word at the gate: the wrapper exits without running the command.
             child.stdin!.end();
@@ -1277,43 +1333,67 @@ class WindowsProcesses implements TaskProcesses {
             throw error;
         }
 
-        child.stdin!.end("go\n");
-
         return { pid, start };
     }
 
     async startOf(pid: number): Promise<number | undefined> {
-        return (await this.#list(true)).get(pid)?.start;
+        const start = (await this.#list(true)).get(pid)?.start;
+
+        return start !== undefined && start > 0 ? start : undefined;
     }
 
-    async members(task: TaskRef, fresh = false): Promise<number[]> {
-        if (task.pid <= 0) {
-            return [];
-        }
+    #recordCoverage(task: TaskRef, state: "job" | "empty"): void {
+        appendFileSync(`${task.files}.pids`, `${state} ${this.#key(task)}\n`);
+        this.#coverage.set(task.marker, state);
+    }
 
+    async members(task: TaskRef, fresh = false): Promise<number[] | undefined> {
+        // A query sent before assignment cannot prove absence, even if assignment finishes during the query.
+        this.#knownOf(task);
+
+        const coverage = this.#coverage.get(task.marker);
         let all: Map<number, WinProc>;
-        let job: { pid: number; start: number }[];
+        let job: { pid: number; start: number }[] | undefined;
 
         try {
             [job, all] = await Promise.all([this.#job(task), this.#list(fresh)]);
         } catch {
-            // The helper failed: a task whose first process is there is taken to run, and nothing is ended for it.
-            return kill(task.pid, 0) ? [task.pid] : [];
+            // The helper could not check identity. A PID probe proves neither membership nor absence.
+            return undefined;
         }
 
-        const members = this.#members(task, all, job);
+        const members = this.#members(task, all, job ?? []);
 
-        if (members.length === 0 && fresh) {
+        if (members?.length !== 0) {
+            return members;
+        }
+
+        if (coverage !== "empty" && (coverage !== "job" || job?.length !== 0)) {
+            // A vanished parent or job name cannot exclude an unobserved descendant.
+            return undefined;
+        }
+
+        if (fresh) {
+            if (coverage !== "empty") {
+                try {
+                    this.#recordCoverage(task, "empty");
+                } catch {
+                    // Keep the job handle if later looks cannot recover the proof from disk.
+                    return [];
+                }
+            }
+
             this.#done(task);
         }
 
-        return members;
+        return [];
     }
 
     #done(task: TaskRef): void {
         const key = this.#key(task);
 
         this.#known.delete(task.marker);
+        this.#coverage.delete(task.marker);
 
         if (this.#jobs.delete(key)) {
             void this.#helper.ask(`drop ${key}`).catch(() => undefined);
@@ -1326,10 +1406,10 @@ class WindowsProcesses implements TaskProcesses {
         }
 
         if (this.#scan === undefined || Date.now() - this.#scan.at > 5000) {
-            return kill(task.pid, 0);
+            return false;
         }
 
-        return this.#members(task, this.#scan.all, []).length > 0;
+        return (this.#members(task, this.#scan.all, [])?.length ?? 0) > 0;
     }
 
     async left(): Promise<number[]> {
@@ -1341,8 +1421,8 @@ class WindowsProcesses implements TaskProcesses {
     }
 
     /** Both signals end the processes by force: Windows has no polite stop for a program without a window. */
-    async signal(task: TaskRef, _name: Signal): Promise<void> {
-        await this.#helper.ask(`killjob ${this.#key(task)}`).catch(() => undefined);
+    async signal(task: TaskRef, _name: Signal, authorize?: () => void): Promise<void> {
+        await this.#helper.ask(`killjob ${this.#key(task)}`, authorize).catch(() => undefined);
 
         // Then each process found, parents first, checked against its start time by the helper as it ends it; a pass
         // again for what they started in the meantime.
@@ -1356,18 +1436,25 @@ class WindowsProcesses implements TaskProcesses {
             const known = this.#knownOf(task);
             const members = this.#members(task, all, []);
 
-            if (members.length === 0) {
+            if (members === undefined || members.length === 0) {
                 return;
             }
 
             for (const pid of members.sort((a, b) => known.get(a)! - known.get(b)!)) {
-                await this.#helper.ask(`kill ${pid} ${known.get(pid)}`).catch(() => undefined);
+                await this.#helper
+                    .ask(`kill ${pid} ${known.get(pid)}`, authorize)
+                    .catch(() => undefined);
             }
         }
     }
 
     async killSpawned(task: TaskRef, pid: number): Promise<void> {
-        this.#children.get(pid)?.kill();
+        const child = this.#children.get(task.marker);
+
+        if (child !== undefined && child.pid === pid) {
+            child.kill();
+        }
+
         await this.#helper.ask(`killjob ${this.#key(task)}`).catch(() => undefined);
 
         // Without a job, what the start found of it: each checked against its start as it ends.
@@ -1376,30 +1463,12 @@ class WindowsProcesses implements TaskProcesses {
         }
     }
 
-    /** A start cut off: the bash whose pid its wrapper wrote, if it started after the reservation and before the file. */
+    /** A crash can leave the PID file behind. Its timestamp does not identify the current holder of that PID. */
     async find(task: TaskRef): Promise<{ pid: number; start?: number } | undefined> {
-        let pid: number;
-        let written: number;
+        const pid = (await this.members(task, true))?.[0];
+        const start = pid === undefined ? undefined : this.#known.get(task.marker)?.get(pid);
 
-        try {
-            pid = Number(readFileSync(`${task.files}.pid`, "utf8").trim());
-            written = statSync(`${task.files}.pid`).mtimeMs + WINDOWS_EPOCH_MS;
-        } catch {
-            return undefined;
-        }
-
-        const info = (await this.#list(true)).get(pid);
-
-        if (
-            info === undefined ||
-            info.start <= 0 ||
-            info.start > written + 20 ||
-            info.start < task.startedAt + WINDOWS_EPOCH_MS - 20
-        ) {
-            return undefined;
-        }
-
-        return { pid, start: info.start };
+        return pid !== undefined && start !== undefined ? { pid, start } : undefined;
     }
 
     close(): void {
