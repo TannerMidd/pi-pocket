@@ -691,6 +691,49 @@ test("an Anthropic account gate that 0.30.0 kept is dropped once; other gates st
     assert.equal(gate({ file }).gates().length, 2);
 });
 
+test("a refusing weekly limit on one gateway route does not block another model on the same gateway", async () => {
+    const g = gate({ hours: () => 6 });
+    const headers = {
+        "x-codex-secondary-used-percent": "100",
+        "x-codex-secondary-window-minutes": "10080",
+        "x-codex-secondary-reset-after-seconds": "604800",
+    };
+    const rt = fake([{ fail: "429 usage_limit_reached", headers }], { ok: true });
+
+    g.install(rt.models);
+
+    try {
+        const first = await ask(rt, "vendor-a/model-1", "gateway", {
+            fetch: async () => new Response("usage_limit_reached", { status: 429, headers }),
+        });
+
+        assert.equal(first.stopReason, "error");
+        assert.match(first.errorMessage!, /Not waiting: it resets in 7 d.*a limit of days/);
+        assert.equal(rt.calls.length, 1);
+        assert.equal(g.gates().length, 1);
+        assert.equal(g.gates()[0]!.key, "gateway/vendor-a/model-1");
+        assert.equal(g.gates()[0]!.scope, "model");
+        assert.equal(g.gates()[0]!.refusing, true);
+
+        const retry = await ask(rt, "vendor-a/model-1", "gateway");
+
+        assert.equal(retry.stopReason, "error");
+        assert.equal(retry.errorMessage, first.errorMessage);
+        assert.equal(rt.calls.length, 1, "retrying the same route refuses locally without sending");
+
+        const other = await ask(rt, "vendor-b/model-2", "gateway");
+
+        assert.equal(other.stopReason, "stop");
+        assert.equal(
+            rt.calls.length,
+            2,
+            "switching to another route on the gateway passes through",
+        );
+    } finally {
+        g.close();
+    }
+});
+
 test("an adapter that refuses a custom fetch (Google) gets none", async () => {
     const rt = fake([], { ok: true });
 

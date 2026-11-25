@@ -106,6 +106,12 @@ const TRANSIENT =
 
 const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504, 520, 524, 529]);
 
+/**
+ * Multi-backend gateways: a usage limit returned through one model belongs to its upstream backend, not every model
+ * the gateway routes to.
+ */
+const GATEWAY_PROVIDERS = new Set(["openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway"]);
+
 const STATUS_PREFIX = /^\s*(?:HTTP\s+)?([45]\d\d)(?=[:\s]|$)[:\s]*/i;
 const CONVERSATION_CODE =
     /^(?:(?:invalid|unknown|missing|expired)_(?:previous_response|conversation)(?:_id)?|(?:previous_response|conversation)(?:_(?:id|owner(?:_account)?))?_(?:invalid|missing|expired|not_found|unavailable))$/i;
@@ -546,7 +552,9 @@ export function classify(input: LimitInput): Classified {
     const source: Source | undefined = fromHeader.resetAt !== undefined ? "header" : undefined;
     const text = source === undefined ? fromText(message, now) : undefined;
     const found = fromHeader.resetAt ?? text;
-    const scope: Scope = usage && !fromHeader.model ? "account" : "model";
+    // A gateway or namespaced route (`vendor/model`) fans out across upstream accounts, so usage limits stay per-model.
+    const gateway = GATEWAY_PROVIDERS.has(input.provider) || input.modelId?.includes("/") === true;
+    const scope: Scope = usage && !fromHeader.model && !gateway ? "account" : "model";
     const reason = cut(message);
     const long = fromHeader.long || LONG_WINDOW.test(message);
 

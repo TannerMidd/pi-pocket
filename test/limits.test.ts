@@ -260,6 +260,103 @@ test("a transient server failure may be about one conversation, not model load",
     }
 });
 
+test("gateway providers and namespaced model IDs narrow usage limits to model scope", () => {
+    const codexWeekly = {
+        "x-codex-secondary-used-percent": "100",
+        "x-codex-secondary-window-minutes": "10080",
+        "x-codex-secondary-reset-after-seconds": "86400",
+    };
+    const anthropic5h = {
+        "anthropic-ratelimit-unified-5h-status": "rejected",
+        "anthropic-ratelimit-unified-5h-reset": String(now / 1000 + 3_600),
+    };
+    const anthropic7d = {
+        "anthropic-ratelimit-unified-7d-status": "rejected",
+        "anthropic-ratelimit-unified-7d-reset": String(now / 1000 + 3 * 86_400),
+    };
+    const usageBody = '429 {"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}';
+    const subscriptionMsg =
+        "The ChatGPT user has reached their Subscription Sharing usage limit. " +
+        "Ask the user to try again after their usage limit resets or use an API key instead.";
+
+    for (const [provider, modelId] of [
+        ["openrouter", "auto"],
+        ["openrouter", "anthropic/claude-sonnet-4"],
+        ["vercel-ai-gateway", "openai/gpt-5"],
+        ["cloudflare-ai-gateway", "claude-sonnet-5-5"],
+        ["gateway", "openai/gpt-5"],
+        ["gateway", "anthropic/claude-sonnet-4"],
+    ] as const) {
+        assert.deepEqual(ask("429 usage_limit_reached", 429, codexWeekly, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            resetAt: now + 86_400_000,
+            source: "header",
+            backoff: false,
+            long: true,
+            reason: "429 usage_limit_reached",
+        });
+        assert.deepEqual(ask("429 rate_limit_error", 429, anthropic5h, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            resetAt: now + 3_600_000,
+            source: "header",
+            backoff: false,
+            reason: "429 rate_limit_error",
+        });
+        assert.deepEqual(ask("429 rate_limit_error", 429, anthropic7d, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            resetAt: now + 3 * 86_400_000,
+            source: "header",
+            backoff: false,
+            long: true,
+            reason: "429 rate_limit_error",
+        });
+        assert.deepEqual(ask(usageBody, 429, {}, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            resetAt: now + 3_600_000,
+            source: "body",
+            backoff: false,
+            reason: usageBody,
+        });
+        assert.deepEqual(ask(subscriptionMsg, 429, {}, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            backoff: true,
+            subscription: true,
+            reason: subscriptionMsg,
+        });
+        assert.deepEqual(ask(subscriptionMsg, 403, {}, provider, modelId), {
+            type: "limit",
+            scope: "model",
+            backoff: true,
+            subscription: true,
+            reason: subscriptionMsg,
+        });
+    }
+
+    // Direct and bare-model providers keep account scope for the same limits.
+    for (const [provider, modelId] of [
+        ["openai-codex", "gpt-5"],
+        ["anthropic", "claude-opus-5-5"],
+        ["openai", "gpt-5"],
+        ["p", undefined],
+        ["other", "plain-model"],
+    ] as const) {
+        for (const verdict of [
+            ask("429 usage_limit_reached", 429, codexWeekly, provider, modelId),
+            ask("429 rate_limit_error", 429, anthropic5h, provider, modelId),
+            ask(usageBody, 429, {}, provider, modelId),
+            ask(subscriptionMsg, 429, {}, provider, modelId),
+            ask(subscriptionMsg, 403, {}, provider, modelId),
+        ]) {
+            assert.equal(verdict.type === "limit" && verdict.scope, "account");
+        }
+    }
+});
+
 test("only limit headers are kept from a response, never a key or a token", () => {
     const kept = responseFacts(
         429,
