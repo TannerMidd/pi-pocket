@@ -190,6 +190,7 @@
 }
 
 @media (max-width: 959px), (pointer: coarse) {
+    .places-rail .rail-place,
     .grouped-menu .tool-place-row .place,
     .grouped-menu .menu-group .tool-row {
         min-height: 44px;

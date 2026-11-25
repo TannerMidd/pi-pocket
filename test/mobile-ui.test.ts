@@ -399,19 +399,43 @@ test(
 
         await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "tight" });`);
         await page.setViewport({ ...VIEWPORTS.tablet, width: 1024, height: 768 });
-        const touch = await inPage<{ brand: number; row: number; tile: number }>(`
+        assert.ok(await page.waitFor({ selector: ".desktop-rail .rail-brand" }));
+        assert.ok(await page.waitFor({ selector: ".nav-menu .menu-row" }));
+        const touch = await inPage<{ brand: number; nav: number; row: number; tile: number }>(`
             const height = (selector) =>
                 parseFloat(getComputedStyle(document.querySelector(selector)).minHeight);
             return JSON.stringify({
                 brand: parseFloat(getComputedStyle(document.querySelector(".rail-brand")).height),
+                nav: height(".desktop-rail .rail-place"),
                 row: height(".nav-menu .menu-row"),
                 tile: height(".nav-menu .place"),
             });
         `);
 
         assert.equal(touch.brand, 44);
+        assert.equal(touch.nav, 44);
         assert.equal(touch.row, 44);
         assert.equal(touch.tile, 44);
+
+        await clickNavigation(page, { row: "App settings" });
+        await reach({ sheet: "menu" }, "App settings");
+        await clickNavigation(page, {
+            selector: ".nav-menu .menu-group .list-item:first-of-type",
+        });
+        await reach({ sheet: "appearance" }, "Appearance");
+        const sheetControls = await inPage<{ back: number; close: number }>(`
+            const size = (selector) => {
+                const style = getComputedStyle(document.querySelector(selector));
+                return Math.min(parseFloat(style.width), parseFloat(style.height));
+            };
+            return JSON.stringify({
+                back: size(".sheet-back"),
+                close: size(".sheet-head > .icon-button"),
+            });
+        `);
+
+        assert.equal(sheetControls.back, 44);
+        assert.equal(sheetControls.close, 44);
     },
 );
 

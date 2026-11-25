@@ -226,3 +226,11 @@
         height: 40px;
     }
 }
+
+/* Touch keeps the app's thumb-sized controls, even when desktop spacing is compact. */
+@media (pointer: coarse), (max-width: 699px) {
+    .grouped-menu .sheet-head > :is(.icon-button, .sheet-back) {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

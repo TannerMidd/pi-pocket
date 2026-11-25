@@ -65,6 +65,14 @@
     }
 }
 
+/* A sheet inside a navigation trail keeps the same touch targets as the menu that opened it. */
+@media (pointer: coarse), (max-width: 699px) {
+    .sheet-host[data-navigation-trail] .sheet-head > :is(.icon-button, .sheet-back) {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
 /* A second side panel (Files, Peeks, an extension, or People) keeps its width. Navigation then floats over it. */
 @media (min-width: 1200px) {
     .sheet-host[data-navigation="beside"] {

@@ -195,6 +195,7 @@ export function Sheets({ sideOccupied }) {
     return html`<div
         class=${`sheet-host ${leaving ? "leaving" : ""}`}
         data-navigation=${navigation}
+        data-navigation-trail=${navigationTrail || undefined}
         inert=${leaving}
     >
         <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
