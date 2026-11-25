@@ -9,6 +9,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { win32 } from "node:path";
 import { createInterface } from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 
 export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
 
@@ -105,6 +106,7 @@ interface ProcTable {
     begin(): void;
     stat(pid: number, fresh?: boolean): Proc | undefined;
     list(fresh: boolean): Proc[];
+    zombiesOnly?(task: TaskRef): boolean;
     /** `guess`: the answer while the environment is not read yet (macOS). */
     marked(pid: number, marker: string, guess?: boolean): boolean;
     /** False when the reads since `begin` missed nothing. */
@@ -113,33 +115,87 @@ interface ProcTable {
     forget(): void;
 }
 
-class LinuxTable implements ProcTable {
-    readonly coarse = false;
-    readonly boot = (() => {
-        try {
-            return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-        } catch {
-            return undefined;
+/** A filtered process directory can silently omit a live member, even when every stat succeeds. */
+function unrestrictedProc(proc: string): boolean {
+    const status = readFileSync(`${proc}/self/status`, "utf8");
+
+    if (status.match(/^NSpid:([^\n]*)$/m)?.[1]?.trim() !== String(process.pid)) {
+        return false;
+    }
+
+    let found = false;
+
+    for (const line of readFileSync(`${proc}/self/mountinfo`, "utf8").split("\n")) {
+        const [, , , root, path] = line.split(" ");
+
+        if (path === "/proc") {
+            if (found || root !== "/" || !line.includes(" - proc ") || line.includes("hidepid=")) {
+                return false;
+            }
+
+            found = true;
+        } else if (/^\/proc\/(?:\d+|self|thread-self|stat)(?:\/|$)/.test(path ?? "")) {
+            return false;
         }
-    })();
+    }
+
+    return found;
+}
+
+export class LinuxTable implements ProcTable {
+    readonly coarse = false;
+    readonly boot: string | undefined;
+    readonly #proc: string;
+    readonly #now: () => number;
+    #zombieBackoff = new Map<number, number>();
+
+    constructor(proc = "/proc", now = () => performance.now()) {
+        this.#proc = proc;
+        this.#now = now;
+
+        try {
+            this.boot = readFileSync(`${proc}/sys/kernel/random/boot_id`, "utf8").trim();
+        } catch {
+            this.boot = undefined;
+        }
+    }
 
     #scan: { at: number; all: Proc[] } | undefined;
 
     unsupported(): string | undefined {
-        return existsSync("/proc/self/stat")
+        return existsSync(`${this.#proc}/self/stat`)
             ? undefined
             : "Background tasks need Linux with /proc, macOS, or Windows: they follow their processes through /proc here.";
     }
 
     begin(): void {}
 
-    stat(pid: number): Proc | undefined {
+    stat(pid: number): (Proc & { sid: number; threads: number }) | undefined {
         try {
-            const text = readFileSync(`/proc/${pid}/stat`, "utf8");
+            const text = readFileSync(`${this.#proc}/${pid}/stat`, "utf8");
             // After the name, which can hold spaces and parentheses: state (3), ppid (4), pgrp (5), …, starttime (22).
             const rest = text.slice(text.lastIndexOf(")") + 2).split(" ");
 
-            return { pid, pgid: Number(rest[2]), state: rest[0] ?? "", start: Number(rest[19]) };
+            const [state, , pgid, sid] = rest;
+            const threads = rest[17];
+            const start = rest[19];
+
+            if (
+                !text.startsWith(`${pid} (`) ||
+                !/^[A-Za-z]$/.test(state ?? "") ||
+                ![pgid, sid, threads, start].every((field) => /^\d+$/.test(field ?? ""))
+            ) {
+                return undefined;
+            }
+
+            return {
+                pid,
+                state: state!,
+                pgid: Number(pgid),
+                sid: Number(sid),
+                threads: Number(threads),
+                start: Number(start),
+            };
         } catch {
             return undefined;
         }
@@ -155,11 +211,11 @@ class LinuxTable implements ProcTable {
 
         const all: Proc[] = [];
 
-        for (const name of readdirSync("/proc")) {
+        for (const name of readdirSync(this.#proc)) {
             if (/^\d+$/.test(name)) {
                 const info = this.stat(Number(name));
 
-                if (info !== undefined && !gone(info)) {
+                if (info !== undefined) {
                     all.push(info);
                 }
             }
@@ -170,9 +226,115 @@ class LinuxTable implements ProcTable {
         return all;
     }
 
+    zombiesOnly(task: TaskRef): boolean {
+        const now = this.#now();
+
+        for (const [pid, until] of this.#zombieBackoff) {
+            if (until > now) {
+                break;
+            }
+
+            this.#zombieBackoff.delete(pid);
+        }
+
+        // Only suppress a costly failed check. A positive observation must always be fresh.
+        if (this.#zombieBackoff.has(task.pid) || this.#zombieBackoff.size >= 128) {
+            return false;
+        }
+
+        if (this.#scanZombies(task)) {
+            return true;
+        }
+
+        this.#zombieBackoff.set(task.pid, this.#now() + 2000);
+
+        return false;
+    }
+
+    /** A bounded, uncached liveness check, never evidence for sending a signal. */
+    #scanZombies(task: TaskRef): boolean {
+        if (
+            !task.startTicks ||
+            !Number.isSafeInteger(task.startTicks) ||
+            task.startTicks < 0 ||
+            !task.boot ||
+            task.boot !== this.boot
+        ) {
+            return false;
+        }
+
+        const forks = () =>
+            readFileSync(`${this.#proc}/stat`, "utf8").match(/^processes (\d+)$/m)?.[1];
+
+        try {
+            if (!unrestrictedProc(this.#proc)) {
+                return false;
+            }
+
+            const before = forks();
+            let witness: Proc | undefined;
+
+            if (before === undefined) {
+                return false;
+            }
+
+            for (const name of readdirSync(this.#proc)) {
+                if (!/^\d+$/.test(name)) {
+                    continue;
+                }
+
+                const info = this.stat(Number(name));
+
+                if (
+                    !info ||
+                    (info.pid === task.pid &&
+                        (info.start !== task.startTicks ||
+                            info.pgid !== task.pid ||
+                            info.sid !== task.pid))
+                ) {
+                    return false;
+                }
+
+                // A live process in this session could join the group. An exited main thread anywhere
+                // can hide executable daemon threads from the separate marker scan.
+                if (gone(info) ? info.threads !== 1 : info.sid === task.pid) {
+                    return false;
+                }
+
+                if (info.pgid === task.pid) {
+                    if (info.sid !== task.pid || info.start < task.startTicks) {
+                        return false;
+                    }
+
+                    witness = info;
+                }
+            }
+
+            if (!witness) {
+                return false;
+            }
+
+            const last = this.stat(witness.pid);
+
+            // Births during enumeration can escape its PID list. Unrelated births also force a later retry.
+            return (
+                last !== undefined &&
+                last.start === witness.start &&
+                last.pgid === task.pid &&
+                last.sid === task.pid &&
+                gone(last) &&
+                last.threads === 1 &&
+                unrestrictedProc(this.#proc) &&
+                before === forks()
+            );
+        } catch {
+            return false;
+        }
+    }
+
     marked(pid: number, marker: string): boolean {
         try {
-            return readFileSync(`/proc/${pid}/environ`, "utf8")
+            return readFileSync(`${this.#proc}/${pid}/environ`, "utf8")
                 .split("\0")
                 .includes(`${BACKGROUND_MARKER}=${marker}`);
         } catch {
@@ -470,13 +632,15 @@ function ownsLeader(
     );
 }
 
+const zombieCandidate = Symbol("zombie group");
+
 /** Once the leader is gone, a member counts only while one carries the marker: a group id can be reused. */
 function groupMembers(
     table: ProcTable,
     item: TaskRef,
     fresh: boolean,
     guess?: boolean,
-): number[] | undefined {
+): number[] | undefined | typeof zombieCandidate {
     if (item.pid <= 0 || (item.boot !== undefined && item.boot !== table.boot)) {
         return [];
     }
@@ -493,15 +657,20 @@ function groupMembers(
         return [item.pid];
     }
 
-    let group = table.list(fresh).filter((each) => each.pgid === item.pid);
+    let group: Proc[];
 
-    // A scan from before the task started does not know it yet.
-    if (group.length === 0 && !fresh) {
-        group = table.list(true).filter((each) => each.pgid === item.pid);
+    try {
+        group = table.list(fresh).filter((each) => each.pgid === item.pid);
+
+        // A scan from before the task started does not know it yet.
+        if (group.length === 0 && !fresh) {
+            group = table.list(true).filter((each) => each.pgid === item.pid);
+        }
+    } catch {
+        return undefined;
     }
 
     if (group.length === 0) {
-        // Enumeration can miss a child born as the leader exits. Only ESRCH confirms the group is gone.
         return kill(-item.pid, 0) === false ? [] : undefined;
     }
 
@@ -516,12 +685,20 @@ function groupMembers(
         return undefined;
     }
 
+    const live = group.filter((each) => !gone(each));
+
+    if (live.length === 0) {
+        return table.zombiesOnly && (first === undefined || first.pgid === item.pid)
+            ? zombieCandidate
+            : undefined;
+    }
+
     if (
-        leader === undefined
-            ? group.some(marked)
+        leader === undefined || gone(leader)
+            ? live.some(marked)
             : ownsLeader(table, item, leader, guess) || marked(leader)
     ) {
-        return group.map((each) => each.pid);
+        return live.map((each) => each.pid);
     }
 
     // An unmarked child can outlive the leader. The numeric group alone proves neither ownership nor absence.
@@ -529,7 +706,7 @@ function groupMembers(
 }
 
 function markedProcesses(table: ProcTable, marker: string): Proc[] {
-    return table.list(true).filter((each) => table.marked(each.pid, marker));
+    return table.list(true).filter((each) => !gone(each) && table.marked(each.pid, marker));
 }
 
 export class PosixProcesses implements TaskProcesses {
@@ -607,8 +784,22 @@ export class PosixProcesses implements TaskProcesses {
             : { pid, start };
     }
 
-    members(task: TaskRef, fresh = false): Promise<number[] | undefined> {
-        return this.#look(() => groupMembers(this.#table, task, fresh));
+    async members(task: TaskRef, fresh = false): Promise<number[] | undefined> {
+        const observed = await this.#look(() => groupMembers(this.#table, task, fresh));
+
+        if (observed !== zombieCandidate) {
+            return observed;
+        }
+
+        // Give Node a turn to reap its child. Only a persisting group needs the extra full scan.
+        await delay(20);
+        const exists = kill(-task.pid, 0);
+
+        if (exists !== true) {
+            return exists === false ? [] : undefined;
+        }
+
+        return this.#table.zombiesOnly!(task) || kill(-task.pid, 0) === false ? [] : undefined;
     }
 
     aliveSync(task: TaskRef): boolean {
@@ -617,7 +808,9 @@ export class PosixProcesses implements TaskProcesses {
         }
 
         // At once, from the table as it is, outside the looks' turns: an environment not read yet counts as the task's.
-        return (groupMembers(this.#table, task, true, true)?.length ?? 0) > 0;
+        const observed = groupMembers(this.#table, task, true, true);
+
+        return Array.isArray(observed) && observed.length > 0;
     }
 
     async left(task: TaskRef): Promise<number[]> {
