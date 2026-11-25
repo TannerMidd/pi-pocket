@@ -278,6 +278,11 @@ export const store = {
         sessions: [],
         /** This person's favorite folders, in shortcut order, sent by the server to every signed-in device. */
         folderFavorites: [],
+        /**
+         * When this person looked at each session on their devices, by id: what the server sends (`seen`), which
+         * `seen.js` merges into `peekSeen`. The server's clock, like `endedAt`.
+         */
+        seenRemote: {},
         /** False until the server's first session list arrives: an empty list until then means "not here yet". */
         sessionsLoaded: false,
         /** Sessions on their way into the archive (true) or out of it (false), by id, until the list catches up (`sessions.js`). */
@@ -1945,6 +1950,8 @@ const handlers = {
     },
     "folder-favorites": (folderFavorites) =>
         setChanged({ folderFavorites: kept(store.state.folderFavorites, folderFavorites) }),
+    // Looks at sessions, on this person's other tabs and devices (`seen.js`). Not a session event: it holds across switches.
+    seen: (seen) => setChanged({ seenRemote: { ...store.state.seenRemote, ...seen } }),
     models: (models) => setChanged({ models: kept(store.state.models, models) }),
     // A theme folder came, went, or changed (`theme.js` loads its new version).
     themes: (themeList) => setChanged({ themeList: kept(store.state.themeList, themeList) }),

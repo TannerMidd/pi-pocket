@@ -2,6 +2,7 @@ import {
     type App,
     cleanUp,
     context,
+    fakeTab,
     lastText,
     newSession,
     openApp,
@@ -389,3 +390,116 @@ test(
         );
     },
 );
+
+/** A session whose run has ended, so it is new to a browser that has not looked at it since. */
+async function finished(text: string): Promise<ConversationId> {
+    const id = await newSession(app);
+
+    await app.commands.submit(id, owner(app), { text, requestId: `seen-${++calls}` });
+    await until(
+        () => app.sessions().find((each) => each.id === Number(id))?.endedAt !== undefined,
+        "the run to end",
+    );
+
+    return id;
+}
+
+test("a look at a session on another device reads it here", real, async () => {
+    const id = await finished("finish once");
+
+    await click('.sidebar .session-tabs [data-tab="priority"]');
+    await present(rowIn("ready", id), "the finished session to read");
+    app.setSeen(owner(app), [{ id: Number(id), at: Date.now() }]);
+    await gone(rowIn("ready", id), "the session, seen elsewhere");
+});
+
+test(
+    "a look here goes to the server, and Undo of Mark all read stays on this device",
+    real,
+    async () => {
+        const id = await finished("finish twice");
+        const other = await newSession(app);
+        const tab = fakeTab(undefined, owner(app));
+
+        await app.attach(tab.client);
+        tab.events.length = 0;
+
+        try {
+            await click('.sidebar .session-tabs [data-tab="priority"]');
+            await present(rowIn("ready", id), "the finished session to read");
+            await click(`${group("ready")} [data-part="session-group-action"]`);
+            await gone(rowIn("ready", id), "the session, read");
+            await until(
+                () =>
+                    tab.events.some(
+                        (each) =>
+                            each.event === "seen" &&
+                            (each.data as Record<number, number>)[Number(id)]! > 0,
+                    ),
+                "the look to reach the other tab",
+            );
+            await page.evaluate(`
+            const { store } = await import("/store.js");
+
+            store.state.notices.findLast((each) => /^Marked \\d+ read/.test(each.message)).action();
+        `);
+            await present(rowIn("ready", id), "the session, to read again");
+            // The server tells this device of another look: what it said of this session before must not undo the Undo.
+            app.setSeen(owner(app), [{ id: Number(other), at: Date.now() }]);
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            assert.ok(await exists(rowIn("ready", id)), "the session stays to read here");
+        } finally {
+            app.detach(tab.client);
+        }
+    },
+);
+
+test("opening a finished session in one browser reads it in another", real, async () => {
+    // A second profile is a second device: its own storage, its own tab, the same person.
+    const devices = new Browsers({
+        dataDir: mkdtempSync(join(root, "priority-ui-device-")),
+        load: async () => undefined,
+        save: () => {},
+        args: [
+            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+        ],
+    });
+
+    try {
+        const device = await devices.open(1);
+        const onDevice = async <T>(script: string): Promise<T> =>
+            JSON.parse(await device.evaluate(script)) as T;
+        const deviceHas = (selector: string) =>
+            onDevice<boolean>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(selector)}) !== null)`,
+            );
+
+        await device.navigate(`${base}/login?token=${encodeURIComponent(app.config.ownerToken)}`);
+        await device.navigate(`${base}/`);
+        await until(
+            () => deviceHas(".sidebar .session-tabs"),
+            "the other device's session list",
+            20_000,
+        );
+        // A run that ended before a browser first heard the server counts as seen there: finish this one after.
+        const id = await finished("finish thrice");
+
+        await click('.sidebar .session-tabs [data-tab="priority"]');
+        await device.evaluate(
+            `document.querySelector('.sidebar .session-tabs [data-tab="priority"]').click()`,
+        );
+        await present(rowIn("ready", id), "the session to read here");
+        await until(() => deviceHas(rowIn("ready", id)), "the session to read on the device");
+        await page.evaluate(`
+            const { navigate } = await import("/store.js");
+
+            navigate(${Number(id)});
+        `);
+        await until(
+            async () => !(await deviceHas(rowIn("ready", id))),
+            "the session, read on the device by a look here",
+        );
+    } finally {
+        await devices.closeAll({ final: true });
+    }
+});

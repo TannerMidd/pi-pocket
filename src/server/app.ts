@@ -197,6 +197,8 @@ const MAX_SUBAGENT_MODELS = 50;
  * there, each row asking for its own as the tiles do.
  */
 export const MAX_PEEKS = 20;
+/** The most seen marks one `POST /api/seen` carries. */
+export const MAX_SEEN_ITEMS = 500;
 /**
  * How a run that failed leaves its messages: the model or its provider answered with an error, no model was there to
  * ask, the run broke, or the server stopped while the model answered and no retry was left (`interrupted`, since Pi
@@ -485,6 +487,12 @@ export class PocketApp {
     readonly #busy = new Set<ConversationId>();
     /** When each conversation's last run ended, since this server started: peek tiles show sessions done since a look. */
     readonly #endedAt = new Map<ConversationId, number>();
+    /**
+     * When each person last looked at each session, by the server's clock like `#endedAt`, which a look is compared
+     * with: a run that ended after it is new. Only what a tab sent, sent on to the same person's other tabs and kept
+     * for tabs that come later; a restart forgets it, and with it the runs it was compared with.
+     */
+    readonly #seenAt = new Map<string, Map<number, number>>();
     /**
      * Conversations whose last run ended because the model or provider failed (not stopped by someone), since this
      * server started: the session list marks them until their next run starts.
@@ -1860,6 +1868,13 @@ export class PocketApp {
 
         client.send("hello", this.#helloFor(client, hello));
         this.#sendSessions(client, this.sessions(client.user));
+
+        const seen = this.#seenFor(client.user);
+
+        if (Object.keys(seen).length > 0) {
+            client.send("seen", seen);
+        }
+
         this.#sendPip(client);
 
         if (client.user.role === "owner" && this.themes.failure !== undefined) {
@@ -2040,6 +2055,67 @@ export class PocketApp {
             },
             () => {},
         );
+    }
+
+    /**
+     * A person looked at sessions at these times (the server's clock, as `#endedAt`): a tab sends only the looks that
+     * are later than what the server kept, and the person's other tabs hear them as a `seen` event. Sessions that are
+     * gone or that the person cannot see are left out, and a time ahead of the server's is cut to now, so a clock that
+     * runs fast cannot hide a run that ends after it.
+     */
+    setSeen(user: User, items: readonly { id: number; at: number }[]): void {
+        const now = Date.now();
+        const mine = this.#seenAt.get(user.id) ?? new Map<number, number>();
+        const applied: Record<number, number> = {};
+
+        for (const { id, at } of items) {
+            const conversation = id as unknown as ConversationId;
+            const time = Math.min(at, now);
+
+            if (
+                this.#sessions[String(this.rootOf(conversation))] === undefined ||
+                !this.canSee(user, conversation) ||
+                time <= (mine.get(id) ?? 0)
+            ) {
+                continue;
+            }
+
+            mine.set(id, time);
+            applied[id] = time;
+        }
+
+        if (Object.keys(applied).length === 0) {
+            return;
+        }
+
+        this.#seenAt.set(user.id, mine);
+        this.#sendSeen(user, applied);
+    }
+
+    /** Send each tab of a person what they saw, and only theirs. */
+    #sendSeen(user: User, seen: Record<number, number>): void {
+        for (const client of this.#clients) {
+            if (client.user.id === user.id) {
+                client.send("seen", seen);
+            }
+        }
+    }
+
+    /** What a person has looked at that is still there, for a tab that comes: sessions that are gone are forgotten. */
+    #seenFor(user: User): Record<number, number> {
+        const seen: Record<number, number> = {};
+
+        for (const [id, at] of this.#seenAt.get(user.id) ?? []) {
+            const conversation = id as unknown as ConversationId;
+
+            if (this.#sessions[String(this.rootOf(conversation))] === undefined) {
+                this.#seenAt.get(user.id)?.delete(id);
+            } else if (this.canSee(user, conversation)) {
+                seen[id] = at;
+            }
+        }
+
+        return seen;
     }
 
     /**

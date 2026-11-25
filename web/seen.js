@@ -2,11 +2,13 @@
 // is new. Peek tiles show those sessions, and the session list's squares turn solid for them. Opening a session is
 // looking at it, and so is having it open in sight when its run ends.
 //
-// Kept per browser, in localStorage, like pins and marks. To share it between someone's devices, the server would keep
-// each person's marks (a per-user document beside `SessionsDoc`), `markSeen` would send them, and the session list
-// would carry them back; `finishedUnseen` would not change.
+// Kept per browser, in localStorage, like pins and marks, and shared with the person's other tabs and devices through
+// the server: each look is sent as it is made (`POST /api/seen`, best effort), and a look from elsewhere (`seen` events,
+// `seenRemote`) that is later than ours becomes ours. A look is a time on the server's clock and only grows, so a lost
+// or late one does no harm, and a restart that makes the server forget them forgets the runs they were compared with
+// too. `since` stays this browser's own: a look from elsewhere only adds to what it has seen.
 import { onPageVisibility, pageVisible } from "./host.js";
-import { serverClockOffset, store } from "./store.js";
+import { api, serverClockOffset, store } from "./store.js";
 
 /** Each session's seen mark is a key of its own, so tabs that mark different sessions at once keep both. */
 const SEEN_PREFIX = "pocket.peekSeen.";
@@ -55,6 +57,61 @@ addEventListener("storage", (event) => {
     }
 });
 
+/** Looks not sent yet, by session: all that come in one turn of the event loop go in one request. */
+const outgoing = new Map();
+let sending = false;
+
+/** Send a look to the server, which tells the person's other tabs. A failure is let go: the look is still ours. */
+function publish(id, at) {
+    outgoing.set(id, Math.max(outgoing.get(id) ?? 0, at));
+
+    if (!sending) {
+        sending = true;
+        queueMicrotask(() => {
+            // The server takes whole numbers; the clock's offset can leave a fraction, which is cut (never below `ended`).
+            const items = [...outgoing].map(([each, time]) => ({
+                id: Number(each),
+                at: Math.floor(time),
+            }));
+
+            sending = false;
+            outgoing.clear();
+
+            for (let from = 0; from < items.length; from += MAX_SENT) {
+                api("seen", { items: items.slice(from, from + MAX_SENT) }).catch(() => {});
+            }
+        });
+    }
+}
+
+/** The most looks one request carries (the server's `MAX_SEEN_ITEMS`). */
+const MAX_SENT = 500;
+
+/**
+ * Sessions whose look was undone here, and when: a look from another device that is not later than the undoing stays
+ * out, so Undo holds on this device. Not kept across a reload.
+ */
+const undone = new Map();
+
+/** Looks from the person's other devices that are later than ours become ours; nothing is sent back. */
+function takeRemote(remote) {
+    const changed = {};
+
+    for (const [id, at] of Object.entries(remote)) {
+        const key = SEEN_PREFIX + id;
+        const have = Math.max(Number(localStorage.getItem(key)) || 0, undone.get(id) ?? 0);
+
+        if (at > have) {
+            localStorage.setItem(key, String(at));
+            changed[id] = at;
+        }
+    }
+
+    if (Object.keys(changed).length > 0) {
+        store.set({ peekSeen: { ...store.state.peekSeen, ...changed } });
+    }
+}
+
 /**
  * Remember that this browser looked at sessions now: a run that ended before is no longer new. One change to the store
  * for all of them, and none when their marks are as they were (each change draws the whole app).
@@ -69,6 +126,7 @@ export function markSeen(...ids) {
         const at = Math.max(Number(localStorage.getItem(key)) || 0, serverNow(), ended);
 
         localStorage.setItem(key, String(at));
+        publish(id, at);
 
         if (store.state.peekSeen?.[id] !== at) {
             changed[id] = at;
@@ -97,6 +155,7 @@ export function restoreSeen(snapshot, expected) {
         }
 
         back.add(Number(id));
+        undone.set(id, serverNow());
 
         if (at > 0) {
             localStorage.setItem(SEEN_PREFIX + id, String(at));
@@ -145,7 +204,14 @@ function seeOpen(state) {
     }
 }
 
+let lastRemote = store.state.seenRemote;
+
 store.subscribe((state) => {
+    if (state.seenRemote !== lastRemote) {
+        lastRemote = state.seenRemote;
+        takeRemote(lastRemote);
+    }
+
     if (state.server !== lastServer) {
         lastServer = state.server;
 

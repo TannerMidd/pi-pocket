@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import QRCode from "qrcode";
-import { MAX_PEEKS } from "../app.ts";
+import { MAX_PEEKS, MAX_SEEN_ITEMS } from "../app.ts";
 import {
     type Auth,
     COOKIE,
@@ -271,6 +271,33 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 String(body.connection ?? ""),
                 body.ids.slice(0, MAX_PEEKS).map((id) => conversationId(String(id))),
                 body.seq as number | undefined,
+            );
+
+            return json(response, 200, { ok: true });
+        }
+
+        // When this person looked at sessions, for their other tabs and devices: `seen` events, `peekSeen` in the app.
+        if (first === "seen" && method === "POST") {
+            const body = await readJson<{ items?: unknown }>(request);
+
+            if (!Array.isArray(body.items) || body.items.length > MAX_SEEN_ITEMS) {
+                throw new HttpError(
+                    400,
+                    `items must be a list of at most ${MAX_SEEN_ITEMS} looks, each with a session id and a time`,
+                );
+            }
+
+            // A look that is not whole is left out; the rest still count.
+            app.setSeen(
+                user,
+                body.items.flatMap((item: { id?: unknown; at?: unknown }) =>
+                    Number.isSafeInteger(item?.id) &&
+                    (item.id as number) >= 0 &&
+                    Number.isSafeInteger(item.at) &&
+                    (item.at as number) >= 0
+                        ? [{ id: item.id as number, at: item.at as number }]
+                        : [],
+                ),
             );
 
             return json(response, 200, { ok: true });
