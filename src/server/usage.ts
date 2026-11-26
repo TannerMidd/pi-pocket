@@ -19,8 +19,10 @@ export type UsageWindow = {
     tag: string;
     /** `5-hour window`, `Weekly window`, `Requests per minute`. */
     label: string;
-    /** Percent left, 0 to 100. Absent when the provider said only that the window is open. */
+    /** Percent left, 0 to 100, rounded. Absent when the provider said only that the window is open. */
     left?: number;
+    /** Less than one percent is left, but not none: `left` is 0 and the window is not limited. Shown as `<1%`. */
+    tiny?: true;
     /** `1,260 of 2,000 left`, for windows that count. */
     detail?: string;
     /** When the window resets, as epoch milliseconds on the server's clock. */
@@ -127,12 +129,23 @@ export function windowName(minutes: number): { tag: string; label: string } {
     return { tag: `${minutes}m`, label: `${minutes}-minute window` };
 }
 
-function stateOf(left: number | undefined, blocked: boolean): WindowState {
-    if (blocked || left === 0) {
-        return "limited";
-    }
+/**
+ * What a window shows from the raw percent left (before rounding): a window is limited only when it is exhausted (`exhausted`,
+ * decided by the caller from the raw numbers), never because the rounded percent is 0. Less than one percent left is `tiny`.
+ */
+function measure(
+    raw: number | undefined,
+    exhausted: boolean,
+): { left?: number; tiny?: true; state: WindowState } {
+    const left = raw === undefined ? undefined : clampPercent(raw);
+    const tiny = !exhausted && left === 0 ? ({ tiny: true } as const) : {};
+    const state: WindowState = exhausted
+        ? "limited"
+        : left !== undefined && left < LOW_AT
+          ? "low"
+          : "ok";
 
-    return left !== undefined && left < LOW_AT ? "low" : "ok";
+    return { ...(left === undefined ? {} : { left }), ...tiny, state };
 }
 
 /** Anthropic's subscription: `anthropic-ratelimit-unified-5h-utilization`, `-status`, `-reset`, and the same for `7d`. */
@@ -157,15 +170,17 @@ function unifiedWindows(headers: Record<string, string>): UsageWindow[] {
         const utilization = numberOf(get("utilization"));
         const remaining = numberOf(get("remaining"));
         // A fraction, as Claude Code reads it: 0.59 is 59 percent used.
-        const left =
+        const raw =
             utilization !== undefined
-                ? clampPercent((1 - Math.min(1, utilization)) * 100)
+                ? (1 - Math.min(1, utilization)) * 100
                 : remaining !== undefined
-                  ? clampPercent(Math.min(1, remaining) * 100)
+                  ? Math.min(1, remaining) * 100
                   : undefined;
         const blocked = LIMITED_STATUS.test(get("status") ?? "");
+        const exhausted =
+            blocked || (utilization !== undefined && utilization >= 1) || remaining === 0;
 
-        if (left === undefined && !blocked) {
+        if (raw === undefined && !blocked) {
             continue;
         }
 
@@ -179,9 +194,9 @@ function unifiedWindows(headers: Record<string, string>): UsageWindow[] {
             id,
             tag: name.tag,
             label: name.label,
-            ...(left === undefined ? (blocked ? { left: 0 } : {}) : { left }),
+            ...(raw === undefined ? { left: 0 } : {}),
+            ...measure(raw, exhausted),
             ...(resetAt === undefined ? {} : { resetAt }),
-            state: stateOf(left, blocked),
         });
     }
 
@@ -199,7 +214,7 @@ function codexWindows(headers: Record<string, string>, at: number): UsageWindow[
             continue;
         }
 
-        const left = clampPercent(100 - Math.min(100, used));
+        const raw = 100 - Math.min(100, used);
         const minutes = numberOf(headers[`x-codex-${which}-window-minutes`]);
         const after = numberOf(headers[`x-codex-${which}-reset-after-seconds`]);
         const resetAt =
@@ -214,9 +229,8 @@ function codexWindows(headers: Record<string, string>, at: number): UsageWindow[
             id: which,
             tag: name.tag,
             label: name.label,
-            left,
+            ...measure(raw, used >= 100),
             ...(resetAt === undefined ? {} : { resetAt }),
-            state: stateOf(left, false),
         });
     }
 
@@ -274,10 +288,8 @@ function countedWindows(headers: Record<string, string>, at: number): UsageWindo
 
                           return after === undefined ? timeOf(reset) : at + after;
                       })();
-            const left =
-                limit !== undefined && limit > 0
-                    ? clampPercent((Math.min(remaining, limit) / limit) * 100)
-                    : 0;
+            const raw =
+                limit !== undefined && limit > 0 ? (Math.min(remaining, limit) / limit) * 100 : 0;
             const minute =
                 family === "anthropic" || (resetAt !== undefined && resetAt - at <= 120_000);
 
@@ -290,12 +302,11 @@ function countedWindows(headers: Record<string, string>, at: number): UsageWindo
                 id: each.id,
                 tag: each.tag,
                 label: minute ? `${each.name} per minute` : each.name,
-                left,
+                ...measure(raw, remaining <= 0),
                 ...(limit === undefined || limit <= 0
                     ? {}
                     : { detail: `${count(remaining)} of ${count(limit)} left` }),
                 ...(resetAt === undefined ? {} : { resetAt }),
-                state: stateOf(left, false),
             });
         }
     }
@@ -315,17 +326,16 @@ function plainWindow(headers: Record<string, string>, at: number): UsageWindow[]
     const reset = headers["x-ratelimit-reset"];
     const after = /^\d{9,}/.test(reset ?? "") ? undefined : durationOf(reset);
     const resetAt = after === undefined ? timeOf(reset) : at + after;
-    const left = clampPercent((Math.min(remaining, limit) / limit) * 100);
+    const raw = (Math.min(remaining, limit) / limit) * 100;
 
     return [
         {
             id: "requests",
             tag: "req",
             label: "Requests",
-            left,
+            ...measure(raw, remaining <= 0),
             detail: `${count(remaining)} of ${count(limit)} left`,
             ...(resetAt === undefined ? {} : { resetAt }),
-            state: stateOf(left, false),
         },
     ];
 }
@@ -382,9 +392,13 @@ export type UsageProvider = {
     /** When the response that the windows come from came. */
     asOf?: number;
     windows: UsageWindow[];
-    /** The limit gate holds the provider's requests: when it tries next, and why in fixed words. */
-    held?: { until: number; reason: string };
+    /** The limit gate holds the whole account's requests: when it tries next, and why in fixed words. */
+    held?: UsageHold;
+    /** The limit gate holds single models only (another model of the provider may still answer). */
+    modelHolds?: (UsageHold & { modelId: string })[];
 };
+
+export type UsageHold = { until: number; reason: string };
 
 export type UsageSnapshot = { at: number; providers: UsageProvider[] };
 
@@ -440,6 +454,7 @@ export class UsageStore {
     view(
         provider: { id: string; name: string; kind: UsageProvider["kind"] },
         held?: UsageProvider["held"],
+        modelHolds: NonNullable<UsageProvider["modelHolds"]> = [],
     ): UsageProvider {
         const entry = this.#entries.get(provider.id);
 
@@ -449,6 +464,7 @@ export class UsageStore {
             ...(entry === undefined || entry.silent ? {} : { asOf: entry.at }),
             windows: entry?.windows ?? [],
             ...(held === undefined ? {} : { held }),
+            ...(modelHolds.length === 0 ? {} : { modelHolds }),
         };
     }
 

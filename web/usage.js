@@ -35,34 +35,61 @@ export function tightestWindow(provider, now) {
     );
 }
 
+/** The percent as it is said: `41%`, and `<1%` for a window with less than one percent left but not none. */
+export const percent = (window) => (window.tiny ? "<1%" : `${window.left}%`);
+
+const latest = (holds) => holds.reduce((a, b) => (b.until > a.until ? b : a), holds[0]);
+
 /**
- * One provider as the places show it: `state` is `limited` (a window at 0, or the limit gate holds the provider),
- * `low`, `ok`, `reset` (every window's time passed), `no-data` (no response since the server started), or
- * `not-reported` (it sends no usage). `window` is the tightest live window; `until` when a limited provider is back.
+ * One provider as the places show it: `state` is `limited` (a window at 0, or the limit gate holds the provider, or the
+ * session's own model, `modelId`), `low`, `ok`, `reset` (every window's time passed), `no-data` (no response since the
+ * server started), or `not-reported` (it sends no usage). `window` is the tightest live window; `until` when a limited
+ * provider is back. A hold comes before what the numbers say, so a restart that emptied them does not hide it. `holds` are
+ * the models the gate holds alone (not the provider): they are details, and limit the provider only for their own model.
  */
-export function providerView(provider, now) {
-    if (provider.status === "no-data" || provider.status === "not-reported") {
-        return { provider, state: provider.status, window: null, until: undefined };
+export function providerView(provider, now, modelId) {
+    const held =
+        provider.held !== undefined && provider.held.until > now ? provider.held : undefined;
+    const holds = (provider.modelHolds ?? []).filter((hold) => hold.until > now);
+    const mine = modelId === undefined ? [] : holds.filter((hold) => hold.modelId === modelId);
+    const hold = [held, ...mine].filter((each) => each !== undefined);
+
+    if (
+        (provider.status === "no-data" || provider.status === "not-reported") &&
+        hold.length === 0
+    ) {
+        return { provider, state: provider.status, window: null, until: undefined, holds };
     }
 
     const window = tightestWindow(provider, now);
-    const held =
-        provider.held !== undefined && provider.held.until > now ? provider.held : undefined;
 
-    if (window?.state === "limited" || held !== undefined) {
+    if (window?.state === "limited" || hold.length > 0) {
         const until = Math.max(
             window?.state === "limited" ? (window.resetAt ?? 0) : 0,
-            held?.until ?? 0,
+            hold.length > 0 ? latest(hold).until : 0,
         );
 
-        return { provider, state: "limited", window, until: until > now ? until : undefined };
+        return {
+            provider,
+            state: "limited",
+            window,
+            until: until > now ? until : undefined,
+            holds,
+        };
     }
 
     if (window === null) {
-        return { provider, state: "reset", window: null, until: undefined };
+        return { provider, state: "reset", window: null, until: undefined, holds };
     }
 
-    return { provider, state: window.state, window, until: undefined };
+    return { provider, state: window.state, window, until: undefined, holds };
+}
+
+/** What each model the gate holds alone says: `claude-fable limited · 1:12`. */
+export function modelHoldWords(view, now) {
+    return (view.holds ?? []).map(
+        (hold) => `${hold.modelId} limited · ${hoursMinutes(hold.until - now)}`,
+    );
 }
 
 /** Providers, the most pressing first: limited (back soonest first), low, then the least left; the rest by name. */
@@ -154,8 +181,8 @@ export function summary(view, now) {
             window.resetAt === undefined ? "" : `. It resets in ${inWords(window.resetAt - now)}`;
 
         return {
-            text: `${window.tag === "" ? "" : `${window.tag} `}${window.left}% left`,
-            aria: `${provider.name} usage: ${view.state === "low" ? "low, " : ""}${window.left}% left in the ${window.label.toLowerCase()}${reset}.`,
+            text: `${window.tag === "" ? "" : `${window.tag} `}${percent(window)} left`,
+            aria: `${provider.name} usage: ${view.state === "low" ? "low, " : ""}${percent(window)} left in the ${window.label.toLowerCase()}${reset}.`,
         };
     }
 

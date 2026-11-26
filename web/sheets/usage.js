@@ -8,6 +8,8 @@ import { BOTTOM_SHEETS, formatWhen, html, Icon, scrimPress, useMinute } from "..
 import {
     agoWords,
     inWords,
+    modelHoldWords,
+    percent,
     providerView,
     sortProviders,
     summary,
@@ -27,7 +29,7 @@ export function sessionUsage(now = serverNow()) {
     const id = view.agent?.model?.provider;
     const provider = id === undefined ? undefined : usage?.providers.find((each) => each.id === id);
 
-    return provider === undefined ? null : providerView(provider, now);
+    return provider === undefined ? null : providerView(provider, now, view.agent?.model?.modelId);
 }
 
 /** Open the usage popover (or sheet); `from` is where, for the focus's way back. */
@@ -84,7 +86,7 @@ function WindowRow({ window, now }) {
             <span class="usage-window-state" data-state=${state}>
                 <${StateMark} state=${state} />
             </span>
-            <span class="usage-window-left">${stale || window.left === undefined ? "—" : `${window.left}% left`}</span>
+            <span class="usage-window-left">${stale || window.left === undefined ? "—" : `${percent(window)} left`}</span>
         </div>
         <${UsageMeter} state=${state} left=${stale ? 0 : window.left} big />
         ${sub && html`<div class="usage-window-sub">${sub}</div>`}
@@ -107,8 +109,9 @@ function Silent({ status }) {
           </p>`;
 }
 
-/** A provider's windows in full, with the limit gate's hold when there is one. */
-function Windows({ provider, now }) {
+/** A provider's windows in full, with the limit gate's hold when there is one, and the models it holds alone. */
+function Windows({ view, now }) {
+    const { provider } = view;
     const held =
         provider.held !== undefined && provider.held.until > now ? provider.held : undefined;
 
@@ -126,7 +129,12 @@ function Windows({ provider, now }) {
                 ${held.reason}. Runs wait here and try again at ${formatWhen(held.until - serverClockOffset())}.
             </span>
         </p>`
-    }`;
+    }${modelHoldWords(view, now).map(
+        (words) => html`<p class="usage-note usage-held" key=${words}>
+            <${Icon} name="clock" size=${12} />
+            <span>${words}</span>
+        </p>`,
+    )}`;
 }
 
 /** The open session's provider, in full. */
@@ -139,7 +147,7 @@ function Current({ view, now }) {
             <span class="usage-kind">${KIND[provider.kind]}</span>
             ${provider.asOf !== undefined && html`<span class="usage-asof">as of ${agoWords(now - provider.asOf)}</span>`}
         </div>
-        <${Windows} provider=${provider} now=${now} />
+        <${Windows} view=${view} now=${now} />
     </section>`;
 }
 
@@ -153,6 +161,7 @@ function Row({ view, now, open, onToggle }) {
             : "";
     const words = summary(view, now);
     const body = `usage-body-${provider.id}`;
+    const models = modelHoldWords(view, now).join(", ");
 
     return html`<div class="usage-row" data-open=${open} data-state=${view.state}>
         <button
@@ -164,7 +173,7 @@ function Row({ view, now, open, onToggle }) {
         >
             <span class="usage-row-name">
                 <span class="usage-row-title">${provider.name}</span>
-                <span class="usage-row-kind">${KIND[provider.kind]}${age}</span>
+                <span class="usage-row-kind">${KIND[provider.kind]}${age}${models === "" ? "" : ` · ${models}`}</span>
             </span>
             ${!none && html`<${UsageMeter} state=${view.state} left=${window?.left} />`}
             <span class="usage-row-left num">
@@ -175,7 +184,7 @@ function Row({ view, now, open, onToggle }) {
                           ? (words?.text ?? "").replace("Limited ", "")
                           : view.state === "reset"
                             ? "— left"
-                            : `${window?.left}% left`
+                            : `${percent(window)} left`
                 }
             </span>
             <span class="usage-row-state" data-state=${view.state}>
@@ -197,7 +206,7 @@ function Row({ view, now, open, onToggle }) {
             open &&
             html`<div class="usage-row-body" id=${body} role="group" aria-label=${`${provider.name} usage`}>
                 ${provider.asOf !== undefined && html`<div class="usage-row-meta"><span>as of ${agoWords(now - provider.asOf)}</span></div>`}
-                <${Windows} provider=${provider} now=${now} />
+                <${Windows} view=${view} now=${now} />
             </div>`
         }
     </div>`;
@@ -237,10 +246,13 @@ function Panel({ onClose }) {
     const { usage } = store.state;
     const now = serverNow();
     const id = store.state.view.agent?.model?.provider;
+    const modelId = store.state.view.agent?.model?.modelId;
     const [expanded, setExpanded] = useState(null);
     const [grouped, setGrouped] = useState(false);
     const [filter, setFilter] = useState("");
-    const views = (usage?.providers ?? []).map((provider) => providerView(provider, now));
+    const views = (usage?.providers ?? []).map((provider) =>
+        providerView(provider, now, provider.id === id ? modelId : undefined),
+    );
     const current = views.find((view) => view.provider.id === id);
     const others = views.filter((view) => view !== current);
     const query = filter.trim().toLowerCase();

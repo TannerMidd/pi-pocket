@@ -622,3 +622,79 @@ test("a provider that sends no usage, or none yet, has no item and a plain row",
         "the row says it",
     );
 });
+
+test(
+    "a model's own limit is a detail, limits the item only for that model, and a hold shows without numbers",
+    real,
+    async (t) => {
+        await page.setViewport(DESKTOP);
+
+        const gate = (provider: string, scope: string, modelId?: string) => ({
+            ...{ key: `${provider}-${scope}`, provider, scope, kind: "reset", since: 0, tries: 1 },
+            ...{ until: Date.now() + 72 * MIN, reason: "the usage limit", probing: false },
+            ...(modelId === undefined ? {} : { modelId }),
+        });
+        const gates: ReturnType<typeof gate>[] = [];
+
+        t.mock.method(app.limits, "gates", () => gates as never);
+        record("faux", unified("0.32", "0.59"));
+        await open();
+        await wait(`return document.querySelector(".usage-now")`, "the item");
+
+        // Another model's limit: the session's model still answers, so the item is not limited.
+        gates.push(gate("faux", "model", "claude-fable"));
+        record("faux", unified("0.32", "0.60"));
+        await wait(
+            `return document.querySelector(".usage-now")?.innerText.includes("40%")`,
+            "the new numbers",
+        );
+        assert.notEqual(
+            await ev<string>(`return document.querySelector(".usage-now").dataset.state`),
+            "limited",
+        );
+        await page.click({ selector: ".usage-now" });
+        await wait(`return document.querySelector(".usage-current")`, "the popover");
+        await settle();
+        assert.match(
+            await ev<string>(`return document.querySelector(".usage-current").innerText`),
+            /claude-fable limited · 1:1\d/,
+        );
+        assert.notEqual(
+            await ev<string>(`return document.querySelector(".usage-current").dataset.state`),
+            "limited",
+        );
+        await page.press("Escape");
+        await wait(`return !document.querySelector(".sheet-host")`, "closed");
+        await settle();
+
+        // The session's own model's limit does limit it.
+        gates.push(gate("faux", "model", "faux-1"));
+        record("faux", unified("0.32", "0.61"));
+        await wait(
+            `return document.querySelector(".usage-now")?.dataset.state === "limited"`,
+            "limited for its own model",
+        );
+        assert.match((await itemText()) ?? "", /^Limited 1:1\d$/);
+
+        // A provider with no numbers at all (after a restart) and a hold of the account: limited, with the item.
+        gates.length = 0;
+        gates.push(gate("fresh", "account"));
+
+        const me = app.config.users.find((user) => user.role === "owner")!;
+        const { id } = await app.commands.createSession(me, { cwd: work });
+        const fresh = fauxProvider({ provider: "fresh", models: [{ id: "fresh-1" }] });
+
+        app.models.registerNativeProvider({ ...fresh.provider, name: "Fresh" } as never);
+        await app.commands.configure(id, me, {
+            model: { provider: "fresh", modelId: "fresh-1" },
+            thinkingLevel: "off",
+        });
+        await open(String(id));
+        record("okco", counted(5000, 3800, "8h20m"));
+        await wait(
+            `return document.querySelector(".usage-now")?.dataset.state === "limited"`,
+            "the item of a provider with no numbers",
+        );
+        assert.match((await itemText()) ?? "", /^Limited 1:1\d$/);
+    },
+);

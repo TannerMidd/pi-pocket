@@ -55,7 +55,7 @@ import { TrustBar } from "./trust.js";
 import { closeSheet } from "./store.js";
 import { openUsage, serverNow, sessionUsage, UsageMeter } from "./sheets/usage.js";
 import { prefs } from "./theme.js";
-import { hoursMinutes, summary, USAGE_ICONS } from "./usage.js";
+import { hoursMinutes, percent, summary, USAGE_ICONS } from "./usage.js";
 import { fingerprint } from "./text-hash.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
@@ -2947,7 +2947,7 @@ function UsageItem() {
         ${!limited && window.tag !== "" && html`<span class="tag">${window.tag}</span>`}
         ${!limited && html`<${UsageMeter} state=${state} left=${window.left} />`}
         <span class="val">
-            <span class="num">${limited ? countText : `${window.left}%`}</span>${limited ? "" : html`<span class="left"> left</span>`}
+            <span class="num">${limited ? countText : percent(window)}</span>${limited ? "" : html`<span class="left"> left</span>`}
         </span>
     </button>`;
 }

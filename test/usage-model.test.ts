@@ -3,19 +3,28 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 type Fn = (...args: any[]) => any;
-const { agoWords, hoursMinutes, inWords, providerView, sortProviders, summary, tightestWindow } =
-    (await import(new URL("../web/usage.js", import.meta.url).href)) as {
-        [
-            name in
-                | "agoWords"
-                | "hoursMinutes"
-                | "inWords"
-                | "providerView"
-                | "sortProviders"
-                | "summary"
-                | "tightestWindow"
-        ]: Fn;
-    };
+const {
+    agoWords,
+    hoursMinutes,
+    inWords,
+    modelHoldWords,
+    providerView,
+    sortProviders,
+    summary,
+    tightestWindow,
+} = (await import(new URL("../web/usage.js", import.meta.url).href)) as {
+    [
+        name in
+            | "agoWords"
+            | "hoursMinutes"
+            | "inWords"
+            | "modelHoldWords"
+            | "providerView"
+            | "sortProviders"
+            | "summary"
+            | "tightestWindow"
+    ]: Fn;
+};
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
 const win = (id: string, left: number, state: string, resetIn?: number, tag = id) => ({
@@ -112,4 +121,71 @@ test("the words", () => {
 
     assert.equal(summary(limited, NOW)?.text, "Limited 1:12");
     assert.equal(summary(providerView(provider("G", [], { status: "no-data" }), NOW), NOW), null);
+});
+
+test("a hold is checked before the numbers: after a restart a waiting provider is still limited", () => {
+    const held = { until: NOW + 5 * MIN, reason: "x" };
+
+    for (const status of ["no-data", "not-reported"]) {
+        const view = providerView(provider("A", [], { status, held }), NOW);
+
+        assert.equal(view.state, "limited", status);
+        assert.equal(view.until, NOW + 5 * MIN);
+        assert.equal(view.window, null);
+        assert.equal(summary(view, NOW)?.text, "Limited 0:05");
+        // A hold that has passed leaves what the provider has: no usage.
+        assert.equal(
+            providerView(provider("A", [], { status, held: { ...held, until: NOW - 1 } }), NOW)
+                .state,
+            status,
+        );
+    }
+
+    // The session's model's own hold counts too, and with no model given it does not.
+    const modelHolds = [{ modelId: "claude-fable", until: NOW + 7 * MIN, reason: "y" }];
+    const own = providerView(
+        provider("A", [], { status: "no-data", modelHolds }),
+        NOW,
+        "claude-fable",
+    );
+
+    assert.equal(own.state, "limited");
+    assert.equal(own.until, NOW + 7 * MIN);
+    assert.equal(
+        providerView(provider("A", [], { status: "no-data", modelHolds }), NOW).state,
+        "no-data",
+    );
+});
+
+test("a model's hold limits the provider only for that model, and is a detail for the others", () => {
+    const modelHolds = [
+        { modelId: "claude-fable", until: NOW + 72 * MIN, reason: "y" },
+        { modelId: "stale", until: NOW - MIN, reason: "y" },
+    ];
+    const reported = provider("Anthropic", [win("5h", 68, "ok", 120 * MIN)], { modelHolds });
+    const other = providerView(reported, NOW, "claude-sonnet");
+    const same = providerView(reported, NOW, "claude-fable");
+
+    assert.equal(other.state, "ok");
+    assert.equal(summary(other, NOW)?.text, "5h 68% left");
+    assert.deepEqual(modelHoldWords(other, NOW), ["claude-fable limited · 1:12"]);
+    assert.equal(providerView(reported, NOW).state, "ok");
+    assert.equal(same.state, "limited");
+    assert.equal(same.until, NOW + 72 * MIN);
+    assert.equal(summary(same, NOW)?.text, "Limited 1:12");
+    // An account-wide hold limits every model.
+    assert.equal(
+        providerView({ ...reported, held: { until: NOW + MIN, reason: "z" } }, NOW, "claude-sonnet")
+            .state,
+        "limited",
+    );
+});
+
+test("less than one percent left says <1%, and is not limited", () => {
+    const tiny = { ...win("tokens", 0, "low", 6 * MIN, "tok"), tiny: true };
+    const view = providerView(provider("A", [tiny]), NOW);
+
+    assert.equal(view.state, "low");
+    assert.equal(summary(view, NOW)?.text, "tok <1% left");
+    assert.match(summary(view, NOW)?.aria ?? "", /low, <1% left/);
 });

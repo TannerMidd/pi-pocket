@@ -2416,13 +2416,33 @@ export class PocketApp {
             at: now,
             providers: [...known.values()].map((provider) => {
                 const mine = gates.filter((gate) => gate.provider === provider.id);
-                const gate = mine.sort((a, b) => b.until - a.until)[0];
+                const reach = (gate: (typeof mine)[number]) => gate.resetAt ?? gate.until;
+                const whole = mine
+                    .filter((gate) => gate.scope !== "model" || gate.modelId === undefined)
+                    .sort((a, b) => b.until - a.until)[0];
+                const single = new Map<
+                    string,
+                    { modelId: string; until: number; reason: string }
+                >();
+
+                for (const gate of mine) {
+                    if (gate.scope === "model" && gate.modelId !== undefined) {
+                        const before = single.get(gate.modelId);
+
+                        if (before === undefined || reach(gate) > before.until) {
+                            single.set(gate.modelId, {
+                                modelId: gate.modelId,
+                                until: reach(gate),
+                                reason: gate.reason,
+                            });
+                        }
+                    }
+                }
 
                 return this.usage.view(
                     provider,
-                    gate === undefined
-                        ? undefined
-                        : { until: gate.resetAt ?? gate.until, reason: gate.reason },
+                    whole === undefined ? undefined : { until: reach(whole), reason: whole.reason },
+                    [...single.values()],
                 );
             }),
         };

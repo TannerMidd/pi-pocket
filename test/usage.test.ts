@@ -174,6 +174,85 @@ test("API keys: Anthropic's requests and tokens, and a single plain limit", () =
     assert.equal(plain?.resetAt, AT + 3_600_000);
 });
 
+test("a window is limited only when it is exhausted, not when its percent rounds to 0", () => {
+    const one = (headers: Record<string, string>) => parseUsage(facts(headers), AT)[0];
+    const shape = (window: ReturnType<typeof one>) => [window?.left, window?.tiny, window?.state];
+
+    // Anthropic's subscription: 0.997 used is 0.3 left (shown 0, not none); 1 used is none.
+    assert.deepEqual(shape(one({ "anthropic-ratelimit-unified-5h-utilization": "0.997" })), [
+        0,
+        true,
+        "low",
+    ]);
+    assert.deepEqual(shape(one({ "anthropic-ratelimit-unified-5h-utilization": "1" })), [
+        0,
+        undefined,
+        "limited",
+    ]);
+    assert.deepEqual(shape(one({ "anthropic-ratelimit-unified-5h-remaining": "0.004" })), [
+        0,
+        true,
+        "low",
+    ]);
+    assert.deepEqual(shape(one({ "anthropic-ratelimit-unified-5h-remaining": "0" })), [
+        0,
+        undefined,
+        "limited",
+    ]);
+    assert.deepEqual(shape(one({ "anthropic-ratelimit-unified-5h-status": "rejected" })), [
+        0,
+        undefined,
+        "limited",
+    ]);
+
+    // ChatGPT's sign-in: 99.6 used is 0.4 left; 100 used is none.
+    assert.deepEqual(shape(one({ "x-codex-primary-used-percent": "99.6" })), [0, true, "low"]);
+    assert.deepEqual(shape(one({ "x-codex-primary-used-percent": "100" })), [
+        0,
+        undefined,
+        "limited",
+    ]);
+    assert.deepEqual(shape(one({ "x-codex-primary-used-percent": "100.4" })), [
+        0,
+        undefined,
+        "limited",
+    ]);
+
+    // Counted limits: 9,000 of 2,000,000 tokens left is 0.45 percent, with a countdown nowhere.
+    const tokens = (remaining: string) =>
+        one({
+            "x-ratelimit-limit-tokens": "2000000",
+            "x-ratelimit-remaining-tokens": remaining,
+            "x-ratelimit-reset-tokens": "6m0s",
+        });
+
+    assert.deepEqual(shape(tokens("9000")), [0, true, "low"]);
+    assert.equal(tokens("9000")?.detail, "9,000 of 2M left");
+    assert.deepEqual(shape(tokens("1")), [0, true, "low"]);
+    assert.deepEqual(shape(tokens("0")), [0, undefined, "limited"]);
+    assert.deepEqual(shape(tokens("10000")), [1, undefined, "low"]);
+
+    const anthropic = (remaining: string) =>
+        one({
+            "anthropic-ratelimit-requests-limit": "1000",
+            "anthropic-ratelimit-requests-remaining": remaining,
+            "anthropic-ratelimit-requests-reset": new Date(AT + 30_000).toISOString(),
+        });
+
+    assert.deepEqual(shape(anthropic("4")), [0, true, "low"]);
+    assert.deepEqual(shape(anthropic("0")), [0, undefined, "limited"]);
+
+    const plain = (remaining: string) =>
+        one({
+            "x-ratelimit-limit": "1000",
+            "x-ratelimit-remaining": remaining,
+            "x-ratelimit-reset": "60",
+        });
+
+    assert.deepEqual(shape(plain("4")), [0, true, "low"]);
+    assert.deepEqual(shape(plain("0")), [0, undefined, "limited"]);
+});
+
 test("a refusal that only says how long to wait is a limited window", () => {
     const [window] = parseUsage(facts({ "retry-after": "90" }, 429), AT);
 
@@ -223,7 +302,7 @@ test("missing and malformed values make no window, and no window is wrong", () =
 test("the store keeps the newest windows, no header and no secret", () => {
     let changed = 0;
     const store = new UsageStore({ now: () => AT, changed: () => changed++ });
-    const secret = "sk-ant-api03-THE-KEY";
+    const secret = "test-credential-not-a-key";
     const headers = {
         "anthropic-ratelimit-unified-5h-utilization": "0.5",
         "anthropic-ratelimit-unified-5h-reset": String(AT / 1000 + 100),
@@ -540,4 +619,48 @@ test("the limit gate marks its provider held in the owner's usage, and a request
         app.usageSnapshot().providers.find((each) => each.id === first.id)?.held,
         undefined,
     );
+});
+
+test("a model's own limit is a hold of that model, not of the provider", (t) => {
+    const [first] = app.usageSnapshot().providers;
+
+    assert.ok(first);
+
+    const gate = (scope: string, until: number, modelId?: string, resetAt?: number) => ({
+        ...{ key: `k-${scope}-${modelId}`, provider: first.id, kind: "reset", since: 0, tries: 1 },
+        ...{ probing: false, scope, until, reason: `${scope} limit` },
+        ...(modelId === undefined ? {} : { modelId }),
+        ...(resetAt === undefined ? {} : { resetAt }),
+    });
+    const mine = () => app.usageSnapshot().providers.find((each) => each.id === first.id);
+
+    t.mock.method(app.limits, "gates", () => [gate("model", 1000, "claude-fable", 2000)] as never);
+    assert.equal(mine()?.held, undefined, "one model's limit does not hold the provider");
+    assert.deepEqual(mine()?.modelHolds, [
+        { modelId: "claude-fable", until: 2000, reason: "model limit" },
+    ]);
+
+    // Both at once, and two gates of one model: the account's stays `held`, the later one counts for the model.
+    t.mock.method(
+        app.limits,
+        "gates",
+        () =>
+            [
+                gate("account", 3000),
+                gate("model", 1000, "claude-fable"),
+                gate("model", 1500, "claude-fable"),
+                gate("model", 500, "other"),
+            ] as never,
+    );
+    assert.deepEqual(mine()?.held, { until: 3000, reason: "account limit" });
+    assert.deepEqual(
+        mine()?.modelHolds?.map((hold) => [hold.modelId, hold.until]),
+        [
+            ["claude-fable", 1500],
+            ["other", 500],
+        ],
+    );
+
+    t.mock.method(app.limits, "gates", () => [] as never);
+    assert.equal(mine()?.modelHolds, undefined);
 });
