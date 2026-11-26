@@ -166,22 +166,24 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 
 ### The composer
 
-| Part                                      | What                                                                                                                    |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `composer`                                | All of it, under the conversation                                                                                       |
-| `dock`                                    | What sits above the message box: the queue and the bars                                                                 |
-| `subagents-bar`                           | The subagents' bar                                                                                                      |
-| `message-box`                             | The box you type in, with its buttons                                                                                   |
-| `quote-strip`                             | Above a box: a passage quoted (Ask PiP's, or Reply's in Separate), with a button to remove it (since 0.27.0)            |
-| `quote-count`                             | Above the session's box: how many quotes Reply put in it, with Clear quotes (since 0.29.0)                              |
-| `quote-block`                             | In the session's box: one quote Reply put in it, as drawn under the text. Colours and fills only (since 0.29.0)         |
-| `composer-tools`                          | The row of buttons in it                                                                                                |
-| `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop, and an extension's button (since 0.19.0) |
-| `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                                                          |
-| `model-chip`                              | The model's button                                                                                                      |
-| `send-button`                             | Send                                                                                                                    |
-| `status-line`                             | The line under the box: who is here, context, cost                                                                      |
-| `status-item`                             | An extension's item in it, with `data-module` naming its module (since 0.19.0)                                          |
+| Part                                      | What                                                                                                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `composer`                                | All of it, under the conversation                                                                                                         |
+| `dock`                                    | What sits above the message box: the queue and the bars                                                                                   |
+| `subagents-bar`                           | The subagents' bar                                                                                                                        |
+| `message-box`                             | The box you type in, with its buttons                                                                                                     |
+| `quote-strip`                             | Above a box: a passage quoted (Ask PiP's, or Reply's in Separate), with a button to remove it (since 0.27.0)                              |
+| `quote-count`                             | Above the session's box: how many quotes Reply put in it, with Clear quotes (since 0.29.0)                                                |
+| `quote-block`                             | In the session's box: one quote Reply put in it, as drawn under the text. Colours and fills only (since 0.29.0)                           |
+| `composer-tools`                          | The row of buttons in it                                                                                                                  |
+| `composer-button`                         | Each of its own buttons: Places, Attach, Plan, the mic, Steer and Queue, Stop, and an extension's button (since 0.19.0)                   |
+| `plan-chip`, `mode-switch`, `stop-button` | Plan, Steer and Queue, and Stop, each also a `composer-button`                                                                            |
+| `composer-more`                           | ⋯, in a box up to 480 px wide: opens the sheet of Plan, Attach, and extensions' buttons the row has no room for; also a `composer-button` |
+| `composer-more-sheet`                     | The list of those items in that sheet: an icon, a name, and what each says of itself                                                      |
+| `model-chip`                              | The model's button                                                                                                                        |
+| `send-button`                             | Send                                                                                                                                      |
+| `status-line`                             | The line under the box: who is here, context, cost                                                                                        |
+| `status-item`                             | An extension's item in it, with `data-module` naming its module (since 0.19.0)                                                            |
 
 ### Layers over the app
 

@@ -884,7 +884,7 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
 });
 
 test(
-    "Send, and while Pi works Stop, stay inside the message box on every phone width, with extension buttons and with more",
+    "Send, and while Pi works Stop, stay inside the message box on every phone width, with the extension buttons folded into ⋯ and with more",
     real,
     async () => {
         const busy = (on: boolean) =>
@@ -903,13 +903,12 @@ test(
                 send: number;
                 right: number;
                 shown: number;
-                below: boolean;
+                more: number;
             }>(`
                 const row = document.querySelector(".composer-row");
                 const stop = row.querySelector(".stop-button")?.getBoundingClientRect();
                 const send = row.querySelector(".send-button")?.getBoundingClientRect();
                 const shown = [...row.querySelectorAll(".ext-composer-button")].filter((each) => each.offsetWidth > 0);
-                const end = (stop ?? send).bottom;
 
                 return JSON.stringify({
                     scroll: row.scrollWidth,
@@ -918,7 +917,7 @@ test(
                     send: send?.right ?? 0,
                     right: row.getBoundingClientRect().right,
                     shown: shown.length,
-                    below: shown.every((each) => each.getBoundingClientRect().top >= end),
+                    more: row.querySelectorAll(".more-button").length,
                 });
             `);
 
@@ -945,24 +944,24 @@ test(
 
                     return "null";
                 `);
-                await until(() => has(".ext-composer-button"), "the extension's buttons");
+                await until(() => has(".more-button"), "⋯ for the extension's buttons");
 
-                // Idle: three buttons would push Send out of a phone's box: they take a line under it.
+                // Idle: three buttons would push Send out of a phone's box: they are in ⋯ instead, and the row stays one row.
                 const idle = await fit();
 
                 assert.ok(
                     idle.scroll <= idle.client && idle.send > 0 && idle.send <= idle.right,
                     `Send is out of the row at ${width} px: ${JSON.stringify(idle)}`,
                 );
-                assert.equal(idle.shown, 3, `the buttons show at ${width} px`);
-                assert.ok(idle.below, `the buttons are on a line under Send at ${width} px`);
+                assert.equal(idle.shown, 0, `the buttons are in ⋯ at ${width} px`);
+                assert.equal(idle.more, 1, `⋯ is in the row at ${width} px`);
 
                 await busy(true);
                 const working = await fit();
 
                 inside(width, "with three extension buttons", working);
-                assert.equal(working.shown, 3, "the extension's buttons stay, on their own line");
-                assert.ok(working.below, `the buttons are on a line under Stop at ${width} px`);
+                assert.equal(working.shown, 0, "the extension's buttons stay in ⋯ while Pi works");
+                assert.equal(working.more, 1, `⋯ is in the row at ${width} px`);
 
                 // A touch screen's taller tap layer on each mode (on a phone, the one mode button) still takes a tap
                 // above and below it: the cut that keeps Stop in is sideways only.
@@ -1004,17 +1003,17 @@ test(
                     `document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== window.__bigText)`,
                 );
 
-                // Something that nothing planned for: the row still keeps Stop.
+                // Something that nothing planned for, a little: the row never wraps, so it keeps Stop by its own slack.
                 await page.evaluate(`
                     const spacer = document.createElement("span");
                     spacer.id = "stress";
-                    spacer.style.cssText = "flex: none; width: 140px; height: 10px";
+                    spacer.style.cssText = "flex: none; width: 30px; height: 10px";
                     document.querySelector(".composer-row > .grow").before(spacer);
                 `);
-                inside(width, "with 140 px more in the row", await fit());
+                inside(width, "with 30 px more in the row", await fit());
                 await page.evaluate(`document.getElementById("stress")?.remove()`);
                 await busy(false);
-                assert.equal((await fit()).shown, 3, "and the buttons are back when Pi stops");
+                assert.equal((await fit()).more, 1, "and ⋯ stays when Pi stops");
             }
         } finally {
             await busy(false);

@@ -2416,7 +2416,8 @@ function placeItems() {
     }));
 }
 
-/** The buttons that extensions added to the message box's row, after the app's own on its left. */
+/** The buttons that extensions added to the message box's row, after the app's own on its left. In a box up to 480px wide
+they fold into its ⋯ button (`fold`, `more`: `composer-more.js`). */
 function composerItems() {
     return added("composerButton").map(({ record, spec }) => ({
         id: itemId(record, spec),
@@ -2424,6 +2425,15 @@ function composerItems() {
         module: record.title,
         before: spec.before,
         after: spec.after,
+        // In a box up to 480px wide, in the row's ⋯ menu (`composer-more.js`).
+        fold: 1,
+        more: () => ({
+            name: spec.title,
+            iconPath: pathOf(spec),
+            on: opened(record, spec),
+            badge: badgeFor(spec),
+            run: () => (opened(record, spec) ? closeOf(spec) : activate(record, spec)),
+        }),
         render: () => {
             const on = opened(record, spec);
             const badge = badgeFor(spec);

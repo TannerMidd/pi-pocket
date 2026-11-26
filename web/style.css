@@ -4225,6 +4225,101 @@ pre.diff .del {
     color: var(--muted);
 }
 
+/* ⋯: the buttons the row has no room for, in a sheet (`composer-more.js`). The dot says that one of them is on or has a
+ * count; the accent says it too. */
+.composer-row .more-button {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-control);
+    color: var(--muted);
+}
+
+.composer-row .more-button.on {
+    color: var(--accent);
+}
+
+.more-button .more-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-fill);
+    box-shadow: 0 0 0 2px var(--card);
+}
+
+@media (max-width: 699px) {
+    .composer-row .more-button {
+        width: 36px;
+        height: 36px;
+    }
+}
+
+/* The sheet's rows: an icon and a name, and on the right what the item says of itself. */
+.more-sheet .sheet-body {
+    padding: 0;
+    gap: 0;
+}
+
+.more-sheet .more-lead,
+.more-sheet .more-foot {
+    margin: 0;
+    padding: 12px 16px 8px;
+}
+
+.more-sheet .more-foot {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--hair);
+}
+
+.more-sheet .more-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 6px 6px;
+}
+
+.more-item {
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.more-item .icon {
+    color: var(--muted);
+}
+
+.more-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--faint);
+}
+
+.more-state.on {
+    color: var(--accent);
+}
+
+.more-count {
+    display: grid;
+    place-items: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: var(--radius);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+@media (pointer: coarse) {
+    .more-item {
+        min-height: 44px;
+    }
+}
+
 /* The model and its thinking level: opens the model menu. */
 .model-chip {
     display: inline-flex;
@@ -4286,84 +4381,17 @@ pre.diff .del {
 }
 
 @container composer (max-width: 400px) {
-    .composer.busy :is(.plan-chip, .model-caret) {
+    .composer.busy :is(.model-spark, .model-caret) {
         display: none;
     }
 }
 
-@container composer (max-width: 355px) {
-    .composer.busy .model-chip .model-spark {
-        display: none;
-    }
-}
-
-/* The buttons that extensions add to the row: any number of them can come. Where they would push Send (or Stop) out of a
- * narrow box (two or more up to 480 px, one up to 340 px), they take a line of their own under the row, where they stay
- * while Pi works. The break is the row's `::after`: a line of no height, so only the buttons' margin parts the lines. A
- * wrapping row breaks before an item that is too wide, not after shrinking one: the model asks for no room, so Send
- * stays on the first line, then takes what is left, up to its whole name. */
-@container composer (max-width: 480px) {
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) {
-        flex-wrap: wrap;
-        row-gap: 0;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .model-chip {
-        flex: 100 1 0;
-        max-width: max-content;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button)::after {
-        content: "";
-        order: 1;
-        flex-basis: 100%;
-        height: 0;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .ext-composer-button {
-        order: 2;
-        margin-top: 4px;
-    }
-}
-
+/* The row is one row, always. In a box up to 480px wide Plan and the buttons that extensions add are in the ⋯ button's
+ * sheet instead (`composer-more.js`), and so is Attach where the model's name would be cut to under eight characters.
+ * Without a ⋯ (nothing else to put in it), a box up to 340px wide that Pi works in gives up Attach, so the model keeps
+ * room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
 @container composer (max-width: 340px) {
-    .composer-row:has(.ext-composer-button) {
-        flex-wrap: wrap;
-        row-gap: 0;
-    }
-
-    .composer-row:has(.ext-composer-button) .model-chip {
-        flex: 100 1 0;
-        max-width: max-content;
-    }
-
-    .composer-row:has(.ext-composer-button)::after {
-        content: "";
-        order: 1;
-        flex-basis: 100%;
-        height: 0;
-    }
-
-    .composer-row:has(.ext-composer-button) .ext-composer-button {
-        order: 2;
-        margin-top: 4px;
-    }
-}
-
-/* One button, on its line in the row: while Pi works it steps aside on a narrow box, so Steer, Queue, Interrupt, and
- * Stop stay inside it. It shows again after. */
-@container composer (340px < width <= 480px) {
-    .composer.busy
-        .composer-row:not(:has(.ext-composer-button ~ .ext-composer-button))
-        .ext-composer-button {
-        display: none;
-    }
-}
-
-/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px), Attach goes while Pi works,
- * so the model keeps room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
-@container composer (max-width: 340px) {
-    .composer.busy .composer-row .attach-button {
+    .composer.busy .composer-row:not(:has(.more-button)) .attach-button {
         display: none;
     }
 }
@@ -17084,6 +17112,12 @@ textarea.notes {
     .composer-row .composer-mic {
         width: 32px;
         height: 36px;
+    }
+    /* ⋯: 36px, and its tap layer reaches 44px each way. */
+    .composer-row .more-button::before {
+        content: "";
+        position: absolute;
+        inset: -4px;
     }
     .composer-row .stop-button,
     .composer-row .send-button {

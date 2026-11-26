@@ -501,7 +501,7 @@ composerButton(spec: ComposerButtonSpec): Added<ComposerButtonSpec>;
 
 Since 0.19.0 · Experimental
 
-Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. In a narrow message box (a phone's), where they would push Send or Stop out of it, these buttons take a line of their own under the row: two or more up to 480 px wide, one up to 340 px. A single button in a box from 341 to 480 px wide stays in the row, and steps aside while Pi works, as the model chip does, so Stop stays in the row; it comes back when Pi stops. See [`ComposerButtonSpec`](#composerbuttonspec).
+Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. The row is always one row. In a message box up to 480 px wide (a phone's), these buttons are not in the row: they are in one **⋯** button after the model, which opens a sheet that lists them by icon and title, in the order of the row, with a dot on ⋯ and the badge's count in the sheet when a button has one. A choice runs what the button runs. So give each button a clear `title`, which names it in the sheet, and keep its `icon` simple. Above 480 px they are in the row as before. See [`ComposerButtonSpec`](#composerbuttonspec).
 
 ### `replyAction`
 

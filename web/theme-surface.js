@@ -243,6 +243,8 @@ export const PARTS = [
     "quote-block",
     "composer-tools",
     "composer-button",
+    "composer-more",
+    "composer-more-sheet",
     "plan-chip",
     "mode-switch",
     "stop-button",
