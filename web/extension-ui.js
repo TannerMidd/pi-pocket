@@ -2190,7 +2190,7 @@ export function sessionActions() {
             label: cutText(spec.label, ACTION_TEXT),
             title: spec.label,
             module: record.title,
-            // One with an icon is also a button on rows, where a mouse hovers (`sessions.js`).
+            // Kept for extensions that read it; rows draw no hover buttons since 0.31.0 (`sessions.js`).
             iconPath: spec.icon !== undefined || spec.iconPath !== undefined ? pathOf(spec) : null,
             run: (ids) => {
                 const sessions = Object.freeze([...ids]);
