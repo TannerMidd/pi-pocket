@@ -5822,50 +5822,6 @@ pre.diff .del {
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
 }
 
-/*
- * Linked-session branches are decorative; each row keeps its own button and actions. Each line runs down from the middle
- * of its parent's mark, and turns with a soft corner to the row's own.
- */
-.session-branches {
-    position: absolute;
-    inset: 0 auto 0 15px;
-    display: flex;
-    pointer-events: none;
-    color: color-mix(in srgb, var(--muted) 60%, transparent);
-}
-
-.session-branches > span {
-    position: relative;
-    width: 14px;
-}
-
-.session-branches > .continues::before,
-.session-branches > .elbow::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: -1px;
-    border-left: 1.5px solid currentColor;
-}
-
-.session-branches > .elbow::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: 50%;
-    width: 8px;
-    border-bottom: 1.5px solid currentColor;
-    border-left: 1.5px solid currentColor;
-    border-bottom-left-radius: calc(var(--r-tag) + 1px);
-}
-
-/* The last child: only the corner, no line on down. */
-.session-branches > .elbow:not(.continues)::before {
-    display: none;
-}
-
 .session-fold {
     position: absolute;
     top: 1px;
@@ -6451,12 +6407,6 @@ button.session-chip {
 /* While taps select rows (after Select), a tap on a chip selects its row too. */
 .sessions.tap-selecting button.session-chip {
     pointer-events: none;
-}
-
-/* A linked row's branch turns into its title's line, not the middle of the taller row. */
-.session-row.with-chips .session-branches > .elbow::after {
-    bottom: auto;
-    height: calc(14px + 6px * var(--space-y));
 }
 
 /* Extensions' filters beside the search (`pocket.sessionFilter`): lit while one narrows the list. */
