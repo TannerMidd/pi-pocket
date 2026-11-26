@@ -1,5 +1,5 @@
 /** The DevTools protocol over a pipe, and the Chromium process at the other end of it. */
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { brandName } from "./identity.ts";
@@ -152,7 +152,7 @@ export class Connection {
     }
 }
 
-const LAUNCH_ARGS = [
+export const LAUNCH_ARGS: readonly string[] = [
     "--headless=new",
     "--remote-debugging-pipe",
     "--no-first-run",
@@ -176,23 +176,54 @@ const LAUNCH_ARGS = [
 /** One Chromium process. It exits on its own when the pipe closes, so a crashed server leaves none behind. */
 export class Chromium {
     readonly connection: Connection;
-    readonly #child: ChildProcess;
+    readonly #stop: () => void;
     readonly exited: Promise<void>;
     userAgent = "";
     /** The browser's name and full version, for its client hints. */
     brand = "Chromium";
     version = "";
 
-    private constructor(child: ChildProcess, connection: Connection) {
-        this.#child = child;
+    private constructor(connection: Connection, stop: () => void, exited: Promise<void>) {
+        this.#stop = stop;
         this.connection = connection;
-        this.exited = new Promise((done) => {
-            if (child.exitCode !== null || child.signalCode !== null) {
-                done();
-            } else {
-                child.once("exit", () => done());
-            }
-        });
+        this.exited = exited;
+    }
+
+    /**
+     * A Chromium that runs somewhere else (in a sandbox's VM) and speaks the DevTools protocol over a pipe that its
+     * owner holds: `input` carries what the browser writes, `output` what is sent to it. `stop` ends it; `exited`
+     * settles when it has.
+     */
+    static async attach(
+        input: Readable,
+        output: Writable,
+        stop: () => void,
+        exited: Promise<void>,
+        name: string,
+    ): Promise<Chromium> {
+        const connection = new Connection(output, input);
+        const chromium = new Chromium(connection, stop, exited);
+
+        void exited.then(() => connection.close("The browser stopped."));
+
+        try {
+            await chromium.#handshake(name);
+        } catch (error) {
+            chromium.kill();
+
+            throw error;
+        }
+
+        return chromium;
+    }
+
+    async #handshake(executable: string): Promise<void> {
+        const version = await this.connection.send("Browser.getVersion", {}, undefined, 20_000);
+
+        this.userAgent = String(version.userAgent ?? "").replace("HeadlessChrome/", "Chrome/");
+        this.brand = brandName(String(version.product ?? ""), executable);
+        this.version = /\/([\d.]+)/.exec(String(version.product ?? ""))?.[1] ?? "";
+        await this.connection.send("Target.setDiscoverTargets", { discover: true });
     }
 
     static async launch(
@@ -239,23 +270,33 @@ export class Chromium {
         }
 
         const connection = new Connection(child.stdio[3] as Writable, child.stdio[4] as Readable);
-        const chromium = new Chromium(child, connection);
+        const exited = new Promise<void>((done) => {
+            if (child.exitCode !== null || child.signalCode !== null) {
+                done();
+            } else {
+                child.once("exit", () => done());
+            }
+        });
+        const chromium = new Chromium(
+            connection,
+            () => {
+                if (child.exitCode !== null || child.signalCode !== null) {
+                    return;
+                }
+
+                child.kill("SIGTERM");
+                const force = setTimeout(() => child.kill("SIGKILL"), 3000);
+
+                force.unref();
+                child.once("exit", () => clearTimeout(force));
+            },
+            exited,
+        );
 
         child.once("exit", () => connection.close("The browser stopped."));
 
         try {
-            const version = await Promise.race([
-                connection.send("Browser.getVersion", {}, undefined, 20_000),
-                failed,
-            ]);
-
-            chromium.userAgent = String(version.userAgent ?? "").replace(
-                "HeadlessChrome/",
-                "Chrome/",
-            );
-            chromium.brand = brandName(String(version.product ?? ""), executable);
-            chromium.version = /\/([\d.]+)/.exec(String(version.product ?? ""))?.[1] ?? "";
-            await connection.send("Target.setDiscoverTargets", { discover: true });
+            await Promise.race([chromium.#handshake(executable), failed]);
         } catch (error) {
             chromium.kill();
 
@@ -267,15 +308,6 @@ export class Chromium {
 
     kill(): void {
         this.connection.close("The browser stopped.");
-
-        if (this.#child.exitCode !== null || this.#child.signalCode !== null) {
-            return;
-        }
-
-        this.#child.kill("SIGTERM");
-        const force = setTimeout(() => this.#child.kill("SIGKILL"), 3000);
-
-        force.unref();
-        this.#child.once("exit", () => clearTimeout(force));
+        this.#stop();
     }
 }

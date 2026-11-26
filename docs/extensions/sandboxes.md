@@ -1,0 +1,53 @@
+# Sandboxes for sessions
+
+A module can give sessions a sandbox: the file and shell tools of a session run in an environment that the module makes (a micro-VM, a container), not on this machine. The built-in Gondolin sandbox (`extensions/gondolin.ts`) is the first user. [Sandboxes](../sandbox.md) tells what people see.
+
+**Experimental, since 0.31.0.** It can change in a minor release, but never in a patch release ([API stability](policies/api-stability.md#experimental)). A module for an older server checks that `host.sandbox` is there.
+
+## What core keeps, and what the module keeps
+
+Core keeps what a module cannot keep safe ([Core or extension](policies/core-or-extension.md), C1, C2, C4):
+
+- **The setting of each session**, in its own stored document (`pocket.sandbox`). It lasts across restarts, forks, subagents, and linked sessions: a session that a sandboxed session starts is sandboxed too.
+- **Fail closed.** A sandboxed session never runs a file or shell call on this machine. With no provider registered, or when the provider's environment throws, each call fails with the reason.
+- **The gate.** A `beforeTool` hook stops the tools that would run on the host. `read`, `write`, `edit`, and `bash` go through the environment, so they are the provider's. A few tools only change Pi Pocket's own state (`ask`, `ui`, `memory`, `schedule`, `tool_search`, `subagent`, `codemode`). Every other tool is a host tool, and it is stopped unless the provider's `hostTools()` says `"allow"`. `browser` is the provider's browser or nothing.
+- **No host secrets.** What `host.commandEnv` adds to host commands is not added to a sandboxed session's. Values that `host.hide` hides still leave every output.
+- **Who may.** `host.sandbox.set` checks that the person sees the session and may drive it, and asks the provider.
+
+The module keeps the sandbox itself: the VM, what it mounts, its network, its lifecycle, and the words for the people.
+
+## Register a provider
+
+```typescript
+web.onDispose(
+    host.sandbox.register({
+        mayChoose: (person) => person.role === "owner",
+        newSessions: () => false,
+        hostTools: () => "block",
+        problem: () => (ready ? undefined : "The sandbox is not set up."),
+        env: (target) => makeEnvironment(target),
+        changed: (conversationId, on) => {
+            /* stop the VM when `on` is false */
+        },
+    }),
+);
+```
+
+- `env(target)` returns an `ExecutionEnv` ([Pi Durable](https://github.com/earendil-works/pi-durable)). It returns at once: start the VM when the first call needs it. A call that cannot get one returns its error result with the reason. `target` has `conversationId`, `rootId` (the session: one VM serves it and its subagents), `cwd`, and `uploadDir`. Use `rootId` to find the VM.
+- `browser(target)` (optional) gives a `{ problem(), launch(flags) }`. `launch` starts a Chromium in the sandbox with Pi Pocket's flags and returns `{ input, output, stop, exited }`: the DevTools pipe (`--remote-debugging-pipe`) as streams that only the server holds. Do not open a port on this machine for it.
+- `mayChoose(person)`, `newSessions()`, `hostTools()`, and `problem()` are read at each use. `problem()` says why a session cannot be put in the sandbox now.
+- The last registration wins. The returned function removes it, and puts back the one before.
+
+## Set a session's sandbox
+
+`host.sandbox.set(conversationId, { id, role }, on)` puts a session and its subagents in the sandbox, or takes them out, for `person`. Core refuses when the person cannot see or drive the session, when `mayChoose` says no, when `problem()` says the host cannot run it, when the session is on a remote workspace, and, for a guest, when the owner chose the sandbox. `host.sandbox.get(conversationId)` reads `{ on, by, at }`.
+
+## Rules for a provider
+
+- Give the environment **only** the folder of the session (and its uploads, read only). Give it no sign-ins, no token, no keys, and none of the server's variables.
+- A path outside the mounted folder is a path in the sandbox, never on this machine.
+- A file the guest may not write because the host runs programs from it (git's config and hooks) stays out of its reach.
+- Never fall back to the host. A call that cannot run fails, with the reason.
+- Tell people what runs where. Core stops host tools, but a provider's own words are what people read.
+
+Gondolin's design (`docs/design/gondolin-sandbox.md` in the repository) shows one choice of each of these.

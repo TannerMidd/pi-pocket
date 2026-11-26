@@ -46,6 +46,7 @@ import {
     InterruptsDoc,
     type PendingReport,
     PlanDoc,
+    SandboxDoc,
     REPORT_PREFIX,
     STOPPED,
     type SubagentRecord,
@@ -1927,6 +1928,13 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
                     if (plan.on) {
                         Object.assign(await tx.doc(PlanDoc, child.id), plan);
+                    }
+
+                    // A sandboxed session's subagents run in its sandbox, never on the host.
+                    const sandbox = await tx.doc(SandboxDoc, api.conversationId);
+
+                    if (sandbox.on) {
+                        Object.assign(await tx.doc(SandboxDoc, child.id), sandbox);
                     }
 
                     state.agents[name] = { conversationId: child.id, reported: [] };

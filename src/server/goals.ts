@@ -118,7 +118,7 @@ export class Goals {
         context: Context,
     ): Promise<Omit<GoalCheck, "at">> {
         let output = "";
-        const env = this.#app.envFor(id);
+        const env = await this.#app.envForRun(id);
         const result = await env.exec(
             command,
             {

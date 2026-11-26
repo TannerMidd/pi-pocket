@@ -130,6 +130,68 @@ export interface WorkspaceProvider {
 }
 
 /**
+ * What a sandbox module needs to know to give a conversation its environment.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SandboxTarget {
+    /** The conversation whose call this is: a session, or one of its subagents. */
+    readonly conversationId: ConversationId;
+    /** The session: one VM serves it and its subagents. */
+    readonly rootId: ConversationId;
+    /** The folder the session works in, as a path on this machine. */
+    readonly cwd: string;
+    /** The session's own upload folder, which the VM may read; undefined when it has none. */
+    readonly uploadDir: string | undefined;
+}
+
+/**
+ * A browser in a VM, for the built-in browser to drive. `launch` starts it with the flags Pi Pocket gives every browser.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SandboxBrowser {
+    problem(): string | undefined;
+    launch(flags: readonly string[]): Promise<{
+        input: NodeJS.ReadableStream & import("node:stream").Readable;
+        output: import("node:stream").Writable;
+        stop(): void;
+        exited: Promise<void>;
+    }>;
+}
+
+/**
+ * What a module gives core so that sessions can run in its sandbox.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SandboxProvider {
+    mayChoose(person: { id: string; role: Role }): boolean;
+    newSessions(): boolean;
+    hostTools(): "block" | "allow";
+    problem(): string | undefined;
+    env(target: SandboxTarget): ExecutionEnv;
+    /** The browser in the conversation's VM: a Chromium whose DevTools pipe only this server holds. */
+    browser?(target: SandboxTarget): SandboxBrowser;
+    changed?(conversationId: ConversationId, on: boolean): void;
+}
+
+/**
+ * Sandboxed sessions.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SandboxApi {
+    register(provider: SandboxProvider): () => void;
+    get(conversationId: ConversationId): Promise<{ on: boolean; by?: string; at?: number }>;
+    set(
+        conversationId: ConversationId,
+        person: { id: string; role: Role },
+        on: boolean,
+    ): Promise<void>;
+}
+
+/**
  * What one `host.classify` call takes: what the model judges, and what it answers.
  * @since 0.31.0
  * @experimental
@@ -259,6 +321,12 @@ export interface Host {
      * @experimental
      */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+    /**
+     * Sandboxed sessions: a module registers the sandbox, and sets who runs in it.
+     * @since 0.31.0
+     * @experimental
+     */
+    readonly sandbox: SandboxApi;
     /**
      * Shapes the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. The return value stops the shaping.

@@ -95,6 +95,12 @@ Ask these questions in this order. The first "yes" gives the answer.
 - **Built-in extension: Session tags** (`extensions/session-tags.ts` and `session-tags/`). Its document of tags, its routes, its chips, filter, and sheets. It is off by default. At run time it uses only `host` and `web`, as a drop-in does.
 - **Why:** pull request #118, by Jeroen Dee (@jeroendee), first put tags in core, on the session list's stored data. Tags are a way to organize work that only some people want (C6), so the workflow became an extension, and the mechanism a set of extension points that other modules can use (C7). Who can see a session stays in core (C1, C9).
 
+### Sandboxes (0.31.0)
+
+- **Core: the setting and the guarantee** (`sandbox.ts`, `host.sandbox`). A session's sandbox setting (a stored document that forks, subagents, and linked sessions inherit), who may change it, the gate that stops tools which would run on the host, and the rule that a sandboxed session runs nothing on the host when the sandbox module is off or cannot start. The browser layer takes a Chromium that a sandbox provides (`RemoteBrowser`).
+- **Built-in extension: Gondolin sandbox** (`extensions/gondolin.ts` and `gondolin/`). The micro-VM, its mounts and network, its lifecycle, Set up, the settings, the sheet. It is off by default. At run time it uses only `host` and `web`.
+- **Why:** a protection that a module could forget or that disappears when the module is turned off is no protection (C1, C2, C4), so the mechanism is core, with a user when it ships (C15). The VM is a workflow that only some owners want (C6, C13).
+
 ### Web access (#126, 0.20.0)
 
 - **Core: `host.fetchPublic`.** A fetch that reaches only the public internet: it checks the address of each connection and each redirect, so a name that changes its address (DNS rebinding) gets nowhere, and it stops at a size and a time.

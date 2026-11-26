@@ -28,6 +28,7 @@ import {
     LinkedSessionCallsDoc,
     LinkedSessionPeersDoc,
     PlanDoc,
+    SandboxDoc,
     SessionsDoc,
     TurnsDoc,
 } from "./docs.ts";
@@ -1015,6 +1016,13 @@ export class LinkedSessions implements LinkedSessionsApi {
             };
             receipt.conversationId = Number(child.id);
             receipt.by = user.id;
+
+            // A session that a sandboxed session starts runs in a sandbox too: that is no way out of it.
+            const sourceSandbox = await tx.doc(SandboxDoc, source);
+
+            if (sourceSandbox.on) {
+                Object.assign(await tx.doc(SandboxDoc, child.id), sourceSandbox);
+            }
 
             if (actor !== undefined) {
                 await this.#authorize(tx, source, actor);

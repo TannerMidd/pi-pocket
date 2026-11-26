@@ -82,6 +82,7 @@ import {
     SessionsDoc,
     SpendDoc,
     type SubagentRecord,
+    SandboxDoc,
     SubagentsDoc,
     SurfacesDoc,
     TurnsDoc,
@@ -120,6 +121,7 @@ import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
 import { Inbox, type InboxDelivery } from "./inbox.ts";
 import { Pip, PIP_EXTENSION } from "./pip.ts";
+import { Sandboxes } from "./sandbox.ts";
 import { setComponentSource } from "./surfaces/components.ts";
 import { PendingActions } from "./surfaces/pending.ts";
 import {
@@ -491,6 +493,9 @@ export class PocketApp {
     );
     /** What extensions add to the environment of each command (`hidden.ts`, `host.commandEnv`). */
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
+    /** No variables for a sandboxed session's commands: what extensions add to host commands are secrets of the host. */
+    readonly #noCommandEnvs = new CommandEnvs((line) => this.#log(line));
+    readonly sandboxes = new Sandboxes(this);
     readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
@@ -635,6 +640,7 @@ export class PocketApp {
         });
         this.browsers = new Browsers({
             dataDir: options.dataDir,
+            remote: (id) => this.sandboxes.browserFor(id),
             ...(options.browser === undefined ? {} : { executable: options.browser }),
             log: (line) => this.#log(line),
             load: async (id) =>
@@ -975,6 +981,23 @@ export class PocketApp {
                 // Values extensions hide (`host.hide`) leave every tool's result before it is stored.
                 hooks: [
                     hook(ToolTask, {
+                        // A sandboxed session runs no tool that would run on the host (`sandbox.ts`).
+                        beforeTool: async (call, api, hookContext) => {
+                            if (
+                                (await api.snapshot(SandboxDoc, api.conversationId, hookContext))
+                                    ?.on !== true
+                            ) {
+                                return undefined;
+                            }
+
+                            const why = this.sandboxes.gate(
+                                call.name,
+                                call.arguments,
+                                api.conversationId,
+                            );
+
+                            return why === undefined ? undefined : { block: why };
+                        },
                         afterTool: (_call, result, api) => {
                             // A secret that changed while the tool ran is hidden from its result too.
                             this.secrets.sync();
@@ -1012,6 +1035,11 @@ export class PocketApp {
                 this.#registerModelProvider(provider, config),
             registerWorkspaceProvider: (scheme, provider) =>
                 this.registerWorkspaceProvider(scheme, provider),
+            sandbox: {
+                register: (provider) => this.sandboxes.register(provider),
+                get: (conversationId) => this.sandboxes.get(conversationId),
+                set: (conversationId, person, on) => this.sandboxes.set(conversationId, person, on),
+            },
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
 
@@ -1160,8 +1188,14 @@ export class PocketApp {
                 registry,
                 settings: this.#harnessSettings(),
                 now: this.now,
-                env: ({ conversationId, cwd }) =>
-                    this.#wrapped(conversationId, cwd ?? this.defaultCwd),
+                env: async ({ conversationId, cwd, read }) => {
+                    const sandboxed =
+                        (await read.snapshot(SandboxDoc, conversationId, context))?.on === true;
+
+                    return sandboxed
+                        ? this.#sandboxed(conversationId, cwd ?? this.defaultCwd)
+                        : this.#wrapped(conversationId, cwd ?? this.defaultCwd);
+                },
                 conversationCreated: async (tx, conversation) => {
                     // Every conversation gets the app's documents up front, so views can read them from the start.
                     await tx.doc(AuthorsDoc, conversation.id);
@@ -1294,6 +1328,11 @@ export class PocketApp {
                 if (agent !== undefined) {
                     this.#agents.set(id, agent as AgentState);
                 }
+
+                this.sandboxes.noted(
+                    id,
+                    (await this.harness.snapshot(SandboxDoc, id, context))?.on === true,
+                );
 
                 this.#noteChat(id, (await this.harness.snapshot(ChatDoc, id, context))?.messages);
                 const missing = await this.attribution.recover(
@@ -1543,6 +1582,8 @@ export class PocketApp {
                     });
                 }
             }
+        } else if (kind === SandboxDoc.definition.kind && id !== undefined) {
+            this.sandboxes.noted(id, (value as { on?: boolean } | null)?.on === true);
         } else if (kind === "pi.agent" && id !== undefined) {
             if (value !== null) {
                 this.#agents.set(id, value as AgentState);
@@ -1833,6 +1874,26 @@ export class PocketApp {
     /** Where a conversation's commands run: its folder here, or its workspace provider's env. */
     envFor(id: ConversationId): ExecutionEnv {
         return this.#wrapped(id, this.cwdOf(id));
+    }
+
+    /**
+     * Where a conversation's commands run now: in its sandbox when its session has one (`sandbox.ts`), else as `envFor`.
+     * It never gives a sandboxed session an environment of the host.
+     */
+    async envForRun(id: ConversationId): Promise<ExecutionEnv> {
+        const sandboxed = (await this.harness.snapshot(SandboxDoc, id, context))?.on === true;
+
+        return sandboxed ? this.#sandboxed(id, this.cwdOf(id)) : this.envFor(id);
+    }
+
+    /** A sandboxed conversation's environment: the module's, with values extensions hide taken out of its output. */
+    #sandboxed(id: ConversationId, cwd: string): ExecutionEnv {
+        this.secrets.sync();
+
+        return withQuietLimit(
+            wrapEnv(this.sandboxes.env(id, cwd), Number(id), cwd, this.#noCommandEnvs, this.hidden),
+            () => this.background.commandQuietMs,
+        );
     }
 
     /** A folder's environment, with what extensions add to each command and hide from its output in this session. */

@@ -51,6 +51,7 @@ import {
     NotesDoc,
     PinsDoc,
     PlanDoc,
+    SandboxDoc,
     type Schedule,
     SessionsDoc,
     STOPPED,
@@ -568,6 +569,17 @@ export class Commands {
                                 ...(title === undefined ? {} : { title }),
                                 ...(worktree === undefined ? {} : { worktree }),
                             };
+
+                            // New sessions start in the sandbox when the sandbox module says so: in this commit, so
+                            // no message can run on the host in between.
+                            if (!remote && app.sandboxes.newSessions) {
+                                Object.assign(await tx.doc(SandboxDoc, id), {
+                                    on: true,
+                                    by: user.id,
+                                    at: now,
+                                });
+                            }
+
                             await init?.(tx, id);
                         },
                     },
@@ -3183,6 +3195,9 @@ export class Commands {
         // A new session rather than a fork gets plan mode and the notes by hand.
         const plan =
             at === undefined ? await app.harness.snapshot(PlanDoc, id, context) : undefined;
+        // A session made from another one stays in its sandbox: that is no way out of it.
+        const sandbox =
+            at === undefined ? await app.harness.snapshot(SandboxDoc, id, context) : undefined;
         const notes =
             at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
 
@@ -3219,6 +3234,10 @@ export class Commands {
             if (at === undefined) {
                 if (plan !== undefined) {
                     Object.assign(await tx.doc(PlanDoc, forked), structuredClone(plan));
+                }
+
+                if (sandbox?.on === true) {
+                    Object.assign(await tx.doc(SandboxDoc, forked), structuredClone(sandbox));
                 }
 
                 if (notes !== undefined) {

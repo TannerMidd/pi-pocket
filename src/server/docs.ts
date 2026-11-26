@@ -612,6 +612,22 @@ export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
     initial: () => ({ on: false }),
 });
 
+/**
+ * Whether a session's tools run in a sandbox (a micro-VM) rather than on this machine. It is stored here, in core, so a
+ * sandboxed session stays one across restarts, forks, subagents and linked sessions, and so that no call of it runs on
+ * the host when the sandbox module is off (`sandbox.ts`). `by` is who chose it: only the owner takes away a sandbox
+ * that the owner chose.
+ */
+export const SandboxDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
+    kind: "pocket.sandbox",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "current",
+    initial: () => ({ on: false }),
+});
+
 export type Schedule = {
     /** Short and stable: what people and Pi use to cancel it. */
     id: string;

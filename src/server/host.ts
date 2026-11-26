@@ -514,6 +514,31 @@ export interface WorkspaceProvider {
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
 }
 
+import type { SandboxProvider } from "./sandbox.ts";
+
+export type { SandboxPerson, SandboxProvider, SandboxTarget } from "./sandbox.ts";
+
+/** Sandboxed sessions (`sandbox.ts`). Experimental, since 0.31.0. */
+export interface SandboxApi {
+    /**
+     * Make `provider` the sandbox of sandboxed sessions, until the returned function is called. The last registration
+     * wins. While none is registered, a sandboxed session runs nothing: core never falls back to this machine.
+     */
+    register(provider: SandboxProvider): () => void;
+    /** A session's setting. */
+    get(conversationId: ConversationId): Promise<{ on: boolean; by?: string; at?: number }>;
+    /**
+     * Put a session (and its subagents) in the sandbox, or take it out, for `person`: core checks that they see and
+     * may drive the session, and asks the provider whether they may choose. Throws an `HttpError`-like error with the
+     * reason when they may not.
+     */
+    set(
+        conversationId: ConversationId,
+        person: { id: string; role: Role },
+        on: boolean,
+    ): Promise<void>;
+}
+
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
 export interface PocketHost {
     readonly guard: LancetGuard;
@@ -579,6 +604,8 @@ export interface PocketHost {
     registerModelProvider(provider: string, config: ProviderConfig): () => void;
     /** @experimental @since 0.28.0 */
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void;
+    /** Sandboxed sessions. @experimental @since 0.31.0 */
+    readonly sandbox: SandboxApi;
     /**
      * Shape the request every model call sends: `shape` returns a replacement payload, or undefined to keep it. It runs
      * after Pi and the caller shaped the request, closest to the wire. Returns how to stop shaping. Only the modules

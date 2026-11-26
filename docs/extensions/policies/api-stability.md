@@ -45,6 +45,7 @@ These members are public:
 - `requesterOf(conversationId)`
 - `cwdOf(conversationId)` (experimental, since 0.28.0)
 - `registerWorkspaceProvider(scheme, provider)` and `WorkspaceProvider` (experimental, since 0.28.0: [Execution environments for workspaces](../workspaces.md))
+- `sandbox` (`register`, `get`, `set`), `SandboxProvider`, `SandboxTarget`, and `SandboxBrowser` (experimental, since 0.31.0: [Sandboxes for sessions](../sandboxes.md))
 - `roleOf(personId)` (experimental, since 0.27.0)
 - `skillPaths()`, `skills(cwd)`
 - `heldBack(conversationId)`, `onLimitsChanged(listener)`

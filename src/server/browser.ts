@@ -9,7 +9,8 @@
  * conversations. Pages are memory only: a restart closes them, and each conversation's last address and size come back
  * from its saved state when its page is next opened.
  */
-import { BrowserError, Chromium } from "./browser/cdp.ts";
+import type { Readable, Writable } from "node:stream";
+import { BrowserError, Chromium, LAUNCH_ARGS } from "./browser/cdp.ts";
 import { findBrowser, profileFolder } from "./browser/discovery.ts";
 import { BrowserPage, type BrowserState, type Saved, wait } from "./browser/page.ts";
 import { type Viewport, VIEWPORTS, viewportFrom } from "./browser/viewport.ts";
@@ -24,7 +25,30 @@ export type OpenOptions = {
     wait?: boolean;
 };
 
+/**
+ * A Chromium that a sandbox runs for a session, in its VM, instead of one on this machine: sandboxed sessions never use
+ * the host's browser. The sessions that share a VM share the browser, and keep their pages apart in contexts as ever.
+ */
+export interface RemoteBrowser {
+    /** Names the browser (its VM): conversations with the same key share one Chromium. */
+    readonly key: string;
+    /** Why this sandbox has no browser, or undefined when one can start. */
+    problem(): string | undefined;
+    /**
+     * Start the browser with the flags Pi Pocket gives every browser (`flags`: headless, DevTools over a pipe, and the
+     * rest), and give the pipe it speaks the DevTools protocol over.
+     */
+    launch(flags: readonly string[]): Promise<{
+        input: Readable;
+        output: Writable;
+        stop(): void;
+        exited: Promise<void>;
+    }>;
+}
+
 export interface BrowsersOptions {
+    /** The browser that runs in a conversation's sandbox, or undefined when its session is not sandboxed. */
+    remote?(conversationId: number): RemoteBrowser | undefined;
     /** Where the browser's profile goes: `browser/` in it. */
     dataDir: string;
     /** The browser to run. Undefined finds one; null means there is none (tests). */
@@ -48,6 +72,12 @@ export class Browsers {
     readonly #options: BrowsersOptions;
     #executable: string | null | undefined;
     #chromium: Promise<Chromium> | undefined;
+    /** Sandboxes' browsers, by `RemoteBrowser.key`. */
+    readonly #remotes = new Map<string, Promise<Chromium>>();
+    /** Which browser each open page is in: a remote's key, or none for this machine's. */
+    readonly #hosts = new Map<number, string>();
+    /** When the last page of each remote browser closed. */
+    readonly #remoteIdle = new Map<string, number>();
     readonly #pages = new Map<number, BrowserPage>();
     readonly #opening = new Map<number, Promise<BrowserPage>>();
     readonly #listeners = new Set<(conversationId: number, state: BrowserState) => void>();
@@ -79,6 +109,13 @@ export class Browsers {
         return this.executable !== undefined;
     }
 
+    /** Whether this conversation can have a browser: a sandboxed one asks its sandbox, never this machine. */
+    #availableFor(conversationId: number): boolean {
+        const remote = this.#options.remote?.(conversationId);
+
+        return remote === undefined ? this.available : remote.problem() === undefined;
+    }
+
     subscribe(listener: (conversationId: number, state: BrowserState) => void): () => void {
         this.#listeners.add(listener);
 
@@ -87,16 +124,17 @@ export class Browsers {
 
     /** A conversation's page as it is now; a closed one has no address. */
     state(conversationId: number): BrowserState {
-        const page = this.#pages.get(conversationId);
+        const page = this.page(conversationId);
 
-        if (page !== undefined && !page.closed) {
-            return page.state(this.available);
+        if (page !== undefined) {
+            return page.state(this.#availableFor(conversationId));
         }
 
-        const problem = this.#problems.get(conversationId);
+        const problem =
+            this.#options.remote?.(conversationId)?.problem() ?? this.#problems.get(conversationId);
 
         return {
-            available: this.available,
+            available: this.#availableFor(conversationId),
             open: false,
             url: "",
             title: "",
@@ -115,7 +153,22 @@ export class Browsers {
     page(conversationId: number): BrowserPage | undefined {
         const page = this.#pages.get(conversationId);
 
-        return page === undefined || page.closed ? undefined : page;
+        if (page === undefined || page.closed) {
+            return undefined;
+        }
+
+        // A session that went into a sandbox since this page opened must not keep a page of this machine's browser,
+        // nor one that left it a page of the sandbox's.
+        if (
+            (this.#hosts.get(conversationId) ?? "") !==
+            (this.#options.remote?.(conversationId)?.key ?? "")
+        ) {
+            void this.#discard(conversationId, page);
+
+            return undefined;
+        }
+
+        return page;
     }
 
     /** Coalesce a page's changes: frames of logs and loads arrive in bursts. */
@@ -185,6 +238,17 @@ export class Browsers {
 
         this.#options.log?.(`Browser started: ${executable}`);
 
+        this.#wire(chromium, "", () => {
+            if (this.#chromium === launching) {
+                this.#chromium = undefined;
+            }
+        });
+
+        return chromium;
+    }
+
+    /** Hear a Chromium's targets for the pages that are in it (`key`: a remote's, "" for this machine's). */
+    #wire(chromium: Chromium, key: string, closed: () => void): void {
         chromium.connection.onEvent = (method, params) => {
             if (!method.startsWith("Target.")) {
                 return;
@@ -199,6 +263,10 @@ export class Browsers {
             }
 
             for (const [id, page] of this.#pages) {
+                if ((this.#hosts.get(id) ?? "") !== key) {
+                    continue;
+                }
+
                 // A page closed by its own script (window.close()) is gone, with its browser context.
                 if (method === "Target.targetDestroyed" && info.targetId === page.targetId) {
                     void this.#discard(id, page);
@@ -209,16 +277,75 @@ export class Browsers {
         };
 
         chromium.connection.onClose = () => {
-            if (this.#chromium === launching) {
-                this.#chromium = undefined;
-            }
+            closed();
 
-            for (const page of this.#pages.values()) {
-                page.close();
+            for (const [id, page] of this.#pages) {
+                if ((this.#hosts.get(id) ?? "") === key) {
+                    page.close();
+                }
             }
         };
+    }
+
+    /** A sandbox's browser: started in its VM the first time a page needs it, and found again while it runs. */
+    async #remoteBrowser(remote: RemoteBrowser): Promise<Chromium> {
+        const problem = remote.problem();
+
+        if (problem !== undefined) {
+            throw new BrowserError(problem);
+        }
+
+        const existing = this.#remotes.get(remote.key);
+
+        if (existing !== undefined) {
+            const running = await existing.catch(() => undefined);
+
+            if (running !== undefined && !running.connection.closed) {
+                return running;
+            }
+        }
+
+        if (this.#closing) {
+            throw new BrowserError("The server is stopping.");
+        }
+
+        const launching = (async () => {
+            const link = await remote.launch(LAUNCH_ARGS);
+
+            return Chromium.attach(link.input, link.output, link.stop, link.exited, "chromium");
+        })();
+
+        this.#remotes.set(remote.key, launching);
+        launching.catch(() => {
+            if (this.#remotes.get(remote.key) === launching) {
+                this.#remotes.delete(remote.key);
+            }
+        });
+        const chromium = await launching;
+
+        if (this.#closing) {
+            chromium.kill();
+
+            throw new BrowserError("The server is stopping.");
+        }
+
+        this.#options.log?.(`Browser started in a sandbox: ${remote.key}`);
+        this.#wire(chromium, remote.key, () => {
+            if (this.#remotes.get(remote.key) === launching) {
+                this.#remotes.delete(remote.key);
+            }
+        });
 
         return chromium;
+    }
+
+    /** The browser a conversation's page runs in: its sandbox's, or this machine's. */
+    async #browserFor(conversationId: number): Promise<{ chromium: Chromium; key: string }> {
+        const remote = this.#options.remote?.(conversationId);
+
+        return remote === undefined
+            ? { chromium: await this.#browser(), key: "" }
+            : { chromium: await this.#remoteBrowser(remote), key: remote.key };
     }
 
     /**
@@ -272,7 +399,7 @@ export class Browsers {
             throw new BrowserError("The browser was closed.");
         }
 
-        const chromium = await this.#browser();
+        const { chromium, key } = await this.#browserFor(conversationId);
         const connection = chromium.connection;
         const { browserContextId } = await connection.send("Target.createBrowserContext", {
             disposeOnDetach: false,
@@ -314,6 +441,8 @@ export class Browsers {
             }
 
             this.#pages.set(conversationId, page);
+            this.#hosts.set(conversationId, key);
+            this.#remoteIdle.delete(key);
             this.#idleSince = Date.now();
 
             if (options.restore !== false && saved?.url !== undefined && saved.url !== "") {
@@ -351,13 +480,22 @@ export class Browsers {
         }
 
         page.close();
+        const key = this.#hosts.get(conversationId) ?? "";
+
+        this.#hosts.delete(conversationId);
 
         if (this.#pages.size === 0) {
             this.#idleSince = Date.now();
         }
 
+        if (key !== "" && ![...this.#hosts.values()].includes(key)) {
+            this.#remoteIdle.set(key, Date.now());
+        }
+
         this.#changed(conversationId);
-        const chromium = await this.#chromium?.catch(() => undefined);
+        const chromium = await (key === "" ? this.#chromium : this.#remotes.get(key))?.catch(
+            () => undefined,
+        );
 
         await chromium?.connection
             .send("Target.disposeBrowserContext", { browserContextId: page.contextId })
@@ -373,6 +511,14 @@ export class Browsers {
             }
         }
 
+        // A sandbox's browser stops a few minutes after its last page closed: it holds memory in the VM.
+        for (const [key, since] of this.#remoteIdle) {
+            if (Date.now() - since > 5 * 60_000 && ![...this.#hosts.values()].includes(key)) {
+                this.#remoteIdle.delete(key);
+                void this.#stopRemote(key);
+            }
+        }
+
         // The browser itself stops a few minutes after its last page closed.
         if (
             this.#pages.size === 0 &&
@@ -382,6 +528,29 @@ export class Browsers {
         ) {
             void this.#stopBrowser();
         }
+    }
+
+    async #stopRemote(key: string): Promise<void> {
+        const pending = this.#remotes.get(key);
+
+        this.#remotes.delete(key);
+        const chromium = await pending?.catch(() => undefined);
+
+        if (chromium !== undefined) {
+            chromium.kill();
+            await Promise.race([chromium.exited, wait(4000)]);
+        }
+    }
+
+    /** Close the pages of a sandbox's browser and stop it: its VM is going away. */
+    async closeRemote(key: string): Promise<void> {
+        for (const [id, page] of [...this.#pages]) {
+            if (this.#hosts.get(id) === key) {
+                await this.#discard(id, page);
+            }
+        }
+
+        await this.#stopRemote(key);
     }
 
     async #stopBrowser(): Promise<void> {
@@ -414,6 +583,7 @@ export class Browsers {
         }
 
         this.#pages.clear();
+        this.#hosts.clear();
 
         if (options.final === true) {
             // After the pages closed, which announces them: nobody listens any more.
@@ -424,7 +594,10 @@ export class Browsers {
             this.#pending.clear();
         }
 
-        await this.#stopBrowser();
+        await Promise.all([
+            this.#stopBrowser(),
+            ...[...this.#remotes.keys()].map((key) => this.#stopRemote(key)),
+        ]);
 
         if (options.final !== true) {
             for (const id of ids) {

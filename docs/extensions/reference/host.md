@@ -220,6 +220,16 @@ Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd`
 
 `WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. `signal` is optional: in 0.28, session creation and settings do not pass one yet.
 
+### `sandbox`
+
+```ts
+readonly sandbox: SandboxApi;
+```
+
+Since 0.31.0 · Experimental
+
+Sandboxed sessions: `register(provider)`, `get(conversationId)`, and `set(conversationId, person, on)`. A module registers the sandbox that sandboxed sessions run their file and shell tools in, and sets who runs in it. Core keeps each session's setting, stops tools that would run on this machine, and never runs a sandboxed session's call on the host: with no provider, or when the provider fails, each call fails with the reason. See [Sandboxes for sessions](../sandboxes.md) and [`SandboxProvider`](../sandboxes.md#register-a-provider).
+
 ### `requesterOf`
 
 ```ts
