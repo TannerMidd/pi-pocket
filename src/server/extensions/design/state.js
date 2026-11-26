@@ -69,7 +69,7 @@ export function loadPrefs() {
     return {
         device: ["mobile", "tablet", "desktop", "slide", "custom"].includes(saved.device)
             ? saved.device
-            : "auto",
+            : "desktop",
         custom: saved.custom ?? { w: 800, h: 600 },
         zoom:
             ["fit", "width", "auto"].includes(saved.zoom) || typeof saved.zoom === "number"
