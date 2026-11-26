@@ -4,6 +4,7 @@
 // while PiP works, or has something new. The panel watches PiP's conversation through a view of its own (`pipview`
 // events), so the session behind it stays as it was.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { OUTCOME_NOTE, pipReport } from "./agent-messages.js";
 import { followUpText } from "./artifact-bridge.js";
 import { useBack } from "./back.js";
 import { boxKey, keyBox } from "./box-keys.js";
@@ -625,7 +626,7 @@ function sessionOf(anchor) {
 // ─── The panel ──────────────────────────────────────────────────────────────
 
 /** A report from a session PiP follows, or a webhook's post (with what came as `data`): folded until opened. */
-function Report({ text, label = "Report", data = null, conversationId }) {
+function Report({ text, label = "Report", data = null, outcome, conversationId }) {
     const [open, setOpen] = useState(false);
 
     return html`<div class=${`pip-report ${open ? "open" : ""}`}>
@@ -645,6 +646,13 @@ function Report({ text, label = "Report", data = null, conversationId }) {
             conversationId=${conversationId}
         />
         ${data !== null && html`<pre class="pip-report-data">${data}</pre>`}
+        ${
+            outcome &&
+            html`<div class="pip-report-outcome">
+                <b data-outcome=${outcome.key}>Outcome: ${outcome.label}</b>
+                ${OUTCOME_NOTE}
+            </div>`
+        }
     </div>`;
 }
 
@@ -688,8 +696,11 @@ function Item({ item, last, busy, conversationId }) {
             const body = written(entry.text);
 
             if (body.startsWith(REPORT)) {
+                const report = pipReport(body.slice(REPORT.length));
+
                 return html`<${Report}
-                    text=${body.slice(REPORT.length)}
+                    text=${report.text}
+                    outcome=${report.outcome}
                     conversationId=${conversationId}
                 />`;
             }

@@ -3,6 +3,8 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { activityOpen } from "./activity-fold.js";
+import { AgentCard } from "./agent-card.js";
+import { parseAgentMessage } from "./agent-messages.js";
 import {
     noteRevealed,
     onPresentationMode,
@@ -76,32 +78,6 @@ import {
 } from "./ui.js";
 import { LessonCall, memoryAvailable } from "./sheets/memory.js";
 
-const REPORT = /^\[subagent (\S+) (answered|failed|stopped|stalled)([^\]]*)\]\s?([\s\S]*)$/;
-/** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
-const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed|stopped|stalled))/;
-
-/**
- * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
- * Its time is short ("2m 04s"), which keeps a long line that is not one quick to turn down.
- */
-const BACKGROUND =
-    /^\[background\] Task (\S+) (.+?) after ([^.\n]{1,20})\.\nCommand: (.*)\n([\s\S]*)$/;
-/** Where the next task's message starts, in a message of several that ended together (`background.ts`). */
-const NEXT_BACKGROUND = /\n\n(?=\[background\] Task )/;
-const OUTPUT_OPEN = "<background-output>\n";
-const OUTPUT_CLOSE = "\n</background-output>";
-
-/** The output fenced in a background task's message, or undefined when it printed nothing. */
-function fencedOutput(rest) {
-    const start = rest.indexOf(OUTPUT_OPEN);
-    const end = start < 0 ? -1 : rest.indexOf(OUTPUT_CLOSE, start + OUTPUT_OPEN.length);
-
-    return end < 0 ? undefined : rest.slice(start + OUTPUT_OPEN.length, end);
-}
-
-/** How a scheduled message starts (see src/server/schedules.ts). */
-const SCHEDULED = "[scheduled] ";
-
 /** A message the app sent for a person, and what sent it: PiP, a PR watch, a webhook (`submit` in src/server/commands.ts). */
 const VIA = /^\[via ([^\]\n]{1,300})\] /;
 /** What came from outside in such a message, fenced as data for Pi: a check's log, a webhook's post, GitHub's events. */
@@ -137,10 +113,6 @@ function FencedText({ text }) {
 
     return parts;
 }
-
-/** A goal's check that did not pass, as Pi is told about it (see src/server/extensions/goals.ts): what, then its output. */
-const GOAL_CHECK =
-    /^\[goal\] `([\s\S]*?)` (still fails|was cut off by a server restart) \(([^)]*)\)\. ([\s\S]*)$/;
 
 /** A skill run with `/skill:name`, as Pi gets it (see `expandSkillCommand` in src/server/prompts.ts): its name, file, and the request. */
 const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
@@ -333,76 +305,6 @@ function CodedText({ text }) {
     return parts;
 }
 
-/** A subagent's report: who, whether it answered or failed, and what it said. */
-function Report({ report, view, fresh }) {
-    const [, name, verb, after, text] = report;
-    const child = view.subagents.find((agent) => agent.name === name);
-    // One that did not answer says why: "failed: Bad request", "stalled again: no progress for 1 h…". Its words
-    // before the colon stay in its head ("stopped by Pi Pocket").
-    const said = verb === "answered" ? undefined : /^([^:]*):\s*([\s\S]*)$/.exec(after);
-    const why = said?.[2] ?? "";
-    const more = said?.[1]?.trim() ?? "";
-
-    return html`<div
-        class=${`report ${verb === "answered" ? "" : verb} ${fresh ? "enter" : ""}`}
-    >
-        <div class="report-head">
-            <span class="report-name">${name}</span> ${verb}${more && ` ${more}`}
-            ${
-                child &&
-                html`<button class="link" onClick=${() => openSubagent(child.conversationId)}>
-                    Open →
-                </button>`
-            }
-        </div>
-        ${why && html`<div class="report-why">${why}</div>`}
-        ${text && html`<${Collapsible} text=${text} />`}
-    </div>`;
-}
-
-/** A background task that ended, as a card for people: its id and outcome, its command, and its output folded away. */
-function BackgroundReport({ match }) {
-    const [, id, outcome, took, command, rest] = match;
-    const output = fencedOutput(rest);
-
-    return html`<div class="report background-report">
-        <div class="report-head">
-            <span class="report-name">${id}</span> ${outcome} · ${took}
-        </div>
-        ${command !== undefined && html`<div class="background-command muted small mono">${command}</div>`}
-        ${
-            output === undefined
-                ? html`<div class="muted small">It printed nothing.</div>`
-                : html`<${BackgroundOutput}
-                      text=${output}
-                      clipped=${rest.startsWith("The end of its output")}
-                  />`
-        }
-    </div>`;
-}
-
-/** Lines of a background task's output shown while it is folded: its last ones, where an error usually is. */
-const OUTPUT_LINES = 8;
-
-/** A background task's output as it printed it, folded to its last lines; `clipped` when the task printed more. */
-function BackgroundOutput({ text, clipped }) {
-    const [open, setOpen] = useState(false);
-    const lines = text.split("\n");
-    const folds = lines.length > OUTPUT_LINES;
-    const shown = folds && !open ? lines.slice(-OUTPUT_LINES).join("\n") : text;
-
-    return html`<div class="background-output">
-        ${clipped && html`<div class="muted small">The end of its output:</div>`}
-        <pre>${shown}</pre>
-        ${
-            folds &&
-            html`<button class="link" onClick=${() => setOpen(!open)}>
-                ${open ? "Show less" : `Show all ${lines.length} lines`}
-            </button>`
-        }
-    </div>`;
-}
-
 /** A span of time: "18s", "2m 04s", "1h 02m". */
 function span(ms) {
     const seconds = Math.max(0, Math.round(ms / 1000));
@@ -576,96 +478,57 @@ function PresentedText({ entry, text }) {
     `;
 }
 
-/** How the app marks a linked session's message (`linked-sessions.ts`): the sender's address in this session. */
-const LINKED_VIA = /^linked session (\S+)$/;
-
-/** A linked session's message folds past this many lines, or this many characters. */
-const LINKED_FOLD_LINES = 10;
-const LINKED_FOLD_CHARS = 900;
-
 /**
- * A message from a linked session: an agent, not a person, in a card of its own. Its head names the session and opens
- * it when this person may (`linkedPeers`, by address); its text shows as Markdown, as Pi's replies do, and a long one
- * folds to its first lines. Tapping the card opens its message sheet, as a person's message does.
+ * A message from an agent or the app: a card for each report or task in it (`AgentCard`). A card names a linked
+ * session by its title (`linkedPeers`, and the sessions this person sees), never its address, and opens it when this
+ * person may; Show raw, and a tap, open the message sheet with the exact text Pi received.
  */
-function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
-    const [open, setOpen] = useState(false);
-    const id = view.linkedPeers?.[address];
-    const session =
-        id === undefined ? undefined : store.state.sessions.find((each) => each.id === id);
-    const name = session ? (session.title ?? "New session") : undefined;
-    const lines = text.split("\n").length;
-    const folds = lines > LINKED_FOLD_LINES || text.length > LINKED_FOLD_CHARS;
+function AgentMessage({ entry, view, cards, attachments, fresh }) {
+    const time = entry.at ? clock(entry.at) : undefined;
+    const raw = () => openSheet({ type: "message", entryId: entry.id });
+
+    const draw = (card, index) => {
+        // A linked session is named by its title, from the view's `linkedPeers` and the sessions this person sees,
+        // never by its address.
+        const peer =
+            card.address === undefined
+                ? undefined
+                : store.state.sessions.find((each) => each.id === view.linkedPeers?.[card.address]);
+        const child =
+            card.subagent === undefined
+                ? undefined
+                : view.subagents.find((agent) => agent.name === card.subagent);
+        const title = peer ? (peer.title ?? "New session") : undefined;
+        const go = peer
+            ? { label: `Open ${title}`, run: () => navigate(peer.id) }
+            : child
+              ? {
+                    label: `Open ${card.subagent}`,
+                    run: () => openSubagent(child.conversationId),
+                }
+              : undefined;
+
+        return html`<${AgentCard}
+            key=${index}
+            card=${card}
+            id=${`${entry.id}-${index}`}
+            time=${time}
+            who=${card.address === undefined ? card.name : (title ?? "A session you cannot open")}
+            unknown=${card.address === undefined ? card.unknown : title === undefined}
+            go=${go}
+            extras=${index === 0 ? html`<${MessageExtras} entry=${entry} attachments=${attachments} />` : undefined}
+            onRaw=${raw}
+            renderFenced=${(text) => html`<${FencedText} text=${text} />`}
+        />`;
+    };
 
     return html`<div
-        class=${`user-row ${fresh ? "enter" : ""}`}
+        class=${`user-row acard-row ${fresh ? "enter" : ""}`}
         data-part="prompt-row"
         data-entry-kind=${entry.presentation?.entryKind}
         id=${`entry-${entry.id}`}
     >
-        <div
-            class=${`prompt linked-message tappable ${folds ? "folds" : ""} ${open ? "open" : ""}`}
-            data-part="prompt"
-            data-from="linked"
-            title="Edit, send again, or copy"
-            tabindex="0"
-            onClick=${(event) => openMessage(event, entry.id)}
-            onKeyDown=${(event) => {
-                if (
-                    (event.key === "Enter" || event.key === " ") &&
-                    event.target === event.currentTarget
-                ) {
-                    event.preventDefault();
-                    openMessage(event, entry.id);
-                }
-            }}
-        >
-            <div class="linked-head" data-part="linked-head">
-                <span class="linked-mark" data-part="linked-mark" aria-hidden="true">
-                    <${Icon} name="fork" size=${16} />
-                </span>
-                <span class="linked-who">
-                    <span class="linked-kicker">
-                        <span class="linked-tag">Linked session</span>
-                        ${entry.at && html`<span>· ${clock(entry.at)}</span>`}
-                    </span>
-                    <span
-                        class=${`linked-name ${name ? "" : "unknown"}`}
-                        data-part="linked-name"
-                    >
-                        ${name ?? "A session you cannot open"}
-                    </span>
-                </span>
-                ${
-                    session &&
-                    html`<button
-                        class="linked-open"
-                        data-part="linked-open"
-                        aria-label=${`Open ${name}`}
-                        onClick=${() => navigate(session.id)}
-                    >
-                        Open
-                        <${Icon} path="M5 12h14M13 6l6 6-6 6" size=${14} />
-                    </button>`
-                }
-            </div>
-            <div class="linked-body" data-part="linked-body" id=${`linked-body-${entry.id}`}>
-                <${Markdown} text=${text} />
-                <${MessageExtras} entry=${entry} attachments=${attachments} />
-            </div>
-            ${
-                folds &&
-                html`<button
-                    class="linked-more"
-                    data-part="linked-more"
-                    aria-expanded=${open ? "true" : "false"}
-                    aria-controls=${`linked-body-${entry.id}`}
-                    onClick=${() => setOpen(!open)}
-                >
-                    ${open ? "Show less" : `Show all · ${lines} lines`}
-                </button>`
-            }
-        </div>
+        ${cards.length === 1 ? draw(cards[0], 0) : html`<div class="acard-group">${cards.map(draw)}</div>`}
     </div>`;
 }
 
@@ -673,101 +536,38 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
 function UserMessage({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
-    // A report has nobody's name on it: a person's message that looks like one is theirs.
-    if (REPORT.test(entry.text) && entry.from === undefined && !view.authors?.[entry.id]) {
-        // Several that arrived together came as one message: a card each. A part that is not a report's start is
-        // more of the report before it.
-        const parts = [];
-
-        for (const part of entry.text.split(NEXT_REPORT)) {
-            if (parts.length > 0 && !REPORT.test(part)) {
-                parts[parts.length - 1] += `\n\n${part}`;
-            } else {
-                parts.push(part);
-            }
-        }
-
-        const reports = parts.map((part) => REPORT.exec(part)).filter(Boolean);
-
-        return reports.length === 1
-            ? html`<${Report} report=${reports[0]} view=${view} fresh=${fresh} />`
-            : html`<div class="report-group">
-                  ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
-              </div>`;
-    }
-
-    // A background task's message: nobody typed it, so a person writing "[background]" themselves keeps it theirs.
-    const background =
-        entry.from === undefined && !view.authors?.[entry.id] ? BACKGROUND.exec(entry.text) : null;
-
-    if (background) {
-        // Several tasks that ended together came as one message: a card each. A part that is not a task's start is
-        // more of the one before it.
-        const parts = [];
-
-        for (const part of entry.text.split(NEXT_BACKGROUND)) {
-            if (parts.length > 0 && !BACKGROUND.test(part)) {
-                parts[parts.length - 1] += `\n\n${part}`;
-            } else {
-                parts.push(part);
-            }
-        }
-
-        const tasks = parts.map((part) => BACKGROUND.exec(part)).filter(Boolean);
-
-        return tasks.length === 1
-            ? html`<${BackgroundReport} match=${tasks[0]} />`
-            : html`<div class="report-group">
-                  ${tasks.map((match) => html`<${BackgroundReport} match=${match} />`)}
-              </div>`;
-    }
-
-    const check = GOAL_CHECK.exec(entry.text);
-
-    if (check) {
-        const [, command, what, how, output] = check;
-
-        return html`<div class="report failed">
-            <div class="report-head">
-                <span class="report-name mono">${command}</span> ${what} · ${how}
-            </div>
-            <${Collapsible} text=${output} limit=${300} />
-        </div>`;
-    }
-
     const authorId = view.authors?.[entry.id];
     const author =
         authorName(entry.id, view, users) ??
         entry.from ??
         (view.conversation?.kind === "subagent" ? "Main agent" : undefined);
     const [written, attachments] = splitAttachments(entry.text);
-    // Set up earlier to go out now: by a person (who shows as its author) or by Pi.
-    // Only a message nobody typed: someone writing "[via …]" themselves gets no label.
-    const via = authorId === undefined ? VIA.exec(written) : null;
-    const sent = via ? written.slice(via[0].length) : written;
-    const scheduled = sent.startsWith(SCHEDULED);
-    // A linked session's message: shown by its label and its fence alone, so the words before the fence (which tell Pi
-    // how to read it) can change without changing how older messages show.
-    const peerText =
-        via && LINKED_VIA.test(via[1])
-            ? /\n<linked-session-message>\n([\s\S]*)\n<\/linked-session-message>$/.exec(sent)?.[1]
-            : undefined;
+    // What an agent or the app sent is a card; nothing a person typed is, whatever it starts with.
+    const cards = parseAgentMessage({
+        text: entry.text,
+        written,
+        named: entry.from !== undefined,
+        author,
+        authored: authorId !== undefined,
+    });
 
-    if (peerText !== undefined) {
-        return html`<${LinkedMessage}
+    if (cards !== null && cards.length > 0) {
+        return html`<${AgentMessage}
             entry=${entry}
             view=${view}
-            address=${LINKED_VIA.exec(via[1])[1]}
-            text=${peerText}
+            cards=${cards}
             attachments=${attachments}
             fresh=${fresh}
         />`;
     }
 
-    const body = scheduled ? sent.slice(SCHEDULED.length) : sent;
+    // A message through a label that has no card (an unknown envelope): its label and its words as they came.
+    const via = authorId === undefined ? VIA.exec(written) : null;
+    const sent = via ? written.slice(via[0].length) : written;
+    const body = sent;
     // `/skill:name request`: the skill by name, and the request.
     const skill = SKILL.exec(body);
-    const name = author ?? (scheduled ? "Pi" : undefined);
+    const name = author;
     // Your own messages take the accent; someone else's, their color; one from someone the app does not know (a name
     // the message carries, the main agent, Pi's own schedule), a quiet one.
     const mark =
@@ -824,7 +624,6 @@ function UserMessage({ entry, view, users }) {
                     </span>`
                 }
                 ${entry.at && html`<span class="prompt-time">${clock(entry.at)}</span>`}
-                ${scheduled && html`<span class="prompt-time">· scheduled</span>`}
                 ${via && html`<span class="prompt-time">· via ${via[1]}</span>`}
             </span>
             <div class="prompt-body" data-part="prompt-text">
@@ -867,21 +666,6 @@ function QuotedText({ text }) {
             ? html`<${CodedText} text=${part.text} />`
             : html`<blockquote class="reply-quote" data-part="reply-quote">${part.quote}</blockquote>`,
     );
-}
-
-function Collapsible({ text, limit = 600 }) {
-    const [open, setOpen] = useState(false);
-
-    if (text.length <= limit) {
-        return html`<${Markdown} text=${text} />`;
-    }
-
-    return html`<div class=${`collapsible ${open ? "open" : ""}`}>
-        <${Markdown} text=${open ? text : `${text.slice(0, limit)}…`} />
-        <button class="link" onClick=${() => setOpen(!open)}>
-            ${open ? "Show less" : "Show more"}
-        </button>
-    </div>`;
 }
 
 // ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────

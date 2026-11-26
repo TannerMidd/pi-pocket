@@ -1,4 +1,4 @@
-// A linked session's message (`LinkedMessage` in web/transcript.js) shows as a card of its own: its session's name and
+// A linked session's message (`AgentCard` in web/agent-card.js) shows as a card of its own: its session's name and
 // Open, its text as Markdown, and a long one folded. A sender this person cannot open shows without a name.
 import {
     type App,
@@ -102,13 +102,13 @@ test("a linked session's message is a card that names its session and opens it",
     await page.navigate(`${base}/s/${source}`);
     // Two cards: the report of the linked session's first run, which came by itself, then the message.
     await see(
-        `return JSON.stringify([...document.querySelectorAll(".linked-message .linked-name")].map((each) => each.textContent.trim()).join() === "Post-fix review,Post-fix review")`,
+        `return JSON.stringify([...document.querySelectorAll(".acard .acard-name")].map((each) => each.textContent.trim()).join() === "Post-fix review,Post-fix review")`,
         "the cards with the session's name",
     );
     const row = await inPage<string>(
-        `return JSON.stringify([...document.querySelectorAll(".user-row:has(.linked-message)")].at(-1).id)`,
+        `return JSON.stringify([...document.querySelectorAll(".user-row:has(.acard)")].at(-1).id)`,
     );
-    const CARD = `#${row} .linked-message`;
+    const CARD = `#${row} .acard`;
 
     const card = await inPage<{
         from: string;
@@ -122,17 +122,17 @@ test("a linked session's message is a card that names its session and opens it",
         const card = document.querySelector(${JSON.stringify(CARD)});
         return JSON.stringify({
             from: card.dataset.from,
-            tag: card.querySelector(".linked-tag").textContent,
-            items: card.querySelectorAll(".linked-body li").length,
-            code: [...card.querySelectorAll(".linked-body code")].map((each) => each.textContent),
-            lead: card.querySelector(".linked-body .md > p:first-child").textContent,
+            tag: card.querySelector(".acard-state").textContent + card.querySelector(".acard-source").textContent,
+            items: card.querySelectorAll(".acard-body li").length,
+            code: [...card.querySelectorAll(".acard-body code")].map((each) => each.textContent),
+            lead: card.querySelector(".acard-body .md > p:first-child").textContent,
             routing: card.textContent.includes("written by another session's agent"),
-            more: card.querySelector(".linked-more")?.textContent.trim(),
+            more: card.querySelector(".acard-more")?.textContent.trim(),
         });
     `);
 
     assert.equal(card.from, "linked");
-    assert.equal(card.tag, "Linked session");
+    assert.equal(card.tag, "Message· Linked session");
     // Markdown, not the raw text: a list, code, and the main point as its own first paragraph.
     assert.equal(card.items, 14);
     assert.deepEqual(card.code, ["npm run check", "web/running-board.js"]);
@@ -143,19 +143,19 @@ test("a linked session's message is a card that names its session and opens it",
     // Folded until Show all; then whole.
     const height = () =>
         inPage<number>(
-            `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .linked-body`)}).getBoundingClientRect().height)`,
+            `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .acard-body`)}).getBoundingClientRect().height)`,
         );
     const folded = await height();
 
-    await page.click({ selector: `${CARD} .linked-more` });
+    await page.click({ selector: `${CARD} .acard-more` });
     await see(
-        `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .linked-more`)}).textContent.trim() === "Show less")`,
+        `return JSON.stringify(document.querySelector(${JSON.stringify(`${CARD} .acard-more`)}).textContent.trim() === "Show less")`,
         "the message open",
     );
     assert.ok((await height()) > folded);
 
     // Open goes to the session that sent it.
-    await page.click({ selector: `${CARD} .linked-open` });
+    await page.click({ selector: `${CARD} .acard-open` });
     await see(`return JSON.stringify(location.pathname === "/s/${session}")`, "the linked session");
 });
 
@@ -178,12 +178,12 @@ test(
 
         await page.navigate(`${base}/s/${source}`);
         await see(
-            `return JSON.stringify(document.querySelector(".linked-message .linked-name.unknown")?.textContent.trim() === "A session you cannot open")`,
+            `return JSON.stringify(document.querySelector(".acard .acard-name.unknown")?.textContent.trim() === "A session you cannot open")`,
             "the card without a name",
         );
         assert.deepEqual(
             await inPage(
-                `return JSON.stringify([document.querySelector(".linked-message .linked-open"), document.querySelector(".linked-message .linked-more")])`,
+                `return JSON.stringify([document.querySelector(".acard .acard-open"), document.querySelector(".acard .acard-more")])`,
             ),
             [null, null],
         );
