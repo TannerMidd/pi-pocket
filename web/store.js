@@ -2662,7 +2662,7 @@ export function navigate(
     showKept(conversationId);
 }
 
-export function openFamily(scope, query = "", origin = document.activeElement) {
+export function openFamily(scope, query = "", origin = document.activeElement, filter = "all") {
     scope = String(scope);
 
     if (store.state.family?.scope === scope) {
@@ -2671,7 +2671,10 @@ export function openFamily(scope, query = "", origin = document.activeElement) {
         return;
     }
 
-    navigate(null, { family: newFamilyVisit(scope, query, origin) });
+    const family = newFamilyVisit(scope, query, origin);
+
+    family.filter = filter;
+    navigate(null, { family });
 }
 
 /**

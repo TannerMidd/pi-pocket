@@ -29,7 +29,7 @@ test("nested families count each visible session once and cap recent shortcuts i
     const tree = familyIndex(sessions);
 
     assert.equal(familyIndex(sessions), tree);
-    assert.equal(descendantCount(tree.nodes.get(0)), 1476);
+    assert.equal(descendantCount(tree.nodes.get(0)), 1475);
     assert.equal(belongsTo(tree.nodes.get(3), tree.nodes.get(1)), true);
     assert.equal(belongsTo(tree.nodes.get(1477), tree.nodes.get(0)), false);
     assert.equal(breadcrumb(tree.nodes.get(3)), "Record 0 › Record 1");
@@ -51,6 +51,20 @@ test("nested families count each visible session once and cap recent shortcuts i
         [4, 6, 8, 10],
     );
     assert.equal(rows.roots.length, 2);
+});
+
+test("counts skip archived sessions but keep active descendants of archived parents", () => {
+    const tree = familyIndex([
+        record(0),
+        { ...record(1, 0), archived: true },
+        record(2, 1),
+        { ...record(3, 1), archived: true },
+    ]);
+    const counts = familyAttention(tree, (s: {id:number}) => s.id === 1 ? "failed" : "ask");
+
+    assert.equal(descendantCount(tree.nodes.get(0)), 1);
+    assert.equal(descendantCount(tree.nodes.get(1)), 1);
+    assert.deepEqual(counts.get(tree.nodes.get(0)), {waiting:1, failed:0});
 });
 
 test("a missing parent has no breadcrumb; cycles and deep chains do not lose rows or recurse", () => {

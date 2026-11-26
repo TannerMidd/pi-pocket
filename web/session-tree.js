@@ -9,7 +9,7 @@ export function familyIndex(sessions) {
     const nodes = new Map(
         sessions.map((session) => [
             session.id,
-            { session, parent: null, children: [], start: 0, end: 0 },
+            { session, parent: null, children: [], start: 0, end: 0, activeKids: 0 },
         ]),
     );
 
@@ -63,6 +63,10 @@ export function familyIndex(sessions) {
         const node = order[i];
 
         node.end = node.children.at(-1)?.end ?? i + 1;
+
+        if (node.parent) {
+            node.parent.activeKids += node.activeKids + Number(!node.session.archived);
+        }
     }
 
     const index = { nodes, roots, order };
@@ -72,7 +76,7 @@ export function familyIndex(sessions) {
     return index;
 }
 
-export const descendantCount = (node) => (node ? node.end - node.start - 1 : 0);
+export const descendantCount = (node) => node?.activeKids ?? 0;
 export const belongsTo = (node, lead) => lead && node.start > lead.start && node.start < lead.end;
 
 export function familyAttention(index, needOf) {

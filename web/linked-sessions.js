@@ -14,7 +14,9 @@ function Relationships() {
     const lead = node?.parent?.session;
     const kids = descendantCount(node);
 
-    if (!sessionsLoaded || (!lead && !kids)) {
+    const family = node?.children.length > 0;
+
+    if (!sessionsLoaded || (!lead && !family)) {
         return null;
     }
 
@@ -31,9 +33,9 @@ function Relationships() {
         </button>`
         }
         ${
-            kids > 0 &&
-            html`<button data-family-open="header-family" aria-label=${"Browse " + kids + " linked sessions" + (info?.waiting ? ", " + info.waiting + " waiting" : "") + (info?.failed ? ", " + info.failed + " failed" : "")} onClick=${(event) => openFamily(conversationId, "", event.currentTarget)}>
-            <${Icon} name="fork" size=${14}/><strong>${kids.toLocaleString()} linked</strong>
+            family &&
+            html`<button data-family-open="header-family" aria-label=${kids === 0 ? "Browse archived links" : "Browse " + kids + " linked sessions" + (info?.waiting ? ", " + info.waiting + " waiting" : "") + (info?.failed ? ", " + info.failed + " failed" : "")} onClick=${(event) => openFamily(conversationId, "", event.currentTarget, kids === 0 ? "archived" : "all")}>
+            <${Icon} name="fork" size=${14}/><strong>${kids === 0 ? "Archived links" : kids.toLocaleString() + " linked"}</strong>
             ${info?.waiting > 0 && html`<span class="family-attn">${info.waiting} waiting</span>`}
             ${info?.failed > 0 && html`<span class="family-attn">${info.failed} failed</span>`}
             <${Icon} name="chevron" size=${13}/>

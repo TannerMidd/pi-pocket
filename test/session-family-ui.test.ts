@@ -163,6 +163,31 @@ for (const mobile of [false, true]) {
             5,
             "two roots, two shortcuts and the open child",
         );
+        await p.press("Tab");
+        await run(p, "document.querySelector(" + q(browse) + ").focus()");
+        assert.equal(await get(p, "document.querySelector(" + q(browse) + ").getAttribute('aria-label')"), "Browse 1391 linked sessions");
+        const control = await get<{hit:number,ring:string, radius:number,border:string,inside:boolean}>(p,
+            `(() => {
+                const btn = document.querySelector(${q(browse)});
+                const label = btn.querySelector('.family-browse-label');
+                const style = getComputedStyle(label);
+                const hit = btn.getBoundingClientRect();
+                const box = label.getBoundingClientRect();
+                const ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+                return {
+                    hit: Math.min(hit.height, hit.width),
+                    ring: style.outlineStyle,
+                    radius: parseFloat(style.borderRadius),
+                    border: style.borderStyle,
+                    inside: box.right + ring <= hit.right && box.left - ring >= hit.left &&
+                        box.top - ring >= hit.top && box.bottom + ring <= hit.bottom,
+                };
+            })()`);
+
+        assert.ok(control.hit >= 44);
+        assert.equal(control.ring,"solid");
+        assert.equal(control.border,"none");
+        assert.ok(control.inside && control.radius <= 4);
         await shot(p, device + "-recent");
         await enter(p, sidebar + ' [data-family-open="work"]');
         await wait(p, explorer + " .session-row");
@@ -176,8 +201,15 @@ for (const mobile of [false, true]) {
         await wait(p, explorer + " .session-row");
         assert.equal(
             await get(p, "document.querySelector('.family-range').textContent"),
-            "1–12 of 1,478",
+            "1–12 of 1,391",
         );
+        const filterState = (value:string) => run(p,
+            `const el=document.querySelector('.family-filters select');el.value=${q(value)};el.dispatchEvent(new Event('change',{bubbles:true}));`);
+
+        await filterState('archived');
+        assert.equal(await get(p,"document.querySelector('.family-range').textContent"),"1–12 of 87");
+        assert.equal(await get(p,"[...document.querySelectorAll('.family-explorer .session-row')].every(el=>el.textContent.includes('Archived'))"),true);
+        await filterState('all');
         await enter(p, '[aria-label="Next page"]');
         await enter(p, '[aria-label="Next page"]');
         await wait(p, result(proof));
@@ -193,7 +225,7 @@ for (const mobile of [false, true]) {
         await wait(p, result(proof));
         assert.equal(
             await get(p, "document.querySelector('.family-pager span').textContent"),
-            "Page 3 of 124",
+            "Page 3 of 116",
         );
         assert.equal(
             await get(p, "document.activeElement.matches(" + q(result(proof)) + ")"),
@@ -206,7 +238,7 @@ for (const mobile of [false, true]) {
         await p.type({ selector: explorer + " input" }, "Night legend");
         assert.equal(
             await get(p, "document.querySelectorAll('.family-explorer .session-row').length"),
-            2,
+            1,
         );
         assert.match(
             await get<string>(p, "document.querySelector(" + q(result(proof)) + ").innerText"),
@@ -263,7 +295,7 @@ for (const mobile of [false, true]) {
         await p.type({ selector: explorer + " input" }, "Night legend");
         assert.equal(
             await get(p, "document.querySelectorAll('.family-explorer .session-row').length"),
-            3,
+            2,
         );
         assert.equal(await get(p, "document.documentElement.scrollWidth > innerWidth"), false);
     });
@@ -336,7 +368,7 @@ test(
         );
         assert.doesNotMatch(
             await get<string>(p, "document.body.innerText"),
-            /Atlas proofs|South plates|1,478/,
+            /Atlas proofs|South plates|1,391/,
         );
         await p.type({ selector: explorer + " input" }, "South plates");
         assert.equal(

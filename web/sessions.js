@@ -832,7 +832,7 @@ function SessionRow({
             : (steers ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0);
 
     return html`<div
-        class=${`session-row ${kids > 0 ? "with-fold" : ""} ${arrival === null ? "" : "arriving"} ${slot === "needs" ? "needs-you" : ""} ${expanded ? "asking" : ""} ${glow ? "glow" : ""} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
+        class=${`session-row ${kids !== null ? "with-fold" : ""} ${arrival === null ? "" : "arriving"} ${slot === "needs" ? "needs-you" : ""} ${expanded ? "asking" : ""} ${glow ? "glow" : ""} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
@@ -938,14 +938,16 @@ function SessionRow({
             </span>
         </button>
         ${
-            kids > 0 &&
+            kids !== null &&
             html`<button
-                class="session-fold" data-part="session-fold"
+                class="session-fold"
+                data-part="session-fold"
                 data-family-open=${"row-" + session.id}
-                aria-label=${"Browse " + kids + " linked sessions" + (trouble ? ", " + trouble + " need attention" : "")}
-                title="Browse family" onClick=${(event) => openFamily(session.id, "", event.currentTarget)}
+                aria-label=${kids === 0 ? "Browse archived links" : "Browse " + kids + " linked sessions" + (trouble ? ", " + trouble + " need attention" : "")}
+                title=${kids === 0 ? "Browse archived links" : "Browse family"}
+                onClick=${(event) => openFamily(session.id, "", event.currentTarget, kids === 0 ? "archived" : "all")}
             >
-                <span class="session-fold-pill">Browse <${Icon} name="chevron" size=${12} /></span>
+                <span class="family-browse-label">Browse <${Icon} name="chevron" size=${12} /></span>
             </button>`
         }
         ${
@@ -1456,7 +1458,7 @@ function AllSessions({ compact = false, explorer = null }) {
         const shown = sessions.filter((s) => {
             const node = tree.nodes.get(s.id);
 
-            if ((!explorer && Boolean(s.archived) !== archived) || (kept && !kept(s))) {
+            if (Boolean(s.archived) !== archived || (kept && !kept(s))) {
                 return false;
             }
 
@@ -2250,7 +2252,7 @@ function AllSessions({ compact = false, explorer = null }) {
 
     const rowOf = ({ session }, index, group, needle, view) => {
         const node = tree.nodes.get(session.id);
-        const kids = !explorer && !group.slot && !needle ? descendantCount(node) : 0;
+        const kids = !explorer && !group.slot && !needle && node.children.length ? descendantCount(node) : null;
         const counts = attention.get(node);
         const trouble = (counts?.waiting ?? 0) + (counts?.failed ?? 0);
         const trail = (explorer || needle || group.key === "linked-shortcuts") && breadcrumb(node);
@@ -2261,6 +2263,7 @@ function AllSessions({ compact = false, explorer = null }) {
             explorer && needOf(session) === "ask" && "Waiting",
             explorer && ["failed", "agents"].includes(needOf(session)) && "Failed",
             trail || (explorer && shortPath(session.cwd, home)),
+            kids === 0 && "Archived links",
             kids && kids.toLocaleString() + " linked",
             kids && trouble && trouble + " need attention",
         ]
@@ -2612,7 +2615,7 @@ function AllSessions({ compact = false, explorer = null }) {
                 turnPage(0);
             }}>
                 ${[
-                    ["all", "All states"],
+                    ["all", "Not archived"],
                     ["attention", "Needs attention"],
                     ["working", "Working"],
                     ["pinned", "Pinned"],
