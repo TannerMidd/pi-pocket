@@ -203,7 +203,10 @@ function Row({ view, now, open, onToggle }) {
     </div>`;
 }
 
-/** Where the popover opens: above the status line's item, or the line; null (the middle) when neither is on screen. */
+/**
+ * Where the popover opens: centred on the status line's item (or the line), and above the message box, so it never
+ * covers what someone is typing; null (the middle) when neither is on screen.
+ */
 function usageAnchor() {
     const rect = (
         document.querySelector(".usage-now") ?? document.querySelector(".status-line")
@@ -213,16 +216,19 @@ function usageAnchor() {
         return null;
     }
 
+    const box = document.querySelector('[data-part="message-box"]')?.getBoundingClientRect();
+    const floor = box && box.height > 0 && box.top < rect.top ? box.top : rect.top;
+
     const top = visualViewport?.offsetTop ?? 0;
     const width = Math.min(440, innerWidth - 16);
     const left = Math.max(
         8,
         Math.min(rect.left + rect.width / 2 - width / 2, innerWidth - width - 8),
     );
-    const room = rect.top - top - 14;
+    const room = floor - top - 14;
 
     return room >= 260
-        ? { left, bottom: innerHeight - rect.top + 10, width, height: Math.min(600, room) }
+        ? { left, bottom: innerHeight - floor + 10, width, height: Math.min(600, room) }
         : null;
 }
 

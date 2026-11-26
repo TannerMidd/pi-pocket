@@ -309,10 +309,12 @@ test(
         }>(`
         const pop = document.querySelector(".usage-pop").getBoundingClientRect();
         const line = document.querySelector(".status-line").getBoundingClientRect();
+        const box = document.querySelector('[data-part="message-box"]').getBoundingClientRect();
         const clean = (el) => el?.innerText.replace(/\\s+/g, " ").trim();
 
         return {
-            above: pop.bottom <= line.top,
+            // Above the message box, not over it: what someone types stays in view.
+            above: pop.bottom <= line.top && pop.bottom <= box.top,
             within: pop.left >= 0 && pop.right <= innerWidth && pop.top >= 0,
             head: clean(document.querySelector(".usage-head-text")),
             current: clean(document.querySelector(".usage-current")),
