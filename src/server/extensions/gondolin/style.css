@@ -1,0 +1,145 @@
+/* Gondolin sandbox's sheet: the app's colors, and targets a thumb can hit. */
+.gdl-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.gdl-block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.gdl-block p {
+    margin: 0;
+}
+
+.gdl-h {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.gdl-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 14px;
+    margin: 0;
+}
+
+.gdl-facts dt {
+    color: var(--muted);
+}
+
+.gdl-facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.gdl-where,
+.gdl-check {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.gdl-where-row,
+.gdl-check li {
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+}
+
+.gdl-where-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+}
+
+.gdl-what {
+    overflow-wrap: anywhere;
+}
+
+.gdl-where-label {
+    flex: none;
+}
+
+.gdl-sandbox .gdl-where-label {
+    color: var(--ok);
+}
+
+.gdl-host .gdl-where-label {
+    color: var(--warn);
+}
+
+.gdl-blocked .gdl-where-label {
+    color: var(--muted);
+}
+
+.gdl-check li {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+}
+
+.gdl-check li > strong {
+    flex: none;
+    min-width: 5.5em;
+}
+
+.gdl-ok > strong {
+    color: var(--ok);
+}
+
+.gdl-bad > strong {
+    color: var(--err);
+}
+
+.gdl-info > strong {
+    color: var(--muted);
+}
+
+.gdl-line {
+    overflow-wrap: anywhere;
+}
+
+.gdl-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.gdl-actions .button {
+    min-height: 44px;
+}
+
+.gdl-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+}
+
+.gdl-log {
+    max-height: 200px;
+    margin: 0;
+    padding: 8px;
+    overflow: auto;
+    white-space: pre-wrap;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+}
+
+.gdl-setting {
+    min-height: 44px;
+    align-items: center;
+}
+
+.gdl-setting-label {
+    flex: 1;
+}

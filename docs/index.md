@@ -40,6 +40,7 @@ A drop-in extension stays when Pi Pocket updates, and the owner can turn it off 
 - [extensions/policies/](extensions/policies/index.md): the rules for extensions and changes to Pi Pocket: what belongs in core, the public API and how it changes, the security model for authors, and the gallery's review.
 - [self-editing.md](self-editing.md): how to change Pi Pocket's code while it runs, check the change, and undo a change that breaks it.
 - [embedders.md](embedders.md): the app bridge, for an embedder (an app that shows Pi Pocket inside itself, such as an Electron or Tauri wrapper): `/api/pocket/info`, `window.pocketHost`, and notifications without Web Push.
+- [sandbox.md](sandbox.md): sandboxes: running a session's tools, and its browser, in a micro-VM (opt-in): set-up, what runs where, what the VM sees, limits, platforms, and what it does not protect. [extensions/sandboxes.md](extensions/sandboxes.md) is the extension point, and `docs/design/gondolin-sandbox.md` the design.
 - [docker.md](docker.md): running Pi Pocket in a container, with extensions, themes, Pi's folder, and the workspace mounted from the host.
 - [systemd.md](systemd.md): running Pi Pocket as a systemd service, with a template unit whose instance name is the access mode.
 - [desktop-app.md](desktop-app.md): the desktop apps of the Windows installer and the macOS package: the window, the tray or menu bar icon, `--desktop`, `launcher-running.json`, and the one-time sign-in link.

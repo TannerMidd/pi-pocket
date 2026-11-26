@@ -25,6 +25,7 @@ export const SIDEBAR = [
             ["docs/extensions/relay.md", "Relay connectors"],
             ["docs/extensions/surfaces.md", "Surfaces: components and A2UI"],
             ["docs/extensions/workspaces.md", "Execution environments for workspaces"],
+            ["docs/extensions/sandboxes.md", "Sandboxes for sessions"],
             ["docs/extensions/app.md", "Adding to the app"],
             ["docs/extensions/routes.md", "Routes"],
             ["docs/extensions/public-pages.md", "Public pages"],
@@ -74,6 +75,7 @@ export const SIDEBAR = [
         items: [
             ["docs/index.md", "Documentation map"],
             ["CONTRIBUTING.md", "Contributing"],
+            ["docs/sandbox.md", "Sandboxes (micro-VMs)"],
             ["docs/docker.md", "Docker and Podman"],
             ["docs/systemd.md", "systemd service"],
             ["docs/windows.md", "Windows installer"],
