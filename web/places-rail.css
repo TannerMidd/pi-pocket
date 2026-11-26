@@ -95,6 +95,7 @@
    adjacent rows still when keyboard or hover actions temporarily narrow a title. */
 @container sessions (min-width: 280px) {
     :root[data-density="comfortable"] .sidebar .session-row:not(.with-chips, .needs-you) {
+        --row-line: 48px;
         contain-intrinsic-size: auto 48px;
     }
 
@@ -108,7 +109,7 @@
     :root[data-density="comfortable"]
         .sidebar
         .session-row:not(.with-chips, .needs-you)
-        .session-title:not(.with-hit) {
+        .session-title:not(.with-hit, .with-crumb) {
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;

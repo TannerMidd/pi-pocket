@@ -1074,7 +1074,7 @@ Since 0.20.0 · Experimental
 
 An action on sessions: its `label` (past 24 characters, cut with "…"), and `run` or `sheet`. By default (`access: "steer"`), only people who can steer see it. Give `access: "view"` for an action that changes nothing, which viewers may use too.
 
-With `icon` or `iconPath`, the action is also a button on each row, beside archive, pin, and mark unread, where a mouse hovers or the keyboard focuses. Only the first such action gets a button: rows keep room for their titles. Touch screens use the row's sheet. `run` gets the ids of the sessions. The sheet gets them as the prop `sessions`. From the bar, they are the selected sessions that the list shows, and the selection then ends. From a row's sheet, it is that session. When `run` throws or rejects, a notice says so.
+Rows draw no buttons on hover: the action is in the menu of a right-click (or Shift+F10, or the Menu key, on a focused row), in the sheet of a long press, and in the bar. `icon` and `iconPath` no longer draw a button on rows. `run` gets the ids of the sessions. The sheet gets them as the prop `sessions`. From the bar, they are the selected sessions that the list shows, and the selection then ends. From a row's sheet, it is that session. When `run` throws or rejects, a notice says so.
 
 ### `SessionFilterSpec`
 

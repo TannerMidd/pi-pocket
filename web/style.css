@@ -5822,28 +5822,71 @@ pre.diff .del {
     animation-delay: calc(min(var(--i, 0), 14) * 18ms);
 }
 
+/*
+ * A parent's count, on the row's own line at the right, in place of its age: ⑂ and how many sessions are linked to it
+ * (`.fold-gap` in the row's side keeps the room), and a mark when some need attention. It is the button that opens the
+ * family's index: 44px wide, as tall as the row's line (or 44px where a finger taps), the title's right edge as its own.
+ */
+.session-row {
+    --row-line: calc(24px + 12px * var(--space-y));
+}
+
 .session-fold {
     position: absolute;
     top: 1px;
     right: 0;
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
     min-width: 44px;
     min-height: 44px;
-    padding: 0 5px;
-    font: inherit;
-    font-size: 12px;
-    color: var(--accent);
+    height: var(--row-line);
+    padding: 0 11px 0 4px;
+    font: 11px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
 }
 
-.family-browse-label {
+.family-browse-label,
+.fold-gap {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 3px;
+    gap: 3px;
+}
+
+/* Shorter than the line by the focus ring's room on each side: the ring is not cut by the row's edge. */
+.family-browse-label {
+    height: calc(var(--row-line) - 8px);
+    margin-top: 4px;
+    padding: 0 3px;
+    margin-right: -3px;
     border-radius: var(--r-tag);
 }
 
+/* The room for the count, in the row's side where the age would be. */
+.fold-gap {
+    margin-left: 4px;
+    visibility: hidden;
+}
+
+.fold-gap .icon,
+.family-browse-label .icon {
+    stroke-width: 2.2;
+}
+
+/* Some of the family needs attention: a mark in the warning color, and the button's label says how many. */
+.fold-alert {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-left: 1px;
+    border-radius: 50%;
+    background: var(--warn);
+}
+
+.session-fold:hover {
+    color: var(--text);
+}
 .session-fold:hover .family-browse-label {
     background: var(--hover);
 }
@@ -5855,11 +5898,37 @@ pre.diff .del {
     outline-offset: 1px;
 }
 
-.session-row.with-fold .session {
-    padding-right: 68px;
+/* A family's lead in Priority, where the group holds only some of its sessions: quieter than the rows under it. */
+.session-row.lead-row .session-title {
+    color: var(--muted);
 }
-.session-row.with-fold .session-actions {
-    right: 66px;
+.session-row.lead-row .state-mark {
+    opacity: 0.45;
+}
+
+/* A family's sessions under their lead, indented one step (`--linked-depth`), the path to a deeper one after its title. */
+.session-title.with-crumb {
+    display: flex;
+    gap: 8px;
+}
+
+.family-more {
+    display: block;
+    width: 100%;
+    height: var(--row-line);
+    padding: 0 10px 0 29px;
+    border-radius: var(--r-row);
+    text-align: left;
+    font: 11px var(--mono);
+    color: var(--muted);
+}
+.family-more:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+.family-more:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 /* One line: the folder's color, the title, and what goes on there on the right. */
@@ -6232,111 +6301,6 @@ pre.diff .del {
     display: none;
 }
 
-/* Archive, pin, and mark unread: on the row's right, shown on hover or while the row has focus. */
-.session-actions {
-    position: absolute;
-    top: 50%;
-    right: 6px;
-    margin-top: -13px;
-    display: flex;
-    gap: 4px;
-}
-
-.session-act {
-    width: 26px;
-    height: 26px;
-    display: grid;
-    place-items: center;
-    color: var(--muted);
-    background: var(--card-2);
-    border: 1px solid var(--hair);
-    border-radius: var(--r-seg);
-    opacity: 0;
-    transform: translateX(4px);
-    transition:
-        opacity var(--t-hover) var(--ease-out),
-        transform var(--t-in) var(--ease-out),
-        color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
-}
-
-@media (hover: hover) {
-    .session-act:hover {
-        color: var(--accent);
-        border-color: var(--accent-line);
-    }
-}
-
-.session-act + .session-act {
-    transition-delay: 25ms;
-}
-
-.session-pin.on {
-    color: var(--brand);
-}
-
-.session-unread.on {
-    color: var(--accent);
-}
-
-/* Touch screens archive, pin, and mark-unread from a long press on the row instead: an unseen button would take taps meant for it. */
-@media (hover: none) {
-    .session-actions {
-        display: none;
-    }
-}
-
-/* The buttons take the right side's place, widened so a long title ends before them (one to three 26px buttons). */
-@media (hover: hover) {
-    .session-row:hover .session-act,
-    .session-act:focus-visible {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:not(.no-acts):hover .session-side {
-        opacity: 0;
-        min-width: 56px;
-    }
-    .session-row.one-act:hover .session-side {
-        min-width: 26px;
-    }
-    /* Three live buttons: archive, pin, and mark-unread. */
-    .session-row.three-acts:hover .session-side {
-        min-width: 86px;
-    }
-    /* And an extension's action (`pocket.sessionAction` with an icon). */
-    .session-row.four-acts:hover .session-side {
-        min-width: 116px;
-    }
-    /* Keyboard focus in the row shows them too, not the focus a click leaves on the open session's row. Kept apart
-       from the rules above: a browser without :has() drops only these. */
-    .session-row:has(:focus-visible) .session-act {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:not(.no-acts):has(:focus-visible) .session-side {
-        opacity: 0;
-        min-width: 56px;
-    }
-    .session-row.one-act:has(:focus-visible) .session-side {
-        min-width: 26px;
-    }
-    .session-row.three-acts:has(:focus-visible) .session-side {
-        min-width: 86px;
-    }
-    .session-row.four-acts:has(:focus-visible) .session-side {
-        min-width: 116px;
-    }
-    /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
-    :root.selecting .session-row .session-act {
-        opacity: 0;
-    }
-    :root.selecting .session-row .session-side {
-        opacity: 1;
-        min-width: 0;
-    }
-}
-
 /*
  * Extensions' chips under a row's title (`pocket.sessionChips`), such as tags. The row's button grows to hold them, so
  * its fill and its click take the whole row; only the chips that do something take clicks of their own.
@@ -6344,10 +6308,6 @@ pre.diff .del {
 .session-row.with-chips .session {
     height: calc(24px + 12px * var(--space-y) + 20px);
     padding-bottom: 20px;
-}
-
-.session-row.with-chips .session-actions {
-    top: calc(13px + 6px * var(--space-y));
 }
 
 .session-chips {
@@ -6551,6 +6511,20 @@ div.group-head {
 
 .session-row.needs-you:has(.icon-only) .session {
     padding-right: 42px;
+}
+
+/* A parent that needs you: its count at the right edge, Review beside it. */
+.session-row.needs-you.with-fold .session {
+    padding-right: calc(74px + var(--fold-w) - 4px);
+}
+.session-row.needs-you.with-fold:has(.icon-only) .session {
+    padding-right: calc(42px + var(--fold-w) - 4px);
+}
+.session-row.needs-you.with-fold .session-quick {
+    right: calc(var(--fold-w) + 2px);
+}
+.session-row.needs-you.with-fold .fold-gap {
+    display: none;
 }
 
 .session-row.needs-you .session-title {
@@ -17045,6 +17019,7 @@ textarea.notes {
         height: calc(30px + 10px * var(--space-y));
     }
     .session-row {
+        --row-line: calc(30px + 10px * var(--space-y));
         contain-intrinsic-size: auto calc(30px + 10px * var(--space-y));
     }
     .session:active {

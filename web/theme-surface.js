@@ -162,7 +162,6 @@ export const PARTS = [
     "session-quick",
     "session-review",
     "session-dismiss",
-    "session-read",
     "session-ask",
     "session-ask-command",
     "session-ask-reason",

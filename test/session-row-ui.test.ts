@@ -323,19 +323,22 @@ async function marked(ids: ConversationId[], what: string): Promise<void> {
 
 test("a session marked unread shows it until it is opened", real, async () => {
     const [one] = folderSessions as [ConversationId];
-    const click = (selector: string) =>
-        page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 
     await fresh();
-    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await menuOpens(one, "the menu");
+    await menuChoose("Mark unread");
     await marked([one], "marked: stored, a dot, and a bold title");
-    await click(`${row(one)} [aria-label="Mark read"]`);
-    await marked([], "read again from the row");
+    await menuOpens(one, "the menu again");
+    await menuChoose("Mark read");
+    await marked([], "read again from the menu");
 
     // A tap on the row opens it.
-    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await menuOpens(one, "the menu once more");
+    await menuChoose("Mark unread");
     await marked([one], "marked again");
-    await click(`${row(one)} > .session`);
+    await page.evaluate(
+        `document.querySelector(${JSON.stringify(`${row(one)} > .session`)}).click()`,
+    );
     await until(async () => (await touched()).path === `/s/${one}`, "opened");
     await marked([], "opening it read it");
 });
@@ -634,3 +637,208 @@ test("another tab opens where the list was scrolled", real, async () => {
     await selectTab("Recent");
     assert.equal(await scrolled(), 600, "Recent");
 });
+
+/** The labels of the open sheet's items, the sheet a long press opens. */
+const sheetItems = () =>
+    inPage<string[]>(`
+        return JSON.stringify([...document.querySelectorAll(".sheet-host:not(.leaving) .list-item")]
+            .map((each) => each.firstElementChild.textContent.trim()));
+    `);
+
+test(
+    "rows draw no hover buttons at any pointer; the menu, a long press, and Shift+F10 give the actions",
+    real,
+    async () => {
+        const buttons = () =>
+            inPage<{ extra: number; rows: number }>(`
+                const rows = [...document.querySelectorAll(${JSON.stringify(`${list} .session-row[data-id]`)})];
+
+                return JSON.stringify({
+                    rows: rows.length,
+                    extra: document.querySelectorAll(
+                        ".session-actions, .session-act, .session-ext-act, [data-part='session-read']",
+                    ).length + rows.filter((each) => each.querySelectorAll("button:not(.session-fold)").length !== 1).length,
+                });
+            `);
+        const wanted = ["Pin to the top", "Mark unread", "Archive"];
+
+        // A mouse over the row, on the desktop.
+        await fresh();
+        const over = await inPage<{ x: number; y: number }>(`
+            const box = document.querySelector(${JSON.stringify(row(active))}).getBoundingClientRect();
+
+            return JSON.stringify({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+        `);
+
+        await page.hover(over);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.deepEqual(
+            { ...(await buttons()), rows: 0 },
+            { extra: 0, rows: 0 },
+            "a hovered row has its one button",
+        );
+
+        // Shift+F10 on a focused row: the menu, under the row, with every action.
+        await page.evaluate(
+            `document.querySelector(${JSON.stringify(`${row(active)} > .session`)}).focus()`,
+        );
+        await page.press("Shift+F10");
+        let shown: Awaited<ReturnType<typeof menuShown>> = null;
+
+        await until(async () => (shown = await menuShown()) !== null, "the menu from the keyboard");
+
+        for (const label of wanted) {
+            assert.ok(shown!.items.includes(label), `Shift+F10 offers ${label}: ${shown!.items}`);
+        }
+
+        // At the row's lower edge: below it, or above it when the menu does not fit under.
+        const at = await inPage<{ edge: number; height: number; left: number }>(`
+            const box = document.querySelector(${JSON.stringify(`${row(active)} > .session`)}).getBoundingClientRect();
+            const menu = document.querySelector('[data-part="session-menu"]');
+
+            return JSON.stringify({
+                edge: Math.round(box.bottom),
+                height: menu.offsetHeight,
+                left: Math.round(box.left),
+            });
+        `);
+
+        assert.ok(
+            shown!.top === at.edge || shown!.top + at.height === at.edge,
+            `at the row's lower edge: ${JSON.stringify({ ...at, top: shown!.top })}`,
+        );
+        assert.ok(shown!.left >= at.left, "at its left");
+        await page.press("Escape");
+        await settled({ sheet: null }, "closed");
+
+        // A touch screen: the same row with no buttons, and the actions in the long press's sheet.
+        await fresh(true);
+        assert.equal((await buttons()).extra, 0, "no buttons on a phone's rows");
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(${JSON.stringify(`${row(active)} > .session`)}) !== null)`,
+                ),
+            "the row, drawn",
+        );
+        // In view: a finger lands on what is at its point.
+        await page.evaluate(
+            `document.querySelector(${JSON.stringify(`${row(active)} > .session`)}).scrollIntoView({ block: "center" })`,
+        );
+        await finger(active, { ms: 1000 });
+        await settled({ sheet: "session" }, "the long press's sheet");
+        const items = await sheetItems();
+
+        for (const label of wanted) {
+            assert.ok(items.includes(label), `a long press offers ${label}: ${items}`);
+        }
+
+        await page.press("Escape");
+        await settled({ sheet: null }, "closed");
+    },
+);
+
+test(
+    "a parent's count sits on the row's one line at every density, desktop and phone, and opens the family",
+    real,
+    async () => {
+        const parent = await newSession(app);
+        const lone = await newSession(app);
+        const kids = 1234;
+
+        await app.harness.commit(async (tx) => {
+            const sessions = (await tx.doc(SessionsDoc)).items;
+            const at = Date.now();
+
+            sessions[String(parent)]!.title = "Parent of many";
+
+            for (let at_ = 0; at_ < kids; at_++) {
+                sessions[String(500000 + at_)] = {
+                    title: `Linked ${at_}`,
+                    cwd: "/linked",
+                    createdAt: at,
+                    updatedAt: at - 1000 - at_,
+                    linkedFrom: { id: Number(parent) },
+                };
+            }
+        }, BACKGROUND_CONTEXT);
+
+        for (const mobile of [false, true]) {
+            for (const density of ["comfortable", "compact", "tight"]) {
+                await fresh(mobile);
+                await page.evaluate(
+                    `(await import("/theme.js")).setPrefs({ density: ${JSON.stringify(density)} })`,
+                );
+                await until(
+                    async () =>
+                        (await inPage<string>(
+                            `return JSON.stringify(document.documentElement.dataset.density ?? "")`,
+                        )) === density,
+                    `${density} density`,
+                );
+                const what = `${mobile ? "390×844" : "desktop"}, ${density}`;
+                const report = await inPage<{
+                    count: string;
+                    label: string | null;
+                    inside: boolean;
+                    height: number;
+                    plain: number;
+                    second: boolean;
+                    words: boolean;
+                    hit: number;
+                    wide: number;
+                    ring: string;
+                }>(`
+                    const row = document.querySelector(${JSON.stringify(row(parent))});
+                    const plain = document.querySelector(${JSON.stringify(row(lone))});
+                    const button = row.querySelector(".session-fold");
+                    const label = button.querySelector(".family-browse-label");
+                    const line = row.querySelector(":scope > .session").getBoundingClientRect();
+                    const box = label.getBoundingClientRect();
+
+                    return JSON.stringify({
+                        count: button.textContent.trim(),
+                        label: button.getAttribute("aria-label"),
+                        inside: box.width > 0 && box.top >= line.top && box.bottom <= line.bottom &&
+                            box.right <= line.right,
+                        height: row.offsetHeight,
+                        plain: plain.offsetHeight,
+                        second: row.querySelector(".session-title.with-context, .session-hit") !== null,
+                        words: /linked/i.test(row.textContent),
+                        hit: Math.min(button.offsetWidth, button.offsetHeight),
+                        wide: button.offsetWidth,
+                        ring: getComputedStyle(label).outlineStyle,
+                    });
+                `);
+
+                assert.equal(report.count, "1,234", `${what}: the count shows`);
+                assert.equal(report.label, "Browse 1234 linked sessions", what);
+                assert.ok(report.inside, `${what}: the count is inside the row's own line`);
+                assert.equal(report.height, report.plain, `${what}: one line, as a plain row is`);
+                assert.equal(report.second, false, `${what}: no second line`);
+                assert.equal(report.words, false, `${what}: no "linked" words in the row`);
+                assert.ok(report.wide >= 44, `${what}: 44px wide`);
+
+                if (mobile) {
+                    assert.ok(report.hit >= 44, `${what}: a 44px hit area for a finger`);
+                }
+
+                if (density === "tight" && !mobile) {
+                    assert.equal(report.ring, "none", "no ring until it has the keyboard focus");
+                }
+            }
+        }
+
+        // A tap on it opens the family's index, as it always has.
+        await fresh();
+        await page.click({ selector: `${row(parent)} .session-fold` });
+        await page.waitFor({ selector: ".family-explorer .session-row" });
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".family-range").textContent)`,
+            ),
+            "1–12 of 1,234",
+        );
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "comfortable" })`);
+    },
+);
