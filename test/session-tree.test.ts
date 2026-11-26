@@ -60,11 +60,11 @@ test("counts skip archived sessions but keep active descendants of archived pare
         record(2, 1),
         { ...record(3, 1), archived: true },
     ]);
-    const counts = familyAttention(tree, (s: {id:number}) => s.id === 1 ? "failed" : "ask");
+    const counts = familyAttention(tree, (s: { id: number }) => (s.id === 1 ? "failed" : "ask"));
 
     assert.equal(descendantCount(tree.nodes.get(0)), 1);
     assert.equal(descendantCount(tree.nodes.get(1)), 1);
-    assert.deepEqual(counts.get(tree.nodes.get(0)), {waiting:1, failed:0});
+    assert.deepEqual(counts.get(tree.nodes.get(0)), { waiting: 1, failed: 0 });
 });
 
 test("a missing parent has no breadcrumb; cycles and deep chains do not lose rows or recurse", () => {

@@ -5888,15 +5888,23 @@ pre.diff .del {
     border-radius: var(--r-tag);
 }
 
-.session-fold:hover .family-browse-label { background: var(--hover); }
-.session-fold:focus-visible { outline: none; }
+.session-fold:hover .family-browse-label {
+    background: var(--hover);
+}
+.session-fold:focus-visible {
+    outline: none;
+}
 .session-fold:focus-visible .family-browse-label {
     outline: 2px solid var(--focus-ring);
     outline-offset: 1px;
 }
 
-.session-row.with-fold .session { padding-right: 68px; }
-.session-row.with-fold .session-actions { right: 66px; }
+.session-row.with-fold .session {
+    padding-right: 68px;
+}
+.session-row.with-fold .session-actions {
+    right: 66px;
+}
 
 /* One line: the folder's color, the title, and what goes on there on the right. */
 .session {

@@ -165,8 +165,18 @@ for (const mobile of [false, true]) {
         );
         await p.press("Tab");
         await run(p, "document.querySelector(" + q(browse) + ").focus()");
-        assert.equal(await get(p, "document.querySelector(" + q(browse) + ").getAttribute('aria-label')"), "Browse 1391 linked sessions");
-        const control = await get<{hit:number,ring:string, radius:number,border:string,inside:boolean}>(p,
+        assert.equal(
+            await get(p, "document.querySelector(" + q(browse) + ").getAttribute('aria-label')"),
+            "Browse 1391 linked sessions",
+        );
+        const control = await get<{
+            hit: number;
+            ring: string;
+            radius: number;
+            border: string;
+            inside: boolean;
+        }>(
+            p,
             `(() => {
                 const btn = document.querySelector(${q(browse)});
                 const label = btn.querySelector('.family-browse-label');
@@ -182,11 +192,12 @@ for (const mobile of [false, true]) {
                     inside: box.right + ring <= hit.right && box.left - ring >= hit.left &&
                         box.top - ring >= hit.top && box.bottom + ring <= hit.bottom,
                 };
-            })()`);
+            })()`,
+        );
 
         assert.ok(control.hit >= 44);
-        assert.equal(control.ring,"solid");
-        assert.equal(control.border,"none");
+        assert.equal(control.ring, "solid");
+        assert.equal(control.border, "none");
         assert.ok(control.inside && control.radius <= 4);
         await shot(p, device + "-recent");
         await enter(p, sidebar + ' [data-family-open="work"]');
@@ -203,13 +214,25 @@ for (const mobile of [false, true]) {
             await get(p, "document.querySelector('.family-range').textContent"),
             "1–12 of 1,391",
         );
-        const filterState = (value:string) => run(p,
-            `const el=document.querySelector('.family-filters select');el.value=${q(value)};el.dispatchEvent(new Event('change',{bubbles:true}));`);
+        const filterState = (value: string) =>
+            run(
+                p,
+                `const el=document.querySelector('.family-filters select');el.value=${q(value)};el.dispatchEvent(new Event('change',{bubbles:true}));`,
+            );
 
-        await filterState('archived');
-        assert.equal(await get(p,"document.querySelector('.family-range').textContent"),"1–12 of 87");
-        assert.equal(await get(p,"[...document.querySelectorAll('.family-explorer .session-row')].every(el=>el.textContent.includes('Archived'))"),true);
-        await filterState('all');
+        await filterState("archived");
+        assert.equal(
+            await get(p, "document.querySelector('.family-range').textContent"),
+            "1–12 of 87",
+        );
+        assert.equal(
+            await get(
+                p,
+                "[...document.querySelectorAll('.family-explorer .session-row')].every(el=>el.textContent.includes('Archived'))",
+            ),
+            true,
+        );
+        await filterState("all");
         await enter(p, '[aria-label="Next page"]');
         await enter(p, '[aria-label="Next page"]');
         await wait(p, result(proof));

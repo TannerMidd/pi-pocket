@@ -2252,7 +2252,10 @@ function AllSessions({ compact = false, explorer = null }) {
 
     const rowOf = ({ session }, index, group, needle, view) => {
         const node = tree.nodes.get(session.id);
-        const kids = !explorer && !group.slot && !needle && node.children.length ? descendantCount(node) : null;
+        const kids =
+            !explorer && !group.slot && !needle && node.children.length
+                ? descendantCount(node)
+                : null;
         const counts = attention.get(node);
         const trouble = (counts?.waiting ?? 0) + (counts?.failed ?? 0);
         const trail = (explorer || needle || group.key === "linked-shortcuts") && breadcrumb(node);
