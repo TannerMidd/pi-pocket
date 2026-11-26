@@ -93,6 +93,7 @@
 }
 .family-explorer .search {
     min-height: 44px;
+    margin-bottom: 8px;
 }
 .family-filters,
 .family-pager,
@@ -131,10 +132,22 @@
     min-width: 44px;
     min-height: 44px;
 }
+/* A page has at most 12 rows. Measure all of them before restoring the reader's scroll position. */
 .family-explorer .session-row {
+    content-visibility: visible;
     border-bottom: 1px solid var(--hair);
 }
-.family-explorer .session-row > .session {
+.session-title.with-context {
+    display: grid;
+    gap: 2px;
+}
+.session-title.with-context .session-name {
+    max-width: 100%;
+}
+.session-row.with-fold .session-time {
+    display: none;
+}
+.family-explorer .session-row:has(.session-title.with-hit) > .session {
     height: auto;
     min-height: 64px;
 }

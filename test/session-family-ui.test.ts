@@ -43,6 +43,11 @@ async function shot(p: BrowserPage, name: string) {
     const path = process.env.POCKET_FAMILY_SHOTS;
 
     if (path) {
+        // Keep transition frames out of the evidence; do not wait for infinite activity indicators.
+        await run(
+            p,
+            "await Promise.allSettled(document.getAnimations().filter(a=>a.effect?.getComputedTiming().endTime < 2000).map(a=>a.finished))",
+        );
         mkdirSync(path, { recursive: true });
         writeFileSync(
             join(path, name + ".jpg"),
@@ -159,6 +164,14 @@ for (const mobile of [false, true]) {
             "two roots, two shortcuts and the open child",
         );
         await shot(p, device + "-recent");
+        await enter(p, sidebar + ' [data-family-open="work"]');
+        await wait(p, explorer + " .session-row");
+        assert.equal(
+            await get(p, "document.querySelectorAll('.family-explorer .session-row').length"),
+            4,
+        );
+        await enter(p, '[aria-label="Back from session index"]');
+        await wait(p, browse);
         await enter(p, browse);
         await wait(p, explorer + " .session-row");
         assert.equal(
@@ -255,6 +268,53 @@ for (const mobile of [false, true]) {
         assert.equal(await get(p, "document.documentElement.scrollWidth > innerWidth"), false);
     });
 }
+
+test("waiting is not unread for an unrestricted viewer", real, async () => {
+    const guest = app.config.addUser("Team reader", "viewer");
+    const p = await browsers.open(4);
+
+    await p.setViewport({ width: 390, height: 844, scale: 1, mobile: true });
+    await p.navigate(base + "/login?token=" + encodeURIComponent(guest.token));
+    await p.navigate(base + "/s/" + branch);
+    await wait(p, ".family-context");
+    const pending = app.approvals.request(
+        {
+            id: "family-call",
+            conversationId: proof,
+            taskId: 1 as never,
+            callId: "review",
+            tool: "write",
+            subject: "Save proof notes",
+            reason: "Review changes",
+            createdAt: Date.now(),
+        },
+        context,
+    );
+
+    try {
+        await wait(p, ".family-attn");
+        assert.match(
+            await get<string>(p, "document.querySelector('.family-attn').innerText"),
+            /1 waiting/,
+        );
+        assert.equal(await get(p, "!!document.querySelector('.lead-unread')"), false);
+        await enter(p, '.family-context [data-family-open="header-family"]');
+        await wait(p, explorer + " .session-row");
+        await p.type({ selector: explorer + " input" }, "Night legend");
+        await wait(p, result(proof));
+        assert.match(
+            await get<string>(p, "document.querySelector(" + q(result(proof)) + ").innerText"),
+            /Waiting/,
+        );
+        assert.equal(
+            await get(p, "!!document.querySelector('.family-explorer [aria-label=Archive]')"),
+            false,
+        );
+    } finally {
+        app.approvals.answer("family-call", { allow: false, by: "test" });
+        await pending;
+    }
+});
 
 test(
     "a restricted viewer gets no parent identity, counts or inaccessible search hits",

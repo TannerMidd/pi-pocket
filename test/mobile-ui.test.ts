@@ -416,6 +416,34 @@ test(
         assert.equal(touch.nav, 44);
         assert.equal(touch.row, 44);
         assert.equal(touch.tile, 44);
+        const targetHeight = (selector: string) =>
+            inPage<number>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(selector)}).offsetHeight)`,
+            );
+
+        // Read layout size, not a rectangle scaled by the sheet's entrance animation.
+        for (const width of [390, 1024]) {
+            await page.setViewport({ ...VIEWPORTS.tablet, width, height: 844 });
+
+            for (const density of ["compact", "tight"]) {
+                await page.evaluate(
+                    `(await import('/theme.js')).setPrefs({density:${JSON.stringify(density)}})`,
+                );
+                assert.ok((await targetHeight(".nav-menu .menu-all")) >= 44, "All places");
+                assert.ok(
+                    (await targetHeight(".nav-menu .sheet-head > .icon-button")) >= 44,
+                    "Close",
+                );
+                await page.evaluate("(await import('/store.js')).openSheet({type:'tools'})");
+                assert.ok(await page.waitFor({ selector: ".grouped-menu .tool-place-row .place" }));
+                assert.ok(
+                    (await targetHeight(".grouped-menu .tool-place-row .place")) >= 44,
+                    "Tools",
+                );
+                await page.evaluate("(await import('/store.js')).openSheet({type:'menu'})");
+                assert.ok(await page.waitFor({ selector: ".nav-menu .menu-all" }));
+            }
+        }
 
         await clickNavigation(page, { row: "App settings" });
         await reach({ sheet: "menu" }, "App settings");

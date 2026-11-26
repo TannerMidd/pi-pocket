@@ -863,11 +863,11 @@ function SessionRow({
                         ></span>`
                 }
             </span>
-            <span class=${`session-title ${hit || details ? "with-hit" : ""}`}>
+            <span class=${`session-title ${hit || details ? "with-hit" : ""} ${details ? "with-context" : ""}`}>
                 ${
                     hit || details
                         ? html`<span class="session-name">${withMark(title, needle)}</span>
-                            <span class="session-hit">${[details, hit].filter(Boolean).join(" · ")}</span>`
+                            <span class="session-hit">${withMark([details, hit].filter(Boolean).join(" · "), needle)}</span>`
                         : withMark(title, needle)
                 }
             </span>
