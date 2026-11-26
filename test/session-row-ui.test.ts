@@ -11,7 +11,7 @@ import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
-import { SessionsDoc } from "../src/server/docs.ts";
+import { ChatDoc, SessionsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 
 const chromium = findBrowser();
@@ -320,6 +320,45 @@ async function marked(ids: ConversationId[], what: string): Promise<void> {
         assert.fail(`${what}: ${last}`);
     }
 }
+
+test(
+    "a session with only new chat offers Mark read in its menu, and that reads it",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await fresh();
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(${JSON.stringify(row(id))}) !== null)`,
+                ),
+            "the new session in the list",
+        );
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(ChatDoc, id)).messages.push({
+                id: "row-chat-1",
+                userId: "someone-else",
+                name: "Someone",
+                text: "A note for later.",
+                at: Date.now(),
+            });
+        }, BACKGROUND_CONTEXT);
+
+        const bold = () =>
+            inPage<boolean>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(`${row(id)} > .session`)})?.classList.contains("unread") ?? false)`,
+            );
+
+        await until(bold, "new chat makes the row unread");
+        const { shown } = await menuOpens(id, "the menu");
+
+        assert.ok(shown.items.includes("Mark read"), JSON.stringify(shown.items));
+        assert.ok(!shown.items.includes("Mark unread"), JSON.stringify(shown.items));
+        await menuChoose("Mark read");
+        await until(async () => !(await bold()), "Mark read reads the chat");
+    },
+);
 
 test("a session marked unread shows it until it is opened", real, async () => {
     const [one] = folderSessions as [ConversationId];

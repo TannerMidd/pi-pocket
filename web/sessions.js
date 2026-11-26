@@ -731,7 +731,8 @@ async function dismissFailures(list) {
     });
 }
 
-function markRead(list, { say = true } = {}) {
+/** Mark sessions read: a mark, a finished run not seen yet, and new chat. Undo puts back what it changed. */
+export function markRead(list, { say = true } = {}) {
     const ids = list.map((session) => session.id);
     const seen = seenSnapshot(ids);
     const marked = ids.filter((id) => isUnread(id));
