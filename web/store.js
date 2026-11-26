@@ -370,6 +370,8 @@ export const store = {
         peopleAsk: { tab: null, highlight: null, n: 0 },
         /** This person's PiP, as the server last told (`{ id, busy, endedAt }`); null when they have none yet. */
         pip: null,
+        /** Each provider's usage left, from its last response: `{ at, providers }`, for the owner only (`usage.js`). */
+        usage: null,
         /** The PiP panel shows; kept per tab, like the browser's, so the reload after a live edit keeps it. */
         pipOpen: sessionStorage.getItem("pocket.pip") === "1",
         /** PiP's conversation, while the panel shows. */
@@ -801,7 +803,14 @@ function reloadAccount(to) {
     notesDrafts.clear();
     waitingInserts = [];
     source?.close();
-    store.set({ me: null, composerInsert: null, auth: null, pip: null, pipOpen: false });
+    store.set({
+        me: null,
+        composerInsert: null,
+        auth: null,
+        pip: null,
+        usage: null,
+        pipOpen: false,
+    });
 
     if (to === undefined) {
         location.reload();
@@ -1905,6 +1914,8 @@ const handlers = {
     pip: (pip) => setChanged({ ...pipLayout(pip), pip: kept(store.state.pip, pip) }),
     // PiP's conversation, while this tab's PiP panel is open.
     pipview: applyPipView,
+    // The owner's usage left of each provider, as its last response said (the server sends it to nobody else).
+    usage: (usage) => store.set({ usage }),
     chat: applyChat,
     presence: (data) =>
         data.conversationId === store.state.conversationId && store.set({ presence: data.people }),

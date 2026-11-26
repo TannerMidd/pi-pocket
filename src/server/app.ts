@@ -141,6 +141,7 @@ import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./p
 import { BASE_THEME, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
+import { UsageStore, type UsageProvider, type UsageSnapshot } from "./usage.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
@@ -446,6 +447,8 @@ export class PocketApp {
     readonly customProviders = new CustomProviders(this);
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
+    /** What each provider's last response said about its limits (`usage.ts`); only the owner sees it. */
+    readonly usage: UsageStore;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
     readonly schedules = new Schedules(this);
@@ -540,6 +543,7 @@ export class PocketApp {
     /** The session each removed session was forked from: a live fork still reads its uploads through it. */
     #removedForks = new Map<string, SessionMeta["forkedFrom"]>();
     #sessionsTimer: NodeJS.Timeout | undefined;
+    #usageTimer: NodeJS.Timeout | undefined;
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
@@ -623,7 +627,9 @@ export class PocketApp {
                 };
             },
         });
+        this.usage = new UsageStore({ changed: () => this.#usageChanged() });
         this.limits = new LimitGate({
+            seen: (provider, facts) => this.usage.record(provider, facts),
             hours: () => this.config.limitWaitHours,
             epoch: (provider) => this.providers.signInEpoch(provider),
             conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
@@ -1943,6 +1949,8 @@ export class PocketApp {
     #limitWaiting = new Set<number>();
 
     #limitsChanged(): void {
+        this.#usageChanged();
+
         const now = new Set(this.limits.waits().map((wait) => wait.conversationId));
         const changed = new Set([...this.#limitWaiting, ...now]);
 
@@ -1975,6 +1983,11 @@ export class PocketApp {
         }
     }
 
+    /** A provider came or went, or its sign-in changed: the owner's tabs get the usage list again. */
+    providersChanged(): void {
+        this.#usageChanged();
+    }
+
     /** Every connected tab. */
     get clients(): ReadonlySet<Client> {
         return this.#clients;
@@ -2004,6 +2017,7 @@ export class PocketApp {
         client.send("hello", this.#helloFor(client, hello));
         this.#sendSessions(client, this.sessions(client.user));
         this.#sendPip(client);
+        this.#sendUsage(client);
 
         if (client.user.role === "owner" && this.themes.failure !== undefined) {
             client.send("notice", { level: "warning", message: this.themes.failure });
@@ -2362,6 +2376,97 @@ export class PocketApp {
 
         if (panel?.conversationId !== undefined) {
             this.#leaveRoom(panel, panel.conversationId);
+        }
+    }
+
+    /**
+     * The usage the owner sees: each connected provider (a sign-in or a key) with what its last response said about its
+     * limits, and whether the limit gate holds it. Nothing is asked of any provider.
+     */
+    usageSnapshot(): UsageSnapshot {
+        const now = Date.now();
+        const known = new Map<string, { id: string; name: string; kind: UsageProvider["kind"] }>();
+        const kindOf = (id: string): UsageProvider["kind"] =>
+            this.models.isUsingOAuth(id) ? "subscription" : "key";
+
+        for (const provider of this.providers.list(true)) {
+            if (provider.configured) {
+                known.set(provider.id, {
+                    id: provider.id,
+                    name: provider.name,
+                    kind: kindOf(provider.id),
+                });
+            }
+        }
+
+        // A provider that answered but is not listed as signed in (a key in the environment) still has numbers.
+        for (const id of this.usage.seen()) {
+            if (!known.has(id)) {
+                known.set(id, {
+                    id,
+                    name: this.models.getProvider(id)?.name ?? id,
+                    kind: kindOf(id),
+                });
+            }
+        }
+
+        const gates = this.limits.gates().filter((gate) => gate.scope !== "request");
+
+        return {
+            at: now,
+            providers: [...known.values()].map((provider) => {
+                const mine = gates.filter((gate) => gate.provider === provider.id);
+                const gate = mine.sort((a, b) => b.until - a.until)[0];
+
+                return this.usage.view(
+                    provider,
+                    gate === undefined
+                        ? undefined
+                        : { until: gate.resetAt ?? gate.until, reason: gate.reason },
+                );
+            }),
+        };
+    }
+
+    /** The owner's usage, or undefined for anyone else: those who may open Providers may see it. */
+    usageFor(user: User): UsageSnapshot | undefined {
+        return user.role === "owner" ? this.usageSnapshot() : undefined;
+    }
+
+    /** Something about usage changed: the owner's tabs get it, at most once each 1.5 seconds. */
+    #usageChanged(): void {
+        if (this.#usageTimer !== undefined || this.#closing !== undefined) {
+            return;
+        }
+
+        this.#usageTimer = setTimeout(() => {
+            this.#usageTimer = undefined;
+            let snapshot: UsageSnapshot | undefined;
+
+            for (const client of this.#clients) {
+                if (client.user.role === "owner") {
+                    snapshot ??= this.usageSnapshot();
+                    this.#sendUsage(client, snapshot);
+                }
+            }
+        }, 1_500);
+        this.#usageTimer.unref();
+    }
+
+    /** Send an owner's tab the usage, unless it is what the tab last got (apart from the time). */
+    #sendUsage(
+        client: Client,
+        snapshot: UsageSnapshot | undefined = this.usageFor(client.user),
+    ): void {
+        if (snapshot === undefined || client.user.role !== "owner") {
+            return;
+        }
+
+        const json = JSON.stringify(snapshot.providers);
+
+        if (json !== client.usageSent) {
+            client.usageSent = json;
+            client.send("usage", snapshot);
         }
     }
 
@@ -4624,6 +4729,7 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
+            clearTimeout(this.#usageTimer);
             this.#stopWebWatch?.();
             this.alerts.close();
             this.surfacePending.close();

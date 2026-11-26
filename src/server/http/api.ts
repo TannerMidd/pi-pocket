@@ -527,6 +527,13 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await runningNow(app, user));
         }
 
+        // Usage left of each provider: for whoever may open the Providers sheet, the owner.
+        if (first === "usage" && second === undefined && method === "GET") {
+            requireOwner(user);
+
+            return json(response, 200, app.usageSnapshot());
+        }
+
         if (first === "spend" && method === "GET") {
             return json(response, 200, app.spend.summary(user));
         }
