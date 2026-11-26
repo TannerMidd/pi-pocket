@@ -5808,11 +5808,11 @@ pre.diff .del {
     padding-block: 1px;
     padding-inline-start: calc(var(--linked-depth, 0) * 14px);
     content-visibility: auto;
-    contain-intrinsic-size: auto calc(24px + 12px * var(--space-y));
+    contain-intrinsic-size: auto calc(20px + 10px * var(--space-y));
 }
 
 .session-row.with-chips {
-    contain-intrinsic-size: auto calc(44px + 12px * var(--space-y));
+    contain-intrinsic-size: auto calc(40px + 10px * var(--space-y));
 }
 
 /* A row new to this page rises in, the rows in turn. Back to the list builds it again: those rows show as they were,
@@ -5823,82 +5823,32 @@ pre.diff .del {
 }
 
 /*
- * Linked-session branches are decorative; each row keeps its own button and actions. Each line runs down from the middle
- * of its parent's mark, and turns with a soft corner to the row's own.
- */
-.session-branches {
-    position: absolute;
-    inset: 0 auto 0 15px;
-    display: flex;
-    pointer-events: none;
-    color: color-mix(in srgb, var(--muted) 60%, transparent);
-}
-
-.session-branches > span {
-    position: relative;
-    width: 14px;
-}
-
-.session-branches > .continues::before,
-.session-branches > .elbow::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: -1px;
-    border-left: 1.5px solid currentColor;
-}
-
-.session-branches > .elbow::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: 50%;
-    width: 8px;
-    border-bottom: 1.5px solid currentColor;
-    border-left: 1.5px solid currentColor;
-    border-bottom-left-radius: calc(var(--r-tag) + 1px);
-}
-
-/* The last child: only the corner, no line on down. */
-.session-branches > .elbow:not(.continues)::before {
-    display: none;
-}
-
-/*
- * A row with linked sessions under it: a button on its right shows how many and folds them away (`sessions.js`). The
- * row's own button keeps its right side clear of it, and the hover actions move in beside it.
+ * A row with linked sessions under it: `LINKED 3` and a chevron at its end, in the mono face, folds them away
+ * (`sessions.js`). Not a pill: the row's own right side keeps clear of it (`with-fold`).
  */
 .session-fold {
     position: absolute;
     /* Inside the row by its focus ring, which the row would cut. */
     top: 2px;
-    right: 0;
+    right: 4px;
     bottom: 2px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 4px;
-    min-width: 44px;
-    padding: 0 6px;
-    font: 11px var(--mono);
+    justify-content: flex-end;
+    gap: 3px;
+    padding: 0 4px;
     color: var(--muted);
+    font: 500 9.5px var(--mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    transition: color var(--t-hover) var(--ease-out);
 }
 
-/* The control itself: how many, and a chevron, in a quiet pill; the whole 44px beside it takes the tap. */
-.session-fold-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    height: 20px;
-    padding: 0 6px;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-pill);
-    background: var(--card-2);
-    transition:
-        color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
+/* The tag is the whole tap target: as tall as the row, a thumb's width until the next control. */
+.session-fold::before {
+    content: "";
+    position: absolute;
+    inset: 0 -4px;
 }
 
 /* Above the open session: its group stays open, so the fold waits. */
@@ -5908,9 +5858,8 @@ pre.diff .del {
 }
 
 @media (hover: hover) {
-    .session-fold:not(:disabled):hover .session-fold-pill {
+    .session-fold:not(:disabled):hover {
         color: var(--text);
-        border-color: var(--accent-line);
     }
 }
 
@@ -5922,12 +5871,9 @@ pre.diff .del {
     transform: rotate(-90deg);
 }
 
+/* The row's own button keeps its right side clear of the fold tag (`LINKED 12` at its widest), in every state. */
 .session-row.with-fold .session {
-    padding-right: 64px;
-}
-
-.session-row.with-fold .session-actions {
-    right: 62px;
+    padding-right: 96px;
 }
 
 /* Chips take a line under the title: the fold stays beside the title's line. */
@@ -5942,8 +5888,8 @@ pre.diff .del {
     align-items: center;
     gap: 0 11px;
     width: 100%;
-    /* 36px, 32px, and 29px. */
-    height: calc(24px + 12px * var(--space-y));
+    /* 30px, 27px, and 24.5px: one line, however narrow the list. */
+    height: calc(20px + 10px * var(--space-y));
     padding: 0 10px;
     border-radius: var(--r-row);
     text-align: left;
@@ -6305,108 +6251,204 @@ pre.diff .del {
     display: none;
 }
 
-/* Archive, pin, and mark unread: on the row's right, shown on hover or while the row has focus. */
-.session-actions {
-    position: absolute;
-    top: 50%;
-    right: 6px;
-    margin-top: -13px;
+/*
+ * The open session at the top of the list (`sessions.js`): its folder, what it does, and how long ago it changed,
+ * its title, and the sessions it started, folded away under a `LINKED n` tag until someone opens them.
+ */
+.session-current {
+    margin: 2px 2px 12px;
+    padding: 12px;
+    border: 1px solid var(--accent-line);
+    border-radius: var(--r-card);
+    background: var(--accent-soft);
+}
+
+/* A linked session that is open says which one started it, above the card: a way back to it. */
+.session-current-parent {
+    margin: -12px -12px 8px;
+    padding: 2px 8px;
+    border-bottom: 1px solid var(--accent-line);
+}
+
+.current-parent-link {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 31px;
+    padding: 0 4px;
+    border-radius: var(--r-row);
+    color: var(--text);
+    text-align: left;
 }
 
-.session-act {
-    width: 26px;
-    height: 26px;
-    display: grid;
-    place-items: center;
+@media (hover: hover) {
+    .current-parent-link:hover {
+        background: var(--bg);
+    }
+}
+
+.current-parent-link .icon {
+    flex: none;
     color: var(--muted);
-    background: var(--card-2);
-    border: 1px solid var(--hair);
-    border-radius: var(--r-seg);
-    opacity: 0;
-    transform: translateX(4px);
-    transition:
-        opacity var(--t-hover) var(--ease-out),
-        transform var(--t-in) var(--ease-out),
-        color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
+}
+
+.current-parent-label {
+    flex: none;
+    color: var(--text);
+    font: 500 9.5px var(--mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.current-parent-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+}
+
+.current-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-size: 12px;
+}
+
+.current-eyebrow .dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--dot, var(--muted));
+}
+
+.current-eyebrow .sep {
+    color: var(--muted);
+}
+
+.current-eyebrow > :not(.dot, .sep) {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.current-title {
+    margin: 2px 0 4px;
+    font-size: 14.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.current-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 12px;
+}
+
+/* How many linked sessions the card holds: `LINKED 3`, a chevron, and a dot while one of them needs you. */
+.current-link-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-tag);
+    color: var(--text);
+    font: 500 10px var(--mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
 }
 
 @media (hover: hover) {
-    .session-act:hover {
-        color: var(--accent);
+    .current-link-toggle:hover {
         border-color: var(--accent-line);
+        background: var(--bg);
     }
 }
 
-.session-act + .session-act {
-    transition-delay: 25ms;
+.current-link-toggle .icon {
+    color: var(--muted);
 }
 
-.session-pin.on {
-    color: var(--brand);
+.current-link-toggle .icon:last-child {
+    transition: transform var(--t-hover) var(--ease-out);
 }
 
-.session-unread.on {
-    color: var(--accent);
+.current-link-toggle[aria-expanded="true"] .icon:last-child {
+    transform: rotate(180deg);
 }
 
-/* Touch screens archive, pin, and mark-unread from a long press on the row instead: an unseen button would take taps meant for it. */
-@media (hover: none) {
-    .session-actions {
-        display: none;
-    }
+.current-linked {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--accent-line);
 }
 
-/* The buttons take the right side's place, widened so a long title ends before them (one to three 26px buttons). */
+.current-linked[hidden] {
+    display: none;
+}
+
+.current-linked-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 31px;
+    padding: 0 8px 0 16px;
+    border-radius: var(--r-row);
+    color: var(--text);
+    text-align: left;
+}
+
 @media (hover: hover) {
-    .session-row:hover .session-act,
-    .session-act:focus-visible {
-        opacity: 1;
-        transform: none;
+    .current-linked-row:hover {
+        background: var(--bg);
     }
-    .session-row:not(.no-acts):hover .session-side {
-        opacity: 0;
-        min-width: 56px;
+}
+
+.current-linked-row .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.current-linked-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 13.5px;
+}
+
+.current-linked-time,
+.current-linked-needs {
+    flex: none;
+    font-size: 12px;
+    color: var(--text);
+}
+
+.current-linked-needs {
+    font-weight: 600;
+}
+
+@media (pointer: coarse) {
+    .current-parent-link,
+    .current-linked-row {
+        min-height: 44px;
     }
-    .session-row.one-act:hover .session-side {
-        min-width: 26px;
-    }
-    /* Three live buttons: archive, pin, and mark-unread. */
-    .session-row.three-acts:hover .session-side {
-        min-width: 86px;
-    }
-    /* And an extension's action (`pocket.sessionAction` with an icon). */
-    .session-row.four-acts:hover .session-side {
-        min-width: 116px;
-    }
-    /* Keyboard focus in the row shows them too, not the focus a click leaves on the open session's row. Kept apart
-       from the rules above: a browser without :has() drops only these. */
-    .session-row:has(:focus-visible) .session-act {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:not(.no-acts):has(:focus-visible) .session-side {
-        opacity: 0;
-        min-width: 56px;
-    }
-    .session-row.one-act:has(:focus-visible) .session-side {
-        min-width: 26px;
-    }
-    .session-row.three-acts:has(:focus-visible) .session-side {
-        min-width: 86px;
-    }
-    .session-row.four-acts:has(:focus-visible) .session-side {
-        min-width: 116px;
-    }
-    /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
-    :root.selecting .session-row .session-act {
-        opacity: 0;
-    }
-    :root.selecting .session-row .session-side {
-        opacity: 1;
-        min-width: 0;
+
+    .current-link-toggle {
+        min-height: 32px;
     }
 }
 
@@ -6415,12 +6457,8 @@ pre.diff .del {
  * its fill and its click take the whole row; only the chips that do something take clicks of their own.
  */
 .session-row.with-chips .session {
-    height: calc(24px + 12px * var(--space-y) + 20px);
+    height: calc(20px + 10px * var(--space-y) + 20px);
     padding-bottom: 20px;
-}
-
-.session-row.with-chips .session-actions {
-    top: calc(13px + 6px * var(--space-y));
 }
 
 .session-chips {
@@ -6480,12 +6518,6 @@ button.session-chip {
 /* While taps select rows (after Select), a tap on a chip selects its row too. */
 .sessions.tap-selecting button.session-chip {
     pointer-events: none;
-}
-
-/* A linked row's branch turns into its title's line, not the middle of the taller row. */
-.session-row.with-chips .session-branches > .elbow::after {
-    bottom: auto;
-    height: calc(14px + 6px * var(--space-y));
 }
 
 /* Extensions' filters beside the search (`pocket.sessionFilter`): lit while one narrows the list. */
@@ -6647,7 +6679,7 @@ div.group-head {
 
 @media (pointer: coarse) {
     .session-quick {
-        height: calc(30px + 10px * var(--space-y));
+        height: 44px;
     }
 }
 
@@ -17119,12 +17151,19 @@ textarea.notes {
     .launcher-input input {
         font-size: 16px;
     }
-    /* Rows a thumb can take, and that answer the press: 40px, 37px, and 34px. */
+    /* Rows a thumb can take, one line each, and that answer the press: 44px. */
     .session {
-        height: calc(30px + 10px * var(--space-y));
+        height: 44px;
     }
     .session-row {
-        contain-intrinsic-size: auto calc(30px + 10px * var(--space-y));
+        contain-intrinsic-size: auto 46px;
+    }
+    .session-row.with-chips .session {
+        height: 64px;
+        padding-bottom: 20px;
+    }
+    .session-row.with-chips {
+        contain-intrinsic-size: auto 66px;
     }
     .session:active {
         background: var(--pressed);

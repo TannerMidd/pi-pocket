@@ -333,6 +333,7 @@ test(
         await reach({ sheet: "menu" }, "the menu");
 
         try {
+            // The rail keeps its own scale at every density: 50px, with room for its label under the mark.
             for (const [density, height] of [
                 ["comfortable", "44px"],
                 ["compact", "40.4px"],
@@ -349,7 +350,7 @@ test(
                     });
                 `);
 
-                assert.equal(measured.minimum, height, `${density} rail rows`);
+                assert.equal(measured.minimum, "50px", `${density} rail rows`);
                 assert.equal(measured.density, density);
                 const scale = await inPage<{
                     rail: number;
@@ -371,12 +372,12 @@ test(
                     });
                 `);
 
-                assert.ok(Math.abs(scale.rail - 64) < 0.1);
+                assert.ok(Math.abs(scale.rail - 80) < 0.1);
                 assert.ok(Math.abs(scale.drawer - 320) < 0.1);
-                assert.ok(Math.abs(scale.brand - 32) < 0.1);
+                assert.ok(Math.abs(scale.brand - 44) < 0.1);
                 assert.equal(scale.row, parseFloat(height));
                 assert.equal(scale.title, 16);
-                assert.equal(scale.label, 11);
+                assert.equal(scale.label, 12);
             }
         } finally {
             await page.evaluate(
@@ -1104,8 +1105,18 @@ test(
         await fresh();
         // Wide, where the sidebar's list shows beside the session: a phone in a session draws no list at all.
         await page.setViewport(VIEWPORTS.desktop);
+        // The open session is the list's card, not one of its rows: another session shows the row that draws again.
+        const other = await newSession(app);
+
         await goTo(first);
         await reach({ path: `/s/${first}` }, "the session");
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.sidebar .session-row[data-id="${Number(other)}"]') !== null)`,
+                ),
+            "the other session's row",
+        );
         await until(
             async () =>
                 (await inPage<boolean>(
@@ -1157,7 +1168,7 @@ test(
             // One session renamed: its row, and no other.
             store.set((state) => ({
                 sessions: state.sessions.map((session) =>
-                    session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
+                    session.id === ${Number(other)} ? { ...session, title: "Renamed here" } : session,
                 ),
             }));
             await settle();

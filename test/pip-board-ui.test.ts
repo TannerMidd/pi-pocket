@@ -103,10 +103,11 @@ const attach = (picker: string) =>
         picker.dispatchEvent(new Event('change', { bubbles: true }));`);
 const place = (value: "floating" | "board") =>
     page.evaluate(`(await import('/theme.js')).setPrefs({ pip: '${value}' })`);
-/** The session the list marks open. */
+/** The session the list marks open: its card at the top, or its row (in Priority, or while searching). */
 const markedOpen = () =>
     inPage<number>(
-        `Number(document.querySelector('.sidebar .session-row:has([aria-current="page"])')
+        `Number((document.querySelector('.sidebar .session-row:has([aria-current="page"])')
+            ?? document.querySelector('.sidebar .session-current[aria-current="page"]'))
             ?.dataset.id)`,
     );
 

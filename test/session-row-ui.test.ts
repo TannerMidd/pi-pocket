@@ -327,13 +327,17 @@ test("a session marked unread shows it until it is opened", real, async () => {
         page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 
     await fresh();
-    await click(`${row(one)} [aria-label="Mark unread"]`);
+    // A row has no buttons of its own: the mark comes from the menu that a right-click opens.
+    await menuOpens(one, "the row's menu");
+    await menuChoose("Mark unread");
     await marked([one], "marked: stored, a dot, and a bold title");
-    await click(`${row(one)} [aria-label="Mark read"]`);
-    await marked([], "read again from the row");
+    await menuOpens(one, "the row's menu again");
+    await menuChoose("Mark read");
+    await marked([], "read again from the menu");
 
     // A tap on the row opens it.
-    await click(`${row(one)} [aria-label="Mark unread"]`);
+    await menuOpens(one, "the menu, a third time");
+    await menuChoose("Mark unread");
     await marked([one], "marked again");
     await click(`${row(one)} > .session`);
     await until(async () => (await touched()).path === `/s/${one}`, "opened");
@@ -382,6 +386,22 @@ const menuChoose = (label: string) =>
             .find((each) => each.firstElementChild.textContent.trim() === ${JSON.stringify(label)})
             .click();
     `);
+
+/** `kids` as sessions that `parent` started, as Agent Teams records them. */
+async function linkTo(parent: ConversationId, kids: ConversationId[]): Promise<void> {
+    await app.harness.commit(async (tx) => {
+        const sessions = (await tx.doc(SessionsDoc)).items;
+
+        for (const kid of kids) {
+            sessions[String(kid)]!.linkedFrom = { id: Number(parent) };
+        }
+    }, BACKGROUND_CONTEXT);
+}
+
+/** No fold chosen yet in this browser, so every session with linked ones starts folded, as a new browser shows it. */
+async function noFoldsChosen(): Promise<void> {
+    await page.evaluate(`localStorage.removeItem("pocket.foldedLinked"); return "null"`);
+}
 
 async function menuOpens(id: ConversationId, what: string) {
     const at = await rightClick(id);
@@ -523,14 +543,7 @@ test(
         const parent = await newSession(app);
         const kids = [await newSession(app), await newSession(app)];
 
-        // Started by the parent, as a linked session is (`team`).
-        await app.harness.commit(async (tx) => {
-            const sessions = (await tx.doc(SessionsDoc)).items;
-
-            for (const kid of kids) {
-                sessions[String(kid)]!.linkedFrom = { id: Number(parent) };
-            }
-        }, BACKGROUND_CONTEXT);
+        await linkTo(parent, kids);
 
         const shown = async () =>
             await inPage<{
@@ -538,6 +551,7 @@ test(
                 expanded: string | null;
                 numbered: number;
                 rows: number;
+                tag: string;
             }>(`
             const fold = document.querySelector(${JSON.stringify(`${row(parent)} .session-fold`)});
             return JSON.stringify({
@@ -545,18 +559,42 @@ test(
                 expanded: fold?.getAttribute("aria-expanded") ?? null,
                 numbered: document.querySelectorAll(${JSON.stringify(`${list} .session-num`)}).length,
                 rows: document.querySelectorAll(${JSON.stringify(`${list} .session-row`)}).length,
+                tag: fold?.textContent.trim() ?? "",
             });
         `);
         const click = (selector: string) =>
             page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 
+        // This browser has folded nothing yet: linked sessions start folded, and the tag says how many.
+        await noFoldsChosen();
         await fresh();
-        await until(
-            async () => (await shown()).kids === 2,
-            "the linked sessions under their parent",
+        await until(async () => (await shown()).kids === 0, "the linked sessions folded at first");
+        assert.equal(
+            (await shown()).tag,
+            "Linked 2",
+            "the row says how many, and nothing is hidden silently",
+        );
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(getComputedStyle(document.querySelector(${JSON.stringify(`${row(parent)} .session-fold`)})).textTransform)`,
+            ),
+            "uppercase",
+            "LINKED n, in small caps",
         );
 
-        // Folded: gone from the list, and from the numbers Alt+1…9 use, with nothing else changing.
+        // Shown: the linked sessions are in the list, and in the numbers Alt+1…9 use.
+        await click(`${row(parent)} .session-fold`);
+        await until(async () => (await shown()).kids === 2, "a tap shows them");
+        const open = await shown();
+
+        assert.equal(open.expanded, "true");
+        assert.equal(
+            open.numbered,
+            Math.min(9, open.rows),
+            "the numbers follow the rows that show",
+        );
+
+        // Folded again: gone from the list and the numbers, with nothing else changing.
         await click(`${row(parent)} .session-fold`);
         await until(async () => (await shown()).kids === 0, "the fold hides them");
         const folded = await shown();
@@ -568,14 +606,19 @@ test(
             "the numbers follow the rows that show",
         );
 
-        // Open one of them: its parent's fold opens, and its button is off.
+        // Open one of them: its parent's fold opens, and its button is off. The open one is the list's card.
         await page.navigate(`${base}/s/${kids[0]}`);
-        await until(async () => (await shown()).kids === 2, "the open session's family shows");
+        await until(
+            async () => (await shown()).kids === 1,
+            "the other linked session, still under its parent",
+        );
+        assert.equal((await shown()).expanded, "true");
         assert.equal(
             await inPage<boolean>(
                 `return JSON.stringify(document.querySelector(${JSON.stringify(`${row(parent)} .session-fold`)}).disabled)`,
             ),
             true,
+            "the fold above the open session is off",
         );
 
         // Back home, the fold is as it was, and unfolding shows them.
@@ -585,6 +628,290 @@ test(
         await until(async () => (await shown()).kids === 2, "unfolded");
     },
 );
+
+test("the labeled rail is 80px wide, with 50px items and 20px marks", real, async () => {
+    await fresh();
+    const rail = await inPage<Record<string, number>>(`
+        const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+        const style = (selector) => getComputedStyle(document.querySelector(selector));
+        return JSON.stringify({
+            width: Math.round(box(".desktop-rail").width),
+            item: Math.round(parseFloat(style(".desktop-rail .rail-place").minHeight)),
+            icon: Math.round(box(".desktop-rail .rail-place .icon").width),
+            label: Math.round(parseFloat(style(".desktop-rail .rail-label").fontSize)),
+            brand: Math.round(box(".rail-brand").width),
+            gap: Math.round(parseFloat(style(".desktop-rail").rowGap)),
+        });
+    `);
+
+    assert.deepEqual(rail, { width: 80, item: 50, icon: 20, label: 12, brand: 44, gap: 6 });
+});
+
+test(
+    "a row is one line, with no line to a linked session and no buttons of its own",
+    real,
+    async () => {
+        await fresh();
+        const row = await inPage<{
+            height: number;
+            clamp: string;
+            wrap: string;
+            branches: number;
+            acts: number;
+            time: number;
+        }>(`
+        const button = document.querySelector(${JSON.stringify(`${list} .session-row > .session`)});
+        const title = button.querySelector(".session-title");
+        const side = button.querySelector(".session-time");
+
+        return JSON.stringify({
+            height: Math.round(button.getBoundingClientRect().height),
+            clamp: getComputedStyle(title).webkitLineClamp,
+            wrap: getComputedStyle(title).whiteSpace,
+            branches: document.querySelectorAll(${JSON.stringify(`${list} .session-branches`)}).length,
+            acts: document.querySelectorAll(${JSON.stringify(`${list} .session-act, ${list} .session-actions`)}).length,
+            time: Math.round(parseFloat(getComputedStyle(side).fontSize)),
+        });
+    `);
+
+        assert.equal(row.height, 30, "30px, one line");
+        assert.equal(row.clamp, "none", "no two-line clamp");
+        assert.equal(row.wrap, "nowrap", "the title runs on one line");
+        assert.equal(row.branches, 0, "no connector lines");
+        assert.equal(row.acts, 0, "no hover buttons");
+        assert.ok(row.time > 0, "the time still shows on the row's right");
+    },
+);
+
+test("a row's actions are its right-click menu, also after a hover", real, async () => {
+    await fresh();
+    await page.hover({ selector: `${row(active)} > .session` });
+
+    assert.equal(
+        await inPage<number>(
+            `return JSON.stringify(document.querySelectorAll(${JSON.stringify(`${list} .session-act`)}).length)`,
+        ),
+        0,
+        "a hover adds no button",
+    );
+    assert.equal(
+        await inPage<string>(
+            `return JSON.stringify(getComputedStyle(document.querySelector(${JSON.stringify(`${row(active)} .session-time`)})).visibility)`,
+        ),
+        "visible",
+        "the time keeps its place",
+    );
+
+    const { shown } = await menuOpens(active, "the row's menu");
+
+    for (const label of ["Archive", "Pin to the top", "Mark unread", "Select"]) {
+        assert.ok(
+            shown.items.includes(label),
+            `the menu offers ${label}: ${shown.items.join(", ")}`,
+        );
+    }
+
+    await page.press("Escape");
+    await settled({ sheet: null }, "closed");
+});
+
+test(
+    "the open session is the list's card, and its linked sessions open in place under it",
+    real,
+    async () => {
+        const parent = await newSession(app);
+        const kids = [await newSession(app), await newSession(app)];
+
+        await linkTo(parent, kids);
+        await page.navigate(`${base}/s/${parent}`);
+
+        const card = () =>
+            inPage<{
+                id: string | null;
+                title: string;
+                eyebrow: string;
+                linked: number;
+                expanded: boolean | null;
+                rows: string[];
+                inList: number;
+                kidRows: number;
+            }>(`
+            const card = document.querySelector(".sidebar .session-current");
+            const rows = [...document.querySelectorAll(".sidebar .session-row")];
+            const list = card?.querySelector('[data-part="session-current-panel"]');
+
+            return JSON.stringify({
+                id: card?.dataset.id ?? null,
+                title: card?.querySelector(".current-title")?.textContent.trim() ?? "",
+                eyebrow: card?.querySelector(".current-eyebrow")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+                linked: card?.querySelectorAll(".current-linked-row").length ?? 0,
+                expanded: card?.querySelector(".current-link-toggle")?.getAttribute("aria-expanded") === "true",
+                rows: list && !list.hidden ? [...list.querySelectorAll(".current-linked-row")].map((each) => each.dataset.id) : [],
+                inList: rows.filter((each) => ${JSON.stringify(kids.map(String))}.includes(each.dataset.id)).length,
+                kidRows: rows.filter((each) => each.dataset.id === ${JSON.stringify(String(parent))}).length,
+            });
+        `);
+
+        await until(async () => (await card()).id === String(parent), "the open session's card");
+        const first = await card();
+
+        assert.equal(first.inList, 0, "its linked sessions are not rows below it");
+        assert.equal(first.kidRows, 0, "the open session is not a row too");
+        assert.match(first.eyebrow, /·\s*\w+\s*·/, "the card's folder, status, and age");
+        assert.equal(first.expanded, false, "its linked sessions start folded");
+        assert.deepEqual(first.rows, [], "so none of them shows");
+
+        await page.click({ selector: ".sidebar .current-link-toggle" });
+        await until(
+            async () => (await card()).rows.length === 2,
+            "the linked sessions open in place",
+        );
+        assert.equal((await card()).expanded, true);
+
+        await page.click({ selector: ".sidebar .current-link-toggle" });
+        await until(async () => (await card()).rows.length === 0, "and close again");
+    },
+);
+
+test(
+    "a linked session that is open says which session started it, and the strip opens it",
+    real,
+    async () => {
+        const parent = await newSession(app);
+        const kid = await newSession(app);
+
+        await linkTo(parent, [kid]);
+        await page.navigate(`${base}/s/${kid}`);
+
+        const strip = () =>
+            inPage<{ text: string; title: string }>(`
+            const parent = document.querySelector(".sidebar .session-current-parent");
+
+            return JSON.stringify({
+                text: parent?.querySelector(".current-parent-label")?.textContent.trim() ?? "",
+                title: parent?.querySelector(".current-parent-name")?.textContent.trim() ?? "",
+            });
+        `);
+
+        await until(async () => (await strip()).text !== "", "the strip above the card");
+        assert.equal((await strip()).text, "From", "FROM, in small caps");
+
+        const title = await inPage<string>(
+            `return JSON.stringify((await import("/store.js")).store.state.sessions.find((each) => each.id === ${Number(parent)}).title || "New session")`,
+        );
+
+        assert.equal((await strip()).title, title, "the session that started it");
+
+        await page.click({ selector: ".sidebar .current-parent-link" });
+        await until(async () => (await touched()).path === `/s/${parent}`, "the parent, opened");
+    },
+);
+
+test("on a phone, rows are a thumb's height, and the rail is a bottom bar", real, async () => {
+    await fresh(true);
+    const phone = await inPage<{
+        rows: number;
+        heights: number[];
+        acts: number;
+        items: number;
+        smallest: number;
+        bottom: number;
+    }>(`
+        const box = (el) => el.getBoundingClientRect();
+        const rows = [...document.querySelectorAll(".home-list .session-row > .session")];
+        const items = [...document.querySelectorAll(".mobile-rail .rail-place")].filter(
+            (el) => el.getClientRects().length,
+        );
+
+        return JSON.stringify({
+            rows: rows.length,
+            heights: [...new Set(rows.map((el) => Math.round(box(el).height)))],
+            acts: document.querySelectorAll(".home-list .session-act").length,
+            items: items.length,
+            smallest: Math.min(...items.map((el) => Math.round(box(el).height))),
+            bottom: Math.round(box(items[0]).bottom),
+        });
+    `);
+
+    assert.ok(phone.rows > 0, "the list, on a phone");
+    assert.deepEqual(phone.heights, [44], "a thumb's height, one line");
+    assert.equal(phone.acts, 0, "no buttons of its own");
+    assert.equal(phone.items, 4, "the four destinations");
+    assert.ok(phone.smallest >= 44, "each a thumb's target");
+    assert.ok(phone.bottom > VIEWPORTS.mobile.height - 16, "in a bar at the screen's foot");
+
+    // The drawer over a session shows the same card, and its linked sessions open there too.
+    const parent = await newSession(app);
+    const kid = await newSession(app);
+
+    await linkTo(parent, [kid]);
+    await page.navigate(`${base}/s/${parent}`);
+    await until(
+        async () =>
+            (await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".home-list .session-current").length)`,
+            )) === 0,
+        "no list beside the session",
+    );
+    await page.evaluate(`(await import("/store.js")).store.set({ drawer: true }); return "null"`);
+    await until(
+        async () =>
+            (await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".drawer .session-current").length)`,
+            )) === 1,
+        "the card, in the drawer",
+    );
+    // The drawer may still be sliding in: a tap on its own element, where a pointer would miss it meanwhile.
+    await page.evaluate(
+        `document.querySelector(".drawer .current-link-toggle").click(); return "null"`,
+    );
+    await until(
+        async () =>
+            await inPage<boolean>(
+                `const toggle = document.querySelector(".drawer .current-link-toggle");
+                return JSON.stringify(toggle?.getAttribute("aria-expanded") === "true")`,
+            ),
+        "its linked session, shown in place",
+    );
+    assert.equal(
+        await inPage<number>(
+            `const panel = document.querySelector('.drawer [data-part="session-current-panel"]');
+            return JSON.stringify(Math.round(panel.querySelector(".current-linked-row").getBoundingClientRect().height))`,
+        ),
+        44,
+        "and a thumb's height there",
+    );
+});
+
+test("Priority has no card: what waits for you comes first", real, async () => {
+    await fresh();
+    assert.equal(
+        await inPage<number>(
+            `return JSON.stringify(document.querySelectorAll(".sidebar .session-current").length)`,
+        ),
+        0,
+        "the list, with no session open",
+    );
+
+    await page.navigate(`${base}/s/${active}`);
+    await until(
+        async () =>
+            (await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".sidebar .session-current").length)`,
+            )) === 1,
+        "the open session's card, on Recent",
+    );
+
+    await selectTab("Priority");
+    assert.equal(
+        await inPage<number>(
+            `return JSON.stringify(document.querySelectorAll(".sidebar .session-current").length)`,
+        ),
+        0,
+        "no card over the needs you come first",
+    );
+    await selectTab("Recent");
+});
 
 test(
     "dragging the sidebar's edge changes nothing on the page's root until it ends",
