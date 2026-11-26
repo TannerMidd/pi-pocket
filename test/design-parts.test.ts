@@ -49,6 +49,20 @@ test("a frame's size is its device's, or the person's own kept between 200 and 4
     assert.equal(devices.exportViewport("slide", { w: 1280, h: 720 }), "desktop");
 });
 
+test("with no size chosen, the canvas shows a desktop page on a wide screen and a phone's on a phone", async () => {
+    const { resolveDevice } = await load("state");
+
+    // The panel beside the conversation is narrow, but the screen is wide: a desktop page.
+    assert.equal(resolveDevice("auto", 600, 1920), "desktop");
+    assert.equal(resolveDevice("auto", 900, 1440), "desktop");
+    assert.equal(resolveDevice("auto", 390, 390), "mobile");
+    // No screen width known: the panel's decides.
+    assert.equal(resolveDevice("auto", 390, 0), "mobile");
+    assert.equal(resolveDevice("auto", 1200, 0), "desktop");
+    // A size someone chose is kept.
+    assert.equal(resolveDevice("tablet", 390, 390), "tablet");
+});
+
 test("fit never scales a page past 100%, and keeps a margin; a number is a number", () => {
     const room = { w: 700, h: 500 };
 
