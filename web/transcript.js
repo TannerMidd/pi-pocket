@@ -17,7 +17,6 @@ import { routeSliding } from "./back.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
-import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
 import { personStorage } from "./person-storage.js";
 import { quoteParts } from "./quote-text.js";
@@ -4148,7 +4147,6 @@ export function Transcript() {
             data-part="transcript"
             ref=${column}
         >
-            <${LinkedSessions} />
             ${
                 conversation.forkedFrom &&
                 sessionsLoaded &&

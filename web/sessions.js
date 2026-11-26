@@ -3,7 +3,7 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Avatar, folderColor, initials } from "./avatar.js";
-import { goHome, useBack } from "./back.js";
+import { goBack, goHome, routeUnder, useBack } from "./back.js";
 import {
     sessionActions,
     sessionChips,
@@ -14,7 +14,16 @@ import {
 import { useDragToClose } from "./gestures.js";
 import { wholeOnTile } from "./peeks.js";
 import { pipUnread } from "./pip.js";
-import { sessionForest, unfolded } from "./session-tree.js";
+import {
+    ancestorMatches,
+    atWork,
+    belongsTo,
+    breadcrumb,
+    descendantCount,
+    familyAttention,
+    familyIndex,
+    recentRows,
+} from "./session-tree.js";
 import {
     actions,
     attempt,
@@ -33,9 +42,8 @@ import {
     stillMoving,
     store,
     workspaceOrder,
-    foldsNow,
+    openFamily,
     openId as markedOpen,
-    toggleFoldedLinked,
     toggleNavigation,
 } from "./store.js";
 import { dismiss as dismissSubagent } from "./subagents.js";
@@ -213,42 +221,7 @@ const readClosed = () => {
     }
 };
 
-/** The fold's name for a screen reader: how many, and what its dot says (`aria-expanded` says whether they show). */
-function foldLabel(kids, trouble) {
-    const count = `${kids} linked ${kids === 1 ? "session" : "sessions"}`;
-
-    return trouble === "waiting"
-        ? `${count}, one needs you`
-        : trouble === "failed"
-          ? `${count}, one failed`
-          : count;
-}
-
-/** Whether a session folded away under `id` waits for you or failed: the fold shows it, as a folded group does. */
-function hiddenTrouble(group, id) {
-    const at = group.hidden.findIndex((row) => row.session.id === id);
-
-    if (at === -1) {
-        return undefined;
-    }
-
-    const depth = group.hidden[at].branches.length;
-
-    for (const row of group.hidden.slice(at + 1)) {
-        if (row.branches.length <= depth) {
-            break;
-        }
-
-        const shape = sessionMark(row.session).shape;
-
-        if (shape === "waiting" || shape === "failed") {
-            return shape;
-        }
-    }
-
-    return undefined;
-}
-
+const PAGE_SIZE = 12;
 const DAY = 86_400_000;
 
 /** When today began, in this device's time zone: worked out once for each grouping, not once for each session. */
@@ -372,7 +345,7 @@ function haystackOf(session, home) {
         kept = {
             words,
             home,
-            text: `${session.title ?? ""} ${session.cwd} ${shortPath(session.cwd, home)} ${session.model ?? ""} ${words.join(" ")}`.toLowerCase(),
+            text: `${session.id} ${session.title ?? "New session"} ${session.cwd} ${shortPath(session.cwd, home)} ${session.model ?? ""} ${words.join(" ")}`.toLowerCase(),
         };
         haystacks.set(session, kept);
     }
@@ -411,7 +384,7 @@ const failing = (counts) => (counts.failed ?? 0) - (counts.dealt ?? 0);
 const failedRun = (session, state = store.state) =>
     session.failed === true && (isUnread(session.id) || finishedUnseen(session, state));
 
-function needOf(session, state = store.state) {
+export function needOf(session, state = store.state) {
     if (session.waiting) {
         return "ask";
     }
@@ -427,18 +400,6 @@ function needsYouCount(sessions = store.state.sessions, state = store.state) {
     return sessions.reduce(
         (sum, session) => sum + (!session.archived && needOf(session, state) ? 1 : 0),
         0,
-    );
-}
-
-/** Whether Pi works in a session itself: a run, a request waiting for a limit, its subagents, or background tasks. */
-function atWork(session) {
-    const counts = session.subagents ?? {};
-
-    return (
-        session.busy ||
-        session.limited !== undefined ||
-        (counts.working ?? 0) + (counts.waiting ?? 0) > 0 ||
-        session.background > 0
     );
 }
 
@@ -490,6 +451,16 @@ function slotOf(session, { state, collabs, answered, team }) {
 
 const NEED_RANK = { ask: 0, failed: 1, agents: 2 };
 
+function needOrder(state) {
+    const rank = (session) => NEED_RANK[needOf(session, state)] ?? 3;
+
+    return (a, b) =>
+        rank(a) - rank(b) ||
+        (rank(a) === 0
+            ? (a.approval?.at ?? 0) - (b.approval?.at ?? 0)
+            : (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt));
+}
+
 function priorityGroups(shown, ctx, held) {
     const slots = { needs: [], ready: [], working: [], quiet: [] };
 
@@ -510,20 +481,8 @@ function priorityGroups(shown, ctx, held) {
         slots[slot].push(session);
     }
 
-    const rank = (session) => NEED_RANK[needOf(session, ctx.state)] ?? 3;
-
-    slots.needs.sort((a, b) => {
-        const kinds = rank(a) - rank(b);
-
-        if (kinds !== 0) {
-            return kinds;
-        }
-
-        return rank(a) === 0
-            ? (a.approval?.at ?? 0) - (b.approval?.at ?? 0)
-            : (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt);
-    });
-    const rowsOf = (list) => list.map((session) => ({ session, branches: [], descendants: 0 }));
+    slots.needs.sort(needOrder(ctx.state));
+    const rowsOf = (list) => list.map((session) => ({ session }));
     const groups = [];
 
     for (const [slot, label] of [
@@ -779,12 +738,9 @@ function teamOf(sessions) {
  */
 function SessionRow({
     session,
-    branches,
     kids,
-    folded,
-    foldHeld,
-    foldTrouble,
-    onFold,
+    details,
+    trouble,
     index,
     number,
     ago,
@@ -880,18 +836,8 @@ function SessionRow({
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
-        style=${`${arrival === null ? "" : `--i:${arrival};`}--linked-depth:${Math.min(branches.length, 3)}`}
+        style=${arrival === null ? undefined : "--i:" + arrival}
     >
-        ${
-            branches.length > 0 &&
-            html`<span class="session-branches" data-part="session-branches" aria-hidden="true">
-                ${branches.slice(-3).map(
-                    (continues, index, visible) => html`<span
-                        class=${`${continues ? "continues" : ""} ${index === visible.length - 1 ? "elbow" : ""}`}
-                    ></span>`,
-                )}
-            </span>`
-        }
         <button
             class=${`session ${unread ? "unread" : ""}`}
             data-part="session-button"
@@ -917,11 +863,11 @@ function SessionRow({
                         ></span>`
                 }
             </span>
-            <span class=${`session-title ${hit ? "with-hit" : ""}`}>
+            <span class=${`session-title ${hit || details ? "with-hit" : ""}`}>
                 ${
-                    hit
-                        ? html`<span class="session-name">${title}</span>
-                            <span class="session-hit">${withMark(hit, needle)}</span>`
+                    hit || details
+                        ? html`<span class="session-name">${withMark(title, needle)}</span>
+                            <span class="session-hit">${[details, hit].filter(Boolean).join(" · ")}</span>`
                         : withMark(title, needle)
                 }
             </span>
@@ -994,26 +940,12 @@ function SessionRow({
         ${
             kids > 0 &&
             html`<button
-                class=${`session-fold ${folded ? "folded" : ""}`}
-                data-part="session-fold"
-                aria-expanded=${!folded}
-                aria-label=${foldLabel(kids, foldTrouble)}
-                title=${
-                    foldHeld
-                        ? "The open session is among them, so they show"
-                        : `${folded ? "Show" : "Hide"} ${kids} linked ${kids === 1 ? "session" : "sessions"}`
-                }
-                disabled=${foldHeld}
-                onClick=${() => onFold(session.id)}
+                class="session-fold" data-part="session-fold"
+                data-family-open=${"row-" + session.id}
+                aria-label=${"Browse " + kids + " linked sessions" + (trouble ? ", " + trouble + " need attention" : "")}
+                title="Browse family" onClick=${(event) => openFamily(session.id, "", event.currentTarget)}
             >
-                ${
-                    foldTrouble &&
-                    html`<span class=${`group-trouble ${foldTrouble}`} aria-hidden="true"></span>`
-                }
-                <span class="session-fold-pill">
-                    ${kids}
-                    <${Icon} name="down" size=${10} />
-                </span>
+                <span class="session-fold-pill">Browse <${Icon} name="chevron" size=${12} /></span>
             </button>`
         }
         ${
@@ -1232,24 +1164,6 @@ function NeedAsk({ session, ask, steers, ownCall, answering, onAnswer }) {
 const MemoRow = memo(SessionRow, ["index"]);
 
 /**
- * The branch lines a linked row draws, one array for each shape: the forest makes new ones each time, and a memoized
- * row would draw again for an array that only looks the same. There are few shapes (a row is at most a few deep).
- */
-const branchShapes = new Map();
-
-function sameBranches(branches) {
-    const key = branches.join();
-    let shape = branchShapes.get(key);
-
-    if (shape === undefined) {
-        shape = Object.freeze([...branches]);
-        branchShapes.set(key, shape);
-    }
-
-    return shape;
-}
-
-/**
  * Sessions in groups: pinned, then by day or by folder. While searching, one flat list of matches. `today` is when
  * today began, and changes the day groups as days pass.
  */
@@ -1363,12 +1277,27 @@ const ROW_KEYS = [
     "extensionsRev",
 ];
 
-function AllSessions({ compact = false }) {
+function AllSessions({ compact = false, explorer = null }) {
     const { sessions, sessionsLoaded, server, pinned } = store.state;
     const team = teamOf(sessions);
     const canStart = canSteer() && !scoped();
-    const [query, setQueryState] = useState(() => (compact ? "" : listKept.query));
-    const [tab, setTabState] = useState(() => tabOf(prefs().group));
+    const [query, setQueryState] = useState(
+        () =>
+            explorer?.query ??
+            (compact ? (store.state.drawerReturn?.sideQuery ?? "") : listKept.query),
+    );
+    const [page, setPage] = useState(explorer?.page ?? 0);
+    const [filter, setFilter] = useState(explorer?.filter ?? "all");
+    const [sort, setSort] = useState(explorer?.sort ?? "new");
+    const [tab, setTabState] = useState(
+        () => (compact && store.state.drawerReturn?.sideTab) || tabOf(prefs().group),
+    );
+
+    useLayoutEffect(() => {
+        if (compact && store.state.drawerReturn) {
+            store.note({ drawerReturn: null });
+        }
+    }, []);
     const [closed, setClosed] = useState(readClosed);
     const [asking, setAsking] = useState(null);
     const [answered, setAnswered] = useState(() => new Set());
@@ -1378,25 +1307,8 @@ function AllSessions({ compact = false }) {
     const opened = useRef({ id: null, slot: null, asked: false });
     const slotsShown = useRef(new Map());
     const askOrder = useRef([]);
-    // Linked sessions folded away (`store.js`), but never above the open session, which always shows.
-    const { foldedLinked } = store.state;
     const openId = markedOpen();
-    const folded = useMemo(() => foldsNow(), [foldedLinked, openId, sessions]);
-    // The sessions above the open one: their folds stay open, so their fold buttons do nothing and are off.
-    const holdsOpen = useMemo(() => {
-        const byId = new Map(sessions.map((session) => [session.id, session]));
-        const above = new Set();
-
-        for (
-            let at = byId.get(openId)?.linkedFrom?.id;
-            at !== undefined && !above.has(at);
-            at = byId.get(at)?.linkedFrom?.id
-        ) {
-            above.add(at);
-        }
-
-        return above;
-    }, [openId, sessions]);
+    const tree = familyIndex(sessions);
     const [selected, setSelectedState] = useState(() => new Set());
     // Taps select rows instead of opening them: a selection started from a long press's sheet, on a touch screen.
     const [tapSelects, setTapSelects] = useState(false);
@@ -1409,7 +1321,7 @@ function AllSessions({ compact = false }) {
     const list = useRef(null);
     const tabs = useRef(null);
     const needle = query.trim().toLowerCase();
-    const archived = tab === "archived";
+    const archived = explorer ? filter === "archived" : tab === "archived";
     const searching = needle !== "";
     // How many rows draw now in each view, in its order (`firstRows`): the list's (`base`), again from the start with
     // each tab, and a search's (`matches`), with each search.
@@ -1438,7 +1350,12 @@ function AllSessions({ compact = false }) {
     fills.current.matches = searching ? (fills.current.matches ?? startFill(reopened)) : null;
 
     const setQuery = (next) => {
-        if (!compact) {
+        setPage(0);
+
+        if (explorer) {
+            explorer.query = next;
+            explorer.page = 0;
+        } else if (!compact) {
             listKept.query = next;
         }
 
@@ -1448,7 +1365,19 @@ function AllSessions({ compact = false }) {
 
     // Scrolled back to where it was, once its rows are there.
     useLayoutEffect(() => {
-        if (!compact && sessionsLoaded && list.current) {
+        if (sessionsLoaded && list.current && explorer) {
+            list.current.scrollTop = explorer.scroll;
+            const target =
+                explorer.focus == null
+                    ? null
+                    : list.current.querySelector(
+                          '[data-id="' + CSS.escape(String(explorer.focus)) + '"] .session',
+                      );
+
+            (target ?? list.current.closest(".sessions").querySelector(".family-heading")).focus({
+                preventScroll: true,
+            });
+        } else if (!compact && sessionsLoaded && list.current) {
             list.current.scrollTop = listKept.scroll;
         }
     }, [sessionsLoaded]);
@@ -1511,15 +1440,81 @@ function AllSessions({ compact = false }) {
     const today = useMemo(todayStart, [minute]);
     const home = server?.home;
 
+    const pins = useMemo(() => new Set(pinned), [pinned]);
+    const attention = useMemo(
+        () => familyAttention(tree, needOf),
+        [tree, unread, peekSeen, server],
+    );
+
     const listFor = (needle) => {
-        // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
         const kept = sessionFilterTest();
-        const shown = sessions.filter(
-            (session) =>
-                Boolean(session.archived) === archived &&
-                (needle === "" || haystackOf(session, home).includes(needle)) &&
-                (kept === null || kept(session)),
-        );
+        const ancestry = needle ? ancestorMatches(tree, needle) : null;
+        const work = (s) => !s.archived && (pins.has(s.id) || atWork(s));
+        const needs = (s) => !s.archived && needOf(s);
+        const scope = explorer?.scope;
+        const lead = scope && tree.nodes.get(Number(scope));
+        const shown = sessions.filter((s) => {
+            const node = tree.nodes.get(s.id);
+
+            if ((!explorer && Boolean(s.archived) !== archived) || (kept && !kept(s))) {
+                return false;
+            }
+
+            if (
+                scope &&
+                !(
+                    scope === "all" ||
+                    (scope === "work" && work(s)) ||
+                    (scope === "attention" && needs(s)) ||
+                    belongsTo(node, lead)
+                )
+            ) {
+                return false;
+            }
+
+            if (
+                explorer &&
+                !(
+                    filter === "all" ||
+                    (filter === "archived" && s.archived) ||
+                    (filter === "pinned" && pins.has(s.id)) ||
+                    (filter === "working" && atWork(s)) ||
+                    (filter === "attention" && needs(s))
+                )
+            ) {
+                return false;
+            }
+
+            return !needle || ancestry.has(node) || haystackOf(s, home).includes(needle);
+        });
+
+        const groupRows = (group) => {
+            const rows = group.rows.map((session) => ({ session }));
+
+            return { ...group, rows, total: rows.length, hidden: rows };
+        };
+
+        if (explorer || needle) {
+            if (explorer && sort === "priority") {
+                shown.sort(needOrder(store.state));
+            } else if (explorer && sort === "old") {
+                shown.sort((a, b) => a.updatedAt - b.updatedAt || a.id - b.id);
+            } else {
+                shown.sort((a, b) => b.updatedAt - a.updatedAt || a.id - b.id);
+            }
+
+            const last = Math.max(0, Math.ceil(shown.length / PAGE_SIZE) - 1);
+            const at = explorer ? Math.min(last, page) : 0;
+            const rows = shown.slice(at * PAGE_SIZE, (at + 1) * PAGE_SIZE);
+
+            return {
+                shown,
+                kept,
+                groups: [groupRows({ key: "flat", label: "Matches", rows })],
+                at,
+                last,
+            };
+        }
 
         if (tab === "priority" && needle === "") {
             const openId = markedOpen();
@@ -1552,20 +1547,21 @@ function AllSessions({ compact = false }) {
             return { shown, kept, groups };
         }
 
-        const forest = sessionForest(shown, { pinned, folders: tab === "folders" });
-        const groups = groupsOf(forest.roots, { tab, needle, home, pinned, today }).map((group) => {
-            const rows = group.rows.flatMap((root) => forest.rows.get(root.id));
+        const { shortcuts, roots } = recentRows(shown, tree, pinned, openId);
+        const recent = tab === "recent";
+        const groups = groupsOf(recent ? roots : shown, { tab, needle, home, pinned, today });
 
-            return {
-                ...group,
-                total: rows.length,
-                rows: needle === "" ? unfolded(rows, folded) : rows,
-                // What each folded row hides, for the marks it stands in for.
-                hidden: needle === "" ? rows : [],
-            };
-        });
+        if (recent && shortcuts.length) {
+            groups.unshift({ key: "linked-shortcuts", label: "Linked shortcuts", rows: shortcuts });
+        }
 
-        return { shown, kept, groups };
+        return {
+            shown,
+            kept,
+            groups: groups.map(groupRows),
+            work: shown.filter(work).length,
+            needs: shown.filter(needs).length,
+        };
     };
 
     const from = [
@@ -1575,7 +1571,10 @@ function AllSessions({ compact = false }) {
         home,
         today,
         extensionsRev,
-        folded,
+        explorer,
+        page,
+        filter,
+        sort,
         unread,
         peekSeen,
         chatReads,
@@ -1585,9 +1584,12 @@ function AllSessions({ compact = false }) {
         answered,
     ];
     // The list as it is with no search (`base`), and a search's matches (`found`): a search keeps the list, hidden.
-    const base = useMemo(() => listFor(""), from);
+    const base = useMemo(
+        () => (explorer && searching ? null : listFor("")),
+        [...from, !!explorer && searching],
+    );
     const found = useMemo(() => (searching ? listFor(needle) : null), [...from, needle]);
-    const { shown, kept, groups } = found ?? base;
+    const { shown, kept, groups, at = 0, last = 0 } = found ?? base;
 
     // Folded groups: a group's key is in `closed`; Quiet starts folded, and `!key` there says it was opened.
     const isClosed = (key) =>
@@ -1727,6 +1729,12 @@ function AllSessions({ compact = false }) {
         }
 
         clearSelection();
+
+        if (explorer) {
+            explorer.focus = id;
+            explorer.scroll = list.current.scrollTop;
+        }
+
         navigate(id);
     };
 
@@ -1997,9 +2005,13 @@ function AllSessions({ compact = false }) {
         addEventListener("selectstart", noText, true);
     };
 
+    const restoring =
+        chosen.length > 0 && chosen.every((id) => tree.nodes.get(id)?.session.archived);
+    const canPinChosen = chosen.every((id) => !tree.nodes.get(id)?.session.archived);
+
     const archiveChosen = () => {
         clearSelection();
-        setArchived(chosen, !archived);
+        setArchived(chosen, !restoring);
     };
 
     const allPinned = chosen.length > 0 && chosen.every((id) => pinned.includes(id));
@@ -2044,8 +2056,6 @@ function AllSessions({ compact = false }) {
 
         return () => removeEventListener("keydown", onKey);
     }, [selecting]);
-
-    const toggleFold = (id) => toggleFoldedLinked(id);
 
     const review = (id) => setAsking((now) => (now === id ? null : id));
 
@@ -2184,13 +2194,12 @@ function AllSessions({ compact = false }) {
     // call this draw's `pick` and `select`, which see this draw's selection.
     const handlers = useRef(null);
 
-    handlers.current = { pick, select, menu, toggleFold, review, answer, dismissOne, readOne };
+    handlers.current = { pick, select, menu, review, answer, dismissOne, readOne };
     const [onPick] = useState(() => (event, id) => handlers.current.pick(event, id));
     const [onSelect] = useState(
         () => (event, id, setPressing) => handlers.current.select(event, id, setPressing),
     );
     const [onMenu] = useState(() => (event, id) => handlers.current.menu(event, id));
-    const [onFold] = useState(() => (id) => handlers.current.toggleFold(id));
     const [onReview] = useState(() => (id) => handlers.current.review(id));
     const [onAnswer] = useState(
         () => (id, askId, allow) => handlers.current.answer(id, askId, allow),
@@ -2239,18 +2248,29 @@ function AllSessions({ compact = false }) {
         drawnRows.current.last = null;
     });
 
-    const rowOf = ({ session, branches, descendants }, index, group, needle, view) => {
-        // Linked sessions fold under the one that started them; a search shows them all, with nothing to fold.
-        const kids = needle === "" ? descendants : 0;
-        const isFolded = kids > 0 && folded.has(session.id);
-        // What the row shows of its place, which the list's own changes can move.
+    const rowOf = ({ session }, index, group, needle, view) => {
+        const node = tree.nodes.get(session.id);
+        const kids = !explorer && !group.slot && !needle ? descendantCount(node) : 0;
+        const counts = attention.get(node);
+        const trouble = (counts?.waiting ?? 0) + (counts?.failed ?? 0);
+        const trail = (explorer || needle || group.key === "linked-shortcuts") && breadcrumb(node);
+        const details = [
+            explorer && session.archived && "Archived",
+            (explorer || group.key === "linked-shortcuts") && pins.has(session.id) && "Pinned",
+            (explorer || group.key === "linked-shortcuts") && atWork(session) && "Working",
+            explorer && needOf(session) === "ask" && "Waiting",
+            explorer && ["failed", "agents"].includes(needOf(session)) && "Failed",
+            trail || (explorer && shortPath(session.cwd, home)),
+            kids && kids.toLocaleString() + " linked",
+            kids && trouble && trouble + " need attention",
+        ]
+            .filter(Boolean)
+            .join(" · ");
         const place = {
             session,
-            shape: sameBranches(branches),
             kids,
-            isFolded,
-            foldHeld: holdsOpen.has(session.id),
-            foldTrouble: isFolded ? hiddenTrouble(group, session.id) : undefined,
+            details,
+            trouble,
             // Only the first nine show their number: a session moving up renumbers the rows it passes.
             number: numbers.get(session.id) < 9 ? numbers.get(session.id) : undefined,
             inTeam: team.has(session.id),
@@ -2267,20 +2287,17 @@ function AllSessions({ compact = false }) {
             return kept.row;
         }
 
-        const open = session.id === conversationId && !session.archived;
+        const open = session.id === conversationId;
         const expanded = asking === session.id && group.slot === "needs";
         const row = html`<${MemoRow}
             key=${session.id}
             session=${session}
-            branches=${place.shape}
             kids=${kids}
-            folded=${isFolded}
-            foldHeld=${place.foldHeld}
-            foldTrouble=${place.foldTrouble}
-            onFold=${onFold}
+            details=${details}
+            trouble=${trouble}
             index=${index}
             number=${place.number}
-            ago=${timeAgo(session.updatedAt)}
+            ago=${explorer ? new Date(session.updatedAt).toLocaleDateString() : timeAgo(session.updatedAt)}
             hit=${place.hit}
             needle=${place.needle}
             selected=${selected.has(session.id)}
@@ -2377,7 +2394,7 @@ function AllSessions({ compact = false }) {
                 : undefined;
 
             const head =
-                group.key !== "flat" || needle
+                group.key !== "flat" || (needle && !explorer)
                     ? html`<${still ? "div" : "button"}
                           class=${`group-head ${group.slot === "needs" ? "attn" : ""}`}
                           data-part="session-group-head"
@@ -2448,15 +2465,49 @@ function AllSessions({ compact = false }) {
         });
     };
 
-    const baseSections = frozen ? null : sectionsOf(base.groups, "", fills.current.base, "base");
+    const baseSections =
+        frozen || !base ? null : sectionsOf(base.groups, "", fills.current.base, "base");
 
     wasSearching.current = searching;
 
+    const scopeTitle =
+        explorer?.scope === "all"
+            ? "Find any session"
+            : explorer?.scope === "work"
+              ? "Pinned & working"
+              : explorer?.scope === "attention"
+                ? "Needs attention"
+                : (tree.nodes.get(Number(explorer?.scope))?.session.title ?? "Family index");
+
+    const turnPage = (next) => {
+        explorer.page = next;
+        explorer.focus = null;
+        explorer.scroll = 0;
+        list.current.scrollTop = 0;
+        setPage(next);
+    };
+
+    const routeButton = (
+        scope,
+        label,
+        icon,
+        query = "",
+    ) => html`<button class="family-index-link" data-family-open=${scope} onClick=${(event) => openFamily(scope, query, event.currentTarget)}>
+        <${Icon} name=${icon} size=${15} /><span>${label}</span><${Icon} name="chevron" size=${14} />
+    </button>`;
+
     return html`<div
-        class=${`sessions ${compact ? "compact" : ""} ${tapping ? "tap-selecting" : ""}`}
+        class=${`sessions ${explorer ? "family-explorer" : ""} ${compact ? "compact" : ""} ${tapping ? "tap-selecting" : ""}`}
         data-part="session-list"
     >
-        <div class="sessions-head">
+        ${
+            explorer
+                ? html`<header class="family-head">
+            <button class="button" aria-label="Back from session index" onClick=${() => (routeUnder() ? goBack() : navigate(null, { replace: true }))}><${Icon} name="back" size=${16}/> Back</button>
+            <p>${Number(explorer.scope) ? "Family index" : "Session index"}</p>
+            <h1 class="family-heading" tabindex="-1">${scopeTitle}</h1>
+        </header>`
+                : html`<div class="sessions-head">
             <span class="sessions-name" data-part="session-list-title">Sessions</span>
             <span class="sessions-count">${sessionsLoaded ? count : ""}</span>
             ${
@@ -2470,15 +2521,29 @@ function AllSessions({ compact = false }) {
                     New
                 </button>`
             }
-        </div>
+        </div>`
+        }
         <label class=${`search ${query ? "filled" : ""}`} data-part="session-search">
             <${Icon} name="search" size=${14} />
             <input
-                placeholder="Search sessions"
-                aria-label="Search sessions"
+                data-family-open="search"
+                placeholder=${explorer && Number(explorer.scope) ? "Search this family" : "Search sessions"}
+                aria-label=${explorer && Number(explorer.scope) ? "Search this family" : "Search sessions"}
                 value=${query}
                 onInput=${(event) => setQuery(event.currentTarget.value)}
                 onKeyDown=${(event) => {
+                    if (event.key === "Enter" || (explorer && event.key === "ArrowDown")) {
+                        event.preventDefault();
+
+                        if (explorer) {
+                            list.current.querySelector(".session")?.focus();
+                        } else {
+                            openFamily("all", query);
+                        }
+
+                        return;
+                    }
+
                     if (event.key !== "Escape" || query === "") {
                         return;
                     }
@@ -2538,7 +2603,33 @@ function AllSessions({ compact = false }) {
                 </button>`,
             )}
         </label>
-        <div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
+        ${
+            explorer
+                ? html`<div class="family-filters">
+            <select aria-label="Filter sessions" value=${filter} onChange=${(e) => {
+                explorer.filter = e.currentTarget.value;
+                setFilter(explorer.filter);
+                turnPage(0);
+            }}>
+                ${[
+                    ["all", "All states"],
+                    ["attention", "Needs attention"],
+                    ["working", "Working"],
+                    ["pinned", "Pinned"],
+                    ["archived", "Archived"],
+                ].map(([value, label]) => html`<option value=${value}>${label}</option>`)}
+            </select>
+            <select aria-label="Order sessions" value=${sort} onChange=${(e) => {
+                explorer.sort = e.currentTarget.value;
+                setSort(explorer.sort);
+                turnPage(0);
+            }}>
+                ${explorer.scope === "attention" && html`<option value="priority">Priority order</option>`}
+                <option value="new">Newest first</option><option value="old">Oldest first</option>
+            </select>
+        </div>
+        <div class="family-range" role="status">${shown.length ? at * PAGE_SIZE + 1 + "–" + Math.min(shown.length, (at + 1) * PAGE_SIZE) + " of " + shown.length.toLocaleString() : "0 results"}</div>`
+                : html`<div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
             ${TABS.map(
                 ([key, label]) => html`<button
                     key=${key}
@@ -2572,23 +2663,46 @@ function AllSessions({ compact = false }) {
                 </button>`,
             )}
             <${TabMarker} tabs=${tabs} at=${`${tab}:${needCount}`} />
-        </div>
+        </div>`
+        }
         <div
             class="session-items"
             ref=${list}
             tabindex="-1"
-            onScroll=${(event) => !compact && (listKept.scroll = event.currentTarget.scrollTop)}
+            onScroll=${(event) => {
+                if (explorer) {
+                    explorer.scroll = event.currentTarget.scrollTop;
+                } else if (!compact) {
+                    listKept.scroll = event.currentTarget.scrollTop;
+                }
+            }}
+            onFocusIn=${(event) => {
+                if (explorer && event.target.closest(".session-row")) {
+                    explorer.focus = Number(event.target.closest(".session-row").dataset.id);
+                }
+            }}
         >
             ${!sessionsLoaded && html`<${LoadingSessions} />`}
             ${
                 sessionsLoaded &&
+                !explorer &&
+                (searching || (tab === "recent" && tree.roots.length < sessions.length)) &&
+                html`<div class="family-routes">
+                ${routeButton("all", searching ? "Search all sessions for “" + query + "”" : "Find any session", "search", query)}
+                ${!searching && base.needs > 0 && routeButton("attention", "Needs attention · " + base.needs, "shield")}
+                ${!searching && base.work > 0 && routeButton("work", "Pinned & working · View all " + base.work, "pin")}
+            </div>`
+            }
+            ${
+                sessionsLoaded &&
                 shown.length === 0 &&
                 html`<div class="sessions-empty">
-                    ${kept !== null && !needle ? "No sessions match the filters." : archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
+                    ${explorer ? "No sessions match this view." : kept !== null && !needle ? "No sessions match the filters." : archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
                 </div>`
             }
             ${
                 sessionsLoaded &&
+                !explorer &&
                 tab === "priority" &&
                 needle === "" &&
                 shown.length > 0 &&
@@ -2602,6 +2716,14 @@ function AllSessions({ compact = false }) {
             <${Kept} hidden=${searching}>${baseSections}<//>
         </div>
         ${
+            explorer &&
+            html`<footer class="family-pager">
+            <span>Page ${at + 1} of ${last + 1}</span>
+            <button class="button" aria-label="Previous page" disabled=${at === 0} onClick=${() => turnPage(at - 1)}><${Icon} name="back" size=${16}/></button>
+            <button class="button" aria-label="Next page" disabled=${at === last} onClick=${() => turnPage(at + 1)}><${Icon} name="chevron" size=${16}/></button>
+        </footer>`
+        }
+        ${
             chosen.length > 0 &&
             html`<div class="select-bar" role="group" aria-label="Selected sessions">
                 <span class="select-count">
@@ -2611,11 +2733,11 @@ function AllSessions({ compact = false }) {
                 ${
                     canSteer() &&
                     html`<button class="button" onClick=${archiveChosen}>
-                        ${archived ? "Unarchive" : "Archive"}
+                        ${restoring ? "Unarchive" : "Archive"}
                     </button>`
                 }
                 ${
-                    !archived &&
+                    canPinChosen &&
                     html`<button class="button" onClick=${pinChosen}>
                         ${allPinned ? "Unpin" : "Pin"}
                     </button>`
@@ -2669,7 +2791,7 @@ const LIST_KEYS = [
     "peekSeen",
     "appearance",
     "extensionsRev",
-    "foldedLinked",
+    "family",
 ];
 
 /**
@@ -2791,6 +2913,8 @@ function Rail({ folded = false, mobile = false }) {
             }
 
             if (mobile) {
+                toSessions();
+            } else if (store.state.family && !sheet && !board && !page) {
                 toSessions();
             } else if (sheet || board || page) {
                 store.set({ board: false, boardAgents: null, page: null });
@@ -2923,7 +3047,7 @@ const RAIL_KEYS = [
     "pipOpen",
     "page",
     "extPanel",
-    "foldedLinked",
+    "family",
     "sheet",
 ];
 

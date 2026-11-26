@@ -34,7 +34,6 @@ import {
     notify,
     openSheet,
     scoped,
-    sessionOrder,
     setUnread,
     signOut,
     openId,
@@ -547,12 +546,10 @@ function actionItems() {
 
 function sessionItems() {
     const { sessions, server } = store.state;
-    // Every session, folded ones too; the numbers are Alt's, which skip what a fold hides.
-    const order = sessionOrder();
-    const archived = sessions.filter((session) => session.archived);
+    // The launcher includes every visible session, even without a numbered sidebar shortcut.
     const numbers = new Map(workspaceOrder().map((session, index) => [session.id, index]));
 
-    return [...order, ...archived].map((session) => {
+    return sessions.map((session) => {
         const number = numbers.get(session.id) ?? -1;
         // Words extensions give it (`pocket.sessionSearch`), such as tags: matched after the title and folder.
         const words = sessionWords(session);
@@ -573,7 +570,7 @@ function sessionItems() {
             text: `${session.title ?? "New session"} ${shortPath(session.cwd, server?.home)}${words.length > 0 ? ` ${words.join(" ")}` : ""}`,
             words,
             keys: number >= 0 && number < 9 ? `Alt ${number + 1}` : undefined,
-            rank: session.archived ? -20 : -number * 0.01,
+            rank: session.archived ? -20 : number < 0 ? -10 : -number * 0.01,
             run: () => navigate(session.id),
             folder: folderColor(session.cwd),
             tone: session.waiting ? "waiting" : session.busy ? "working" : "quiet",

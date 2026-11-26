@@ -40,6 +40,7 @@ import {
     pipBoard,
     togglePip,
 } from "./pip.js";
+import { LinkedSessions } from "./linked-sessions.js";
 import { Drawer, RailNav, ResizeHandle, SessionList, toSessions } from "./sessions.js";
 import { SessionTabs } from "./session-tabs.js";
 // Loaded for what it does: it gives replies' Markdown the component for pages, images, and diffs in code blocks.
@@ -252,10 +253,10 @@ function Topbar() {
 
     return html`<header class="topbar" data-part="topbar" ref=${edge}>
         <button
-            class="icon-button badge-host topbar-back"
-            aria-label=${waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
-            title="Sessions"
-            onClick=${toSessions}
+            class=${`icon-button badge-host topbar-back ${store.state.fromIndex ? "index-back" : ""}`}
+            aria-label=${store.state.fromIndex ? "Back to results" : waiting > 0 ? `Back to sessions, ${waiting} waiting for you` : "Back to sessions"}
+            title=${store.state.fromIndex ? "Back to results" : "Sessions"}
+            onClick=${store.state.fromIndex ? goBack : toSessions}
         >
             <${Icon} name="back" size=${22} />
             ${waiting > 0 && html`<span class="badge warn">${waiting}</span>`}
@@ -537,7 +538,7 @@ function App() {
     // their room.
     const board = state.board;
     const page = !board && state.page !== null;
-    const placed = board || page;
+    const placed = board || page || state.family;
     const browsing =
         inConversation && !placed && state.browserOpen && browserAvailable() && !state.missing;
     const filing = !placed && filesShown(state);
@@ -572,8 +573,10 @@ function App() {
                       ? html`<${SubagentsBoard} />`
                       : page
                         ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
-                        : inConversation
-                          ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}<${Topbar} />
+                        : state.family
+                          ? html`<${SessionList} key=${state.family.key} explorer=${state.family} />`
+                          : inConversation
+                            ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}<${Topbar} /><${LinkedSessions} />
                     ${
                         peeking &&
                         tiles.length > 0 &&
@@ -589,9 +592,9 @@ function App() {
                             ? html`<${PipBoardBox}><${StatusLine} /><//>`
                             : html`<${Composer} key=${state.conversationId} />`)
                     }`
-                          : sidebar
-                            ? html`<${Splash} />`
-                            : html`<div class="home-list" data-part="home-list">
+                            : sidebar
+                              ? html`<${Splash} />`
+                              : html`<div class="home-list" data-part="home-list">
                                   <${SessionList} />
                               </div>`
             }

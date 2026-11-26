@@ -517,7 +517,7 @@ test(
 );
 
 test(
-    "a fold hides linked sessions at once, from the list and the numbers, but never above the open one",
+    "a family opens in the index and only the selected child joins the sidebar",
     real,
     async () => {
         const parent = await newSession(app);
@@ -532,57 +532,32 @@ test(
             }
         }, BACKGROUND_CONTEXT);
 
-        const shown = async () =>
-            await inPage<{
-                kids: number;
-                expanded: string | null;
-                numbered: number;
-                rows: number;
-            }>(`
-            const fold = document.querySelector(${JSON.stringify(`${row(parent)} .session-fold`)});
-            return JSON.stringify({
-                kids: ${JSON.stringify(kids.map((kid) => row(kid)))}.filter((each) => document.querySelector(each)).length,
-                expanded: fold?.getAttribute("aria-expanded") ?? null,
-                numbered: document.querySelectorAll(${JSON.stringify(`${list} .session-num`)}).length,
-                rows: document.querySelectorAll(${JSON.stringify(`${list} .session-row`)}).length,
-            });
-        `);
-        const click = (selector: string) =>
-            page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
-
         await fresh();
-        await until(
-            async () => (await shown()).kids === 2,
-            "the linked sessions under their parent",
-        );
-
-        // Folded: gone from the list, and from the numbers Alt+1…9 use, with nothing else changing.
-        await click(`${row(parent)} .session-fold`);
-        await until(async () => (await shown()).kids === 0, "the fold hides them");
-        const folded = await shown();
-
-        assert.equal(folded.expanded, "false");
-        assert.equal(
-            folded.numbered,
-            Math.min(9, folded.rows),
-            "the numbers follow the rows that show",
-        );
-
-        // Open one of them: its parent's fold opens, and its button is off.
-        await page.navigate(`${base}/s/${kids[0]}`);
-        await until(async () => (await shown()).kids === 2, "the open session's family shows");
         assert.equal(
             await inPage<boolean>(
-                `return JSON.stringify(document.querySelector(${JSON.stringify(`${row(parent)} .session-fold`)}).disabled)`,
+                `return JSON.stringify(!document.querySelector(${JSON.stringify(row(kids[0]!))}))`,
             ),
             true,
         );
+        await page.click({ selector: row(parent) + " .session-fold" });
+        await page.waitFor({ selector: ".family-explorer .session-row" });
+        assert.equal(
+            await inPage<number>(
+                'return document.querySelectorAll(".family-explorer .session-row").length',
+            ),
+            2,
+        );
+        const child = '.family-explorer .session-row[data-id="' + kids[0] + '"] .session';
 
-        // Back home, the fold is as it was, and unfolding shows them.
-        await fresh();
-        await until(async () => (await shown()).kids === 0, "folded again away from it");
-        await click(`${row(parent)} .session-fold`);
-        await until(async () => (await shown()).kids === 2, "unfolded");
+        await page.click({ selector: child });
+        await page.waitFor({ selector: ".family-context .lead-route" });
+        await page.waitFor({ selector: row(kids[0]!) });
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(!document.querySelector(${JSON.stringify(row(kids[1]!))}))`,
+            ),
+            true,
+        );
     },
 );
 

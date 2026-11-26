@@ -1,117 +1,152 @@
-/** A top row's branches: none. One array for all of them, so a memoized row sees the same value each time. */
-const NO_BRANCHES = Object.freeze([]);
+// Index only the session list supplied for this person. Pins and filters do not change relationships.
+const indices = new WeakMap();
 
-// Presentation only: linked sessions stay independent sessions, never subagents of the one that started them.
-export function sessionForest(shown, { pinned = [], folders = false } = {}) {
-    const byId = new Map(shown.map((session) => [session.id, session]));
-    const pins = new Set(pinned);
-    const parents = new Map();
-
-    for (const session of shown) {
-        const parent = byId.get(session.linkedFrom?.id);
-
-        if (
-            parent &&
-            parent.id !== session.id &&
-            !pins.has(session.id) &&
-            (!folders || parent.cwd === session.cwd)
-        ) {
-            parents.set(session.id, parent.id);
-        }
+export function familyIndex(sessions) {
+    if (indices.has(sessions)) {
+        return indices.get(sessions);
     }
 
-    // Stored links should be acyclic, but malformed input must not hide rows or loop forever.
-    for (const session of shown) {
-        const seen = new Set([session.id]);
-        let at = parents.get(session.id);
+    const nodes = new Map(
+        sessions.map((session) => [
+            session.id,
+            { session, parent: null, children: [], start: 0, end: 0 },
+        ]),
+    );
 
-        while (at !== undefined) {
-            if (seen.has(at)) {
-                parents.delete(session.id);
+    for (const node of nodes.values()) {
+        node.parent = nodes.get(node.session.linkedFrom?.id) ?? null;
+    }
+
+    // Cut one edge per cycle. Each parent chain is visited once, even for a very deep family.
+    const done = new Set();
+
+    for (const first of nodes.values()) {
+        const path = new Set();
+        let node = first;
+
+        while (node && !done.has(node)) {
+            if (path.has(node)) {
+                node.parent = null;
                 break;
             }
 
-            seen.add(at);
-            at = parents.get(at);
+            path.add(node);
+            node = node.parent;
+        }
+
+        for (const item of path) {
+            done.add(item);
         }
     }
 
-    const children = new Map(shown.map((session) => [session.id, []]));
-
-    for (const session of shown) {
-        const parent = parents.get(session.id);
-
-        if (parent !== undefined) {
-            children.get(parent).push(session);
-        }
-    }
-
-    // How many rows a row has under it, at any depth: what folding it hides.
-    const counted = new Map();
-
-    const count = (id) => {
-        if (!counted.has(id)) {
-            counted.set(
-                id,
-                children.get(id).reduce((sum, child) => sum + 1 + count(child.id), 0),
-            );
-        }
-
-        return counted.get(id);
-    };
-
-    const rows = new Map();
     const roots = [];
 
-    for (const session of shown) {
-        if (parents.has(session.id)) {
-            continue;
-        }
-
-        const family = [];
-        const pending = [{ session, branches: NO_BRANCHES, descendants: count(session.id) }];
-        let updatedAt = session.updatedAt;
-
-        while (pending.length > 0) {
-            const row = pending.pop();
-            const descendants = children.get(row.session.id);
-
-            family.push(row);
-            updatedAt = Math.max(updatedAt, row.session.updatedAt);
-
-            for (let index = descendants.length - 1; index >= 0; index--) {
-                pending.push({
-                    session: descendants[index],
-                    branches: [...row.branches, index < descendants.length - 1],
-                    descendants: count(descendants[index].id),
-                });
-            }
-        }
-
-        rows.set(session.id, family);
-        roots.push({ ...session, updatedAt });
+    for (const node of nodes.values()) {
+        (node.parent?.children ?? roots).push(node);
     }
 
-    roots.sort((a, b) => b.updatedAt - a.updatedAt);
+    const order = [];
+    const stack = [...roots].reverse();
 
-    return { roots, rows };
+    while (stack.length) {
+        const node = stack.pop();
+
+        node.start = order.length;
+        order.push(node);
+
+        for (let i = node.children.length - 1; i >= 0; i--) {
+            stack.push(node.children[i]);
+        }
+    }
+
+    for (let i = order.length - 1; i >= 0; i--) {
+        const node = order[i];
+
+        node.end = node.children.at(-1)?.end ?? i + 1;
+    }
+
+    const index = { nodes, roots, order };
+
+    indices.set(sessions, index);
+
+    return index;
 }
 
-/** A list of rows in tree order without those under a folded row (`folded`: the ids folded). */
-export function unfolded(rows, folded) {
-    const out = [];
-    let under = null;
+export const descendantCount = (node) => (node ? node.end - node.start - 1 : 0);
+export const belongsTo = (node, lead) => lead && node.start > lead.start && node.start < lead.end;
 
-    for (const row of rows) {
-        const depth = row.branches.length;
+export function familyAttention(index, needOf) {
+    const counts = new Map();
 
-        if (under !== null && depth > under) {
+    for (let i = index.order.length - 1; i >= 0; i--) {
+        const node = index.order[i];
+
+        if (!node.parent) {
             continue;
         }
 
-        under = row.descendants > 0 && folded.has(row.session.id) ? depth : null;
-        out.push(row);
+        const parent = counts.get(node.parent) ?? { waiting: 0, failed: 0 };
+        const kids = counts.get(node);
+        const need = !node.session.archived && needOf(node.session);
+
+        parent.waiting += (kids?.waiting ?? 0) + Number(need === "ask");
+        parent.failed += (kids?.failed ?? 0) + Number(need === "failed" || need === "agents");
+        counts.set(node.parent, parent);
     }
 
-    return out;
+    return counts;
+}
+
+export function ancestorMatches(index, needle) {
+    const matched = new Set();
+
+    for (const node of index.order) {
+        if (
+            node.parent &&
+            (matched.has(node.parent) ||
+                (node.parent.session.title ?? "New session").toLowerCase().includes(needle))
+        ) {
+            matched.add(node);
+        }
+    }
+
+    return matched;
+}
+
+export function breadcrumb(node) {
+    const names = [];
+    let parent = node?.parent;
+
+    while (parent && names.length < 4) {
+        names.unshift(parent.session.title ?? "New session");
+        parent = parent.parent;
+    }
+
+    return [...(parent ? ["…"] : []), ...names].join(" › ");
+}
+
+export function atWork(session) {
+    const counts = session.subagents ?? {};
+
+    return (
+        session.busy ||
+        session.limited !== undefined ||
+        (counts.working ?? 0) + (counts.waiting ?? 0) > 0 ||
+        session.background > 0
+    );
+}
+
+// The first two shortcuts, plus a selected child not already shown. Keep all ordinary roots.
+export function recentRows(shown, index, pins, open) {
+    const pinned = new Set(pins);
+    const linked = shown.filter((s) => index.nodes.get(s.id)?.parent);
+    const candidates = linked.filter((s) => pinned.has(s.id) || atWork(s));
+    const shortcuts = candidates.slice(0, 2);
+    const current = linked.find((s) => s.id === open);
+
+    if (current && !shortcuts.includes(current)) {
+        shortcuts.push(current);
+    }
+
+    return { shortcuts, candidates, roots: shown.filter((s) => !index.nodes.get(s.id)?.parent) };
 }
