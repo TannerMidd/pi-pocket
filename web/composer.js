@@ -51,7 +51,10 @@ import { fromServer } from "./seen.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
+import { closeSheet } from "./store.js";
+import { openUsage, serverNow, sessionUsage, UsageMeter } from "./sheets/usage.js";
 import { prefs } from "./theme.js";
+import { hoursMinutes, summary, USAGE_ICONS } from "./usage.js";
 import { fingerprint } from "./text-hash.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
@@ -69,6 +72,7 @@ import {
     modelLabel,
     shortModelName,
     Spinner,
+    useMinute,
     useSecond,
 } from "./ui.js";
 
@@ -2632,10 +2636,14 @@ function PlacesButton() {
 
 /**
  * The status line's shorter forms, in the order a narrow line takes them until it fits on one row: shorter words and
- * gaps, no "1 here" while you are alone, extensions' items' short forms, the guard's and the context's labels, then the
- * cache, then the wait for the first token.
+ * gaps, no "1 here" while you are alone, extensions' items' short forms, the guard's and the context's labels, the
+ * usage's window ("7d"), then the cache, the usage's "left" and word, the wait for the first token, and last the
+ * usage's meter ("41%" alone).
  */
-const SHORTER = ["words", "here", "ext", "guard", "context", "cache", "wait"];
+const SHORTER = [
+    ...["words", "here", "ext", "guard", "context", "window", "cache"],
+    ...["left", "wait", "bare"],
+];
 /** What each status line was last fitted for: its text. Its width is the observer's to watch. */
 const fitted = new WeakMap();
 
@@ -2877,6 +2885,68 @@ defineItem("status", {
     detail: () =>
         cacheRate() !== undefined &&
         `${Math.round(cacheRate() * 100)}% of the input came from the cache`,
+});
+
+/**
+ * How much of the open session's provider's limits is left, from its last response (the owner's, `usage.js`): the
+ * tightest window ("7d 41% left"), then "41% left", then "41%". Low and limited keep a mark and a word. A tap opens
+ * the list of every provider's (`sheets/usage.js`). Nothing when the provider has no numbers yet.
+ */
+function UsageItem() {
+    useMinute();
+
+    const now = serverNow();
+    const view = sessionUsage(now);
+    const words = view && summary(view, now);
+
+    if (!words) {
+        return null;
+    }
+
+    const { window, state, until } = view;
+    const open = store.state.sheet?.type === "usage";
+    const limited = state === "limited";
+    const countText = limited && until !== undefined ? hoursMinutes(until - now) : "";
+
+    return html`<button
+        class=${`usage-now ${limited && countText === "" ? "no-count" : ""}`}
+        data-part="status-usage"
+        data-state=${state}
+        aria-haspopup="dialog"
+        aria-expanded=${open}
+        aria-label=${words.aria}
+        title=${words.aria}
+        onClick=${() => (open ? closeSheet() : openUsage("item"))}
+    >
+        ${limited && html`<${Icon} name="clock" size=${12} />`}
+        ${state === "low" && html`<${Icon} path=${USAGE_ICONS.warn} size=${12} />`}
+        ${state === "ok" && html`<${Icon} path=${USAGE_ICONS.gauge} size=${12} class="gauge" />`}
+        ${limited ? html`<span class="word">Limited</span>` : state === "low" && html`<span class="word">Low</span>`}
+        ${!limited && window.tag !== "" && html`<span class="tag">${window.tag}</span>`}
+        ${!limited && html`<${UsageMeter} state=${state} left=${window.left} />`}
+        <span class="val">
+            <span class="num">${limited ? countText : `${window.left}%`}</span>${limited ? "" : html`<span class="left"> left</span>`}
+        </span>
+    </button>`;
+}
+
+defineItem("status", {
+    id: "core:usage",
+    label: "Usage left",
+    note: "For the owner. The model sheet still shows it when hidden",
+    order: 450,
+    render: () => {
+        const view = sessionUsage();
+
+        return view !== null && summary(view, serverNow()) !== null ? html`<${UsageItem} />` : null;
+    },
+    detail: () => {
+        const view = sessionUsage();
+
+        return view?.state === "limited" || view?.state === "low" || view?.state === "ok"
+            ? summary(view, serverNow())?.aria
+            : null;
+    },
 });
 
 /**

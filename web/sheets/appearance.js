@@ -579,6 +579,7 @@ function SlotLayout({ slot }) {
                 const at = movable.indexOf(item.id);
                 const detail = [
                     item.module && `From ${item.module}`,
+                    item.note,
                     hiddenBy && `Hidden by ${hiddenBy}`,
                     item.fixed && "Always shown",
                 ]

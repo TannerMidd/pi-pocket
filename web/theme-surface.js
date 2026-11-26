@@ -250,6 +250,9 @@ export const PARTS = [
     "model-chip",
     "status-line",
     "status-item",
+    "status-usage",
+    "model-usage",
+    "usage-panel",
     // Layers over the app
     "sheet",
     "sheet-head",

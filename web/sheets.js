@@ -26,6 +26,7 @@ import { MessageSheet } from "./sheets/message.js";
 import { ModelPicker } from "./sheets/model.js";
 import { InviteSheet, MyPhoto, PeopleSheet } from "./sheets/people.js";
 import { AuthDialog, ProvidersSheet } from "./sheets/providers.js";
+import { UsageSheet } from "./sheets/usage.js";
 import { HooksSheet } from "./sheets/hooks.js";
 import { SchedulesSheet } from "./sheets/schedules.js";
 import { SessionSheet } from "./sheets/session.js";
@@ -245,6 +246,10 @@ function sheetBody(sheet) {
             break;
         case "providers":
             body = html`<${ProvidersSheet} />`;
+            break;
+        // Only the owner has any: the menu's Providers is theirs too.
+        case "usage":
+            body = me?.role === "owner" ? html`<${UsageSheet} />` : null;
             break;
         case "extensions":
         case "gallery":

@@ -182,21 +182,24 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `send-button`                             | Send                                                                                                                    |
 | `status-line`                             | The line under the box: who is here, context, cost                                                                      |
 | `status-item`                             | An extension's item in it, with `data-module` naming its module (since 0.19.0)                                          |
+| `status-usage`                            | The usage item in it (Usage left: a meter and the tightest window's percent), a button that opens the usage list        |
 
 ### Layers over the app
 
-| Part                                 | What                                                                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scrim`                              | What a sheet, the launcher, or the drawer sits in, over the app. `data-for` says which: `sheet`, `launcher`, `drawer`                             |
-| `sheet`                              | A sheet: a bottom sheet on phones, a window on wide screens. `data-sheet` says which (`appearance`, `menu`, `model`, …; `ext` for an extension's) |
-| `sheet-head`, `sheet-body`           | Its title bar, and what it holds                                                                                                                  |
-| `menu`                               | The navigation menu and its groups, including Activity, Tools, and Account                                                                        |
-| `session-menu`                       | The right-click menu on a session row (since 0.27.0)                                                                                              |
-| `quote-reply-button`                 | The pill that shows over selected text, with Reply and (with PiP on) Ask PiP (since 0.27.0)                                                       |
-| `launcher`                           | The launcher (Ctrl/⌘+K)                                                                                                                           |
-| `launcher-input`, `launcher-filters` | Its search field, and the search types under it                                                                                                   |
-| `launcher-group`, `launcher-row`     | A group's heading, and each result                                                                                                                |
-| `notices`, `notice`                  | The notices, and each one                                                                                                                         |
+| Part                                 | What                                                                                                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scrim`                              | What a sheet, the launcher, or the drawer sits in, over the app. `data-for` says which: `sheet`, `launcher`, `drawer`                                    |
+| `sheet`                              | A sheet: a bottom sheet on phones, a window on wide screens. `data-sheet` says which (`appearance`, `menu`, `model`, …; `ext` for an extension's)        |
+| `sheet-head`, `sheet-body`           | Its title bar, and what it holds                                                                                                                         |
+| `menu`                               | The navigation menu and its groups, including Activity, Tools, and Account                                                                               |
+| `session-menu`                       | The right-click menu on a session row (since 0.27.0)                                                                                                     |
+| `quote-reply-button`                 | The pill that shows over selected text, with Reply and (with PiP on) Ask PiP (since 0.27.0)                                                              |
+| `launcher`                           | The launcher (Ctrl/⌘+K)                                                                                                                                  |
+| `launcher-input`, `launcher-filters` | Its search field, and the search types under it                                                                                                          |
+| `launcher-group`, `launcher-row`     | A group's heading, and each result                                                                                                                       |
+| `notices`, `notice`                  | The notices, and each one                                                                                                                                |
+| `usage-panel`                        | The usage list the status item opens: a popover above the status line, a bottom sheet on a phone (it is also a `sheet` there, with `data-sheet="usage"`) |
+| `model-usage`                        | The model sheet's first row: the session's provider, its usage, and the way to all of them                                                               |
 
 ### Panels
 
