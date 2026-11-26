@@ -30,6 +30,7 @@ import {
     promptBefore,
     resendable,
 } from "../entry-presentation.js";
+import { parseAgentMessage } from "../agent-messages.js";
 import { memoryAvailable } from "./memory.js";
 
 /** What each mode is called where a person chooses it. */
@@ -215,6 +216,15 @@ export function MessageSheet({ entryId }) {
     // A message of files alone has no words: its preview says so, and there is nothing to copy or remember.
     const filesAlone = toPi && text.trim() === "";
     const prompt = toPi ? entry : promptBefore(entryId, view);
+    // What an agent or the app sent shows as a card; here is the exact text Pi received.
+    const fromAgent =
+        toPi &&
+        parseAgentMessage({
+            text: entry.text,
+            written: writtenText(entry),
+            named: entry.from !== undefined,
+            authored: view.authors?.[entry.id] !== undefined,
+        }) !== null;
 
     const copy = () => {
         closeSheet();
@@ -247,7 +257,7 @@ export function MessageSheet({ entryId }) {
         <//>`;
     }
 
-    return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
+    return html`<${Sheet} title=${fromAgent ? "As Pi received it" : toPi ? "Message" : "Reply"} onClose=${closeSheet}>
         <div class="message-preview">${filesAlone ? "(attachments)" : text}</div>
         ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
         ${

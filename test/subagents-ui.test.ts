@@ -264,7 +264,7 @@ test(
         );
         assert.equal(
             await inPage<boolean>(
-                `return JSON.stringify([...document.querySelectorAll(".report-name")].some((name) => name.textContent === "zed"))`,
+                `return JSON.stringify([...document.querySelectorAll(".acard[data-kind=subagent] .acard-name")].some((name) => name.textContent === "zed"))`,
             ),
             false,
         );
