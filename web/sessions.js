@@ -49,6 +49,7 @@ import {
     html,
     Icon,
     memo,
+    NO_HOVER,
     railState,
     scrimPress,
     shortPath,
@@ -794,7 +795,9 @@ function SessionRow({
     onPick,
     onSelect,
     onMenu,
+    hoverAction,
     open,
+    pinned,
     marked,
     unread,
     unseen,
@@ -803,6 +806,7 @@ function SessionRow({
     meId,
     collabs,
     steers,
+    hovers,
     slot,
     team,
     need,
@@ -813,6 +817,7 @@ function SessionRow({
     onReview,
     onAnswer,
     onDismiss,
+    onRead,
 }) {
     // Where it rises in, in turn, when it is new to this page; null when it shows as it was.
     const [arrival] = useState(() => {
@@ -861,14 +866,32 @@ function SessionRow({
             ? formatWhen(fromServer(session.limited))
             : undefined;
     const tip = [title, ...(why ? [why] : []), ...(folders ? where.reverse() : where)].join(" · ");
+    // Archive, pin, and mark-unread show on hover; an archived session only comes back, and only for people who steer.
+    const acts = !hovers
+        ? 0
+        : slot === "needs"
+          ? 0
+          : slot === "ready"
+            ? (steers ? 1 : 0) + 1 + (hoverAction ? 1 : 0)
+            : (steers ? 1 : 0) + (session.archived ? 0 : 2) + (hoverAction ? 1 : 0);
 
     return html`<div
-        class=${`session-row ${kids > 0 ? "with-fold" : ""} ${arrival === null ? "" : "arriving"} ${slot === "needs" ? "needs-you" : ""} ${expanded ? "asking" : ""} ${glow ? "glow" : ""} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""}`}
+        class=${`session-row ${kids > 0 ? "with-fold" : ""} ${arrival === null ? "" : "arriving"} ${slot === "needs" ? "needs-you" : ""} ${expanded ? "asking" : ""} ${glow ? "glow" : ""} ${open ? "active" : ""} ${selected ? "selected" : ""} ${pressing ? "pressing" : ""} ${moving ? "moving" : ""} ${marked ? "marked-unread" : ""} ${unseen ? "unseen" : ""} ${chips.length > 0 ? "with-chips" : ""} ${["no-acts", "one-act", "", "three-acts", "four-acts"][acts]}`}
         data-part="session-row"
         data-state=${ROW_STATES[mark.shape.split(" ")[0]]}
         data-id=${session.id}
         style=${`${arrival === null ? "" : `--i:${arrival};`}--linked-depth:${Math.min(branches.length, 3)}`}
     >
+        ${
+            branches.length > 0 &&
+            html`<span class="session-branches" data-part="session-branches" aria-hidden="true">
+                ${branches.slice(-3).map(
+                    (continues, index, visible) => html`<span
+                        class=${`${continues ? "continues" : ""} ${index === visible.length - 1 ? "elbow" : ""}`}
+                    ></span>`,
+                )}
+            </span>`
+        }
         <button
             class=${`session ${unread ? "unread" : ""}`}
             data-part="session-button"
@@ -987,8 +1010,10 @@ function SessionRow({
                     foldTrouble &&
                     html`<span class=${`group-trouble ${foldTrouble}`} aria-hidden="true"></span>`
                 }
-                <span class="session-fold-label">Linked ${kids}</span>
-                <${Icon} name="down" size=${11} />
+                <span class="session-fold-pill">
+                    ${kids}
+                    <${Icon} name="down" size=${10} />
+                </span>
             </button>`
         }
         ${
@@ -1047,6 +1072,70 @@ function SessionRow({
                     <${Icon} name="close" size=${12} />
                 </button>
             </span>`
+        }
+        ${
+            hovers &&
+            slot !== "needs" &&
+            html`<span class="session-actions">
+            ${
+                hoverAction &&
+                html`<button
+                    class="session-act session-ext-act"
+                    title=${hoverAction.title}
+                    aria-label=${hoverAction.title}
+                    onClick=${() => hoverAction.run([session.id])}
+                >
+                    <${Icon} path=${hoverAction.iconPath} size=${14} />
+                </button>`
+            }
+            ${
+                steers &&
+                html`<button
+                    class="session-act"
+                    title=${session.archived ? "Unarchive" : "Archive"}
+                    aria-label=${session.archived ? "Unarchive" : "Archive"}
+                    onClick=${() => setArchived([session.id], !session.archived)}
+                >
+                    <${Icon} name=${session.archived ? "unarchive" : "archive"} size=${14} />
+                </button>`
+            }
+            ${
+                slot === "ready" &&
+                html`<button
+                    class="session-act"
+                    data-part="session-read"
+                    title="Mark read"
+                    aria-label="Mark read"
+                    onClick=${() => onRead(session.id)}
+                >
+                    <${Icon} name="check" size=${14} />
+                </button>`
+            }
+            ${
+                slot !== "ready" &&
+                !session.archived &&
+                html`<button
+                    class=${`session-act session-pin ${pinned ? "on" : ""}`}
+                    title=${pinned ? "Unpin" : "Pin to the top"}
+                    aria-label=${pinned ? "Unpin" : "Pin"}
+                    onClick=${() => togglePin(session.id)}
+                >
+                    <${Icon} name="pin" size=${14} />
+                </button>`
+            }
+            ${
+                slot !== "ready" &&
+                !session.archived &&
+                html`<button
+                    class=${`session-act session-unread ${marked ? "on" : ""}`}
+                    title=${marked ? "Mark read" : "Mark unread"}
+                    aria-label=${marked ? "Mark read" : "Mark unread"}
+                    onClick=${() => setUnread(session.id, !marked)}
+                >
+                    <${Icon} name=${marked ? "check" : "unread"} size=${14} />
+                </button>`
+            }
+        </span>`
         }
         ${
             expanded &&
@@ -1202,135 +1291,6 @@ function groupsOf(shown, { tab, needle, home, pinned, today }) {
     return [...groups, ...byKey.values()];
 }
 
-/** A folder's own name, as the focus card says it: the last part of its short path (`~/work/pi-pocket` is `pi-pocket`). */
-function folderLeaf(session, home) {
-    const path = shortPath(session.cwd, home);
-    const at = path.lastIndexOf("/");
-    const leaf = at === -1 ? path : path.slice(at + 1);
-
-    if (leaf === "" || leaf === "~") {
-        return "Home";
-    }
-
-    return leaf;
-}
-
-/** What waits in a linked session, short enough for the card's row: nothing when the session is quiet. */
-function linkedBadge(session, steers) {
-    const need = needOf(session);
-
-    if (need === "ask") {
-        return steers ? "needs you" : "waiting";
-    }
-
-    return need === "failed" || need === "agents" ? "failed" : "";
-}
-
-/**
- * The open session, at the top of the list (`AllSessions`): its folder, status and age, its title, and the sessions it
- * started, folded away behind `LINKED n` until they are asked for. A linked session that is open says which one started
- * it, in a strip above its title. The list leaves out the sessions this card holds, so none shows twice.
- */
-function FocusCard({ session, linked, parent, home, steers, open, onToggle }) {
-    const mark = sessionMark(session);
-    const title = session.title ?? "New session";
-    const status = mark.label || (parent ? "Linked" : "Idle");
-    const trouble = linked.some((kid) => needOf(kid) === "ask")
-        ? "waiting"
-        : linked.some((kid) => needOf(kid) !== null)
-          ? "failed"
-          : undefined;
-    const panel = `session-current-linked-${session.id}`;
-    const count = `${linked.length} linked ${linked.length === 1 ? "session" : "sessions"}`;
-    const said =
-        trouble === "waiting"
-            ? `${count}, one needs you`
-            : trouble === "failed"
-              ? `${count}, one failed`
-              : count;
-
-    return html`<article
-        class="session-current"
-        data-part="session-current"
-        data-id=${session.id}
-        aria-current="page"
-    >
-        ${
-            parent &&
-            html`<div class="session-current-parent" data-part="session-current-parent">
-                <button
-                    class="current-parent-link"
-                    title=${`Open ${parent.title ?? "New session"}`}
-                    onClick=${() => navigate(parent.id)}
-                >
-                    <${Icon} name="fork" size=${12} />
-                    <span class="current-parent-label">From</span>
-                    <span class="current-parent-name">${parent.title ?? "New session"}</span>
-                </button>
-            </div>`
-        }
-        <div class="current-eyebrow">
-            <span
-                class="dot"
-                style=${`--dot:${folderColor(session.cwd)}`}
-                aria-hidden="true"
-            ></span>
-            <span>${folderLeaf(session, home)}</span>
-            <span class="sep" aria-hidden="true">·</span>
-            <span>${status}</span>
-            <span class="sep" aria-hidden="true">·</span>
-            <span>${timeAgo(session.updatedAt)}</span>
-        </div>
-        <h2 class="current-title">${title}</h2>
-        ${
-            linked.length > 0 &&
-            html`<div class="current-meta">
-                <button
-                    class="current-link-toggle"
-                    data-part="session-current-linked"
-                    aria-expanded=${open}
-                    aria-controls=${panel}
-                    aria-label=${said}
-                    title=${`${open ? "Hide" : "Show"} ${count}`}
-                    onClick=${onToggle}
-                >
-                    <${Icon} name="fork" size=${12} />
-                    <span>Linked ${linked.length}</span>
-                    ${trouble && html`<span class=${`group-trouble ${trouble}`} aria-hidden="true"></span>`}
-                    <${Icon} name="down" size=${11} />
-                </button>
-            </div>`
-        }
-        ${
-            linked.length > 0 &&
-            html`<div
-                class="current-linked"
-                data-part="session-current-panel"
-                id=${panel}
-                hidden=${!open}
-            >
-                ${linked.map((kid) => {
-                    const badge = linkedBadge(kid, steers);
-
-                    return html`<button
-                        key=${kid.id}
-                        class="current-linked-row"
-                        data-id=${kid.id}
-                        title=${kid.title ?? "New session"}
-                        onClick=${() => navigate(kid.id)}
-                    >
-                        <${Icon} name="fork" size=${11} />
-                        <span class="current-linked-title">${kid.title ?? "New session"}</span>
-                        <span class=${badge ? "current-linked-needs" : "current-linked-time"}>
-                            ${badge || timeAgo(kid.updatedAt)}
-                        </span>
-                    </button>`;
-                })}
-            </div>`
-        }
-    </article>`;
-}
-
 /**
  * The marker under the open tab, measured again when `at` changes and as the tabs resize: in a component of its own, so
  * that a resize, a sidebar's drag at every frame, draws only the marker and not the whole list.
@@ -1437,37 +1397,6 @@ function AllSessions({ compact = false }) {
 
         return above;
     }, [openId, sessions]);
-    // The open session's card: the days' and the pins' groups leave it, and its linked sessions, out. Not in Priority,
-    // where what waits for you comes first, nor in the archive, nor while searching.
-    const card = useMemo(() => {
-        if (tab !== "recent" && tab !== "folders") {
-            return null;
-        }
-
-        const session = sessions.find((each) => each.id === openId && !each.archived);
-
-        if (!session) {
-            return null;
-        }
-
-        const linked = sessions.filter(
-            (each) =>
-                !each.archived && each.linkedFrom?.id === session.id && !pinned.includes(each.id),
-        );
-        const parent = sessions.find(
-            (each) => each.id === session.linkedFrom?.id && !each.archived,
-        );
-
-        return {
-            session,
-            linked,
-            parent,
-            skip: new Set([session.id, ...linked.map((each) => each.id)]),
-        };
-    }, [sessions, pinned, tab, openId]);
-    // The card's linked sessions show when asked for, folded away again for another open session.
-    const [cardShown, setCardShown] = useState(null);
-    const cardOpen = card !== null && cardShown === card.session.id;
     const [selected, setSelectedState] = useState(() => new Set());
     // Taps select rows instead of opening them: a selection started from a long press's sheet, on a touch screen.
     const [tapSelects, setTapSelects] = useState(false);
@@ -1585,12 +1514,9 @@ function AllSessions({ compact = false }) {
     const listFor = (needle) => {
         // Extensions' filters that are on (`pocket.sessionFilter`): a session shows only when each keeps it.
         const kept = sessionFilterTest();
-        // What the card at the top holds does not show below it: the open session, and its linked ones.
-        const skip = needle === "" ? card?.skip : undefined;
         const shown = sessions.filter(
             (session) =>
                 Boolean(session.archived) === archived &&
-                !skip?.has(session.id) &&
                 (needle === "" || haystackOf(session, home).includes(needle)) &&
                 (kept === null || kept(session)),
         );
@@ -1646,7 +1572,6 @@ function AllSessions({ compact = false }) {
         sessions,
         pinned,
         tab,
-        card,
         home,
         today,
         extensionsRev,
@@ -2221,6 +2146,14 @@ function AllSessions({ compact = false }) {
 
     const dismissAll = (rows) => dismissFailures(rows.map((row) => row.session));
 
+    const readOne = (id) => {
+        const session = sessions.find((each) => each.id === id);
+
+        if (session) {
+            markRead([session], { say: false });
+        }
+    };
+
     const toggleGroup = (key) => {
         const next = new Set(closed);
 
@@ -2246,11 +2179,12 @@ function AllSessions({ compact = false }) {
     const steers = canSteer();
     // Made again only when extensions or this person's steering change: rows keep the same action while they do not.
     const extActions = useMemo(sessionActions, [extensionsRev, steers]);
+    const hoverAction = extActions.find((action) => action.iconPath !== null);
     // Rows' handlers that stay the same from draw to draw, so a row draws again only when what it shows changes. They
     // call this draw's `pick` and `select`, which see this draw's selection.
     const handlers = useRef(null);
 
-    handlers.current = { pick, select, menu, toggleFold, review, answer, dismissOne };
+    handlers.current = { pick, select, menu, toggleFold, review, answer, dismissOne, readOne };
     const [onPick] = useState(() => (event, id) => handlers.current.pick(event, id));
     const [onSelect] = useState(
         () => (event, id, setPressing) => handlers.current.select(event, id, setPressing),
@@ -2262,11 +2196,14 @@ function AllSessions({ compact = false }) {
         () => (id, askId, allow) => handlers.current.answer(id, askId, allow),
     );
     const [onDismiss] = useState(() => (id) => handlers.current.dismissOne(id));
+    const [onRead] = useState(() => (id) => handlers.current.readOne(id));
     // What every row reads of the store, read once here: rows read none of it themselves (`SessionRow`). Marks, seen
     // marks, and read times come through `isUnread`, `finishedUnseen`, and `sessionUnread`.
     const { me, moving } = store.state;
     const conversationId = markedOpen();
     const collabs = collab();
+    // Row buttons that only a hovering pointer shows (`NO_HOVER`): touch screens draw none.
+    const hovers = !NO_HOVER.matches;
 
     // Rows as they were last drawn in each view, by session, with what each was drawn from. A row whose session and place
     // are as they were, in a view whose rows read all else as before (`shared`), is the same element again, which Preact
@@ -2275,11 +2212,13 @@ function AllSessions({ compact = false }) {
     const shared = [
         tab,
         selected,
+        hoverAction,
         minute,
         asking,
         answered,
         moved,
         steers,
+        hovers,
         ...ROW_KEYS.map((key) => store.state[key]),
     ];
     // The list's rows are not drawn while a search hides them, past the draw that hides them.
@@ -2349,7 +2288,9 @@ function AllSessions({ compact = false }) {
             onPick=${onPick}
             onSelect=${onSelect}
             onMenu=${onMenu}
+            hoverAction=${hoverAction}
             open=${open}
+            pinned=${isPinned(session.id)}
             marked=${isUnread(session.id)}
             unread=${collabs && !open && sessionUnread(session)}
             unseen=${finishedUnseen(session)}
@@ -2358,6 +2299,7 @@ function AllSessions({ compact = false }) {
             meId=${me?.id}
             collabs=${collabs}
             steers=${steers}
+            hovers=${hovers}
             minute=${expanded || session.limited !== undefined ? minute : undefined}
             extensionsRev=${extensionsRev}
             slot=${group.slot}
@@ -2377,6 +2319,7 @@ function AllSessions({ compact = false }) {
             onReview=${onReview}
             onAnswer=${onAnswer}
             onDismiss=${onDismiss}
+            onRead=${onRead}
         />`;
 
         drawnRows.current[view].rows.set(session.id, { place, row });
@@ -2640,7 +2583,6 @@ function AllSessions({ compact = false }) {
             ${
                 sessionsLoaded &&
                 shown.length === 0 &&
-                (!card || searching) &&
                 html`<div class="sessions-empty">
                     ${kept !== null && !needle ? "No sessions match the filters." : archived ? "No archived sessions." : needle ? "No matches." : "No sessions yet. Start one with New."}
                 </div>`
@@ -2655,19 +2597,6 @@ function AllSessions({ compact = false }) {
                     <${Icon} name="check" size=${13} />
                     <span>Nothing needs you</span>
                 </div>`
-            }
-            ${
-                card &&
-                !searching &&
-                html`<${FocusCard}
-                    session=${card.session}
-                    linked=${card.linked}
-                    parent=${card.parent}
-                    home=${home}
-                    steers=${steers}
-                    open=${cardOpen}
-                    onToggle=${() => setCardShown(cardOpen ? null : card.session.id)}
-                />`
             }
             ${searching && sectionsOf(groups, needle, fills.current.matches, "matches")}
             <${Kept} hidden=${searching}>${baseSections}<//>
@@ -2925,7 +2854,7 @@ function Rail({ folded = false, mobile = false }) {
                 π
             </button>`
         }
-        ${place("sessions", "Sessions", html`<${Icon} name="chat" size=${20} />`, {
+        ${place("sessions", "Sessions", html`<${Icon} name="chat" size=${19} />`, {
             title: mobile
                 ? "Sessions"
                 : `Sessions (${keys} ${folded ? "unfolds" : "folds"} the list)`,
@@ -2944,11 +2873,11 @@ function Rail({ folded = false, mobile = false }) {
                 aria-label="New session"
                 onClick=${() => openSheet({ type: "cwd", mode: "new" })}
             >
-                <${Icon} name="plus" size=${20} />
+                <${Icon} name="plus" size=${19} />
             </button>`
         }
         ${folded && html`<${RailTiles} />`}
-        ${place("activity", "Activity", html`<${Icon} name="pulse" size=${20} />`, {
+        ${place("activity", "Activity", html`<${Icon} name="pulse" size=${19} />`, {
             count: busy || live,
             alert: failing(agents) > 0 || agents.waiting > 0,
             description: [
@@ -2961,7 +2890,7 @@ function Rail({ folded = false, mobile = false }) {
                 .filter(Boolean)
                 .join(", "),
         })}
-        ${place("tools", "Tools", html`<${Icon} name="grid" size=${20} />`, {
+        ${place("tools", "Tools", html`<${Icon} name="grid" size=${19} />`, {
             news: server?.pip && (pip?.busy || (!pipOpen && pipUnread())),
         })}
         ${place(
@@ -2969,7 +2898,7 @@ function Rail({ folded = false, mobile = false }) {
             "Account",
             me
                 ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${20} />`
-                : html`<${Icon} name="users" size=${20} />`,
+                : html`<${Icon} name="users" size=${19} />`,
             { title: `${me?.name ?? "Account"} · ${role}` },
         )}
     </nav>`;

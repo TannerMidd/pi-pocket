@@ -2190,7 +2190,7 @@ export function sessionActions() {
             label: cutText(spec.label, ACTION_TEXT),
             title: spec.label,
             module: record.title,
-            // Its icon, for a bar or a menu that shows one; a row has no buttons of its own (`sheets/session.js`).
+            // One with an icon is also a button on rows, where a mouse hovers (`sessions.js`).
             iconPath: spec.icon !== undefined || spec.iconPath !== undefined ? pathOf(spec) : null,
             run: (ids) => {
                 const sessions = Object.freeze([...ids]);

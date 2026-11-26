@@ -333,7 +333,7 @@ test(
                 ),
             "the action in the bar",
         );
-        // The bar's: each row has it too, in the menu that a right-click opens.
+        // The bar's: each row has a Note button too, where a mouse hovers.
         await inPage(
             `[...document.querySelectorAll(".sidebar .select-bar .button")].find((each) => each.textContent.trim() === "Note").click(); return "null"`,
         );
@@ -352,58 +352,21 @@ test(
     },
 );
 
-test("an action with an icon is in the row's right-click menu, not on the row", real, async () => {
+test("an action with an icon is a button on each row too", real, async () => {
     await inPage(`globalThis.noted = null; return "null"`);
     assert.equal(
-        await inPage<number>(
-            `return JSON.stringify(document.querySelectorAll(".sidebar .session-row .session-ext-act").length)`,
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector('.sidebar .session-row[data-id="${first}"] .session-ext-act')?.getAttribute("aria-label") ?? null)`,
         ),
-        0,
-        "no button on the row",
+        "Note",
     );
-
-    // The menu holds it, and it runs on that row.
-    await inPage(`
-        const button = document.querySelector('.sidebar .session-row[data-id="${first}"] > .session');
-        const box = button.getBoundingClientRect();
-
-        button.dispatchEvent(
-            new MouseEvent("contextmenu", {
-                bubbles: true,
-                cancelable: true,
-                button: 2,
-                clientX: Math.round(box.x + 20),
-                clientY: Math.round(box.y + box.height / 2),
-            }),
-        );
-        return "null";
-    `);
-    await until(
-        () =>
-            inPage<boolean>(
-                `return JSON.stringify(document.querySelector('.sheet-host:not(.leaving) [data-part="session-menu"]') !== null)`,
-            ),
-        "the row's menu",
+    await inPage(
+        `document.querySelector('.sidebar .session-row[data-id="${first}"] .session-ext-act').click(); return "null"`,
     );
-    await inPage(`
-        [...document.querySelectorAll('.sheet-host:not(.leaving) [data-part="session-menu"] [role="menuitem"]')]
-            .find((each) => each.firstElementChild.textContent.trim() === "Note")
-            .click();
-        return "null";
-    `);
     await until(
         async () => ((await value<number[]>("noted")) ?? []).join() === String(first),
         "the action on that row",
     );
-    await until(
-        () =>
-            inPage<boolean>(
-                `return JSON.stringify(document.querySelector('.sheet-host:not(.leaving) [data-part="session-menu"]') === null)`,
-            ),
-        "the menu closed",
-    );
-    // A click soon after a layer closed is let go (back.js): wait it out.
-    await new Promise((resolve) => setTimeout(resolve, 600));
 });
 
 test(

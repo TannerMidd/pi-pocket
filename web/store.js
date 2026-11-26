@@ -268,22 +268,6 @@ addEventListener("pocket:signedOut", () => {
 /** Where this browser keeps the sessions whose linked sessions are folded away (`toggleFoldedLinked`). */
 const FOLDED_LINKED_KEY = "pocket.foldedLinked";
 
-/** Whether this browser ever folded or unfolded them: until it does, every session with linked ones is folded. */
-let foldsChosen = null;
-
-const foldsWereChosen = () => {
-    if (foldsChosen === null) {
-        try {
-            foldsChosen = localStorage.getItem(FOLDED_LINKED_KEY) !== null;
-        } catch {
-            // Storage refused: nothing was stored, and the fold by default is all there is.
-            foldsChosen = true;
-        }
-    }
-
-    return foldsChosen;
-};
-
 export const store = {
     state: {
         me: undefined, // undefined: unknown, null: signed out
@@ -590,27 +574,12 @@ function readFoldedLinked() {
 
 /**
  * The folds that apply now: a session whose linked sessions are folded, but not one above the open session, which
- * always shows. Until someone folds or unfolds one, they all start folded: the list leads with its sessions.
+ * always shows.
  */
 export function foldsNow(state = store.state) {
     const folds = new Set(state.foldedLinked);
     const byId = new Map(state.sessions.map((session) => [session.id, session]));
     const seen = new Set();
-
-    if (!foldsWereChosen()) {
-        const { rows } = sessionForest(
-            state.sessions.filter((session) => !session.archived),
-            { pinned: state.pinned },
-        );
-
-        for (const family of rows.values()) {
-            for (const row of family) {
-                if (row.descendants > 0) {
-                    folds.add(row.session.id);
-                }
-            }
-        }
-    }
 
     for (
         let at = byId.get(openId(state))?.linkedFrom?.id;
@@ -624,20 +593,15 @@ export function foldsNow(state = store.state) {
     return folds;
 }
 
-/**
- * Fold a session's linked sessions away in the list, or show them again; kept for this browser, its other tabs too.
- * The choice is against what shows now (`foldsNow`), so the first tap opens the folds that started folded by default.
- */
+/** Fold a session's linked sessions away in the list, or show them again; kept for this browser, its other tabs too. */
 export function toggleFoldedLinked(id) {
     const known = new Set(store.state.sessions.map((session) => session.id));
     // Sessions that are gone are let go of as the choice is saved.
     const next = store.state.foldedLinked.filter((each) => each !== id && known.has(each));
 
-    if (!foldsNow().has(id)) {
+    if (!store.state.foldedLinked.includes(id)) {
         next.push(id);
     }
-
-    foldsChosen = true;
 
     try {
         localStorage.setItem(FOLDED_LINKED_KEY, JSON.stringify(next));
@@ -651,7 +615,6 @@ export function toggleFoldedLinked(id) {
 // Another tab of this browser folded or unfolded: this one follows.
 addEventListener("storage", (event) => {
     if (event.key === FOLDED_LINKED_KEY) {
-        foldsChosen = true;
         store.set({ foldedLinked: readFoldedLinked() });
     }
 });
