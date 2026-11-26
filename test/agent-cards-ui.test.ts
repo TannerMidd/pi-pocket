@@ -446,3 +446,54 @@ test("on a phone nothing scrolls sideways, and each control is a thumb's size", 
     assert.deepEqual(measured.over, []);
     assert.deepEqual(measured.small, []);
 });
+
+test("Show raw keeps every line, and a watch keeps its line breaks", real, async () => {
+    await page.setViewport(VIEWPORTS.desktop);
+
+    // A payload that holds the attachments heading as its own words: Show raw must not stop there.
+    const relay = via(
+        "relay oswc-bugs",
+        inbox(
+            "A message came in from outside.",
+            "",
+            "relay-message",
+            ' connector="oswc-bugs" kind="discord" from="Someone" from-id="42"',
+            "Here is my list.\nAttached files (saved on the server):\nnot a file, just words after the heading",
+        ),
+    );
+    // A watch with lines and an indent around a fenced log.
+    const watch = via(
+        "PR watch",
+        'Line one\n  indented two\nline three\n<ci-log name="test">\nnot ok 1\n</ci-log>\nafter the log',
+    );
+
+    await inject(relay);
+    await inject(watch);
+    await page.navigate(`${base}/s/${source}`);
+    await see(
+        `return JSON.stringify(document.querySelector(".acard[data-kind=watch] .acard-fenced") !== null)`,
+        "the watch card",
+    );
+
+    const kept = await inPage<{ white: string; text: string }>(`
+        const body = [...document.querySelectorAll(".acard[data-kind=watch] .acard-fenced")].at(-1);
+        return JSON.stringify({ white: getComputedStyle(body).whiteSpace, text: body.innerText });
+    `);
+
+    assert.equal(kept.white, "pre-wrap");
+    assert.match(kept.text, /Line one\n {2}indented two\nline three/);
+
+    await page.evaluate(
+        `[...document.querySelectorAll(".acard[data-kind=relay] .acard-raw")].at(-1).click(); return "true"`,
+    );
+    await see(
+        `return JSON.stringify(document.querySelector(".message-preview") !== null)`,
+        "the message sheet",
+    );
+    const raw = await inPage<string>(
+        `return JSON.stringify(document.querySelector(".message-preview").textContent)`,
+    );
+
+    assert.equal(raw.replace(/\r/g, ""), relay);
+    await page.evaluate(`(await import("/store.js")).closeSheet(); return "true"`);
+});

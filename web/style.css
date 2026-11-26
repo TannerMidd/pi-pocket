@@ -2183,7 +2183,8 @@ kbd {
 }
 
 /* What came from outside, as plain text, never Markdown: it keeps its lines as written. */
-.acard-plain {
+.acard-plain,
+.acard-fenced {
     white-space: pre-wrap;
 }
 

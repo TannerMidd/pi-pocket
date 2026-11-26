@@ -29,7 +29,8 @@ function Body({ body, open, renderFenced }) {
         case "markdown":
             return html`<${Markdown} text=${body.text} />`;
         case "fenced":
-            return renderFenced(body.text);
+            // Its text between the data blocks keeps its line breaks and indents, as a message's text does.
+            return html`<div class="acard-fenced">${renderFenced(body.text)}</div>`;
 
         case "code": {
             const lines = body.text.split("\n");
