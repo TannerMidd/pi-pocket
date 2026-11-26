@@ -332,13 +332,21 @@ export const routeState = (key) => history.state?.pocket?.[key];
 /** Values for the entry a fresh page starts on, kept until `startHistory` writes that entry. */
 let firstEntry = {};
 let started = false;
+/** The keys `markRoute` has kept: an entry that history moves or writes again keeps them. */
+const marked = new Set();
 
 /**
  * Keep `value` under `key` on the route's entry as it stands (a visit's key, for an entry that came without one). An
- * entry this module has not written yet (a fresh page) gets it when `startHistory` writes it.
+ * entry this module has not written yet (a fresh page, or a reload) gets it when `startHistory` writes it.
  */
 export function markRoute(key, value) {
     const pocket = history.state?.pocket;
+
+    marked.add(key);
+
+    if (!started) {
+        firstEntry = { ...firstEntry, [key]: value };
+    }
 
     if (pocket) {
         history.replaceState(
@@ -346,9 +354,21 @@ export function markRoute(key, value) {
             "",
             location.href,
         );
-    } else if (!started) {
-        firstEntry = { ...firstEntry, [key]: value };
     }
+}
+
+/** What `markRoute` kept on the route's entry, to write again on the entry that takes its place. */
+function carried() {
+    const pocket = history.state?.pocket ?? {};
+    const kept = { ...firstEntry };
+
+    for (const key of marked) {
+        if (pocket[key] !== undefined) {
+            kept[key] = pocket[key];
+        }
+    }
+
+    return kept;
 }
 
 /**
@@ -564,7 +584,7 @@ export function startHistory({ home }) {
             listUnderOnFirstTap();
         }
     } else {
-        history.replaceState({ pocket: { layers: 0, ...firstEntry } }, "", location.href);
+        history.replaceState({ pocket: { layers: 0, ...carried() } }, "", location.href);
     }
 
     shownBack = history.state.pocket.back;
@@ -578,10 +598,11 @@ export function startHistory({ home }) {
  */
 function listUnderNow() {
     const here = location.pathname + location.search + location.hash;
+    const kept = carried();
 
     history.replaceState({ pocket: { layers: 0, back: 0 } }, "", HOME);
     history.pushState({ pocket: { layers: 0, back: 0, guard: true } }, "", HOME);
-    history.pushState({ pocket: { layers: 0, back: 1, ...firstEntry } }, "", here);
+    history.pushState({ pocket: { layers: 0, back: 1, ...kept } }, "", here);
 }
 
 /**
@@ -590,7 +611,7 @@ function listUnderNow() {
  */
 function listUnderOnFirstTap() {
     history.replaceState(
-        { pocket: { layers: 0, listUnder: true, ...firstEntry } },
+        { pocket: { layers: 0, listUnder: true, ...carried() } },
         "",
         location.href,
     );
@@ -610,9 +631,10 @@ function listUnderOnFirstTap() {
         }
 
         const here = location.pathname + location.search + location.hash;
+        const kept = carried();
 
         history.replaceState({ pocket: { layers: 0, back: 0 } }, "", HOME);
-        history.pushState({ pocket: { layers: 0, back: 1, ...firstEntry } }, "", here);
+        history.pushState({ pocket: { layers: 0, back: 1, ...kept } }, "", here);
         shownBack = 1;
     };
 

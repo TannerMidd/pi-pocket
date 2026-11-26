@@ -459,6 +459,27 @@ test("back to an index opened directly or reloaded keeps its results", real, asy
 });
 
 test(
+    "on a phone, back to an index opened directly or reloaded keeps its results",
+    real,
+    async () => {
+        // A phone puts the list's entry under the route at the first tap or key: that must keep the visit's key.
+        const p = await browsers.open(8);
+
+        await p.setViewport({ width: 390, height: 844, scale: 1, mobile: true });
+        await p.navigate(base + "/login?token=" + encodeURIComponent(app.config.ownerToken));
+        await p.navigate(base + "/s/index/all");
+        // A reload before the first tap or key: the entry still waits for the list to go under it.
+        await wait(p, ".family-explorer");
+        await run(p, "location.reload()");
+        await wait(p, ".family-explorer");
+        await browseAndReturn(p);
+        await run(p, "location.reload()");
+        await wait(p, ".family-explorer");
+        await browseAndReturn(p);
+    },
+);
+
+test(
     "a new sidebar search replaces the open index's results, and back leaves it once",
     real,
     async () => {
