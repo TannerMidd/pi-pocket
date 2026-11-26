@@ -1,4 +1,4 @@
-import { routeState } from "./back.js";
+import { markRoute, routeState } from "./back.js";
 
 // History carries an opaque visit key, not search text, titles, or read state. Results are always recomputed from the current person's list.
 const visits = new Map();
@@ -43,7 +43,16 @@ export function routeFamily() {
 
     const visit = visits.get(routeState("familyKey"));
 
-    return visit?.scope === scope ? visit : newFamilyVisit(scope);
+    if (visit?.scope === scope) {
+        return visit;
+    }
+
+    // An entry that came without a key (a link, a reload) keeps this one, so back from a result finds the same visit.
+    const fresh = newFamilyVisit(scope);
+
+    markRoute("familyKey", fresh.key);
+
+    return fresh;
 }
 
 export function restoreFamilyOpener(visit) {

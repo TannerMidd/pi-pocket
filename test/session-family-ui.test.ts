@@ -7,6 +7,7 @@ import {
     root,
     say,
     scriptedModel,
+    until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -17,7 +18,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
-import { SessionsDoc } from "../src/server/docs.ts";
+import { ChatDoc, SessionsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 
 const real = { skip: findBrowser() === undefined ? "Chromium not installed" : false };
@@ -403,6 +404,140 @@ test(
         assert.equal(
             await get(p, "document.querySelector('.family-range').innerText"),
             "0 results",
+        );
+    },
+);
+
+const desktop = { width: 1920, height: 1080, scale: 1, mobile: false };
+
+async function browseAndReturn(p: BrowserPage): Promise<void> {
+    await wait(p, explorer + " .session-row");
+    await p.type({ selector: explorer + " input" }, "Sheet");
+    await wait(p, explorer + " .session-row");
+    await enter(p, '[aria-label="Next page"]');
+    await enter(p, '[aria-label="Next page"]');
+    await wait(p, explorer + " .session-row");
+    const pager = await get<string>(p, "document.querySelector('.family-pager span').textContent");
+    const id = await get<string>(
+        p,
+        "document.querySelector('.family-explorer .session-row').dataset.id",
+    );
+    const y = await get<number>(
+        p,
+        "(document.querySelector('.family-explorer .session-items').scrollTop=64,document.querySelector('.family-explorer .session-items').scrollTop)",
+    );
+
+    assert.match(pager, /^Page 3 of /);
+    // A click keeps the scroll: focusing the row first would bring it into view.
+    await run(p, "document.querySelector(" + q(result(Number(id))) + ").click()");
+    await wait(p, '[aria-label="Back to results"]');
+    await enter(p, '[aria-label="Back to results"]');
+    await wait(p, result(Number(id)));
+    assert.equal(await get(p, "document.querySelector('.family-explorer input').value"), "Sheet");
+    assert.equal(await get(p, "document.querySelector('.family-pager span').textContent"), pager);
+    assert.equal(
+        await get(p, "document.activeElement.matches(" + q(result(Number(id))) + ")"),
+        true,
+    );
+    assert.equal(
+        await get(p, "document.querySelector('.family-explorer .session-items').scrollTop"),
+        y,
+    );
+}
+
+test("back to an index opened directly or reloaded keeps its results", real, async () => {
+    const p = await browsers.open(5);
+
+    await p.setViewport(desktop);
+    await p.navigate(base + "/login?token=" + encodeURIComponent(app.config.ownerToken));
+    await p.navigate(base + "/s/index/all");
+    await browseAndReturn(p);
+    await run(p, "location.reload()");
+    await wait(p, ".family-explorer");
+    await browseAndReturn(p);
+});
+
+test(
+    "a new sidebar search replaces the open index's results, and back leaves it once",
+    real,
+    async () => {
+        const p = await browsers.open(6);
+
+        await p.setViewport(desktop);
+        await p.navigate(base + "/login?token=" + encodeURIComponent(app.config.ownerToken));
+        await p.navigate(base + "/s/" + proof);
+        await wait(p, ".scroller .transcript");
+        await enter(p, '.sidebar [data-family-open="all"]');
+        await wait(p, explorer + " .session-row");
+        await p.type({ selector: explorer + " input" }, "Sheet");
+        await enter(p, '[aria-label="Next page"]');
+        await p.type({ selector: ".sidebar .search input" }, "Night legend");
+        await enter(p, '.sidebar [data-family-open="all"]');
+        await until(
+            async () =>
+                (await get<string>(p, "document.querySelector('.family-explorer input').value")) ===
+                "Night legend",
+            "the index to take the new search",
+        );
+        assert.equal(
+            await get(p, "document.querySelectorAll('.family-explorer .session-row').length"),
+            2,
+        );
+        assert.equal(
+            await get(
+                p,
+                "document.querySelector('.family-pager span')?.textContent ?? 'Page 1 of 1'",
+            ),
+            "Page 1 of 1",
+        );
+        await run(p, "history.back()");
+        await wait(p, ".scroller .transcript");
+        assert.equal(await get(p, "document.querySelector('.family-explorer')"), null);
+    },
+);
+
+test(
+    "a lead with only new chat shows Unread in a child's header until it is read",
+    real,
+    async () => {
+        const head = await newSession(app);
+        const child = await newSession(app);
+
+        await app.harness.commit(async (tx) => {
+            const items = (await tx.doc(SessionsDoc)).items;
+
+            Object.assign(items[String(head)]!, { title: "Chat-only lead" });
+            Object.assign(items[String(child)]!, {
+                title: "Chat-only child",
+                linkedFrom: { id: Number(head) },
+            });
+        }, context);
+        const p = await browsers.open(7);
+
+        await p.setViewport(desktop);
+        await p.navigate(base + "/login?token=" + encodeURIComponent(app.config.ownerToken));
+        await p.navigate(base + "/s/" + child);
+        await wait(p, ".family-context .lead-route");
+        assert.equal(await get(p, "!!document.querySelector('.lead-unread')"), false);
+        await app.harness.commit(async (tx) => {
+            (await tx.doc(ChatDoc, head)).messages.push({
+                id: "guest-chat-1",
+                userId: "someone-else",
+                name: "Someone",
+                text: "Check the plates.",
+                at: Date.now(),
+            });
+        }, context);
+        await wait(p, ".lead-unread");
+        assert.equal(await get(p, "document.querySelector('.lead-unread').textContent"), "Unread");
+        await enter(p, ".lead-route");
+        await run(p, "const m = await import('/store.js'); m.openSheet({ type: 'chat' });");
+        await p.waitFor({ text: "Check the plates." });
+        await run(p, "const m = await import('/store.js'); m.navigate(" + Number(child) + ");");
+        await wait(p, ".family-context .lead-route");
+        await until(
+            async () => !(await get<boolean>(p, "!!document.querySelector('.lead-unread')")),
+            "the lead's chat to count as read",
         );
     },
 );

@@ -329,6 +329,28 @@ export const goBack = () => history.back();
 /** What `pushRoute` kept on the route's entry under `key`, or undefined. */
 export const routeState = (key) => history.state?.pocket?.[key];
 
+/** Values for the entry a fresh page starts on, kept until `startHistory` writes that entry. */
+let firstEntry = {};
+let started = false;
+
+/**
+ * Keep `value` under `key` on the route's entry as it stands (a visit's key, for an entry that came without one). An
+ * entry this module has not written yet (a fresh page) gets it when `startHistory` writes it.
+ */
+export function markRoute(key, value) {
+    const pocket = history.state?.pocket;
+
+    if (pocket) {
+        history.replaceState(
+            { ...history.state, pocket: { ...pocket, [key]: value } },
+            "",
+            location.href,
+        );
+    } else if (!started) {
+        firstEntry = { ...firstEntry, [key]: value };
+    }
+}
+
 /**
  * The route this one was opened over (a path), whose entry is under this route's, so `popRoute` goes back there.
  * Undefined when not known, or while history has not caught up with the route the app shows.
@@ -524,6 +546,8 @@ export function goHome(fallback) {
 export function startHistory({ home }) {
     const pocket = history.state?.pocket;
 
+    started = true;
+
     if (pocket && !pocket.listUnder) {
         settle();
 
@@ -540,7 +564,7 @@ export function startHistory({ home }) {
             listUnderOnFirstTap();
         }
     } else {
-        history.replaceState({ pocket: { layers: 0 } }, "", location.href);
+        history.replaceState({ pocket: { layers: 0, ...firstEntry } }, "", location.href);
     }
 
     shownBack = history.state.pocket.back;
@@ -557,7 +581,7 @@ function listUnderNow() {
 
     history.replaceState({ pocket: { layers: 0, back: 0 } }, "", HOME);
     history.pushState({ pocket: { layers: 0, back: 0, guard: true } }, "", HOME);
-    history.pushState({ pocket: { layers: 0, back: 1 } }, "", here);
+    history.pushState({ pocket: { layers: 0, back: 1, ...firstEntry } }, "", here);
 }
 
 /**
@@ -565,7 +589,11 @@ function listUnderNow() {
  * skips entries a page adds before anyone has touched it. Marked meanwhile, so a reload before then still does it.
  */
 function listUnderOnFirstTap() {
-    history.replaceState({ pocket: { layers: 0, listUnder: true } }, "", location.href);
+    history.replaceState(
+        { pocket: { layers: 0, listUnder: true, ...firstEntry } },
+        "",
+        location.href,
+    );
 
     const put = () => {
         // A layer open above it (a notification opened the chat): at a tap once it has closed.
@@ -584,7 +612,7 @@ function listUnderOnFirstTap() {
         const here = location.pathname + location.search + location.hash;
 
         history.replaceState({ pocket: { layers: 0, back: 0 } }, "", HOME);
-        history.pushState({ pocket: { layers: 0, back: 1 } }, "", here);
+        history.pushState({ pocket: { layers: 0, back: 1, ...firstEntry } }, "", here);
         shownBack = 1;
     };
 

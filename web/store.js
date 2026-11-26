@@ -2605,7 +2605,8 @@ export function navigate(
     const route =
         location.pathname !== path ||
         store.state.conversationId !== conversationId ||
-        store.state.family?.scope !== family?.scope;
+        store.state.family?.scope !== family?.scope ||
+        (!!family && store.state.family?.key !== family.key);
 
     if (route && back) {
         popRoute(path);
@@ -2665,7 +2666,13 @@ export function navigate(
 export function openFamily(scope, query = "", origin = document.activeElement, filter = "all") {
     scope = String(scope);
 
-    if (store.state.family?.scope === scope) {
+    const open = store.state.family?.scope === scope ? store.state.family : null;
+
+    // The index is open: a plain tap on its own link keeps the search it has.
+    if (
+        open &&
+        ((query === "" && filter === "all") || (query === open.query && filter === open.filter))
+    ) {
         store.set({ board: false, page: null, drawer: false, sheet: null });
 
         return;
@@ -2674,7 +2681,20 @@ export function openFamily(scope, query = "", origin = document.activeElement, f
     const family = newFamilyVisit(scope, query, origin);
 
     family.filter = filter;
-    navigate(null, { family });
+
+    // A new search takes the open index's place, still over the route it was opened over, so back leaves it once.
+    if (open) {
+        Object.assign(family, {
+            origin: open.origin,
+            opener: open.opener,
+            sideQuery: open.sideQuery,
+            sideTab: open.sideTab,
+            drawer: open.drawer,
+            sideScroll: open.sideScroll,
+        });
+    }
+
+    navigate(null, { family, replace: !!open });
 }
 
 /**
