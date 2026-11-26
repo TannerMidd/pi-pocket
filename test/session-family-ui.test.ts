@@ -185,8 +185,9 @@ for (const mobile of [false, true]) {
                 const hit = btn.getBoundingClientRect();
                 const box = label.getBoundingClientRect();
                 const ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+                // Layout size, not the drawn box: a row that is still sliding in is transformed.
                 return {
-                    hit: Math.min(hit.height, hit.width),
+                    hit: Math.min(btn.offsetHeight, btn.offsetWidth),
                     ring: style.outlineStyle,
                     radius: parseFloat(style.borderRadius),
                     border: style.borderStyle,
@@ -533,6 +534,15 @@ test(
         await enter(p, ".lead-route");
         await run(p, "const m = await import('/store.js'); m.openSheet({ type: 'chat' });");
         await p.waitFor({ text: "Check the plates." });
+        // The chat marks itself read just after it draws the message: leave only once it has.
+        await until(
+            async () =>
+                await get<boolean>(
+                    p,
+                    "(await import('/store.js')).store.state.chatReads[" + Number(head) + "] > 0",
+                ),
+            "the lead's chat to be marked read",
+        );
         await run(p, "const m = await import('/store.js'); m.navigate(" + Number(child) + ");");
         await wait(p, ".family-context .lead-route");
         await until(
