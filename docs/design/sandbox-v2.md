@@ -132,7 +132,7 @@ Ledger writes are **serialised** through one queue. This closes the race where a
 
 Owns: the doc, phases, the queue, `admit`, leases, groups, `rootOf`, the platform gate, the tool gate, the readiness gate, and the runner ledger (4.5). It never imports Gondolin.
 
-**Readiness gate.** Turn-on requires every component of the sandbox to be registered: gate, host file access, trusted places, Git boundary, driver, **jobs, browser, and the `team` rule**. The last PR registers the last of them. Until all are present, turn-on is refused ("not available yet"). So a PR that lands part of the work cannot enable anything.
+**Readiness gate.** Turn-on requires every component of the sandbox to be registered: gate, host file access, trusted places, Git boundary, driver, **jobs, browser, the `team` rule, and the MCP launch point resolved** (decision 14). **`admit` checks readiness on every `join`**, not only at turn-on, so a session that would start sandboxed in a sandboxed group is refused while the gate is closed. The last PR registers the last of them. Until all are present, turn-on is refused ("not available yet"). So a PR that lands part of the work cannot enable anything.
 
 **Provider contract:** `env`, `release` (resolves only after teardown; a rejection keeps the sandbox on), `jobs`, `browser`, `folderProblem`, `mayChoose`. Registration is **awaited and serialised** against the old provider's teardown. The newest live registration serves. A disposed provider never returns. `host.sandbox` is **not** on the public `host` object, in the types, or in the docs until the last PR. The built-in module reaches it through an internal option. **A routed tool with no route fails closed.** If `jobs` or `browser` is absent, `background` and `browser` are blocked, and `team` stays blocked until its rule exists.
 
@@ -140,7 +140,7 @@ Owns: the doc, phases, the queue, `admit`, leases, groups, `rootOf`, the platfor
 
 **One module touches the file system for host code.** `node:fs`, `node:fs/promises`, and `node:child_process` imports are allowed only in `hostfs.ts`, the hardened Git runner, and an allow-list of files that touch only Pocket's own data, install, config, or system locations. An ESLint rule and a source test enforce the list. A second source test: **no `git` spawn exists outside the one hardened runner.**
 
-**Census.** `docs/design/sandbox-v2-census.md` lists all 77 files that import those modules at base `690ebd74`: 40 `own`, 27 `convert`, 10 `split`. It also lists the **indirect** users (`design/guide.ts` through `readDesignSystemText`, `heic.ts`, `repo-watches.ts`, `browser/*`). The list comes from `rg -l --glob 'src/server/**/*.ts' -e 'from "(node:)?(fs|fs/promises|child_process)"'`. **CI keeps it current:** PR 2 turns the table into `src/server/fs-census.json`, and `test/fs-census.test.ts` scans the tree (static imports, `import()`, `require`) and fails on an unlisted importer, a stale entry, or a `convert` or `split` file that still imports a primitive. Indirect users are forced to convert by types: a helper that touches a session folder takes a `FolderRef`, and its callers stop compiling until they have one. The lint covers `src/server/extensions/*` (built-in modules). **Drop-in extensions** are the owner's code and run with the owner's rights; the lint cannot reach them. The `host` file APIs they use are `hostfs`-backed. A drop-in that imports `node:fs` itself is a documented limit.
+**Census.** `docs/design/sandbox-v2-census.md` lists all 77 files that import those modules at base `690ebd74`: 41 `own`, 23 `convert`, 10 `split`, and 3 `wrapper`. It also lists the **indirect** users (`design/guide.ts` through `readDesignSystemText`, `heic.ts`, `repo-watches.ts`, `browser/*`). The list comes from `rg -l --glob 'src/server/**/*.ts' -e 'from "(node:)?(fs|fs/promises|child_process)"'`. **CI keeps it current:** PR 2 turns the table into `src/server/fs-census.json`, and `test/fs-census.test.ts` scans the tree (static imports, `import()`, `require`) and fails on an unlisted importer, a stale entry, or a `convert` or `split` file that still imports a primitive. Indirect users are forced to convert by types: a helper that touches a session folder takes a `FolderRef`, and its callers stop compiling until they have one. The lint covers `src/server/extensions/*` (built-in modules). **Drop-in extensions** are the owner's code and run with the owner's rights; the lint cannot reach them. The `host` file APIs they use are `hostfs`-backed. A drop-in that imports `node:fs` itself is a documented limit.
 
 **`FolderRef`.** `app.folderOf(id)` replaces `cwdOf` for host code. It returns an opaque object (path, device, inode, group state). It has no `toString`, `valueOf`, or `Symbol.toPrimitive`. `fs` rejects it at compile time and at run time. Access is `hostfs.open(folderRef, relativeName)`: a descriptor walk, one name at a time, refusing every link and every odd name, failing closed on any error.
 
@@ -231,6 +231,49 @@ An **allow list** in core. An unlisted tool is a host tool and is blocked.
 - **Migration.** The `pocket.sandbox` doc keeps the shape `{ on, by, at }`. At server start a stored `on` doc is audited like any other (I1) and starts `suspended` if the readiness gate is not met. The live database has none today, so a test with a synthetic stored doc covers it. The old build's `gondolin/vms.json` is imported as confirmed ledger records. A file in an unknown shape refuses VM starts until the owner clears it.
 - **Guest text and plain sessions.** The limits in section 1 are listed on the sandbox sheet. `team` and `session_send` cannot reach plain sessions from a sandboxed tree (4.6).
 
+### 4.8 Implementation review checklist
+
+Every implementation-level item from the two critics' reviews. Each PR's description ticks the items it owns.
+
+**Deliveries (PR 1).**
+
+- The `deliver` wrapper does not exist yet. It must convert **every** direct `submit`. A scan of the base finds these callers: `commands.ts`, `turn-notes.ts`, `schedules.ts`, `background.ts`, `resend.ts`, `extensions/subagents.ts` (both the reporter and the courier), `extensions/agent-teams.ts`, `extension-sessions.ts`, `linked-sessions.ts`, `inbox.ts` (the webhook inbox), `extension-commands.ts`, `watches.ts`, `repo-watches.ts`, `shell.ts`, `pip.ts`, `http/conversation-routes.ts`. Several of them go through `commands.submit`. The `.submit(` source test lists them and fails on a new one.
+- **Deferral keeps checkpoints and batches.** `background.ts` must not mark a deferred report as told. `resend.ts` must not finish a deferred task. A deferred courier batch stays whole and keeps its batch number.
+- `admit` checks the readiness gate on every `join` (4.1).
+
+**Reload and providers (PR 1, PR 5).**
+
+- `reload.ts` stages the replacement before the old module's cleanup. For providers this changes to: awaited teardown, a barrier drain, then a **generation check** before the new provider serves. Applies to manual reload, auto reload, removal, and disable.
+
+**Recovery and ledger (PR 5).**
+
+- An unfinished `/proc` scan counts as **unknown**, which is alive.
+- The ledger keeps its records after any failure. A failed write or read never empties it.
+- A spawn that never settles within the bound leaves the tree `suspended`.
+
+**Census (PR 2).**
+
+- `git.ts`, `github.ts`, `reveal.ts`, and `processes.ts` need a **named spawn wrapper**. They cannot just lose `child_process`. The census marks them `wrapper` or `split`.
+- `secrets.ts` is `split`. `upload-references.ts` is `own`. `browser/*` is `own` in every row, and the host browser is refused for sandboxed trees.
+- The census test also catches: calls into Pi's own loaders (`loadProjectContextFiles`, `loadSkills`, `loadSkillsFromDir`); `createRequire` (`lancet.ts`, `extension-document-imports.ts`); `process.getBuiltinModule`; `process.binding`; and packages that wrap fs or spawn.
+
+**Git (PR 2, PR 4).**
+
+- `gh` runs Git itself. Treat it like Git: `runGh` has the same environment, flags, and version gate as `runGit`.
+- `--attr-source` needs **Git 2.40 or later**. A version gate runs at start. **Fail closed:** below 2.40, Pocket's own Git in a sandboxed folder is refused, with the version in the message. The only fallback is a Git-written empty attributes snapshot: `-c core.attributesFile=/dev/null`, `GIT_ATTR_NOSYSTEM=1`, and a bare `--git-dir` plus `--work-tree` over a snapshot made by `hostfs`. If that is not built, the refusal stands. Nothing falls back to plain Git.
+- Resolve the absolute `git` path once. Ignore relative and empty `PATH` entries (4.7).
+
+**`hostfs` and `GuardedFs` (PR 2, PR 4).**
+
+- **`hostfs` on plain folders.** It confines only folders that a sandboxed tree uses. For every other folder it behaves as today: links are followed, and the error codes are the same. A **plain-session parity test** in PR 2 runs the existing file, changes, and viewer cases on a plain folder, with and without `hostfs`, and compares results.
+- **`GuardedFs` and guest-made special files.** A **link** the guest makes is stored as a link and never followed on the host: reads of it return the link, and a path through it is refused by the descriptor walk. A **FIFO** or a device node is never opened on the host. A `stat` on it works. An `open` returns `ENXIO`, so the bridge cannot block on it. A guest `mknod` is refused with `EPERM`, except for a regular file. A socket is refused the same way. A test makes each kind in the guest-side API and checks the host side stays unblocked.
+- Both pieces fail closed off Linux and without `/proc`.
+
+**Trusted places and MCP (PR 3).**
+
+- Find the MCP spawn. Record the answer for readiness. Never read a sandboxed folder's project MCP config.
+- Entry-cap plan and exclusions as in 4.3.
+
 ## 5. Findings from #415, by class
 
 Each class names the element that makes it **impossible**. Sources: Greptile on GitHub (G), and the independent reviews at `640919a8` through `322a8780` (I), from `independent-review-findings.md`.
@@ -300,7 +343,7 @@ Each class names the element that makes it **impossible**. Sources: Greptile on 
 Each PR reviews alone and **ships safe with the sandbox off**: the readiness gate (4.1) refuses turn-on until the last PR registers the last component.
 
 1. **Core state, admission, gate.** `sandbox.ts` (state, phases, leases with bound folders, `rootOf`, `admit`, `exclusive`, `deliver`, readiness gate), the `pocket.sandbox` kind, the **allow-list tool gate with its route check** (`team`, `background`, and `browser` blocked until their routes exist), the fail-closed env, a trusted-places stub that **refuses by default**, every entry point in 2.4 against a fake provider. `host.sandbox` stays internal. Files: `sandbox.ts`, `commands.ts`, `app.ts`, `linked-sessions.ts`, `schedules.ts`, `hooks.ts`, `repo-watches.ts`, `extensions/subagents.ts`, `extension-sessions.ts`, `session-cleanup.ts`, `reload.ts`, `docs.ts`. _Fail first:_ a race test per row of 2.4; the I6 source test over both cwd stores; the `.submit(` source test; an archived tree gaining work; a plain move with a surviving task. _Salvage:_ `admit`, `exclusive`, overlap; `hostfs17` tree logic.
-2. **Structural host file access, census, hardened Git runner.** `hostfs.ts` (the `/proc/self/fd` walk), `FolderRef`, the lint rule, `fs-census.json` and its test, both source tests, snapshot loaders, the `project-model.ts` rule, the conversion of all 27 `convert` and 10 `split` files. _Fail first:_ alias, parent-swap, FIFO, `/dev/zero`, `AGENTS.md` link, mention-link cases; the census test; the two source tests. _Salvage:_ `confined.ts`.
+2. **Structural host file access, census, hardened Git runner.** `hostfs.ts` (the `/proc/self/fd` walk), `FolderRef`, the lint rule, `fs-census.json` and its test, both source tests, snapshot loaders, the `project-model.ts` rule, the conversion of the 23 `convert` and 10 `split` files, and the named spawn wrappers (`runGit`, `runGh`, `reveal`, `spawnIn`). _Fail first:_ alias, parent-swap, FIFO, `/dev/zero`, `AGENTS.md` link, mention-link cases; the census test; the two source tests. _Salvage:_ `confined.ts`.
 3. **Trusted places.** `trusted-places.ts`, `PATH`, per-key bases, the bounded and cached walk, the settings-change `rules` transition, the MCP launch finding, the resolve hook. _Fail first:_ `trusted-roots.test.ts`, an unfinished walk, a `node_modules` tree, a changed `mcp.json`. _Salvage:_ `trusted-places.ts`.
 4. **The Git boundary and `GuardedFs`.** `policy.ts`, the config audit, the link-chain walk, descriptor discovery, and `GuardedFs` on `hostfs`, tested on real folders with no VM. _Fail first:_ `.git` equivalence table; the key allow-list; link chains against `readlink -f`; swap races on `GuardedFs`. _Salvage:_ `policy.ts`, and from `git.ts` the allow-list and chain walk only.
 5. **Driver, barrier, ledger.** The Gondolin adapter over `GuardedFs`, `manager.ts`, the core ledger, `SpawnBarrier`, the module shell (off by default), guest env, Linux check. _Fail first:_ intent, wait, release, spawn (the I9 race); a crash between intent and confirm; failed close; unreadable `/proc`; serialised provider replacement. _Salvage:_ `manager.ts`, `real-driver.ts`, `guest-env.ts`.
@@ -329,4 +372,4 @@ Each PR reviews alone and **ships safe with the sandbox off**: the readiness gat
 11. **Extension slash commands in a sandboxed tree.** _Recommend blocked until the extension says it is inert._
 12. **The guest bridge.** _Recommend our own `GuardedFs` on `hostfs`_ over wrapping Gondolin's `RealFSProvider`. The cost is more code in PR 4 and PR 5.
 13. **Guest text reaching PiP.** _Recommend a documented limit_ (fenced and labelled data). The alternative removes PiP's host tools after it reads a sandboxed transcript.
-14. **MCP launch point.** _Recommend_ finding the spawn in PR 3 and routing it through `launchCheck`. If it lives outside Pocket, accept the change-time check alone and say so.
+14. **MCP launch point.** _Recommend_ finding the spawn in PR 3 and routing it through `launchCheck`. If it lives outside Pocket, accept the change-time check alone and say so. Either way, a sandboxed folder's **project-level MCP config is never read**, the same as decision 10 for `settings.json`. "MCP launch point resolved" is a readiness-gate component: the gate stays closed until PR 3 records which of the two cases holds.
