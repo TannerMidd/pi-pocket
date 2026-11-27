@@ -176,3 +176,8 @@
 .gdl-block > .button {
     min-height: 44px;
 }
+
+.gdl-notready {
+    margin: 0 0 12px;
+    color: var(--body);
+}

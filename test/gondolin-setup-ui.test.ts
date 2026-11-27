@@ -106,6 +106,19 @@ test(
     },
 );
 
+test("the menu itself has a Sandbox row at home too, and one tap opens Set up", real, async () => {
+    await page.navigate(`${base}/`);
+    await inPage(`(await import("/store.js")).openSheet({ type: "menu" }); return "null";`);
+    await until(
+        async () => (await rows()).some((each) => each.startsWith("Sandbox set up")),
+        "the Sandbox set up row in the menu",
+    );
+    await inPage(
+        `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Sandbox set up")).click(); return "null";`,
+    );
+    await until(async () => (await buttons()).includes("Set up"), "Set up in the sandbox sheet");
+});
+
 test("the Sandbox row is in the session menu itself", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(
@@ -125,3 +138,40 @@ test("the Sandbox row is in the session menu itself", real, async () => {
     );
     await until(async () => (await buttons()).includes("Set up"), "Set up in the sandbox sheet");
 });
+
+/** Whether the button named `label` is on screen now: what shows at its middle is the button, with no scrolling. */
+const visible = (label: string) =>
+    inPage<boolean>(`
+        const button = [...document.querySelectorAll(".sheet button")].find((each) => each.textContent.trim() === ${JSON.stringify(label)});
+        if (!button) return JSON.stringify(false);
+        const box = button.getBoundingClientRect();
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return JSON.stringify(box.bottom <= innerHeight && top !== null && button.contains(top));
+    `);
+
+for (const [name, viewport] of [
+    ["desktop", { width: 1920, height: 1080, scale: 1, mobile: false }],
+    ["phone", { width: 390, height: 844, scale: 1, mobile: true }],
+] as const) {
+    test(
+        `before Set up has run, Set up shows at once in the sandbox sheet (${name}, with and without a session)`,
+        real,
+        async () => {
+            await page.setViewport(viewport);
+
+            for (const where of [`${base}/`, `${base}/s/${session}`]) {
+                await page.navigate(where);
+                await until(
+                    async () => (await entries()).includes("Sandbox set up"),
+                    "the module's entry",
+                );
+                await inPage(
+                    `(await import("/extension-ui.js")).extensionEntries("gondolin")[0].run(); return "null";`,
+                );
+                await until(async () => (await buttons()).includes("Set up"), "the sandbox sheet");
+                await until(() => visible("Set up"), `Set up on screen at ${where}`);
+                assert.ok(await visible("Set up with a browser"), "both buttons show");
+            }
+        },
+    );
+}

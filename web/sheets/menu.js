@@ -487,6 +487,10 @@ function overview(places) {
                 next: true,
             }),
             sectionRow("settings", "sliders"),
+            // A module's app rows (`pocket.menu`), one tap from the menu, with or without a session.
+            ...extensionMenuItems().map((each) =>
+                menuRow(each.label, each.run, { icon: "grid", hint: each.hint }),
+            ),
         ]),
     ];
 }
