@@ -395,6 +395,7 @@ async function openSheet(
         style: () => {},
         status: () => ({ update: () => {}, remove: () => {} }),
         menu: () => ({ remove: () => {} }),
+        launcher: () => ({ remove: () => {} }),
         Loader: () => null,
         on: (name: string, listener: () => void) => {
             const set = listeners.get(name) ?? new Set();
