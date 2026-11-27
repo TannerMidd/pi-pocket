@@ -1191,13 +1191,8 @@ a,
     color: var(--text);
 }
 
-.meter > span,
-.usage-meter > i {
+.meter > span {
     background: var(--accent);
-}
-
-.usage-meter[data-state="low"] > i {
-    background: var(--warn);
 }
 
 /* Sheets, menus, and the launcher are the highest plane. */
