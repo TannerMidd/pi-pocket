@@ -1,6 +1,14 @@
 import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import {
+    appendFileSync,
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    symlinkSync,
+    truncateSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -337,4 +345,30 @@ test("a fetch keeps its caps and type check, and shows no token or link", async 
         mock.server.closeAllConnections();
         mock.server.close();
     }
+});
+
+test("a file that grows after its size was looked at is not read past the caps", async () => {
+    const root = folder();
+    const file = join(root, "grows.bin");
+
+    writeFileSync(file, "1234");
+
+    const grow = () => appendFileSync(file, "x".repeat(6));
+
+    // Four bytes are allowed, and it is four bytes when it does not grow.
+    const [same] = await readFiles(new Hostfs(), root, join(root, "data"), ["grows.bin"], {
+        max: 1,
+        maxBytes: 4,
+    });
+
+    assert.equal(same!.data.byteLength, 4);
+    // Ten bytes arrive: the read stops at the cap and fails, and nothing is sent.
+    await assert.rejects(
+        readFiles(new Hostfs(), root, join(root, "data"), ["grows.bin"], {
+            max: 1,
+            maxBytes: 4,
+            afterSize: grow,
+        }),
+        /grew while it was read/,
+    );
 });

@@ -11,6 +11,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server");
 
@@ -223,18 +224,69 @@ test("no package that wraps fs or spawn is imported, except where the census nam
     assert.deepEqual(problems, []);
 });
 
-test("import() and require() take a literal module name, except where the census says", () => {
-    const pattern = /(?<![.\w])(?:import|require)\s*\(\s*(?!["'`])/;
-    const problems: string[] = [];
+/**
+ * Every `import(…)` and `require(…)` call of a source file, read with the TypeScript compiler (not a pattern): whether its
+ * one argument is a single plain string literal. A template with a placeholder, a concatenation, or a name is not.
+ */
+export function loadsOf(text: string): { literal: boolean; text: string }[] {
+    const file = ts.createSourceFile("source.ts", text, ts.ScriptTarget.Latest, true);
+    const found: { literal: boolean; text: string }[] = [];
 
-    for (const [file, text] of sources) {
-        if (pattern.test(text) && !(file in census.dynamicImport)) {
-            problems.push(`${file} loads a module by a name that is not a literal`);
+    const visit = (node: ts.Node): void => {
+        if (
+            ts.isCallExpression(node) &&
+            (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                (ts.isIdentifier(node.expression) && node.expression.text === "require"))
+        ) {
+            const argument = node.arguments[0];
+
+            found.push({
+                literal:
+                    node.arguments.length === 1 &&
+                    argument !== undefined &&
+                    (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)),
+                text: node.getText(file),
+            });
+        }
+
+        ts.forEachChild(node, visit);
+    };
+
+    visit(file);
+
+    return found;
+}
+
+test("the dynamic-load check reads the syntax: a placeholder, a concatenation, and a name are not literals", () => {
+    const flagged = (code: string) => loadsOf(code).filter((each) => !each.literal).length;
+
+    assert.equal(flagged('await import("node:fs");'), 0);
+    assert.equal(flagged("await import(`node:fs`);"), 0);
+    assert.equal(flagged('const fs = require("node:fs");'), 0);
+    assert.equal(flagged('await import(`node:${"fs"}`);'), 1);
+    assert.equal(flagged('await import("node:" + "fs");'), 1);
+    assert.equal(flagged("await import(name);"), 1);
+    assert.equal(flagged("require(name);"), 1);
+    assert.equal(flagged('await import("a", { with: { type: "json" } });'), 1);
+    assert.equal(flagged("// import(`node:${x}`)\nconst text = 'import(name)';"), 0);
+});
+
+test("import() and require() take a single string literal, except where the census says", () => {
+    const problems: string[] = [];
+    const raw = (file: string) => readFileSync(join(ROOT, file), "utf8");
+
+    for (const file of sources.keys()) {
+        const open = loadsOf(raw(file)).filter((each) => !each.literal);
+
+        if (open.length > 0 && !(file in census.dynamicImport)) {
+            problems.push(
+                `${file} loads a module by a name that is not a literal: ${open[0]!.text}`,
+            );
         }
     }
 
     for (const file of Object.keys(census.dynamicImport)) {
-        if (!pattern.test(sources.get(file) ?? "")) {
+        if (!loadsOf(raw(file)).some((each) => !each.literal)) {
             problems.push(`${file} is listed for dynamic import and no longer has one`);
         }
     }

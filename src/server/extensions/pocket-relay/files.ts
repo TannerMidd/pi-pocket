@@ -5,6 +5,7 @@ import {
     type Hostfs,
     open,
     openNoFollow,
+    readHandleBounded,
     realpathAsync,
     rename,
     unlinkAsync,
@@ -102,7 +103,11 @@ export async function readFiles(
     cwd: string | undefined,
     dataDir: string,
     paths: readonly string[],
-    caps: { max: number; maxBytes: number },
+    caps: {
+        max: number;
+        maxBytes: number;
+        /** @internal A test hook, between the size and the read. */ afterSize?: () => void;
+    },
 ): Promise<RelayOutFile[]> {
     if (paths.length > caps.max) {
         throw new Error(`This connector sends ${caps.max} files at most: nothing was sent.`);
@@ -173,7 +178,27 @@ export async function readFiles(
             }
 
             const name = safeName(basename(real));
-            const data = await handle.readFile();
+
+            // At most what the caps allow, counted as it is read: a file that grows after its size was looked at is
+            // not read whole.
+            caps.afterSize?.();
+
+            const room = Math.min(caps.maxBytes, MAX_REPLY_BYTES - (total - stat.size));
+            let data: Buffer;
+
+            try {
+                data = await readHandleBounded(handle, room);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "EFBIG") {
+                    throw new Error(
+                        `${shown} grew while it was read: this connector sends files of ${Math.floor(caps.maxBytes / 1048576)} MB at most. Nothing was sent.`,
+                    );
+                }
+
+                throw error;
+            }
+
+            total += data.length - stat.size;
 
             files.push({
                 name,

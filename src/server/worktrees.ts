@@ -66,7 +66,7 @@ async function copyNewFiles(root: FolderRef, into: FolderRef): Promise<string[]>
         const target = into.at(path);
 
         await mkdirAsync(target.parent()!, { recursive: true });
-        await copyFileAsync(from, target);
+        await copyFileAsync(from, target, Math.max(0, MAX_COPIED_BYTES - copied));
         copied += stats.size;
     }
 

@@ -638,6 +638,14 @@ function readBounded(read: (buffer: Buffer) => number, max: number): Buffer {
     }
 }
 
+/** Read what a descriptor holds from where it is, at most `max` bytes: one more, whatever its size said, is `EFBIG`. */
+export async function readHandleBounded(handle: FileHandle, max: number): Promise<Buffer> {
+    return readBoundedAsync(
+        async (buffer) => (await handle.read(buffer, 0, buffer.length, null)).bytesRead,
+        max,
+    );
+}
+
 async function readBoundedAsync(
     read: (buffer: Buffer) => Promise<number>,
     max: number,
@@ -1125,7 +1133,10 @@ export async function renameAsync(from: Place, to: Place): Promise<void> {
     );
 }
 
-export function copyFile(from: Place, to: Place, mode?: number): void {
+/** The most that a copy out of a sandboxed folder reads, unless the caller says less. */
+export const MAX_COPY = 256 * 1024 * 1024;
+
+export function copyFile(from: Place, to: Place, mode?: number, max = MAX_COPY): void {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         copyFileSync(from.located.path, to.located.path);
 
@@ -1133,21 +1144,21 @@ export function copyFile(from: Place, to: Place, mode?: number): void {
     }
 
     // The source is read through its own descriptor, so a link swapped in is refused, not followed.
-    writeFile(to, readFile(from, { max: Number.MAX_SAFE_INTEGER }));
+    writeFile(to, readFile(from, { max }));
 
     if (mode !== undefined) {
         use(to, (path) => chmodSync(path, mode));
     }
 }
 
-export async function copyFileAsync(from: Place, to: Place): Promise<void> {
+export async function copyFileAsync(from: Place, to: Place, max = MAX_COPY): Promise<void> {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         await fsp.copyFile(from.located.path, to.located.path);
 
         return;
     }
 
-    copyFile(from, to);
+    copyFile(from, to, undefined, max);
 }
 
 /** Write a file (`flag` `w` by default; `wx` makes it fail if it is there). A sandboxed place is never opened through a link. */
@@ -1571,8 +1582,17 @@ export class Hostfs {
     /** The identity of each nested folder at its first look, by stated path. */
     readonly #roots = new Map<string, { dev: bigint; ino: bigint }>();
 
-    constructor(view: SandboxView = NO_SANDBOX) {
+    readonly #maxPins: number;
+
+    /** `maxPins`: how many nested folders keep their first-look identity; a pin is never dropped to make room. */
+    constructor(view: SandboxView = NO_SANDBOX, options: { maxPins?: number } = {}) {
         this.#view = view;
+        this.#maxPins = options.maxPins ?? 10_000;
+    }
+
+    /** Admission teardown: the folder's pinned identity goes (a new look pins it again). */
+    unpinRoot(path: string): void {
+        this.#roots.delete(resolve(path));
     }
 
     #folders(): Folder[] {
@@ -1598,15 +1618,17 @@ export class Hostfs {
                 const where = this.#locate(target, here, true);
 
                 if (where.kind === "confined" && where.parts.length > 0) {
-                    this.#roots.set(target, ref.identity);
-
-                    for (const old of this.#roots.keys()) {
-                        if (this.#roots.size <= 1000) {
-                            break;
-                        }
-
-                        this.#roots.delete(old);
+                    // A pin is a security fact: it is kept until admission is torn down (`unpinRoot`), never evicted. At
+                    // the limit a new nested folder is refused.
+                    if (this.#roots.size >= this.#maxPins) {
+                        throw failure(
+                            "EMFILE",
+                            `${target} cannot be admitted: too many folders are pinned`,
+                            target,
+                        );
                     }
+
+                    this.#roots.set(target, ref.identity);
                 }
             }
         }

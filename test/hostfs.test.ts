@@ -598,3 +598,40 @@ test(
         assert.throws(() => received.child("alias/ok.txt"), { code: "EACCES" });
     },
 );
+
+test(
+    "a first-look pin is kept until admission is torn down, and a full table refuses, never evicts",
+    { skip: !linux },
+    (t) => {
+        const { root, host: unused, outside } = lab(t);
+        const info = statSync(root, { bigint: true });
+        const host = new hostfs.Hostfs(
+            { sandboxedFolders: () => [{ path: root, dev: info.dev, ino: info.ino }] },
+            { maxPins: 2 },
+        );
+
+        assert.ok(unused);
+
+        for (const name of ["one", "two", "three"]) {
+            mkdirSync(join(root, name));
+            writeFileSync(join(root, name, "f.txt"), name);
+        }
+
+        const first = host.folder(join(root, "one"));
+
+        host.folder(join(root, "two"));
+        assert.throws(() => host.folder(join(root, "three")), { code: "EMFILE" });
+        // The first pin is still there: a replacement at its path is refused, not accepted as the root.
+        rmSync(join(root, "one"), { recursive: true });
+        mkdirSync(join(root, "one"));
+        writeFileSync(join(root, "one", "f.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.folder(join(root, "one")).at("f.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(first.at("f.txt")), { code: "ESTALE" });
+        // Teardown frees a slot; a pinned folder is pinned again at its next look.
+        host.unpinRoot(join(root, "one"));
+        assert.equal(hostfs.readText(host.folder(join(root, "one")).at("f.txt")), "forged");
+        assert.ok(outside);
+    },
+);
