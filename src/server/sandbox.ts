@@ -276,6 +276,11 @@ export class Sandboxes {
     readonly #revisions = new Map<number, number>();
     /** The transitions under way (a change, a turn-on or turn-off, a resume, the rules): a provider change waits for them. */
     readonly #active = new Set<Promise<unknown>>();
+    /**
+     * Trees whose last release failed or ran out of time: nothing proves that their VM is gone. No path restores `stable`
+     * while one is in the set; only a release that succeeds clears it.
+     */
+    readonly #needsProof = new Set<number>();
     /** One release attempt for each tree at a time: a retry joins it, and a late one never follows a recovery. */
     readonly #releasing = new Map<number, Promise<void>>();
     readonly #changed = new Set<() => void>();
@@ -588,9 +593,30 @@ export class Sandboxes {
         return run;
     }
 
+    /**
+     * Wait until no transition is under way. The wait is bounded: a transition that is stuck is reported, and it never holds
+     * up a provider change or the trees that are not stuck (the release of a stuck tree joins its own attempt, and is bounded).
+     */
     async #quiet(): Promise<void> {
         while (this.#active.size > 0) {
-            await Promise.allSettled([...this.#active]);
+            const stop = new AbortController();
+            const done = Promise.allSettled([...this.#active]).then(() => "done" as const);
+            const late = this.#timer(this.#drainMs, stop.signal).then(() =>
+                stop.signal.aborted ? new Promise<never>(() => {}) : ("late" as const),
+            );
+            const outcome = await Promise.race([done, late]).finally(() => stop.abort());
+
+            if (outcome === "late") {
+                this.#app.log(
+                    "A change of a sandbox is stuck: a provider change does not wait for it any more.",
+                );
+                this.#app.ownerNotice(
+                    "warning",
+                    "A change of a sandbox does not end. It is left as it is, and it does not hold up the others.",
+                );
+
+                return;
+            }
         }
     }
 
@@ -1844,25 +1870,78 @@ export class Sandboxes {
 
         try {
             await Promise.race([attempt, timeout]);
+        } catch (error) {
+            // A failed or timed-out release is not a proof: its trees need one before they reopen.
+            for (const root of roots) {
+                this.#needsProof.add(root);
+            }
+
+            throw error;
         } finally {
             stop.abort();
         }
     }
 
     /**
-     * Wait until no release is in flight for the tree (also one that a bound gave up on), and answer why it failed, if it
-     * did. Nothing reopens a tree while a release runs: every path that would restore `stable` waits here first.
+     * What must hold before a tree is let back in: no release in flight, and a proof that its VM is gone when an earlier
+     * release failed or ran out of time. A release in flight is waited for, with a bound, and the wait ends at once when the
+     * tree's revision changes (another transition owns it). Answers `moved` (write nothing), or why the tree stays
+     * suspended (`stay`), or neither: it may reopen. Never throws.
      */
-    async #idle(root: number): Promise<Error | undefined> {
+    async #proof(
+        root: number,
+        revision: number,
+    ): Promise<{ stay?: string; moved?: true } | undefined> {
         while (this.#releasing.has(root)) {
-            try {
-                await this.#releasing.get(root);
-            } catch (error) {
-                return error instanceof Error ? error : new Error(String(error));
+            const going = this.#releasing.get(root)!;
+            const stop = new AbortController();
+            let wake!: () => void;
+            const outcome = await Promise.race([
+                going.then(
+                    () => "done" as const,
+                    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+                ),
+                this.#timer(this.#drainMs, stop.signal).then(() =>
+                    stop.signal.aborted ? new Promise<never>(() => {}) : ("late" as const),
+                ),
+                new Promise<"moved">((resolve) => {
+                    wake = () => {
+                        if (this.#revision(root) !== revision) {
+                            resolve("moved");
+                        }
+                    };
+
+                    this.#changed.add(wake);
+                }),
+            ]).finally(() => {
+                stop.abort();
+                this.#changed.delete(wake);
+            });
+
+            if (outcome === "moved") {
+                return { moved: true };
+            }
+
+            if (outcome === "late") {
+                this.#needsProof.add(root);
+
+                return { stay: "its VM is still being stopped, and is not known to be gone" };
+            }
+
+            if (outcome !== "done") {
+                return { stay: `it could not be stopped (${describeError(outcome)})` };
             }
         }
 
-        return undefined;
+        if (this.#needsProof.has(root)) {
+            try {
+                await this.#release([root], "the VM is proved gone before work is let in");
+            } catch (error) {
+                return { stay: `it could not be stopped (${describeError(error)})` };
+            }
+        }
+
+        return this.#revision(root) === revision ? undefined : { moved: true };
     }
 
     /**
@@ -1876,11 +1955,23 @@ export class Sandboxes {
             return going;
         }
 
-        const run = this.#releaseAttempt([root], reason).finally(() => {
-            if (this.#releasing.get(root) === run) {
-                this.#releasing.delete(root);
-            }
-        });
+        const run = this.#releaseAttempt([root], reason)
+            .then(
+                () => {
+                    // The proof: only a release that succeeded clears what a failed one left.
+                    this.#needsProof.delete(root);
+                },
+                (error: unknown) => {
+                    this.#needsProof.add(root);
+
+                    throw error;
+                },
+            )
+            .finally(() => {
+                if (this.#releasing.get(root) === run) {
+                    this.#releasing.delete(root);
+                }
+            });
 
         this.#releasing.set(root, run);
         run.catch(() => undefined);
@@ -1958,10 +2049,10 @@ export class Sandboxes {
             }
 
             // A VM that is still being stopped is not a place to start another in.
-            if (this.#releasing.has(root)) {
+            if (this.#releasing.has(root) || this.#needsProof.has(root)) {
                 throw new HttpError(
                     409,
-                    "The VM of this session is still being stopped. Try again in a moment.",
+                    "The VM of this session is still being stopped, or is not known to be gone. Try again in a moment.",
                 );
             }
 
@@ -2157,18 +2248,17 @@ export class Sandboxes {
             throw new HttpError(409, `It could not be resumed: ${problem}`);
         }
 
-        // Nothing reopens while a release runs (another change of the rules may have started one).
-        const late = await this.#idle(root);
+        // Nothing reopens while a release runs, or without the proof that an earlier failed release did not give.
+        const proof = await this.#proof(root, token);
 
-        if (late !== undefined) {
-            this.#setIf(
-                root,
-                token,
-                "suspended",
-                `it could not be stopped (${describeError(late)})`,
-            );
+        if (proof?.stay !== undefined) {
+            this.#setIf(root, token, "suspended", proof.stay);
 
-            throw new HttpError(409, `It could not be resumed: ${describeError(late)}`);
+            throw new HttpError(409, `It could not be resumed: ${proof.stay}`);
+        }
+
+        if (proof?.moved === true) {
+            throw new HttpError(409, "It could not be resumed: it was changed again. Try again.");
         }
 
         // The reservation that the failure kept goes, so the group is free again.
@@ -2264,24 +2354,20 @@ export class Sandboxes {
                         );
                     }
 
-                    // A release that an earlier rules change started may still run: the tree stays closed until it has
-                    // ended, and when it failed the tree stays suspended with that reason.
-                    const late = await this.#idle(root);
-
-                    if (!still(root)) {
+                    if (problem !== undefined) {
+                        write(root, "suspended", problem);
                         continue;
                     }
 
-                    if (late !== undefined) {
-                        write(
-                            root,
-                            "suspended",
-                            `${problem ?? "Its VM was being stopped"} It could not be stopped (${describeError(late)}).`,
-                        );
+                    // A release that an earlier change started may still run, and one that failed or ran out of time left
+                    // no proof: the tree stays closed until the release ended, or a new one succeeded.
+                    const proof = await this.#proof(root, mine.get(root)!);
+
+                    if (proof?.moved === true || !still(root)) {
                         continue;
                     }
 
-                    write(root, problem === undefined ? "stable" : "suspended", problem);
+                    write(root, proof?.stay === undefined ? "stable" : "suspended", proof?.stay);
                 } catch (error) {
                     write(
                         root,
@@ -2347,16 +2433,15 @@ export class Sandboxes {
                 continue;
             }
 
-            // Not while a release runs for the tree; a release that failed keeps it suspended, with its reason.
-            const late = missing === undefined ? await this.#idle(root) : undefined;
+            // Not while a release runs for the tree, and not without the proof a failed release did not give.
+            const proof = missing === undefined ? await this.#proof(root, seen) : undefined;
 
-            if (late !== undefined) {
-                this.#setIf(
-                    root,
-                    seen,
-                    "suspended",
-                    `it could not be stopped (${describeError(late)})`,
-                );
+            if (proof?.moved === true) {
+                continue;
+            }
+
+            if (proof?.stay !== undefined) {
+                this.#setIf(root, seen, "suspended", proof.stay);
                 continue;
             }
 
