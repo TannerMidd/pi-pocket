@@ -7,7 +7,7 @@
  * (`policy.ts` protects `.git`'s own files; this protects what the config adds.)
  */
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -163,8 +163,12 @@ function below(path: string, roots: readonly string[]): boolean {
  */
 function follow(raw: string, roots: readonly string[]): { physical: string; problem?: string } {
     let at: string = sep;
+    const parts = raw.split(sep);
+    let hops = 0;
 
-    for (const part of raw.split(sep)) {
+    while (parts.length > 0) {
+        const part = parts.shift()!;
+
         if (part === "" || part === ".") {
             continue;
         }
@@ -193,15 +197,47 @@ function follow(raw: string, roots: readonly string[]): { physical: string; prob
             continue;
         }
 
-        let real: string;
+        if (++hops > 40) {
+            return {
+                physical: next,
+                problem: `reaches into the folder through too many links (${next})`,
+            };
+        }
+
+        let real: string | undefined;
 
         try {
             real = realpathSync(next);
         } catch {
-            return {
-                physical: next,
-                problem: `reaches into the folder through a link that leads nowhere (${next})`,
-            };
+            // A link that leads nowhere: where it points is read as written, and followed like any other path.
+            real = undefined;
+        }
+
+        if (real === undefined) {
+            let target: string;
+
+            try {
+                target = resolve(dirname(next), readlinkSync(next));
+            } catch {
+                return {
+                    physical: next,
+                    problem: `reaches into the folder through a link that cannot be read (${next})`,
+                };
+            }
+
+            // The guest may change a link that lies in a mount, whatever it points at.
+            if (below(next, roots)) {
+                return {
+                    physical: target,
+                    problem: `reaches into the folder through a link that leads nowhere (${next})`,
+                };
+            }
+
+            // A link outside the mounts is the owner's: a target inside a mount is held like a path that is missing.
+            parts.unshift(...target.split(sep));
+            at = sep;
+
+            continue;
         }
 
         if (below(next, roots) || below(real, roots)) {

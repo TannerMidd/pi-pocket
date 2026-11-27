@@ -543,3 +543,38 @@ test("a call that waits for git's configuration does not lose its VM to the idle
         await vms.stopAll("the test ended");
     }
 });
+
+test("a link that leads nowhere and lies outside the folder does not block it, unless it points into it", () => {
+    const base = temp();
+    const root = join(base, "proj");
+    const home = join(base, "home");
+
+    mkdirSync(join(root, ".git"), { recursive: true });
+    mkdirSync(home);
+    symlinkSync(join(base, "gone"), join(home, "stale"));
+    symlinkSync(join(home, "stale"), join(home, "chain"));
+    symlinkSync(join(root, "not-yet.txt"), join(home, "into-folder"));
+    symlinkSync(join(home, "into-folder"), join(home, "via-link"));
+    const context = { cwd: root, top: root, gitDir: join(root, ".git"), mounts: [root], home };
+    const plan = (value: string, key = "core.excludesfile") =>
+        execPlan([{ origin: "global", key, value }], context);
+
+    // The owner's stale links, wholly outside the folder: nothing for the guest to change.
+    for (const value of [join(home, "stale"), join(home, "chain"), "~/stale", "~/chain/x"]) {
+        assert.deepEqual(plan(value).problems, [], value);
+        assert.deepEqual(plan(value).paths, [], value);
+    }
+
+    // A link in the owner's home that points into the folder, at a file that is not there yet: the guest could make
+    // it, so it is held.
+    for (const value of [join(home, "into-folder"), "~/into-folder", join(home, "via-link")]) {
+        const result = plan(value);
+
+        assert.deepEqual(result.problems, [], value);
+        assert.deepEqual(hooksOnly(result.paths, root), ["/not-yet.txt"], value);
+    }
+
+    // A link inside the folder that leads nowhere is the guest's to change: refused.
+    symlinkSync(join(base, "gone"), join(root, "dangling"));
+    assert.match(plan(join(root, "dangling")).problems[0] ?? "", /link that leads nowhere/);
+});
