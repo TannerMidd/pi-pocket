@@ -12,7 +12,7 @@ Core keeps what a module cannot keep safe ([Core or extension](policies/core-or-
 - **Fail closed.** A sandboxed session never runs a file or shell call on this machine. With no provider registered, or when the provider's environment throws, each call fails with the reason.
 - **The gate.** A `beforeTool` hook stops the tools that would run on the host. `read`, `write`, `edit`, and `bash` go through the environment, so they are the provider's. A few tools only change Pi Pocket's own state (`ask`, `ui`, `memory`, `schedule`, `tool_search`, `subagent`, `codemode`). Every other tool is a host tool, and it is stopped unless the provider's `hostTools()` says `"allow"`. `browser` is the provider's browser or nothing.
 - **No host secrets.** What `host.commandEnv` adds to host commands is not added to a sandboxed session's. Values that `host.hide` hides still leave every output.
-- **Who may.** `host.sandbox.set` checks that the person sees the session and may drive it, and asks the provider.
+- **Who may.** `host.sandbox.set` checks that the person sees the session and may drive it, and asks the provider. A change is one step at a time for a session, and its tool calls wait while it runs: turning on stores the setting only when nothing runs on this machine, and turning off stores it only after `release` resolves.
 
 The module keeps the sandbox itself: the VM, what it mounts, its network, its lifecycle, and the words for the people.
 
@@ -26,8 +26,11 @@ web.onDispose(
         hostTools: () => "block",
         problem: () => (ready ? undefined : "The sandbox is not set up."),
         env: (target) => makeEnvironment(target),
+        release: async (conversationId) => {
+            /* stop the VM and what runs in it, and wait until it is gone */
+        },
         changed: (conversationId, on) => {
-            /* stop the VM when `on` is false */
+            /* tell the module's own screens: the setting is stored */
         },
     }),
 );
@@ -35,6 +38,7 @@ web.onDispose(
 
 - `env(target)` returns an `ExecutionEnv` ([Pi Durable](https://github.com/earendil-works/pi-durable)). It returns at once: start the VM when the first call needs it. A call that cannot get one returns its error result with the reason. `target` has `conversationId`, `rootId` (the session: one VM serves it and its subagents), `cwd`, and `uploadDir`. Use `rootId` to find the VM.
 - `browser(target)` (optional) gives a `{ problem(), launch(flags) }`. `launch` starts a Chromium in the sandbox with Pi Pocket's flags and returns `{ input, output, stop, exited }`: the DevTools pipe (`--remote-debugging-pipe`) as streams that only the server holds. Do not open a port on this machine for it.
+- `release(conversationId)` (optional) is called when a session's sandbox is about to go off. Stop the VM and what runs in it, and resolve **only when teardown has finished**: core stores `off` after it, and until then the session's folder stays confined and its tool calls wait. If it rejects, the sandbox stays on and the person sees the message. `changed(conversationId, on)` runs after the setting is stored, for the module's own bookkeeping; it cannot stop the change.
 - `mayChoose(person)`, `newSessions()`, `hostTools()`, and `problem()` are read at each use. `problem()` says why a session cannot be put in the sandbox now.
 - `folderProblem(cwd)` (optional) says why a folder may not be a sandboxed session's folder (it holds sign-ins or keys). Core asks when a session is put in the sandbox and for the folder of a linked session.
 - `otherFolders()` (optional) says whether a linked session that a sandboxed session starts may use a folder other than its parent's. Without it, it may not.

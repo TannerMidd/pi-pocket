@@ -121,7 +121,7 @@ test(
     { skip: LINUX },
     async () => {
         const { folder, outside } = layout("only-outside-or-inside.txt");
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
         const restore = swapBeforeUse(folder, outside);
 
         try {
@@ -143,7 +143,7 @@ test(
     { skip: LINUX },
     async () => {
         const { folder, outside } = layout("file.txt");
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
         const restore = swapBeforeUse(folder, outside);
 
         try {
@@ -163,7 +163,7 @@ test(
     { skip: LINUX },
     () => {
         const { folder, outside } = layout("out.txt");
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
         const restore = swapBeforeUse(folder, outside);
 
         try {
@@ -215,7 +215,7 @@ test(
     { skip: LINUX },
     async () => {
         const { folder, outside } = repository();
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
         const restore = swapBeforeUse(folder, outside);
 
         try {
@@ -251,7 +251,7 @@ test(
                 GIT_COMMITTER_EMAIL: "t@e",
             },
         });
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
 
         try {
             writeFileSync(join(folder, "kept.txt"), "changed\n");
@@ -277,7 +277,7 @@ test(
     async () => {
         const { folder, outside } = repository();
         const trees = scratch();
-        const stop = onSandboxedFolders((used) => used === folder);
+        const stop = onSandboxedFolders(() => [folder]);
         const restore = swapBeforeUse(folder, outside);
 
         try {
@@ -306,7 +306,7 @@ test(
 
 test("where the system has no way to open a name inside a folder safely, a sandboxed folder is not read", async () => {
     const { folder } = layout("file.txt");
-    const stop = onSandboxedFolders((used) => used === folder);
+    const stop = onSandboxedFolders(() => [folder]);
     const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
 
     Object.defineProperty(process, "platform", { value: "darwin" });

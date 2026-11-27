@@ -19,7 +19,7 @@ import { after, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { changesIn, diffOf } from "../src/server/changes.ts";
-import { onSandboxedFolders, openInside } from "../src/server/confined.ts";
+import { onSandboxedFolders, openInside, sandboxedFolder } from "../src/server/confined.ts";
 import { APP_ROOT } from "../src/server/config.ts";
 import { viewFile } from "../src/server/files.ts";
 import { serveImage } from "../src/server/http/assets.ts";
@@ -179,7 +179,7 @@ test(
         assert.equal(await text("linked-dir/other.txt"), `${SECRET}\n`);
         assert.equal(await status("pic.png"), 200);
 
-        const stop = onSandboxedFolders((used) => used === work);
+        const stop = onSandboxedFolders(() => [work]);
 
         try {
             assert.equal(await text("plain.txt"), "plain\n");
@@ -362,7 +362,7 @@ test("in a sandboxed session's folder no filter the configuration defines runs f
         assert.equal(existsSync(marker), true, "an ordinary folder's filter did not run");
         rmSync(marker);
 
-        const stop = onSandboxedFolders((used) => used === path);
+        const stop = onSandboxedFolders(() => [path]);
 
         try {
             const changes = await changesIn(path, []);
@@ -388,7 +388,7 @@ test("in a sandboxed session's folder Changes shows a repository whose filter is
         `[filter "lfs"]\n\tclean = "sh -c 'touch ${marker}; exit 1'"\n\tsmudge = "sh -c 'touch ${marker}; exit 1'"\n\tprocess = "sh -c 'touch ${marker}; exit 1'"\n\trequired = true\n`,
     );
 
-    const stop = onSandboxedFolders((used) => used === path);
+    const stop = onSandboxedFolders(() => [path]);
 
     try {
         writeFileSync(join(path, "big.bin"), "real big content\n");
@@ -431,3 +431,31 @@ test("a repository a guest makes in the folder does not run its configuration", 
         rmSync(path, { recursive: true, force: true });
     }
 });
+
+test(
+    "a session's folder inside a sandboxed one is still confined when the guest makes it a link",
+    { skip: LINUX },
+    async () => {
+        const project = folder("nested-project");
+        const beyond = folder("nested-beyond");
+        const nested = join(project, "sub");
+
+        writeFileSync(join(beyond, "data.txt"), `${SECRET}\n`);
+        symlinkSync(beyond, nested);
+        const stop = onSandboxedFolders(() => [project]);
+
+        try {
+            // The folder lies in the project by name, though really it is elsewhere.
+            assert.equal(sandboxedFolder(nested), true);
+
+            for (const path of [join(nested, "data.txt"), nested]) {
+                await assert.rejects(viewFile(path, undefined, nested), /not followed/, path);
+                await assert.rejects(openInside(nested, path), /not followed/, path);
+            }
+
+            assert.equal(sandboxedFolder(folder("nested-elsewhere")), false);
+        } finally {
+            stop();
+        }
+    },
+);

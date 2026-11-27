@@ -278,26 +278,37 @@ export class Sandboxes {
         );
     }
 
-    /**
-     * Whether a sandboxed session uses `folder`, or a folder that holds it or lies in it: what a guest wrote can be
-     * there. A folder shared by a sandboxed and an ordinary session counts, as the guest writes it all the same.
-     */
-    usesFolder(folder: string): boolean {
-        const here = canonical(folder);
+    /** A session and the subagents under it, to any depth, as `agentsOf` lists them. */
+    async #tree(
+        id: ConversationId,
+        agentsOf: (
+            conversation: ConversationId,
+        ) => Promise<Record<string, { conversationId: ConversationId }> | undefined>,
+    ): Promise<ConversationId[]> {
+        const found = [id];
 
-        for (const id of this.#on) {
-            try {
-                const used = canonical(this.#app.cwdOf(id as unknown as ConversationId));
-
-                if (within(here, used) || within(used, here)) {
-                    return true;
-                }
-            } catch {
-                // A session that is gone uses no folder.
+        for (let index = 0; index < found.length; index++) {
+            for (const agent of Object.values((await agentsOf(found[index]!)) ?? {})) {
+                found.push(agent.conversationId);
             }
         }
 
-        return false;
+        return found;
+    }
+
+    /** The folders that sandboxed sessions work in, as stated. */
+    folders(): string[] {
+        const found: string[] = [];
+
+        for (const id of this.#on) {
+            try {
+                found.push(this.#app.cwdOf(id as unknown as ConversationId));
+            } catch {
+                // A session that is gone works in no folder.
+            }
+        }
+
+        return found;
     }
 
     /** The change of each session's sandbox that is under way, by the session's number. */
@@ -722,20 +733,13 @@ export class Sandboxes {
             );
         }
 
-        const conversations = [id];
-
-        for (let index = 0; index < conversations.length; index++) {
-            const agents = (
-                await app.harness.snapshot(SubagentsDoc, conversations[index]!, context)
-            )?.agents;
-
-            for (const agent of Object.values(agents ?? {})) {
-                conversations.push(agent.conversationId);
-            }
-        }
+        const looked = await this.#tree(
+            id,
+            async (each) => (await app.harness.snapshot(SubagentsDoc, each, context))?.agents,
+        );
 
         if (on) {
-            const running = await this.#hostWork(conversations);
+            const running = await this.#hostWork(looked);
 
             if (running.length > 0) {
                 throw new HttpError(
@@ -754,12 +758,20 @@ export class Sandboxes {
             }
         }
 
-        await app.harness.commit(async (tx) => {
+        // The subagents are found in the commit that changes them: one that is being started has its own commit, which
+        // copies the setting it reads, so it is in this list or it copies the new setting.
+        const conversations = await app.harness.commit(async (tx) => {
+            const tree = await this.#tree(
+                id,
+                async (each) => (await tx.doc(SubagentsDoc, each)).agents,
+            );
             const at = Date.now();
 
-            for (const each of conversations) {
+            for (const each of tree) {
                 Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
             }
+
+            return tree;
         }, context);
 
         // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of its
