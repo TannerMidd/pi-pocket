@@ -53,6 +53,8 @@ export interface GuestVm {
     readonly id: string;
     readonly fs: GuestFs;
     hostPid(): number | null;
+    /** Process start-time + command identity captured at launch, used to avoid killing reused PIDs. */
+    hostIdentity?(): string | undefined;
     onExit(listener: (reason: string) => void): void;
     exec(argv: string[], options?: GuestExecOptions): GuestProcess;
     /** Optional native disk checkpoint (`qcow2`), when supported by the loaded Gondolin version. */
@@ -95,7 +97,7 @@ export interface SandboxDriver {
     check(settings: { backend: Backend; image: string }): Promise<HostCheck>;
     setup(progress: (line: string) => void, signal: AbortSignal): Promise<void>;
     start(spec: VmSpec, signal?: AbortSignal, onRunner?: (vm: GuestVm) => void): Promise<GuestVm>;
-    reapOrphan?(pid: number): void;
+    reapOrphan?(pid: number, expectedIdentity: string): void;
 }
 
 /** Default allow-listed hosts for package registries and GitHub API/cloning. */

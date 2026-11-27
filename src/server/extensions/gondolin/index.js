@@ -4,17 +4,6 @@ export const pocketApi = 2;
 
 const SHIELD_PATH = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M9 12l2 2 4-4";
 
-function sandboxIdOf(cwd) {
-    if (typeof cwd !== "string" || !cwd.toLowerCase().startsWith("gondolin://")) {
-        return null;
-    }
-
-    const rest = cwd.slice("gondolin://".length);
-    const slash = rest.indexOf("/");
-
-    return (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase() || null;
-}
-
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
 
@@ -77,6 +66,7 @@ export default function setup(pocket) {
         });
     }
 
+    let currentConversationId = null;
     let currentSandboxId = null;
 
     const statusHandle =
@@ -89,8 +79,11 @@ export default function setup(pocket) {
               })
             : null;
 
-    function updateStatusBar(conversation) {
-        currentSandboxId = sandboxIdOf(conversation?.cwd);
+    function updateStatusBar() {
+        currentSandboxId =
+            currentConversationId === null
+                ? null
+                : (snapshot?.sandboxByConversation?.[currentConversationId] ?? null);
 
         if (statusHandle === null) {
             return;
@@ -114,23 +107,22 @@ export default function setup(pocket) {
 
     if (typeof pocket.onConversation === "function") {
         pocket.onDispose(
-            pocket.onConversation((conversation) => {
-                updateStatusBar(conversation);
+            pocket.onConversation((conversationId) => {
+                currentConversationId = conversationId;
+                updateStatusBar();
+
+                if (
+                    conversationId !== null &&
+                    snapshot?.sandboxByConversation?.[conversationId] === undefined
+                ) {
+                    void refresh();
+                }
             }),
         );
     }
 
     listeners.add(() => {
-        if (currentSandboxId !== null && statusHandle !== null) {
-            const found = snapshot?.sandboxes?.find((s) => s.id === currentSandboxId);
-            const stateLabel = found?.state ? ` · ${found.state}` : "";
-
-            statusHandle.update({
-                hidden: false,
-                label: `Sandbox${stateLabel}`,
-                title: `Gondolin sandbox ${currentSandboxId}. Tap to review or apply changes.`,
-            });
-        }
+        updateStatusBar();
     });
 
     function DiffReview({ sandboxId, onBack }) {
@@ -142,6 +134,8 @@ export default function setup(pocket) {
         const [commitMessage, setCommitMessage] = useState("");
         const [applying, setApplying] = useState(false);
         const [applied, setApplied] = useState(null);
+
+        const [reloadCount, setReloadCount] = useState(0);
 
         useEffect(() => {
             let active = true;
@@ -175,7 +169,7 @@ export default function setup(pocket) {
             return () => {
                 active = false;
             };
-        }, [sandboxId]);
+        }, [sandboxId, reloadCount]);
 
         async function handleApply(event) {
             event.preventDefault();
@@ -187,6 +181,7 @@ export default function setup(pocket) {
                     repoPath,
                     branchName,
                     commitMessage,
+                    patchHash: data?.patchHash,
                 });
 
                 setApplied(res);
@@ -216,10 +211,22 @@ export default function setup(pocket) {
         return html`<div class="gondolin-sheet">
             <div class="gondolin-row-between">
                 <h3>Review changes · ${sandboxId}</h3>
-                ${
-                    onBack &&
-                    html`<button type="button" class="gondolin-btn" onClick=${onBack}>Back</button>`
-                }
+                <div class="gondolin-actions">
+                    <button
+                        type="button"
+                        class="gondolin-btn"
+                        disabled=${loading}
+                        onClick=${() => setReloadCount((n) => n + 1)}
+                    >
+                        Refresh
+                    </button>
+                    ${
+                        onBack &&
+                        html`<button type="button" class="gondolin-btn" onClick=${onBack}>
+                            Back
+                        </button>`
+                    }
+                </div>
             </div>
             ${loading && html`<p class="muted">Inspecting diff inside sandbox…</p>`}
             ${error && html`<p class="gondolin-error">${error}</p>`}

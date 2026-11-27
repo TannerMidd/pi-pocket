@@ -8,7 +8,6 @@ import { join } from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { DEFAULT_IMAGE } from "./driver.ts";
 import {
-    DEFAULT_ALLOWED_HOSTS,
     type Backend,
     type GuestVm,
     type NetworkMode,
@@ -45,6 +44,8 @@ export interface SandboxRecord {
     networkMode?: NetworkMode;
     allowedHosts?: string[];
     seeded: boolean;
+    /** Initial seed commit SHA in `/workspace` used as the fixed base for diff/export. */
+    baseCommit?: string;
     hasSnapshot: boolean;
 }
 
@@ -146,7 +147,7 @@ export class SandboxManager {
     readonly #records = new Map<string, SandboxRecord>();
     readonly #running = new Map<string, RunningEntry>();
     readonly #envs = new Map<string, GuestEnv>();
-    readonly #pids = new Map<string, number>();
+    readonly #pids = new Map<string, { pid: number; identity: string }>();
     #disposed = false;
 
     constructor(options: {
@@ -221,12 +222,18 @@ export class SandboxManager {
     #reapOrphans(): void {
         try {
             const parsed = JSON.parse(readFileSync(this.#runLedgerFile(), "utf8")) as {
-                pids?: Record<string, number>;
+                pids?: Record<string, { pid?: unknown; identity?: unknown } | number>;
             };
 
-            for (const pid of Object.values(parsed.pids ?? {})) {
-                if (typeof pid === "number") {
-                    this.#driver.reapOrphan?.(pid);
+            for (const entry of Object.values(parsed.pids ?? {})) {
+                if (
+                    entry !== null &&
+                    typeof entry === "object" &&
+                    typeof entry.pid === "number" &&
+                    typeof entry.identity === "string" &&
+                    entry.identity !== ""
+                ) {
+                    this.#driver.reapOrphan?.(entry.pid, entry.identity);
                 }
             }
 
@@ -454,20 +461,17 @@ export class SandboxManager {
                         diskMb: settings.diskMb,
                         network: {
                             mode: networkMode,
-                            allowedHosts:
-                                networkMode === "allowlist"
-                                    ? allowedHosts.length > 0
-                                        ? allowedHosts
-                                        : [...DEFAULT_ALLOWED_HOSTS]
-                                    : [],
+                            // Preserve an explicitly empty allow-list (deny all hosts); defaults come from readSettings().
+                            allowedHosts: networkMode === "allowlist" ? [...allowedHosts] : [],
                         },
                     },
                     signal,
                     (runner) => {
                         const pid = runner.hostPid();
+                        const identity = runner.hostIdentity?.();
 
-                        if (pid !== null) {
-                            this.#pids.set(id, pid);
+                        if (pid !== null && identity !== undefined) {
+                            this.#pids.set(id, { pid, identity });
                             this.#saveRunLedger();
                         }
                     },
@@ -490,8 +494,14 @@ export class SandboxManager {
                     if (existsSync(snap)) {
                         await this.#restoreWorkspaceSnapshot(vm, snap, signal);
                     } else {
-                        await seedWorkspace(vm, record.source, signal);
+                        const seeded = await seedWorkspace(vm, record.source, signal);
+
                         record.seeded = true;
+
+                        if (seeded.baseCommit !== undefined) {
+                            record.baseCommit = seeded.baseCommit;
+                        }
+
                         this.#saveRecords();
                     }
 
@@ -538,7 +548,9 @@ export class SandboxManager {
         );
 
         if (packed.exitCode !== 0) {
-            return;
+            throw new Error(
+                `Could not snapshot /workspace (tar exited ${packed.exitCode}): ${packed.stderr.trim() || "unknown error"}`,
+            );
         }
 
         const bytes = await vm.fs.readFile("/tmp/pocket-workspace.tar.gz");
@@ -589,8 +601,15 @@ export class SandboxManager {
         }
     }
 
-    /** Checkpoints `/workspace` and closes the VM cleanly. */
-    async stop(id: string, options: { saveSnapshot?: boolean } = {}): Promise<void> {
+    /**
+     * Checkpoints `/workspace` and closes the VM cleanly. When `saveSnapshot` is enabled (the default) and saving
+     * fails, the VM is kept running and the error is re-thrown so unsaved work is never silently discarded (unless
+     * `force: true` is passed during server shutdown).
+     */
+    async stop(
+        id: string,
+        options: { saveSnapshot?: boolean; force?: boolean } = {},
+    ): Promise<void> {
         const entry = this.#running.get(id);
 
         if (entry === undefined) {
@@ -609,7 +628,15 @@ export class SandboxManager {
 
             if (vm !== undefined) {
                 if (options.saveSnapshot !== false) {
-                    await this.#saveWorkspaceSnapshot(id, vm).catch(() => undefined);
+                    try {
+                        await this.#saveWorkspaceSnapshot(id, vm);
+                    } catch (error) {
+                        if (options.force !== true) {
+                            this.#scheduleIdle(id, entry);
+
+                            throw error;
+                        }
+                    }
                 }
 
                 await vm.close().catch(() => undefined);
@@ -645,6 +672,7 @@ export class SandboxManager {
         rmSync(this.#snapshotFile(id), { force: true });
         record.hasSnapshot = false;
         record.seeded = false;
+        delete record.baseCommit;
         this.#saveRecords();
         this.#onChange();
     }
@@ -684,16 +712,25 @@ export class SandboxManager {
         }
     }
 
-    /** Extracts a unified diff (tracked + untracked files) from `/workspace` inside the VM and runs security inspection. */
+    /**
+     * Extracts a unified diff (all commits since the initial seed plus any staged/unstaged/untracked changes) from
+     * `/workspace` inside the VM and runs security inspection.
+     */
     async diff(id: string, signal?: AbortSignal): Promise<PatchInspection> {
         const vm = await this.ensureRunning(id, signal);
-        // Stage untracked files with intent-to-add (`git add -N`) in a clean read-only way so `git diff HEAD` captures new files too.
+        const record = this.#records.get(id);
+        const base =
+            record?.baseCommit !== undefined && /^[0-9a-f]{40,64}$/i.test(record.baseCommit)
+                ? record.baseCommit
+                : "HEAD";
         const out = await execCapture(
             vm,
             [
                 "/bin/sh",
                 "-c",
-                'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace add -N -A >/dev/null 2>&1; git -C /workspace -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color HEAD',
+                'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace add -N -A >/dev/null 2>&1; git -C /workspace -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color "$1"',
+                "sh",
+                base,
             ],
             "/workspace",
             signal,
@@ -714,7 +751,9 @@ export class SandboxManager {
         this.#disposed = true;
         const ids = [...this.#running.keys()];
 
-        await Promise.allSettled(ids.map((id) => this.stop(id, { saveSnapshot: true })));
+        await Promise.allSettled(
+            ids.map((id) => this.stop(id, { saveSnapshot: true, force: true })),
+        );
         this.#envs.clear();
     }
 }

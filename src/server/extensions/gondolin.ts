@@ -181,18 +181,30 @@ export default function createGondolin(
         web.route(
             "GET",
             "status",
-            async () => {
+            async (request) => {
                 const settings = readSettings();
                 const check = await driver.check({
                     backend: settings.backend,
                     image: settings.image,
                 });
+                const sandboxByConversation: Record<number, string> = {};
+
+                if (typeof request.sessions === "function") {
+                    for (const session of request.sessions()) {
+                        const sbId = parseSandboxUri(session.cwd);
+
+                        if (sbId !== undefined) {
+                            sandboxByConversation[session.id] = sbId;
+                        }
+                    }
+                }
 
                 return {
                     installed: driver.installed(),
                     check,
                     settings,
                     sandboxes: manager.list(),
+                    sandboxByConversation,
                     setup:
                         setupRunning === null
                             ? { running: false }
@@ -351,7 +363,14 @@ export default function createGondolin(
                     throw web.error(404, "Sandbox not found.");
                 }
 
-                await manager.stop(id, { saveSnapshot: true });
+                try {
+                    await manager.stop(id, { saveSnapshot: true });
+                } catch (error) {
+                    throw web.error(
+                        409,
+                        `VM kept running because saving /workspace failed: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                }
 
                 return { ok: true };
             },
@@ -450,6 +469,18 @@ export default function createGondolin(
                     throw web.error(400, `Invalid branch name "${branchName}".`);
                 }
 
+                const expectedPatchHash =
+                    typeof request.body.patchHash === "string"
+                        ? request.body.patchHash.trim().toLowerCase()
+                        : "";
+
+                if (!/^[0-9a-f]{64}$/.test(expectedPatchHash)) {
+                    throw web.error(
+                        400,
+                        "Review the diff first: a valid patchHash is required to apply.",
+                    );
+                }
+
                 const commitMessage =
                     typeof request.body.commitMessage === "string"
                         ? request.body.commitMessage.trim()
@@ -461,6 +492,13 @@ export default function createGondolin(
                     inspection = await manager.diff(id, request.signal);
                 } catch (error) {
                     throw web.error(409, error instanceof Error ? error.message : String(error));
+                }
+
+                if (inspection.patchHash !== expectedPatchHash) {
+                    throw web.error(
+                        409,
+                        "Sandbox changes were modified after you opened the review. Refresh the diff and review it again before applying.",
+                    );
                 }
 
                 if (!inspection.ok) {

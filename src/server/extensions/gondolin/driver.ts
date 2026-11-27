@@ -3,7 +3,7 @@
  * Supports Linux (`libkrun` or `qemu` with `/dev/kvm`) and macOS Apple Silicon (`libkrun` via Hypervisor.framework,
  * or `qemu`). Mounts NO host directories into the VM — `/workspace` lives on the VM's own private disk.
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
     accessSync,
@@ -143,25 +143,65 @@ function wrapFs(
     };
 }
 
-function isGondolinProcess(pid: number): boolean {
-    if (process.platform === "linux" && existsSync(`/proc/${pid}/cmdline`)) {
-        try {
-            const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+const GONDOLIN_RUNNER_PATTERN = /gondolin-krun-runner|qemu-system/;
 
-            return /gondolin-krun-runner|qemu-system/.test(cmdline);
+/**
+ * Returns a stable `(startTime:command)` identity string ONLY when `pid` is a live Gondolin/QEMU runner process.
+ * Returns `undefined` when the process is gone, belongs to another program, or cannot be verified (fail-safe: never
+ * kill an unverified PID).
+ */
+export function processIdentity(pid: number): string | undefined {
+    if (!Number.isSafeInteger(pid) || pid <= 1) {
+        return undefined;
+    }
+
+    if (process.platform === "linux") {
+        try {
+            const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+            const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+            const closeParen = stat.lastIndexOf(")");
+
+            if (closeParen < 0) {
+                return undefined;
+            }
+
+            const fields = stat.slice(closeParen + 2).split(" ");
+            const state = fields[0];
+            const startTime = fields[19];
+
+            if (
+                state === "Z" ||
+                state === "X" ||
+                !startTime ||
+                !GONDOLIN_RUNNER_PATTERN.test(cmdline)
+            ) {
+                return undefined;
+            }
+
+            return `linux:${startTime}:${cmdline}`;
         } catch {
-            return false;
+            return undefined;
         }
     }
 
-    // On macOS/other platforms, check if process exists before signaling.
-    try {
-        process.kill(pid, 0);
+    if (process.platform === "darwin") {
+        try {
+            const out = execFileSync("ps", ["-p", String(pid), "-o", "lstart=,command="], {
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "ignore"],
+            }).trim();
 
-        return true;
-    } catch {
-        return false;
+            if (out === "" || !GONDOLIN_RUNNER_PATTERN.test(out)) {
+                return undefined;
+            }
+
+            return `darwin:${out}`;
+        } catch {
+            return undefined;
+        }
     }
+
+    return undefined;
 }
 
 class GondolinVm implements GuestVm {
@@ -169,6 +209,7 @@ class GondolinVm implements GuestVm {
     readonly fs: GuestFs;
     readonly #vm: any;
     readonly #pid: number | null;
+    readonly #identity: string | undefined;
     #closed = false;
     #closing: Promise<void> | undefined;
     readonly #exits: ((reason: string) => void)[] = [];
@@ -176,6 +217,7 @@ class GondolinVm implements GuestVm {
     constructor(vm: any) {
         this.#vm = vm;
         this.#pid = typeof vm.getHostPid === "function" ? vm.getHostPid() : null;
+        this.#identity = this.#pid === null ? undefined : processIdentity(this.#pid);
         this.id = String(vm.id ?? randomUUID());
 
         try {
@@ -201,6 +243,10 @@ class GondolinVm implements GuestVm {
 
     hostPid(): number | null {
         return this.#pid;
+    }
+
+    hostIdentity(): string | undefined {
+        return this.#identity;
     }
 
     onExit(listener: (reason: string) => void): void {
@@ -299,7 +345,11 @@ class GondolinVm implements GuestVm {
                 // fall through to PID verification
             }
 
-            if (this.#pid !== null && isGondolinProcess(this.#pid)) {
+            if (
+                this.#pid !== null &&
+                this.#identity !== undefined &&
+                processIdentity(this.#pid) === this.#identity
+            ) {
                 for (const target of [-this.#pid, this.#pid]) {
                     try {
                         process.kill(target, "SIGKILL");
@@ -634,8 +684,13 @@ export class GondolinDriver implements SandboxDriver {
         return wrapped ?? new GondolinVm(vm);
     }
 
-    reapOrphan(pid: number): void {
-        if (!Number.isSafeInteger(pid) || pid <= 1 || !isGondolinProcess(pid)) {
+    reapOrphan(pid: number, expectedIdentity: string): void {
+        if (
+            !Number.isSafeInteger(pid) ||
+            pid <= 1 ||
+            expectedIdentity === "" ||
+            processIdentity(pid) !== expectedIdentity
+        ) {
             return;
         }
 

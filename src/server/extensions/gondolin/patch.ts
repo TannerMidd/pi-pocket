@@ -11,6 +11,7 @@
  *   never touching the owner's live working tree or index.
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +38,8 @@ export interface RiskyFile {
 export interface PatchInspection {
     ok: boolean;
     patch: string;
+    /** SHA-256 hex digest of `patch`, used to bind Apply strictly to the exact diff the owner reviewed. */
+    patchHash: string;
     files: PatchFile[];
     blocked: string[];
     riskyFiles: RiskyFile[];
@@ -144,6 +147,7 @@ export function inspectPatch(rawPatch: string): PatchInspection {
         return {
             ok: false,
             patch: "",
+            patchHash: "",
             files: [],
             blocked: [`Patch exceeds the ${MAX_PATCH_BYTES / 1024 / 1024} MiB limit.`],
             riskyFiles: [],
@@ -156,6 +160,7 @@ export function inspectPatch(rawPatch: string): PatchInspection {
         return {
             ok: false,
             patch: "",
+            patchHash: "",
             files: [],
             blocked: ["Patch contains NUL bytes."],
             riskyFiles: [],
@@ -316,10 +321,12 @@ export function inspectPatch(rawPatch: string): PatchInspection {
         path,
         reason,
     }));
+    const patchHash = createHash("sha256").update(rawPatch, "utf8").digest("hex");
 
     return {
         ok: blocked.length === 0,
         patch: rawPatch,
+        patchHash,
         files,
         blocked,
         riskyFiles,
@@ -416,8 +423,58 @@ export function validBranchName(name: string): boolean {
 }
 
 /**
+ * Discovers every `filter.<name>.*` and `diff.<name>.*` configured across system/global/local/worktree Git config and
+ * returns `-c` overrides that completely disable them so neither `checkout` nor `apply --index` can invoke external
+ * filter commands (e.g. Git LFS, custom clean/smudge/process filters, or textconv drivers).
+ */
+async function disableFilterFlags(repoPath: string): Promise<string[]> {
+    const flags: string[] = [];
+    const filters = new Set<string>();
+    const diffs = new Set<string>();
+
+    const out = await runHardenedGit(repoPath, ["config", "--get-regexp", "^(filter|diff)\\."])
+        .then((r) => r.stdout)
+        .catch(() => "");
+
+    for (const line of out.split("\n")) {
+        const key = line.split(/\s+/, 1)[0] ?? "";
+        const filterMatch = /^filter\.(.+)\.(clean|smudge|process|required)$/i.exec(key);
+
+        if (filterMatch !== null && filterMatch[1]) {
+            filters.add(filterMatch[1]);
+        }
+
+        const diffMatch = /^diff\.(.+)\.(textconv|command)$/i.exec(key);
+
+        if (diffMatch !== null && diffMatch[1]) {
+            diffs.add(diffMatch[1]);
+        }
+    }
+
+    for (const name of filters) {
+        flags.push(
+            "-c",
+            `filter.${name}.clean=`,
+            "-c",
+            `filter.${name}.smudge=`,
+            "-c",
+            `filter.${name}.process=`,
+            "-c",
+            `filter.${name}.required=false`,
+        );
+    }
+
+    for (const name of diffs) {
+        flags.push("-c", `diff.${name}.textconv=`, "-c", `diff.${name}.command=`);
+    }
+
+    return flags;
+}
+
+/**
  * Applies a validated sandbox patch onto a **brand-new local git branch** in `repoPath` using a disposable temporary
- * worktree. The repository's active working tree and index are never modified.
+ * worktree. The repository's active working tree and index are never modified, hooks and filters are completely
+ * disabled, and the final ref creation is atomic (fails if a concurrent apply created the branch first).
  */
 export async function applyPatchToNewBranch(options: {
     repoPath: string;
@@ -457,18 +514,33 @@ export async function applyPatchToNewBranch(options: {
         throw new Error(`Branch "${branchName}" already exists. Choose a new branch name.`);
     }
 
+    const noFilters = await disableFilterFlags(repoPath);
     const worktreeRoot = mkdtempSync(join(tmpdir(), "pocket-gondolin-apply-"));
     const worktreeDir = join(worktreeRoot, "wt");
 
     try {
-        await runHardenedGit(repoPath, ["worktree", "add", "--detach", worktreeDir, head]);
-        await runHardenedGit(worktreeDir, ["apply", "--index", "--whitespace=nowarn"], patch);
+        await runHardenedGit(repoPath, [
+            ...noFilters,
+            "worktree",
+            "add",
+            "--no-checkout",
+            "--detach",
+            worktreeDir,
+            head,
+        ]);
+        await runHardenedGit(worktreeDir, [...noFilters, "reset", "--hard", head]);
+        await runHardenedGit(
+            worktreeDir,
+            [...noFilters, "apply", "--index", "--whitespace=nowarn"],
+            patch,
+        );
 
         const message =
             options.commitMessage?.trim() ||
             `Apply sandbox changes (${inspection.files.length} file${inspection.files.length === 1 ? "" : "s"})`;
 
         await runHardenedGit(worktreeDir, [
+            ...noFilters,
             "-c",
             "user.name=Pi Pocket Sandbox",
             "-c",
@@ -481,7 +553,8 @@ export async function applyPatchToNewBranch(options: {
 
         const commit = (await runHardenedGit(worktreeDir, ["rev-parse", "HEAD"])).stdout.trim();
 
-        await runHardenedGit(repoPath, ["update-ref", `refs/heads/${branchName}`, commit]);
+        // Passing empty string as oldvalue makes update-ref atomic: fails if the branch was created concurrently.
+        await runHardenedGit(repoPath, ["update-ref", `refs/heads/${branchName}`, commit, ""]);
 
         return { branch: branchName, commit, filesChanged: inspection.files.length };
     } finally {
