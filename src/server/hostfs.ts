@@ -23,7 +23,9 @@ import {
     type Stats,
     closeSync,
     copyFileSync,
+    close as fsClose,
     createReadStream as fsCreateReadStream,
+    read as fsRead,
     existsSync,
     fchmodSync,
     fstatSync,
@@ -396,6 +398,15 @@ function pinParent(
                         throw error;
                     }
 
+                    // A recorded folder that is gone is not made again: nothing may take its name.
+                    if (host?.recorded(parentId, part) === true) {
+                        throw failure(
+                            "ESTALE",
+                            `${shown} is no longer the folder it was admitted as`,
+                            shown,
+                        );
+                    }
+
                     try {
                         mkdirSync(at);
                     } catch (made) {
@@ -609,29 +620,253 @@ function modeFlags(flags: string | number): number {
 const notRegular = (place: Place, max: number): NodeJS.ErrnoException =>
     failure("EFBIG", `${place.display.text} is not a regular file of at most ${max} bytes`);
 
+/**
+ * What a resource that was opened in a plain folder keeps: the context and the generation of the view it was opened in.
+ * On every operation the resource looks again. If its folder has become sandboxed since, the resource is revoked: every
+ * later operation fails with `ESTALE` (and the descriptor is closed), so a handle that was given out for a plain folder
+ * never reads a folder that the guest writes. A resource opened in a sandboxed folder needs no guard: it stays confined.
+ */
+class Guard {
+    readonly #host: Hostfs;
+    readonly #label: string;
+    #generation: number;
+    #revoked = false;
+
+    constructor(host: Hostfs, label: string) {
+        this.#host = host;
+        this.#label = label;
+        this.#generation = host.generation();
+    }
+
+    check(): void {
+        if (!this.#revoked) {
+            const generation = this.#host.generation();
+
+            if (generation === this.#generation) {
+                return;
+            }
+
+            this.#generation = generation;
+            this.#revoked =
+                this.#host.confines(this.#label) || this.#host.holdsSandboxed(this.#label);
+        }
+
+        if (this.#revoked) {
+            throw failure(
+                "ESTALE",
+                `${this.#label} is in a sandboxed folder now: this open file is revoked`,
+                this.#label,
+            );
+        }
+    }
+}
+
+const guardOf = (place: Place): Guard | undefined =>
+    place.context === undefined ? undefined : new Guard(place.context, place.display.text);
+
+/** A stream of a descriptor that is already open, checked at every read (and bounded where `end` says so). */
+function guardedStream(
+    fd: number,
+    options: { start?: number; end?: number; autoClose?: boolean },
+    guard: Guard | undefined,
+): ReadStream {
+    return fsCreateReadStream("", {
+        ...options,
+        fd,
+        autoClose: options.autoClose ?? true,
+        ...(guard === undefined
+            ? {}
+            : {
+                  fs: {
+                      read: (
+                          each: number,
+                          buffer: Buffer,
+                          offset: number,
+                          length: number,
+                          position: number | null,
+                          done: (error: Error | null, bytes: number, buffer: Buffer) => void,
+                      ) => {
+                          try {
+                              guard.check();
+                          } catch (error) {
+                              done(error as Error, 0, buffer);
+
+                              return;
+                          }
+
+                          fsRead(each, buffer, offset, length, position, done);
+                      },
+                      close: fsClose,
+                  } as never,
+              }),
+    });
+}
+
+/**
+ * A file handle that is never given out raw: every call checks its guard (a handle from a plain folder is revoked when
+ * the folder becomes sandboxed), and a handle in a sandboxed folder has no unbounded read: `readFile` is refused, and
+ * `createReadStream` needs an `end`.
+ */
+function guardedHandle(
+    handle: FileHandle,
+    guard: Guard | undefined,
+    confined: boolean,
+): FileHandle {
+    return new Proxy(handle, {
+        get(target, property) {
+            const value = Reflect.get(target, property, target) as unknown;
+
+            if (typeof value !== "function") {
+                return value;
+            }
+
+            if (property === "close") {
+                return value.bind(target);
+            }
+
+            if (property === "readFile" && confined) {
+                return async () => {
+                    throw failure("EINVAL", "a file in a sandboxed folder is read with a bound");
+                };
+            }
+
+            if (property === "createReadStream") {
+                return (options?: { start?: number; end?: number; autoClose?: boolean }) => {
+                    // Pocket's own files, with no guard and no confinement: the handle's own stream, as ever.
+                    if (guard === undefined && !confined) {
+                        return (value as (each?: unknown) => unknown).call(target, options);
+                    }
+
+                    guard?.check();
+
+                    if (confined && !Number.isFinite(options?.end)) {
+                        throw failure(
+                            "EINVAL",
+                            "a stream of a file in a sandboxed folder needs a bound",
+                        );
+                    }
+
+                    return guardedStream(
+                        target.fd,
+                        { ...options, autoClose: options?.autoClose ?? false },
+                        guard,
+                    );
+                };
+            }
+
+            // The methods of a handle are asynchronous: a revoked handle gives a rejected promise, not a throw.
+            return (...args: unknown[]) => {
+                try {
+                    guard?.check();
+                } catch (error) {
+                    return Promise.reject(error);
+                }
+
+                return (value as (...each: unknown[]) => unknown).apply(target, args);
+            };
+        },
+    });
+}
+
+/** A listing that is never given out raw: every read checks its guard. */
+function guardedDir(dir: Dir, guard: Guard | undefined): Dir {
+    return new Proxy(dir, {
+        get(target, property) {
+            const value = Reflect.get(target, property, target) as unknown;
+
+            if (property === Symbol.asyncIterator) {
+                // The listing's own iterator, with a check before each entry: what it does at the end or when the loop
+                // is left (closing the folder) is its own.
+                return () => {
+                    const inner = (target as unknown as AsyncIterable<unknown>)[
+                        Symbol.asyncIterator
+                    ]() as AsyncIterator<unknown>;
+                    const next = {
+                        next: async () => {
+                            guard?.check();
+
+                            return inner.next();
+                        },
+                        return: async (done?: unknown) =>
+                            inner.return === undefined
+                                ? { done: true, value: done }
+                                : inner.return(done),
+                        [Symbol.asyncIterator]: () => next,
+                    };
+
+                    return next;
+                };
+            }
+
+            if (typeof value !== "function") {
+                return value;
+            }
+
+            return (...args: unknown[]) => {
+                if (property !== "close" && property !== "closeSync") {
+                    try {
+                        guard?.check();
+                    } catch (error) {
+                        // `read` is asynchronous, `readSync` is not.
+                        if (String(property).endsWith("Sync")) {
+                            throw error;
+                        }
+
+                        return Promise.reject(error);
+                    }
+                }
+
+                return (value as (...each: unknown[]) => unknown).apply(target, args);
+            };
+        },
+    });
+}
+
 /** A descriptor held open for a file: read it, look at it, close it. */
 export class OpenFile {
     readonly #fd: number;
     readonly #confined: boolean;
+    readonly #guard: Guard | undefined;
     #closed = false;
 
-    /** `confined`: the file is in a sandboxed folder, so a read of it is always bounded (`readAll`). */
-    constructor(fd: number, confined = false) {
+    /**
+     * `confined`: the file is in a sandboxed folder, so a read of it is always bounded (`readAll`). `guard`: a file of a
+     * plain folder is revoked when the folder becomes sandboxed.
+     */
+    constructor(fd: number, confined = false, guard?: Guard) {
         this.#fd = fd;
         this.#confined = confined;
+        this.#guard = guard;
+    }
+
+    /** Before every operation: a revoked file is closed and refused. */
+    #current(): void {
+        try {
+            this.#guard?.check();
+        } catch (error) {
+            this.close();
+
+            throw error;
+        }
     }
 
     stat(): Stats;
     stat(options: { bigint: true }): BigIntStats;
     stat(options?: { bigint: true }): Stats | BigIntStats {
+        this.#current();
+
         return options === undefined ? fstatSync(this.#fd) : fstatSync(this.#fd, options);
     }
 
     read(buffer: Buffer, offset: number, length: number, position: number | null): number {
+        this.#current();
+
         return fsReadSync(this.#fd, buffer, offset, length, position);
     }
 
     write(data: Uint8Array): void {
+        this.#current();
+
         for (let done = 0; done < data.length;) {
             done += writeSync(this.#fd, data, done);
         }
@@ -639,6 +874,7 @@ export class OpenFile {
 
     /** Change the mode of this file itself, by the descriptor: what the name names now is not touched. */
     chmod(mode: number): void {
+        this.#current();
         fchmodSync(this.#fd, mode);
     }
 
@@ -647,15 +883,16 @@ export class OpenFile {
      * the one that is read, and a file that grows is not sent past the bound. The stream owns the descriptor.
      */
     readStream(bytes: number): ReadStream {
+        this.#current();
         this.#closed = true;
 
-        return bytes <= 0
-            ? fsCreateReadStream("", { fd: this.#fd, autoClose: true, start: 0, end: 0 })
-            : fsCreateReadStream("", { fd: this.#fd, autoClose: true, start: 0, end: bytes - 1 });
+        return guardedStream(this.#fd, { start: 0, end: Math.max(0, bytes - 1) }, this.#guard);
     }
 
     /** What is left of the file, from the start; `max` bounds it (more than that is `EFBIG`). */
     readAll(max?: number): Buffer {
+        this.#current();
+
         // A file in a sandboxed folder is never read without a bound: the default is `MAX_TEXT`.
         const bound = max ?? (this.#confined ? MAX_TEXT : undefined);
 
@@ -1092,7 +1329,7 @@ export async function opendir(place: Place, options?: { bufferSize?: number }): 
     const at = place.located;
 
     if (at.kind === "plain") {
-        return fsp.opendir(at.path, options);
+        return guardedDir(await fsp.opendir(at.path, options), guardOf(place));
     }
 
     return useAsync(place, async (path, _confined, self) => {
@@ -1101,7 +1338,7 @@ export async function opendir(place: Place, options?: { bufferSize?: number }): 
         );
 
         try {
-            return await fsp.opendir(entry(handle.fd), options);
+            return guardedDir(await fsp.opendir(entry(handle.fd), options), undefined);
         } finally {
             await handle.close();
         }
@@ -1109,7 +1346,12 @@ export async function opendir(place: Place, options?: { bufferSize?: number }): 
 }
 
 export function opendirSyncAt(place: Place): Dir {
-    return withFolder(place, (path) => opendirSync(path));
+    const plain = place.located.kind === "plain";
+
+    return guardedDir(
+        withFolder(place, (path) => opendirSync(path)),
+        plain ? guardOf(place) : undefined,
+    );
 }
 
 /** The place's real path. A sandboxed place has no links, so it is its stated path once it is shown to be there. */
@@ -1397,14 +1639,13 @@ export function append(
 export function openSync(place: Place, flags: string | number = "r", mode?: number): OpenFile {
     return use(place, (path, confined) => {
         const bits = modeFlags(flags);
+        // A pipe named like a file does not hold the open: the caller looks at what it is before it reads. A plain folder
+        // gives the native errors, as ever.
         const fd = confined
             ? openChecked(path, bits, mode, place.display.text)
-            : noLink(place.display.text, () =>
-                  // A pipe named like a file does not hold the open: the caller looks at what it is before it reads.
-                  fsOpenSync(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode),
-              );
+            : fsOpenSync(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode);
 
-        return new OpenFile(fd, confined);
+        return new OpenFile(fd, confined, confined ? undefined : guardOf(place));
     });
 }
 
@@ -1443,7 +1684,7 @@ export function openNoFollowSync(
                 throw error;
             }
 
-            return new OpenFile(fd);
+            return new OpenFile(fd, false, guardOf(place));
         }
 
         return new OpenFile(openChecked(path, flags, undefined, place.display.text), true);
@@ -1459,15 +1700,23 @@ export async function open(
         const bits = modeFlags(flags);
 
         if (!confined) {
-            return fsp.open(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode);
+            return guardedHandle(
+                await fsp.open(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode),
+                guardOf(place),
+                false,
+            );
         }
 
         // Checked and made as a regular file, then opened again through the checked descriptor.
         const fd = openChecked(path, bits, mode, place.display.text);
 
-        return fsp
-            .open(entry(fd), bits & (ACCMODE | constants.O_APPEND))
-            .finally(() => closeSync(fd));
+        return guardedHandle(
+            await fsp
+                .open(entry(fd), bits & (ACCMODE | constants.O_APPEND))
+                .finally(() => closeSync(fd)),
+            undefined,
+            true,
+        );
     });
 }
 
@@ -1506,14 +1755,18 @@ export async function openNoFollow(
                 throw error;
             }
 
-            return handle;
+            return guardedHandle(handle, guardOf(place), false);
         }
 
         const fd = openChecked(path, flags, undefined, place.display.text);
 
-        return fsp
-            .open(entry(fd), flags & (ACCMODE | constants.O_APPEND))
-            .finally(() => closeSync(fd));
+        return guardedHandle(
+            await fsp
+                .open(entry(fd), flags & (ACCMODE | constants.O_APPEND))
+                .finally(() => closeSync(fd)),
+            undefined,
+            true,
+        );
     });
 }
 
@@ -1531,8 +1784,12 @@ export function createReadStream(
             throw failure("EINVAL", "a stream of a file in a sandboxed folder needs a bound");
         }
 
+        // Opened by descriptor before it is returned, never by its path later: a link swapped in after this call is not
+        // followed, and a stream of a plain folder is revoked if the folder becomes sandboxed.
         if (!confined) {
-            return fsCreateReadStream(path, options);
+            const fd = fsOpenSync(path, constants.O_RDONLY | NON_BLOCK);
+
+            return guardedStream(fd, options, guardOf(place));
         }
 
         const fd = openChecked(path, constants.O_RDONLY, undefined, place.display.text);
@@ -1543,7 +1800,7 @@ export function createReadStream(
             throw failure("EACCES", `${place.display.text} is not a regular file`);
         }
 
-        return fsCreateReadStream("", { ...options, fd, autoClose: true });
+        return guardedStream(fd, options, undefined);
     });
 }
 
@@ -2228,7 +2485,7 @@ export class Hostfs {
                     ? { dev: inner.dev, ino: inner.ino }
                     : { dev: info.dev, ino: info.ino };
 
-                this.#record(owner, at, name, expected);
+                this.#record(owner, at, name, expected, last);
 
                 if (!last) {
                     // The walk goes on from the descriptor that is held, whether this one or one held already.
@@ -2267,12 +2524,19 @@ export class Hostfs {
         parent: { dev: bigint; ino: bigint },
         name: string,
         identity: { dev: bigint; ino: bigint },
+        /** The view's identity for a listed root is the authority: it replaces what was recorded at this entry. */
+        authority = false,
     ): void {
         const key = edgeKey(parent, name);
         const known = this.#edges.get(key);
 
         if (known !== undefined) {
             known.holders.add(`pos:${owner.id}`);
+
+            // An entry never holds two identities: the one the view lists now is the one that is checked.
+            if (authority && keyOf(known.identity) !== keyOf(identity)) {
+                known.identity = identity;
+            }
         } else {
             this.#edges.set(key, { identity, holders: new Set([`pos:${owner.id}`]) });
         }

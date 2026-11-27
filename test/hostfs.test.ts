@@ -1588,3 +1588,154 @@ test(
         host.close();
     },
 );
+
+test(
+    "a resource opened in a plain folder is revoked when the folder becomes sandboxed, and is never raw",
+    { skip: !linux },
+    async (t) => {
+        const { root, secret } = lab(t);
+        const info = statSync(root, { bigint: true });
+        let listed: { path: string; dev: bigint; ino: bigint }[] = [];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        writeFileSync(join(root, "big.txt"), "x".repeat(hostfs.MAX_TEXT + 100));
+
+        const file = hostfs.openSync(host.at(join(root, "big.txt")));
+        const handle = await hostfs.open(host.at(join(root, "big.txt")));
+        const dir = await hostfs.opendir(host.at(root));
+        const stream = hostfs.createReadStream(host.at(join(root, "big.txt")), { end: 10 });
+        const noFollow = await hostfs.openNoFollow(host.at(join(root, "big.txt")));
+        const syncDir = hostfs.opendirSyncAt(host.at(root));
+
+        // Plain: nothing is bounded or refused, as ever.
+        assert.equal(file.readAll().length, hostfs.MAX_TEXT + 100);
+        assert.equal((await handle.stat()).size, hostfs.MAX_TEXT + 100);
+        assert.ok(syncDir.readSync() !== null);
+
+        // The folder becomes sandboxed: every live resource is revoked (ESTALE) on its next operation.
+        listed = [{ path: root, dev: info.dev, ino: info.ino }];
+        assert.throws(() => file.readAll(), { code: "ESTALE" });
+        assert.throws(() => file.read(Buffer.alloc(4), 0, 4, 0), { code: "ESTALE" });
+        await assert.rejects(handle.stat(), { code: "ESTALE" });
+        await assert.rejects(handle.readFile(), { code: "ESTALE" });
+        await assert.rejects(noFollow.read(Buffer.alloc(4), 0, 4, 0), { code: "ESTALE" });
+        await assert.rejects(dir.read(), { code: "ESTALE" });
+        assert.throws(() => syncDir.readSync(), { code: "ESTALE" });
+        await assert.rejects(
+            (async () => {
+                for await (const chunk of stream) {
+                    assert.ok(chunk);
+                }
+            })(),
+            { code: "ESTALE" },
+        );
+        await handle.close();
+        await noFollow.close();
+        dir.closeSync?.call(dir);
+        assert.ok(secret);
+        host.close();
+    },
+);
+
+test(
+    "a handle in a sandboxed folder has no unbounded read, and a stream is opened by descriptor before it is returned",
+    { skip: !linux },
+    async (t) => {
+        const { root, outside, secret, host } = lab(t);
+        const folder = host.folder(root);
+        const handle = await hostfs.open(folder.at("ok.txt"));
+
+        await assert.rejects(handle.readFile(), { code: "EINVAL" });
+        assert.throws(() => handle.createReadStream(), { code: "EINVAL" });
+        assert.equal((await handle.read(Buffer.alloc(2), 0, 2, 0)).bytesRead, 2);
+        await handle.close();
+
+        // A plain stream, with its link swapped in before the first read: it was opened already, so it reads the file.
+        const plain = join(outside, "plain.txt");
+
+        writeFileSync(plain, "PLAIN");
+
+        const stream = hostfs.createReadStream(hostfs.own(outside).child("plain.txt"), {
+            end: 100,
+        });
+
+        rmSync(plain);
+        symlinkSync(secret, plain);
+
+        const read: Buffer[] = [];
+
+        for await (const chunk of stream) {
+            read.push(chunk as Buffer);
+        }
+
+        assert.equal(Buffer.concat(read).toString(), "PLAIN");
+    },
+);
+
+test("a write does not make a recorded ancestor again before it refuses", { skip: !linux }, (t) => {
+    const { root, host } = lab(t);
+    const outer = join(root, "sub");
+    const inner = join(outer, "inner");
+
+    mkdirSync(inner);
+    host.folder(inner);
+    rmSync(inner, { recursive: true });
+
+    const folder = host.folder(root);
+
+    assert.throws(() => hostfs.writeFile(folder.at("sub/inner/new.txt"), "x"), { code: "ESTALE" });
+    assert.equal(existsSync(inner), false, "nothing was created");
+    assert.throws(() => hostfs.mkdir(folder.at("sub/inner/a/b"), { recursive: true }), {
+        code: "ESTALE",
+    });
+    assert.equal(existsSync(inner), false, "nothing was created");
+    // A name that was never recorded is made, as ever.
+    hostfs.mkdir(folder.at("sub/other/a"), { recursive: true });
+    assert.equal(existsSync(join(outer, "other", "a")), true);
+    host.close();
+});
+
+test("a plain folder gives the native errors", { skip: !linux }, (t) => {
+    const { root } = lab(t);
+    const plain = hostfs.own(root);
+
+    // `ok.txt` is a file: a name below it is ENOTDIR, as the plain call says (a sandboxed walk says EACCES).
+    assert.throws(() => hostfs.openSync(plain.child("ok.txt/below")), { code: "ENOTDIR" });
+    assert.throws(() => hostfs.openSync(plain.child("missing")), { code: "ENOENT" });
+});
+
+test(
+    "a listed root that is replaced, with the view giving its new identity, is read and written at the new identity",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+
+        const info = (path: string) => {
+            const found = statSync(path, { bigint: true });
+
+            return { path, dev: found.dev, ino: found.ino };
+        };
+
+        let listed = [info(root), info(nested)];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        assert.equal(hostfs.readText(host.at(join(nested, "deep.txt"))), "deep");
+        // The inner root is replaced, and the owner of the view lists the new folder.
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "new");
+        listed = [info(root), info(nested)];
+
+        assert.equal(hostfs.readText(host.at(join(nested, "deep.txt"))), "new");
+        hostfs.writeFile(host.at(join(nested, "fresh.txt")), "fresh");
+        assert.equal(readFileSync(join(nested, "fresh.txt"), "utf8"), "fresh");
+        assert.equal(hostfs.readText(host.at(root).child("sub").child("fresh.txt")), "fresh");
+        // And it is checked at the new identity: a second replacement that the view does not list is refused.
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.at(join(nested, "deep.txt"))), { code: "ESTALE" });
+        host.close();
+    },
+);
