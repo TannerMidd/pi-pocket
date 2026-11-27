@@ -40,6 +40,8 @@ const STALE_NOTE =
     "This VM keeps the rules it started with. The new settings apply when it starts again.";
 const NO_SESSION_NOTE =
     "Open a session to choose whether its tools run in a sandbox. Set up below works without one.";
+const NOT_SET_UP_NOTE =
+    "The sandbox is not set up yet. Tap Set up: it installs the Gondolin package and downloads the guest image. Nothing is installed outside Pi Pocket's data folder.";
 const REMOVE_NOTE =
     "This stops every sandbox VM and deletes the package and the images. Sessions keep their sandbox setting and fail until you set up again.";
 
@@ -64,6 +66,7 @@ export default function setup(pocket) {
     let item = null;
     let row = null;
     let owner = false;
+    let hostOk = null;
     const listeners = new Set();
 
     const notify = () => {
@@ -196,7 +199,7 @@ export default function setup(pocket) {
             return () => listeners.delete(again);
         }, []);
 
-        return { conversation, state, owner };
+        return { conversation, state, owner, hostOk };
     }
 
     function Switcher({ close }) {
@@ -364,7 +367,11 @@ export default function setup(pocket) {
 
         const refresh = useCallback(async () => {
             try {
-                setHost(await pocket.api("host"));
+                const answer = await pocket.api("host");
+
+                hostOk = answer.check?.ok ?? null;
+                setHost(answer);
+                notify();
             } catch (failure) {
                 setError(failure.message);
             }
@@ -420,6 +427,162 @@ export default function setup(pocket) {
         };
 
         const running = host?.setup.running === true;
+        const notReady = host?.check.ok === false;
+        const checks =
+            host === null
+                ? null
+                : html`
+                      <ul class="gdl-check">
+                          ${host.check.lines.map(
+                              (line) => html`
+                                  <li
+                                      class=${line.ok ? "gdl-ok" : line.optional ? "gdl-info" : "gdl-bad"}
+                                  >
+                                      <strong
+                                          >${line.ok ? "OK" : line.optional ? "Not used" : "Needs work"}</strong
+                                      >
+                                      <span class="gdl-line"
+                                          ><b>${line.name}.</b> ${line.detail}</span
+                                      >
+                                  </li>
+                              `,
+                          )}
+                      </ul>
+                      <p class="muted small">${runningText(host)}</p>
+                      ${
+                          host.vms.length === 0
+                              ? null
+                              : html`<h3 class="gdl-h">Running sandboxes</h3>
+                                    <ul class="gdl-vms">
+                                        ${host.vms.map(
+                                            (each) => html`
+                                                <li class="gdl-vm">
+                                                    <div class="gdl-vm-info">
+                                                        <strong class="gdl-vm-title"
+                                                            >${each.title || `Session ${each.rootId}`}</strong
+                                                        >
+                                                        <span class="mono small gdl-vm-folder"
+                                                            >${each.cwd}</span
+                                                        >
+                                                        <span class="muted small"
+                                                            >${each.busy > 0 ? "Working" : "Idle"}</span
+                                                        >
+                                                    </div>
+                                                    <button
+                                                        class="button"
+                                                        disabled=${busy}
+                                                        onClick=${() => act("stop-vm", { c: each.rootId })}
+                                                    >
+                                                        Stop
+                                                    </button>
+                                                </li>
+                                            `,
+                                        )}
+                                    </ul>`
+                      }
+                  `;
+        const actions =
+            host === null
+                ? null
+                : html`
+                      ${
+                          running
+                              ? html`
+                                    <pre class="gdl-log mono small">
+${host.setup.lines.join("\n")}</pre>
+                                    <button class="button" onClick=${() => act("setup-stop")}>
+                                        Stop Set up
+                                    </button>
+                                `
+                              : html`
+                                    ${
+                                        host.setup.error === null
+                                            ? host.setup.done
+                                                ? html`<p class="muted small">Set up finished.</p>`
+                                                : null
+                                            : html`<div class="error-box">${host.setup.error}</div>`
+                                    }
+                                    <div class="gdl-actions">
+                                        <button
+                                            class="button"
+                                            disabled=${busy}
+                                            onClick=${() => act("check")}
+                                        >
+                                            Check again
+                                        </button>
+                                        <button
+                                            class="button primary"
+                                            disabled=${busy}
+                                            onClick=${() => setSure("plain")}
+                                        >
+                                            Set up
+                                        </button>
+                                        <button
+                                            class="button"
+                                            disabled=${busy}
+                                            onClick=${() => setSure("browser")}
+                                        >
+                                            Set up with a browser
+                                        </button>
+                                    </div>
+                                    ${
+                                        sure !== "plain" && sure !== "browser"
+                                            ? null
+                                            : html`
+                                                  <div class="gdl-confirm">
+                                                      <p>${setupText(host, sure === "browser")}</p>
+                                                      <div class="gdl-actions">
+                                                          <button
+                                                              class="button primary"
+                                                              disabled=${busy}
+                                                              onClick=${() => act("setup", { browser: sure === "browser" })}
+                                                          >
+                                                              Start
+                                                          </button>
+                                                          <button
+                                                              class="button"
+                                                              onClick=${() => setSure(null)}
+                                                          >
+                                                              Not now
+                                                          </button>
+                                                      </div>
+                                                  </div>
+                                              `
+                                    }
+                                    <div class="gdl-actions">
+                                        <button
+                                            class="button"
+                                            disabled=${busy}
+                                            onClick=${() => setSure("remove")}
+                                        >
+                                            Remove the package and images
+                                        </button>
+                                    </div>
+                                    ${
+                                        sure === "remove"
+                                            ? html`<div class="gdl-confirm">
+                                                  <p>${REMOVE_NOTE}</p>
+                                                  <div class="gdl-actions">
+                                                      <button
+                                                          class="button"
+                                                          disabled=${busy}
+                                                          onClick=${() => act("remove")}
+                                                      >
+                                                          Remove
+                                                      </button>
+                                                      <button
+                                                          class="button"
+                                                          onClick=${() => setSure(null)}
+                                                      >
+                                                          Not now
+                                                      </button>
+                                                  </div>
+                                              </div>`
+                                            : null
+                                    }
+                                `
+                      }
+                  `;
 
         return html`
             <div class="gdl-block">
@@ -428,177 +591,28 @@ export default function setup(pocket) {
                 ${
                     host === null
                         ? html`<${pocket.Loader} />`
-                        : html`
-                              <ul class="gdl-check">
-                                  ${host.check.lines.map(
-                                      (line) => html`
-                                          <li
-                                              class=${line.ok ? "gdl-ok" : line.optional ? "gdl-info" : "gdl-bad"}
-                                          >
-                                              <strong
-                                                  >${line.ok ? "OK" : line.optional ? "Not used" : "Needs work"}</strong
-                                              >
-                                              <span class="gdl-line"
-                                                  ><b>${line.name}.</b> ${line.detail}</span
-                                              >
-                                          </li>
-                                      `,
-                                  )}
-                              </ul>
-                              <p class="muted small">${runningText(host)}</p>
-                              ${
-                                  host.vms.length === 0
-                                      ? null
-                                      : html`<h3 class="gdl-h">Running sandboxes</h3>
-                                            <ul class="gdl-vms">
-                                                ${host.vms.map(
-                                                    (each) => html`
-                                                        <li class="gdl-vm">
-                                                            <div class="gdl-vm-info">
-                                                                <strong class="gdl-vm-title"
-                                                                    >${each.title || `Session ${each.rootId}`}</strong
-                                                                >
-                                                                <span
-                                                                    class="mono small gdl-vm-folder"
-                                                                    >${each.cwd}</span
-                                                                >
-                                                                <span class="muted small"
-                                                                    >${each.busy > 0 ? "Working" : "Idle"}</span
-                                                                >
-                                                            </div>
-                                                            <button
-                                                                class="button"
-                                                                disabled=${busy}
-                                                                onClick=${() => act("stop-vm", { c: each.rootId })}
-                                                            >
-                                                                Stop
-                                                            </button>
-                                                        </li>
-                                                    `,
-                                                )}
-                                            </ul>`
-                              }
-                              ${
-                                  running
-                                      ? html`
-                                            <pre class="gdl-log mono small">
-${host.setup.lines.join("\n")}</pre>
-                                            <button
-                                                class="button"
-                                                onClick=${() => act("setup-stop")}
-                                            >
-                                                Stop Set up
-                                            </button>
-                                        `
-                                      : html`
-                                            ${
-                                                host.setup.error === null
-                                                    ? host.setup.done
-                                                        ? html`<p class="muted small">
-                                                              Set up finished.
-                                                          </p>`
-                                                        : null
-                                                    : html`<div class="error-box">
-                                                          ${host.setup.error}
-                                                      </div>`
-                                            }
-                                            <div class="gdl-actions">
-                                                <button
-                                                    class="button"
-                                                    disabled=${busy}
-                                                    onClick=${() => act("check")}
-                                                >
-                                                    Check again
-                                                </button>
-                                                <button
-                                                    class="button primary"
-                                                    disabled=${busy}
-                                                    onClick=${() => setSure("plain")}
-                                                >
-                                                    Set up
-                                                </button>
-                                                <button
-                                                    class="button"
-                                                    disabled=${busy}
-                                                    onClick=${() => setSure("browser")}
-                                                >
-                                                    Set up with a browser
-                                                </button>
-                                            </div>
-                                            ${
-                                                sure !== "plain" && sure !== "browser"
-                                                    ? null
-                                                    : html`
-                                                          <div class="gdl-confirm">
-                                                              <p>
-                                                                  ${setupText(host, sure === "browser")}
-                                                              </p>
-                                                              <div class="gdl-actions">
-                                                                  <button
-                                                                      class="button primary"
-                                                                      disabled=${busy}
-                                                                      onClick=${() => act("setup", { browser: sure === "browser" })}
-                                                                  >
-                                                                      Start
-                                                                  </button>
-                                                                  <button
-                                                                      class="button"
-                                                                      onClick=${() => setSure(null)}
-                                                                  >
-                                                                      Not now
-                                                                  </button>
-                                                              </div>
-                                                          </div>
-                                                      `
-                                            }
-                                            <div class="gdl-actions">
-                                                <button
-                                                    class="button"
-                                                    disabled=${busy}
-                                                    onClick=${() => setSure("remove")}
-                                                >
-                                                    Remove the package and images
-                                                </button>
-                                            </div>
-                                            ${
-                                                sure === "remove"
-                                                    ? html`<div class="gdl-confirm">
-                                                          <p>${REMOVE_NOTE}</p>
-                                                          <div class="gdl-actions">
-                                                              <button
-                                                                  class="button"
-                                                                  disabled=${busy}
-                                                                  onClick=${() => act("remove")}
-                                                              >
-                                                                  Remove
-                                                              </button>
-                                                              <button
-                                                                  class="button"
-                                                                  onClick=${() => setSure(null)}
-                                                              >
-                                                                  Not now
-                                                              </button>
-                                                          </div>
-                                                      </div>`
-                                                    : null
-                                            }
-                                        `
-                              }
-                          `
+                        : notReady
+                          ? [html`<p class="gdl-notready">${NOT_SET_UP_NOTE}</p>`, actions, checks]
+                          : [checks, actions]
                 }
             </div>
         `;
     }
 
     function SandboxSheet({ close }) {
-        return html`
-            <div class="gdl-sheet">
-                <${Switcher} close=${close} />
-                <${Vm} close=${close} />
-                <${Where} />
-                <${Host} />
-            </div>
-        `;
+        const { owner: admin, state: mine, hostOk: ready } = useSandbox();
+        // Until the machine is set up, the owner sees Set up first: nothing above it, nothing to scroll to.
+        const first = admin && (ready ?? mine?.ready ?? null) !== true;
+
+        // Keyed, so Host keeps its state when it moves.
+        const parts = [
+            html`<${Switcher} key="switch" close=${close} />`,
+            html`<${Vm} key="vm" close=${close} />`,
+            html`<${Where} key="where" />`,
+        ];
+        const host = html`<${Host} key="host" />`;
+
+        return html`<div class="gdl-sheet">${first ? [host, ...parts] : [...parts, host]}</div>`;
     }
 
     pocket.sheet({ id: "sandbox", title: "Sandbox", component: SandboxSheet });
