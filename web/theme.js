@@ -392,10 +392,14 @@ function lookOf(id = prefs().look) {
         return null;
     }
 
+    const usable = (each) => each.usable && each.css.length > 0;
+    const list = store.state.themeList ?? [];
+
+    // A chosen theme that is gone or cannot load falls back to Pocket's own look, which is a theme folder too.
     return (
-        store.state.themeList?.find(
-            (each) => each.id === id && each.usable && each.css.length > 0,
-        ) ?? null
+        list.find((each) => each.id === id && usable(each)) ??
+        list.find((each) => each.id === BASE_LOOK && usable(each)) ??
+        null
     );
 }
 

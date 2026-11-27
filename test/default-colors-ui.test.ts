@@ -4,6 +4,7 @@
 import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -245,3 +246,96 @@ test(
         assert.equal(lantern.bold, "", "no plane steps of Pocket's look");
     },
 );
+
+test(
+    "a chosen theme that is gone falls back to Pocket's own look, not the bare app",
+    real,
+    async () => {
+        const shown = await visit({
+            "pocket.themeChosen": { theme: false, look: true },
+            "pocket.appearance": { look: "a-theme-that-is-gone" },
+        });
+
+        assert.equal(shown.look, "pocket");
+        assert.equal(shown.bold, "70%", "Pocket's stylesheet is loaded");
+    },
+);
+
+test(
+    "quiet text in sheets keeps its color with a light palette that is not Pocket's",
+    real,
+    async () => {
+        await visit({
+            "pocket.themeChosen": { theme: true, look: false },
+            "pocket.appearance": { theme: "catppuccin-latte" },
+        });
+
+        // A weight over 100% is invalid in color-mix(), and the text would inherit its parent's color instead. Chromium
+        // clamps a calc() weight, so this run cannot see it; the stylesheet check below holds for every engine.
+        const colors = JSON.parse(
+            await page.evaluate(`
+            const sheet = document.createElement("div");
+            const quiet = document.createElement("span");
+
+            sheet.className = "sheet";
+            sheet.style.color = "rgb(1, 2, 3)";
+            quiet.style.color = "var(--muted)";
+            quiet.textContent = "quiet";
+            sheet.append(quiet);
+            document.body.append(sheet);
+
+            const seen = { parent: getComputedStyle(sheet).color, quiet: getComputedStyle(quiet).color };
+
+            sheet.remove();
+
+            return JSON.stringify(seen);
+        `),
+        ) as { parent: string; quiet: string };
+
+        assert.notEqual(colors.quiet, colors.parent);
+
+        const css = await readFile(
+            join(import.meta.dirname, "..", "web", "themes", "pocket", "theme.css"),
+            "utf8",
+        );
+        const uncapped = css
+            .split("\n")
+            .filter(
+                (line) =>
+                    /var\(--mute\) \+/.test(line) && !/min\(100%, var\(--mute\) \+/.test(line),
+            );
+
+        assert.deepEqual(
+            uncapped,
+            [],
+            "every --mute weight above the base is capped by min(100%, …)",
+        );
+    },
+);
+
+test("the folded sidebar holds the whole rail, labels and badges included", real, async () => {
+    await visit({});
+    await page.evaluate(`(await import("/theme.js")).setPrefs({ sidebar: "rail" }); return "true"`);
+    await until(
+        async () =>
+            JSON.parse(
+                await page.evaluate(
+                    `return JSON.stringify(document.documentElement.dataset.rail === "on")`,
+                ),
+            ) === true,
+        "the sidebar folded",
+    );
+
+    const fit = JSON.parse(
+        await page.evaluate(`
+            const rail = document.querySelector(".places-rail").getBoundingClientRect();
+            const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+
+            return JSON.stringify({ rail: Math.round(rail.right), sidebar: Math.round(sidebar.right), width: Math.round(rail.width) });
+        `),
+    ) as { rail: number; sidebar: number; width: number };
+
+    assert.equal(fit.width, 88);
+    assert.ok(fit.rail <= fit.sidebar, JSON.stringify(fit));
+    await page.evaluate(`(await import("/theme.js")).setPrefs({ sidebar: "open" }); return "true"`);
+});

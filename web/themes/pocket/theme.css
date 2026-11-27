@@ -222,9 +222,25 @@
     border-right: 0;
 }
 
+/* The folded sidebar holds the whole rail, which is wider here than the app's 64 px: nothing of a label or a badge is
+   cut off, and a saved narrower width still gives the list the room beside it. */
+@media (min-width: 960px) {
+    .sidebar-clip > .sessions {
+        min-width: min(204px, calc(var(--sidebar-w, 432px) - 88px - 2 * var(--border)));
+    }
+
+    :root[data-rail="on"] .sidebar {
+        width: calc(89px + env(safe-area-inset-left));
+    }
+
+    :root[data-tiling="on"][data-rail="on"] .sidebar {
+        width: calc(88px + 2 * var(--border));
+    }
+}
+
 /* The rail is the darkest plane: its quiet text is measured against it. */
 .places-rail {
-    --muted: color-mix(in oklab, var(--body) calc(var(--mute) + 8%), var(--desk));
+    --muted: color-mix(in oklab, var(--body) min(100%, var(--mute) + 8%), var(--desk));
 }
 
 .places-rail .rail-brand {
@@ -1199,8 +1215,8 @@ a,
 .sheet,
 .pop-menu,
 .launcher {
-    --muted: color-mix(in oklab, var(--body) calc(var(--mute) + 12%), var(--sheet));
-    --faint: color-mix(in oklab, var(--body) calc(var(--mute) + 7%), var(--sheet));
+    --muted: color-mix(in oklab, var(--body) min(100%, var(--mute) + 12%), var(--sheet));
+    --faint: color-mix(in oklab, var(--body) min(100%, var(--mute) + 7%), var(--sheet));
 }
 
 /* A person's initials on a tint of their color: darker, in a light palette, so they read at 4.5:1. */
