@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { sandboxedFolder } from "../src/server/confined.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     newSession,
@@ -22,7 +22,6 @@ import {
 
 after(cleanUp);
 
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
 let opened = 0;
 
 /** A promise that settles when `open` is called, and one that settles when something reaches `wait`. */
@@ -53,7 +52,7 @@ function signal() {
 async function session(name: string) {
     const driver = new FakeDriver();
 
-    (globalThis as Record<symbol, unknown>)[SEAM] = driver;
+    useDriver(driver);
     const model = scriptedModel((request) => {
         const { messages } = request as { messages: { role: string }[] };
 
@@ -63,7 +62,13 @@ async function session(name: string) {
                   stopReason: "toolUse",
               });
     });
-    const app = await openApp(model, join(root, `data-transition-${++opened}`));
+    const app = await openApp(
+        model,
+        join(root, `data-transition-${++opened}`),
+        undefined,
+        undefined,
+        sandboxOptions(),
+    );
     const folder = join(root, `transition-${name}`);
 
     mkdirSync(folder, { recursive: true });
@@ -143,7 +148,7 @@ test("a turn-on that is refused leaves no VM, and a call that comes meanwhile wa
         assert.equal(driver.log.commands.length, 0, "the call ran in a VM");
         await app.background.stop(id, task.id);
     } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+        useDriver(undefined);
         held.open();
         await app.close();
     }
@@ -170,7 +175,7 @@ test("a call that comes while the sandbox is turned on runs in the VM once it is
         assert.equal(driver.log.started.length, 1);
         assert.ok(driver.log.commands.length > 0, "the call did not run in the VM");
     } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+        useDriver(undefined);
         held.open();
         await app.close();
     }
@@ -217,7 +222,7 @@ test("the folder stays confined, and the setting on, until the VM is gone when t
         assert.equal(sandboxedFolder(folder), false);
         assert.equal(driver.log.started.length, 1, "the call that waited started a VM");
     } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+        useDriver(undefined);
         held.open();
         await app.close();
     }
