@@ -300,6 +300,67 @@ test(
 );
 
 test(
+    "a taken-back message with its files, and the draft and files already in the box, all come back after a late /api/me",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(app, id, "rows beside taken-back words");
+        await openOn(id, "rows beside taken-back words");
+        await saved(id);
+        // What the device keeps for this person and session: a draft, a file in the box, and a message taken back with
+        // its own file (`keepBack`).
+        await page.evaluate(`
+            const { store } = await import("/store.js");
+            const prefix = "pocket.person." + encodeURIComponent(store.state.me.id) + ":";
+            const file = (name) => ({ name, size: 3, mime: "text/plain", path: "/tmp/" + name });
+
+            localStorage.setItem(prefix + "draft.${id}", "the draft");
+            localStorage.setItem(prefix + "attached.${id}", JSON.stringify([file("kept.txt")]));
+            localStorage.setItem(prefix + "takenBack.${id}", JSON.stringify([
+                { text: "taken back", attachments: [file("back.txt")], after: null },
+            ]));
+            "null";
+        `);
+        const me = hold("/api/me");
+
+        try {
+            await page.reload();
+            await until(
+                async () => (await shown("rows beside taken-back words")).rows,
+                "cached rows",
+                15_000,
+            );
+        } finally {
+            me.release();
+        }
+
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.composer textarea')?.value === 'taken back\\nthe draft')`,
+                ),
+            "the taken-back words before the draft",
+        );
+        await ready();
+        // The words and both files, and the record of the taken-back message is gone, as it was taken.
+        assert.deepEqual(
+            await inPage<string[]>(
+                `return JSON.stringify([...document.querySelectorAll('.composer .chip-name')].map((each) => each.textContent))`,
+            ),
+            ["back.txt", "kept.txt"],
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(Object.keys(localStorage).some((key) => key.endsWith("takenBack.${id}")))`,
+            ),
+            false,
+        );
+        await leave();
+    },
+);
+
+test(
     "a reload with no device copy keeps the boot screen until /api/me, then shows rows",
     real,
     async () => {
