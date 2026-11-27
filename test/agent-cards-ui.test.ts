@@ -497,3 +497,17 @@ test("Show raw keeps every line, and a watch keeps its line breaks", real, async
     assert.equal(raw.replace(/\r/g, ""), relay);
     await page.evaluate(`(await import("/store.js")).closeSheet(); return "true"`);
 });
+
+test("a linked answer that quotes the attachments heading keeps all its words", real, async () => {
+    await page.setViewport(VIEWPORTS.desktop);
+
+    const said =
+        "Here is the list.\n\nAttached files (saved on the server):\n- not a file\n\nStill my answer.";
+
+    await inject(linked(FINAL, said, "Completed"));
+    await page.navigate(`${base}/s/${source}`);
+    await see(
+        `return JSON.stringify([...document.querySelectorAll(".acard[data-kind=linked] .acard-body")].some((body) => body.querySelector(".md")?.innerText.includes("Still my answer.") && body.querySelector(".attachments") === null))`,
+        "the whole answer in the card, with no attachments made of its words",
+    );
+});

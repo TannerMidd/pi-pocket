@@ -1180,9 +1180,14 @@ export const ATTACHMENTS_HEADING = "\n\nAttached files (saved on the server):\n"
  * before 0.14.0, has the heading without the blank line before it.
  */
 export function splitAttachments(text) {
-    return (text.startsWith(ATTACHMENTS_HEADING.trimStart()) ? `\n\n${text}` : text).split(
-        ATTACHMENTS_HEADING,
-    );
+    const whole = text.startsWith(ATTACHMENTS_HEADING.trimStart()) ? `\n\n${text}` : text;
+    // The server puts the list last, so only the last heading counts, and never one inside a linked session's fenced
+    // message: an answer that quotes the heading keeps all its words.
+    const at = whole.lastIndexOf(ATTACHMENTS_HEADING);
+
+    return at === -1 || at < whole.lastIndexOf("\n</linked-session-message>")
+        ? [whole]
+        : [whole.slice(0, at), whole.slice(at + ATTACHMENTS_HEADING.length)];
 }
 
 /** What a person wrote in a message to Pi, without the list of attached files. */
