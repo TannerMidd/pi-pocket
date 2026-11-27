@@ -174,30 +174,7 @@ async function ready(): Promise<void> {
 /** Open a new document, losing all tab memory. */
 async function openOn(id: ConversationId, text: string): Promise<void> {
     await page.navigate(`${base}/s/${id}`);
-    await until(async () => (await shown(text)).rows, text, 20_000).catch(async (error) => {
-        const state = await inPage<unknown>(`
-            const { store } = await import("/store.js");
-            const transcript = document.querySelector('[data-part="transcript"]');
-
-            return JSON.stringify({
-                url: location.href,
-                me: store.state.me?.id ?? null,
-                sessionsLoaded: store.state.sessionsLoaded,
-                connection: store.state.connection,
-                viewed: store.state.view.conversation?.id ?? null,
-                transcript: transcript === null ? null : transcript.textContent.slice(0, 200),
-                loader: transcript?.querySelector('.loader') != null,
-                boot: document.querySelector('.boot') !== null,
-                probe: globalThis.openProbe ?? null,
-                navigation: performance.getEntriesByType("navigation").map((entry) => entry.name + " " + entry.type),
-                history: history.length + " " + JSON.stringify(history.state),
-                storage: Object.keys(sessionStorage).join(","),
-                ready: document.readyState,
-            });
-        `).catch((cause) => `the page could not be read: ${cause}`);
-
-        throw new Error(`${(error as Error).message}: ${JSON.stringify(state)}`);
-    });
+    await until(async () => (await shown(text)).rows, text, 20_000);
     await ready();
 }
 

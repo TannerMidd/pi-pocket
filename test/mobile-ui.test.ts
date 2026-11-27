@@ -153,30 +153,7 @@ async function fresh(): Promise<void> {
             )) === true,
         "the session list",
         20_000,
-    ).catch(async (error) => {
-        const state = await inPage<unknown>(`
-            const { store } = await import("/store.js");
-
-            return JSON.stringify({
-                url: location.href,
-                me: store.state.me?.id ?? null,
-                sessionsLoaded: store.state.sessionsLoaded,
-                sessions: store.state.sessions.length,
-                connection: store.state.connection,
-                rows: document.querySelectorAll(".home-list .session-row").length,
-                boot: document.querySelector(".boot") !== null,
-                sheet: store.state.sheet?.type ?? null,
-                navigation: performance.getEntriesByType("navigation").map((entry) => entry.name + " " + entry.type),
-                history: history.length + " " + JSON.stringify(history.state),
-                storage: Object.keys(sessionStorage).join(","),
-                ready: document.readyState,
-                address: JSON.stringify(globalThis.addressLog ?? null).slice(-1500),
-                now: Math.round(performance.now()),
-            });
-        `).catch((cause) => `the page could not be read: ${cause}`);
-
-        throw new Error(`${(error as Error).message}: ${JSON.stringify(state)}`);
-    });
+    );
 }
 
 /** Go to a session from inside the app, as a peek tile or a subagent's link does. */
@@ -191,39 +168,9 @@ before(async () => {
     writeFileSync(join(work, "README.md"), "# Hello\n\nA file to read.\n");
     writeFileSync(join(work, "web.env"), "PORT=3000\nHOST=127.0.0.1\n");
     app = await openApp(scriptedModel(route));
-    const handler = createHandler({
-        app,
-        listen: { host: "127.0.0.1", port: 0 },
-        restart: () => {},
-    });
-    const appSource = readFileSync(join(import.meta.dirname, "../web/app.js"), "utf8");
-    // Writes down each change of the address, with its stack, so a page that moves by itself says what moved it.
-    const probe = `
-        globalThis.addressLog = [];
-        for (const name of ["pushState", "replaceState", "go", "back", "forward"]) {
-            const real = history[name].bind(history);
-
-            history[name] = (...args) => {
-                addressLog.push({ name, args: args.slice(0, 1).concat(args.slice(2)), at: Math.round(performance.now()), stack: new Error().stack.split("\\n").slice(2, 6).join(" | ") });
-
-                return real(...args);
-            };
-        }
-    `;
-
-    server = createServer(async (request, response) => {
-        if (new URL(request.url ?? "/", "http://test.local").pathname === "/app.js") {
-            response.writeHead(200, {
-                "content-type": "text/javascript",
-                "cache-control": "no-store",
-            });
-            response.end(probe + appSource);
-
-            return;
-        }
-
-        await handler(request, response);
-    });
+    server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
