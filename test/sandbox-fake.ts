@@ -45,6 +45,8 @@ export class FakeProvider implements SandboxProvider {
     holdOpen: Gate | undefined;
     /** Holds `listFiles` until opened, when set. */
     holdList: Gate | undefined;
+    /** With `holdRelease`: only this root's release is held. */
+    holdOnly: number | undefined;
     /** Holds `release` until opened, when set. */
     holdRelease: Gate | undefined;
     failRelease: string | undefined;
@@ -100,7 +102,9 @@ export class FakeProvider implements SandboxProvider {
     }
 
     async release(root: ConversationId): Promise<void> {
-        await this.holdRelease?.wait();
+        if (this.holdOnly === undefined || this.holdOnly === Number(root)) {
+            await this.holdRelease?.wait();
+        }
 
         if (this.failRelease !== undefined) {
             throw new Error(this.failRelease);

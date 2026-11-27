@@ -386,6 +386,7 @@ export class ExtensionLoader {
     readonly #suspend: (file: string, leave: boolean) => Promise<void>;
     /** The old version stays after a failed reload: whatever its suspension stopped goes on again. */
     readonly #reloadFailed: (file: string) => Promise<void>;
+    readonly #reloadCommitted: (file: string) => Promise<void>;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -415,6 +416,8 @@ export class ExtensionLoader {
             suspend?: (file: string, leave: boolean) => Promise<void>;
             /** A new version of a module failed to load after its old one was suspended: the old one stays, and goes on. */
             reloadFailed?: (file: string) => Promise<void>;
+            /** A new version of a module was installed after its old one was suspended: whatever it staged takes effect. */
+            reloadCommitted?: (file: string) => Promise<void>;
         } = {},
     ) {
         this.#registry = registry;
@@ -427,6 +430,7 @@ export class ExtensionLoader {
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
         this.#suspend = options.suspend ?? (() => Promise.resolve());
         this.#reloadFailed = options.reloadFailed ?? (() => Promise.resolve());
+        this.#reloadCommitted = options.reloadCommitted ?? (() => Promise.resolve());
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -798,6 +802,11 @@ export class ExtensionLoader {
                 installed.flatMap((extension) => declared(extension).tools),
             );
             committed = true;
+
+            // The new version is installed: what it staged (a sandbox provider) takes the old one's place.
+            await this.#reloadCommitted(file).catch((error: unknown) =>
+                this.#notify("warning", `${file}: ${describe(error)}`),
+            );
 
             return installed;
         } finally {

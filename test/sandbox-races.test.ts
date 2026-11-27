@@ -778,6 +778,10 @@ test("row: a module that comes on reconciles: registration waits for the old tea
     hold.open();
     await leaving;
     await registering;
+    // A reload's registration is only staged: the loader commits it once the new version is installed.
+    assert.equal(w.app.sandboxes.provider, w.provider, "staged, not installed yet");
+    await w.app.sandboxes.reloadCommitted("fake.ts");
+    assert.equal(w.app.sandboxes.provider, second);
     assert.equal(w.app.sandboxes.phaseOf(w.a), "stable", "reconciled");
     assert.equal((await w.app.envFor(w.a).exec("x", undefined, context)).ok, true);
     assert.deepEqual(second.ran, ["x"], "the newest registration serves");

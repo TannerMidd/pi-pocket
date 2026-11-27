@@ -270,8 +270,26 @@ export class Sandboxes {
      * is installed only after the old one's teardown succeeded.
      */
     #serial: Promise<unknown> = Promise.resolve();
-    /** Set while the provider is being torn down: nothing starts under it (`#fenceProblem`). */
-    #fence: string | undefined;
+    /**
+     * Up while the provider is being torn down, and, after a successful teardown that keeps the provider (a reload), until the
+     * reload ends: nothing starts under it (`#fenceProblem`). It has an owner, the token of the lifecycle step that raised it,
+     * and only that step may lower it (`#lowerFence`): a recovery of one tree cannot end the fence of a teardown that is going on.
+     * `active`: the teardown is still running.
+     */
+    #fence: { why: string; token: number; active: boolean } | undefined;
+    #fenceSeq = 0;
+    /**
+     * A reload of the module that serves the sandbox is under way (`suspendOwner(owner, false)` ended): the replacement that
+     * the module registers is only staged, and takes the place of the old provider when the loader commits the reload
+     * (`reloadCommitted`). When the reload fails (`reloadFailed`) the staged one is dropped, and the old one goes on.
+     */
+    #reloading:
+        | {
+              owner: string;
+              token: number;
+              staged?: { provider: SandboxProvider; owner: string | undefined };
+          }
+        | undefined;
     /** Set when the server starts to stop, and never cleared: no registration, reconcile, or start may undo a shutdown. */
     #stopping = false;
     /** Counts every change of the provider: an environment handle made under another generation is stale. */
@@ -378,6 +396,26 @@ export class Sandboxes {
                 );
             }
 
+            const mine = { provider, owner };
+            const handle = {
+                unregister: () =>
+                    this.#serialised(async () => {
+                        // A staged provider that was dropped is never current: nothing to stop.
+                        if (this.#provider === mine) {
+                            await this.#stop(mine, true, "the sandbox module went away");
+                        }
+                    }),
+            };
+
+            // A module that is being reloaded registers its new provider, but it is only staged: the old one stays (and its
+            // VMs are proved gone already), and the new one takes its place when the loader commits the reload. A reload that
+            // fails drops it. Nothing of the old provider is removed here.
+            if (this.#reloading !== undefined && this.#reloading.owner === owner) {
+                this.#reloading.staged = mine;
+
+                return handle;
+            }
+
             const old = this.#provider;
 
             // A live provider is stopped first: its trees are suspended, its calls revoked, its VMs proved gone. When that
@@ -393,36 +431,35 @@ export class Sandboxes {
                 }
             }
 
-            const mine = { provider, owner };
-
-            this.#provider = mine;
-            this.#generation++;
-            // The new provider serves: the fence of the old one's teardown comes down.
-            this.#fence = undefined;
-
-            if (provider.env !== undefined) {
-                this.#present.add("driver");
-            }
-
-            if (provider.jobs !== undefined) {
-                this.#present.add("jobs");
-            }
-
-            if (provider.browser !== undefined) {
-                this.#present.add("browser");
-            }
-
+            this.#install(mine);
             await this.reconcile();
 
-            return {
-                unregister: () =>
-                    this.#serialised(async () => {
-                        if (this.#provider === mine) {
-                            await this.#stop(mine, true, "the sandbox module went away");
-                        }
-                    }),
-            };
+            return handle;
         });
+    }
+
+    /** The provider serves from now: the generation moves, and its parts count toward the readiness gate. */
+    #install(mine: { provider: SandboxProvider; owner: string | undefined }): void {
+        this.#provider = mine;
+        this.#generation++;
+
+        // A fence that a teardown left for this provider's reload goes with the swap; one that a teardown is raising is not
+        // touched (the teardown lowers its own).
+        if (this.#fence !== undefined && !this.#fence.active) {
+            this.#fence = undefined;
+        }
+
+        if (mine.provider.env !== undefined) {
+            this.#present.add("driver");
+        }
+
+        if (mine.provider.jobs !== undefined) {
+            this.#present.add("jobs");
+        }
+
+        if (mine.provider.browser !== undefined) {
+            this.#present.add("browser");
+        }
     }
 
     #serialised<T>(work: () => Promise<T>): Promise<T> {
@@ -445,14 +482,16 @@ export class Sandboxes {
         leave: boolean,
         why: string,
         final = false,
-    ): Promise<void> {
+    ): Promise<number> {
         // A provider change never ends, or overwrites, a transition that it does not own: it waits until they are done.
         await this.#quiet();
 
         // The fence goes up in the same tick as the last look at the transitions: from now on no sandboxed admission, turn-on,
         // lease grant, or VM launch may use this provider (`#fenceProblem`), so no tree can start under it that the teardown
         // does not see. It stays up until the new provider is installed, or the module is gone.
-        this.#fence = why;
+        const fence = { why, token: ++this.#fenceSeq, active: true };
+
+        this.#fence = fence;
 
         // Only a tree that is stable, or suspended by a provider change, is suspended here; a suspension that another
         // transition left (a failed release, the rules) keeps its record, and the VM is stopped all the same.
@@ -481,6 +520,9 @@ export class Sandboxes {
                         current.lifecycle === true
                     ) {
                         owned.set(root, this.#setPhase(root, "suspended", why, true));
+                        // What a change of the tree reserved goes to the new owner, which needs none: the tree is suspended, and
+                        // the fence guards the group. A reservation that stayed would lock the folder after the tree reopens.
+                        this.#dropReservations(root);
                     }
                 }
 
@@ -503,7 +545,7 @@ export class Sandboxes {
             // The provider stays, and so do the trees' suspensions: no teardown is going on any more. At shutdown the fence
             // stays: nothing may start in a server that is stopping.
             if (!final) {
-                this.#fence = undefined;
+                this.#lowerFence(fence.token);
             }
 
             throw error;
@@ -513,6 +555,19 @@ export class Sandboxes {
             this.#provider = undefined;
             this.#generation++;
             // No provider: nothing can start. The fence has done its work.
+            this.#lowerFence(fence.token);
+        } else {
+            // The provider stays (a reload): the fence stays up, no longer for a teardown that runs, until the step that owns
+            // it ends it.
+            fence.active = false;
+        }
+
+        return fence.token;
+    }
+
+    /** Lower the fence, only for the step that raised it. */
+    #lowerFence(token: number): void {
+        if (this.#fence?.token === token) {
             this.#fence = undefined;
         }
     }
@@ -525,7 +580,7 @@ export class Sandboxes {
 
         return this.#fence === undefined
             ? undefined
-            : `The sandbox module is being replaced or turned off (${this.#fence}), so no sandbox starts now. Try again once the new one is in.`;
+            : `The sandbox module is being replaced or turned off (${this.#fence.why}), so no sandbox starts now. Try again once the new one is in.`;
     }
 
     // ─── What the app tells us as documents commit ──────────────────────────
@@ -698,11 +753,14 @@ export class Sandboxes {
     }
 
     /** A change that waited asks whether its phase is still its own before it writes: a teardown may have taken the tree. */
-    #assertOwner(root: number, token: number | undefined): void {
-        if (this.#revision(root) !== token) {
+    #assertOwner(root: number, token: number | undefined, generation?: number): void {
+        if (
+            this.#revision(root) !== token ||
+            (generation !== undefined && this.#generation !== generation)
+        ) {
             throw new HttpError(
                 409,
-                "The session was taken over by a provider change meanwhile, so this was not done. Try again.",
+                "The session, or the sandbox module, was changed meanwhile, so this was not done. Try again.",
             );
         }
     }
@@ -1220,6 +1278,27 @@ export class Sandboxes {
      * only writes what it owns (the catalogue entry, the folders, the archive flag) and refuses nothing.
      */
     async admit(tx: Tx, request: Request): Promise<void> {
+        // What depends on the provider is asked again at the end, after every await of the admission: a replacement or a
+        // teardown that began meanwhile refuses the commit.
+        const generation = this.#generation;
+
+        await this.#admit(tx, request);
+
+        if (
+            (request.kind === "join" ||
+                request.kind === "move" ||
+                request.kind === "on" ||
+                request.kind === "off") &&
+            this.#generation !== generation
+        ) {
+            throw new HttpError(
+                409,
+                "The sandbox module changed while this was being admitted, so it was not done. Try again.",
+            );
+        }
+    }
+
+    async #admit(tx: Tx, request: Request): Promise<void> {
         switch (request.kind) {
             case "join":
                 return this.#admitJoin(tx, request);
@@ -1673,12 +1752,17 @@ export class Sandboxes {
         };
 
         let token: number | undefined;
+        // The provider as it was when the change was planned (set in the planning hold): a replacement meanwhile makes what
+        // was admitted stale.
+        let generation = this.#generation;
+        // Whether the tree's VM must stop first: read in the planning hold, never before a wait.
+        let releases = false;
 
         const commit = (request: Request) =>
             this.exclusive(() =>
                 this.#app.harness
                     .commit(async (tx) => {
-                        this.#assertOwner(root, token);
+                        this.#assertOwner(root, token, generation);
 
                         // The entry point's own writes read the state as it was; admission then writes what it owns.
                         const done = await steps.commit(tx);
@@ -1687,6 +1771,10 @@ export class Sandboxes {
                             await this.admit(tx, request);
                         }
 
+                        // After the awaits of admission (a folder check, a sandbox problem), right before the commit lands: the
+                        // tree must still be this change's, and the provider the one it was admitted under.
+                        this.#assertOwner(root, token, generation);
+
                         return done;
                     }, context)
                     .finally(() => this.#audited()),
@@ -1694,18 +1782,15 @@ export class Sandboxes {
 
         // No shortcut for a server with no sandbox: a first turn-on could succeed while this prepares, and the change would end
         // without it. Every change reserves its folders and marks its tree before any preparation.
-        const releases = spec.kind !== "enter" && this.#on.has(root);
-        const reservation: Reservation = {
-            folders: [
-                ...this.#treeFolders(root),
-                ...(spec.kind === "move" ? (spec.early ?? []) : []),
-                ...(spec.kind === "move" && Array.isArray(steps.moves)
-                    ? steps.moves.map((each) => each.cwd)
-                    : []),
-            ],
-            roots: new Set([root]),
-            what: `#${root}`,
-        };
+        const reservation: Reservation = { folders: [], roots: new Set([root]), what: `#${root}` };
+        // The folders of the tree and where it goes, as they are now: read again at every plan, after any wait.
+        const foldersNow = () => [
+            ...this.#treeFolders(root),
+            ...(spec.kind === "move" ? (spec.early ?? []) : []),
+            ...(spec.kind === "move" && Array.isArray(steps.moves)
+                ? steps.moves.map((each) => each.cwd)
+                : []),
+        ];
 
         // `token` (above) is the revision of this change's phase record: only it may end it.
         // (1) Plan, in a short hold: reserve the union of the old and the new group before anything else. A change that
@@ -1713,6 +1798,9 @@ export class Sandboxes {
         // change to end, and plans again. Several sessions of one folder archived together all go through, in order.
         for (;;) {
             const planned = await this.exclusive(() => {
+                // Nothing computed before a wait is used after it: the folders, the sandbox state, and the provider are read
+                // here, in the hold that makes the reservation.
+                reservation.folders = foldersNow();
                 const reserved = this.#reservedProblem(reservation.folders);
 
                 if (reserved !== undefined) {
@@ -1726,6 +1814,8 @@ export class Sandboxes {
                     );
                 }
 
+                releases = spec.kind !== "enter" && this.#on.has(root);
+                generation = this.#generation;
                 this.#reserve(reservation);
                 token = this.#setPhase(root, "moving");
 
@@ -1783,7 +1873,9 @@ export class Sandboxes {
 
             return done;
         } catch (error) {
-            if (released) {
+            // A tree that a provider teardown took over is the teardown's now: this change's reservation goes, so the folder is not
+            // locked after the replacement reopens the tree.
+            if (released && this.#revision(root) === token) {
                 // Section 3: a step that fails after the release leaves the tree suspended, with its old folder and
                 // setting, and its group reserved, until an explicit recovery (`resume`) proves the teardown.
                 this.#setIf(root, token, "suspended", describeError(error));
@@ -2236,6 +2328,7 @@ export class Sandboxes {
         const reservation: Reservation = { folders: [], roots: new Set([root]), what: `#${root}` };
 
         let token: number | undefined;
+        const generation = this.#generation;
 
         // (1) Plan, in a short hold: the preconditions, a fresh trusted-places check, and the reservation.
         await this.exclusive(async () => {
@@ -2293,10 +2386,10 @@ export class Sandboxes {
 
             // (3) Commit, in a short hold: I1 again, and the setting on the root.
             await this.exclusive(() =>
-                app.harness.commit((tx) => {
-                    this.#assertOwner(root, token);
-
-                    return this.admit(tx, { kind: "on", id, user });
+                app.harness.commit(async (tx) => {
+                    this.#assertOwner(root, token, generation);
+                    await this.admit(tx, { kind: "on", id, user });
+                    this.#assertOwner(root, token, generation);
                 }, context),
             );
 
@@ -2339,6 +2432,7 @@ export class Sandboxes {
 
         const reservation: Reservation = { folders: [], roots: new Set([root]), what: `#${root}` };
         let token: number | undefined;
+        const generation = this.#generation;
 
         // (1) Plan: the overlap check is here, before any revoke.
         await this.exclusive(async () => {
@@ -2405,10 +2499,10 @@ export class Sandboxes {
         try {
             // (4) Commit off.
             await this.exclusive(() =>
-                app.harness.commit((tx) => {
-                    this.#assertOwner(root, token);
-
-                    return this.admit(tx, { kind: "off", id, user });
+                app.harness.commit(async (tx) => {
+                    this.#assertOwner(root, token, generation);
+                    await this.admit(tx, { kind: "off", id, user });
+                    this.#assertOwner(root, token, generation);
                 }, context),
             );
             this.#dropReservations(root);
@@ -2438,6 +2532,15 @@ export class Sandboxes {
 
         if (at?.phase !== "suspended") {
             return;
+        }
+
+        // Not while the provider is being torn down or reloaded: a recovery of one tree cannot end a fence it does not own, and a
+        // tree that goes on now would start a VM that the teardown does not see.
+        if (this.#fence !== undefined) {
+            throw new HttpError(
+                409,
+                "The sandbox module is being replaced or reloaded, so a session cannot be resumed now. Try again once that ends.",
+            );
         }
 
         const token = this.#setPhase(root, "turning-off", at.reason);
@@ -2478,12 +2581,6 @@ export class Sandboxes {
         if (this.#revision(root) === token) {
             this.#dropReservations(root);
             this.#setPhase(root, "stable");
-
-            // An explicit recovery with the kept provider ends the fence that a reload left up (`reloadFailed`), when no
-            // teardown or shutdown is going on.
-            if (!this.#stopping && this.#provider !== undefined && this.#fence !== undefined) {
-                this.#fence = undefined;
-            }
         }
     }
 
@@ -2493,11 +2590,15 @@ export class Sandboxes {
      */
     async reloadFailed(owner: string): Promise<void> {
         await this.#serialised(async () => {
-            if (this.#stopping || this.#provider?.owner !== owner || this.#fence === undefined) {
+            const reload = this.#reloading;
+
+            if (this.#stopping || reload === undefined || reload.owner !== owner) {
                 return;
             }
 
-            this.#fence = undefined;
+            // What the new version registered is dropped (it was only staged): the old provider is the one that goes on.
+            this.#reloading = undefined;
+            this.#lowerFence(reload.token);
             await this.reconcile();
         });
     }
@@ -2512,8 +2613,6 @@ export class Sandboxes {
         this.#epoch++;
         this.#wake();
     }
-
-    // ─── Rules, recovery, reload, shutdown ──────────────────────────────────
 
     /**
      * Rules that decide what a VM may do changed (the module's settings, Pi's settings or an MCP file; the files are
@@ -2705,7 +2804,37 @@ export class Sandboxes {
                 return;
             }
 
-            await this.#stop(mine, leave, "the sandbox module is being replaced or turned off");
+            const token = await this.#stop(
+                mine,
+                leave,
+                "the sandbox module is being replaced or turned off",
+            );
+
+            // A reload keeps the provider, and its fence, until the loader commits the reload or reports its failure.
+            this.#reloading = leave ? undefined : { owner, token };
+        });
+    }
+
+    /**
+     * The loader installed the new version of the module that serves the sandbox: the provider it registered (staged until now)
+     * takes the old one's place, the fence of the reload comes down, and the trees that the reload suspended go on.
+     */
+    async reloadCommitted(owner: string): Promise<void> {
+        await this.#serialised(async () => {
+            const reload = this.#reloading;
+
+            if (this.#stopping || reload === undefined || reload.owner !== owner) {
+                return;
+            }
+
+            this.#reloading = undefined;
+
+            if (reload.staged !== undefined) {
+                this.#install(reload.staged);
+            }
+
+            this.#lowerFence(reload.token);
+            await this.reconcile();
         });
     }
 
@@ -2714,7 +2843,7 @@ export class Sandboxes {
         // The flag and the fence go up now, in this tick: no sandboxed admission, turn-on, lease grant, VM launch, or
         // registration from here on. The flag is never cleared; the fence is the teardown's, which a registration clears.
         this.#stopping = true;
-        this.#fence = "the server is stopping";
+        this.#fence = { why: "the server is stopping", token: ++this.#fenceSeq, active: true };
 
         await this.#serialised(async () => {
             try {

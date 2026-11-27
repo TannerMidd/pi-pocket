@@ -90,11 +90,11 @@ test("a reconcile that waited does not overwrite the phase of a transition that 
     const reconciling = app.sandboxes.reconcile();
 
     await check.reached;
-    // A recovery begins while the reconcile waits: its teardown is under way.
+    // Another transition begins while the reconcile waits: a turn-off, whose teardown is under way.
     const release = gate();
 
     provider.holdRelease = release;
-    const resuming = app.sandboxes.resume(a);
+    const resuming = app.sandboxes.turnOff(a, owner(app));
 
     await release.reached;
     assert.equal(app.sandboxes.phaseOf(a), "turning-off");
@@ -110,6 +110,7 @@ test("a reconcile that waited does not overwrite the phase of a transition that 
     release.open();
     await resuming;
     assert.equal(app.sandboxes.phaseOf(a), "stable");
+    assert.equal(app.sandboxes.isOn(a), false);
 });
 
 test("a tree that is not live gains no work or lease while a neighbour's turn-off reserves the folder, and `off` is checked again at the commit", async () => {

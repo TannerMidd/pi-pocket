@@ -149,7 +149,7 @@ test("a provider teardown takes the tree over from a change that waited: that ch
 
     provider.holdRelease = hold;
     const moving = app.commands.configure(a, owner(app), { cwd: to });
-    const refused = assert.rejects(moving, /taken over/);
+    const refused = assert.rejects(moving, /changed meanwhile/);
 
     await hold.reached;
     assert.equal(app.sandboxes.phaseOf(a), "moving");
