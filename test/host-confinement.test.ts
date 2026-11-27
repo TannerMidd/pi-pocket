@@ -169,13 +169,18 @@ test("in a sandboxed session's folder the viewer and the file route never follow
 
     try {
         assert.equal(await text("plain.txt"), "plain\n");
-        assert.equal(await text("inner.txt"), "plain\n", "a link inside the folder is followed");
 
-        for (const path of ["AGENTS.md", "link.txt", "linked-dir/other.txt", "linked-dir"]) {
-            await assert.rejects(text(path), /leads out of the folder/, path);
+        for (const path of [
+            "AGENTS.md",
+            "link.txt",
+            "inner.txt",
+            "linked-dir/other.txt",
+            "linked-dir",
+        ]) {
+            await assert.rejects(text(path), /link, which is not followed/, path);
         }
 
-        await assert.rejects(openInside(work, join(work, "link.txt")), /leads out of the folder/);
+        await assert.rejects(openInside(work, join(work, "link.txt")), /not followed/);
 
         // A path outside the folder that someone names is theirs to read, as before.
         const named = await viewFile(secret, undefined, work);

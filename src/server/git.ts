@@ -19,6 +19,8 @@ export type GitOptions = {
     maxBuffer?: number;
     /** Written to git's standard input. */
     input?: string;
+    /** Give the bytes as a `latin1` string, which loses none: `Buffer.from(out, "latin1")`. */
+    binary?: boolean;
     /** Whether a path names itself (the default), or may be a pattern, as `check-ignore` takes names. */
     literalPaths?: boolean;
 };
@@ -64,6 +66,7 @@ function run(
         timeoutMs = 60_000,
         maxBuffer = 16 * 1024 * 1024,
         input,
+        binary = false,
         literalPaths = true,
     }: GitOptions,
 ): Promise<string> {
@@ -81,6 +84,7 @@ function run(
                 cwd,
                 timeout: timeoutMs,
                 maxBuffer,
+                encoding: binary ? "latin1" : "utf8",
                 env: {
                     ...base,
                     GIT_LITERAL_PATHSPECS: literalPaths ? "1" : "0",

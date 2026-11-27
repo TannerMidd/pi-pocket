@@ -6,13 +6,13 @@
  * themselves as people type: typing never waits on the network.
  */
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
+import type { Dirent, Dir } from "node:fs";
 import { lstat, open, opendir, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
-import { confines, openInside, realInside } from "./confined.ts";
+import { confines, listing, openInside, sandboxedFolder } from "./confined.ts";
 import { git } from "./git.ts";
 import { type ReadableFile, withUploadBytes } from "./upload-content.ts";
 
@@ -88,6 +88,32 @@ async function gitFiles(cwd: string, timeoutMs = 10_000): Promise<string | undef
 const DIR_EXTRA = 1000;
 
 /**
+ * A folder open for listing. With `folder`, the folder of a sandboxed session that `path` lies in, it is the folder
+ * that a walk of the names reached, never the path opened again (`confined.ts`).
+ */
+async function openFolder(
+    path: string,
+    folder?: string,
+): Promise<{ dir: Dir; release: () => Promise<void> }> {
+    if (folder === undefined) {
+        return { dir: await opendir(path, { bufferSize: 256 }), release: async () => {} };
+    }
+
+    const held = await openInside(folder, path);
+
+    try {
+        return {
+            dir: await opendir(listing(held), { bufferSize: 256 }),
+            release: () => held.close(),
+        };
+    } catch (error) {
+        await held.close();
+
+        throw error;
+    }
+}
+
+/**
  * At most `limit` entries of a folder, read as they come: a folder of a million files costs no more than `limit`.
  * `more` says some were left. Stops early, with `more`, past `deadline`.
  */
@@ -96,29 +122,34 @@ async function readSome(
     limit: number,
     deadline = Number.POSITIVE_INFINITY,
     allow?: FileFilter["allow"],
+    folder?: string,
 ): Promise<{ entries: Dirent[]; more: boolean }> {
     const entries: Dirent[] = [];
-    const dir = await opendir(path, { bufferSize: 256 });
+    const { dir, release } = await openFolder(path, folder);
     let scanned = 0;
 
-    // Leaving the loop early closes the folder.
-    for await (const entry of dir) {
-        if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
-            return { entries, more: true };
+    try {
+        // Leaving the loop early closes the folder.
+        for await (const entry of dir) {
+            if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
+                return { entries, more: true };
+            }
+
+            if (allow !== undefined && !(await allow(join(path, entry.name)))) {
+                continue;
+            }
+
+            if (entries.length >= limit) {
+                return { entries, more: true };
+            }
+
+            entries.push(entry);
         }
 
-        if (allow !== undefined && !(await allow(join(path, entry.name)))) {
-            continue;
-        }
-
-        if (entries.length >= limit) {
-            return { entries, more: true };
-        }
-
-        entries.push(entry);
+        return { entries, more: false };
+    } finally {
+        await release();
     }
-
-    return { entries, more: false };
 }
 
 /** The files under `cwd`, nearest first, without hidden folders or `SKIP`: at most `max`, found within `ms`. */
@@ -128,6 +159,7 @@ async function walkFiles(
     ms: number,
 ): Promise<{ files: string[]; truncated: boolean }> {
     const deadline = Date.now() + ms;
+    const pinned = sandboxedFolder(cwd) ? cwd : undefined;
     const files: string[] = [];
     const queue = [""];
     let truncated = false;
@@ -145,6 +177,8 @@ async function walkFiles(
                 dir === "" ? cwd : `${cwd}/${dir}`,
                 max - files.length + DIR_EXTRA,
                 deadline,
+                undefined,
+                pinned,
             );
         } catch {
             continue;
@@ -211,12 +245,17 @@ type WalkEntry = { name: string; dir: boolean };
 async function* candidates(
     dir: string,
     known: readonly string[] | undefined,
+    pinned?: string,
 ): AsyncGenerator<WalkEntry | undefined> {
     if (known === undefined) {
-        const folder = await opendir(dir, { bufferSize: 256 });
+        const { dir: folder, release } = await openFolder(dir, pinned);
 
-        for await (const entry of folder) {
-            yield { name: entry.name, dir: entry.isDirectory() };
+        try {
+            for await (const entry of folder) {
+                yield { name: entry.name, dir: entry.isDirectory() };
+            }
+        } finally {
+            await release();
         }
     } else {
         const seen = new Set<string>();
@@ -263,6 +302,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
     const files: string[] = [];
     const deadline = Date.now() + WALK_MS;
     const root = resolve(cwd);
+    const pinned = sandboxedFolder(root) ? root : undefined;
 
     if (filter.children(root)?.length === 0) {
         return { files, truncated: false };
@@ -337,7 +377,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
         };
 
         try {
-            for await (const entry of candidates(dir, known)) {
+            for await (const entry of candidates(dir, known, pinned)) {
                 if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
                     await flush();
 
@@ -566,43 +606,52 @@ export async function viewFile(
         return withUploadBytes(file, async (bytes) => viewBytes(file.path, bytes));
     }
 
-    // In the folder of a sandboxed session a link that leads out of it is not followed (`confined.ts`).
-    const confined = folder !== undefined && confines(folder, file);
-    const real = confined ? await realInside(folder, file) : file;
-    const info = await stat(real);
-
-    if (info.isDirectory()) {
-        const { entries, more } = await readSome(
-            resolve(real),
-            VIEW_ENTRIES,
-            allow && Date.now() + WALK_MS,
-            allow,
-        );
-        const listed = entries
-            .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
-            .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
-
-        return { kind: "folder", entries: listed, truncated: more };
-    }
-
-    // A pipe or a device would never finish reading: only regular files are opened.
-    if (!info.isFile()) {
-        return { kind: "other", size: info.size };
-    }
-
-    if (IMAGE_EXTENSIONS.test(file)) {
-        return { kind: "image", size: info.size };
-    }
-
-    const handle = confined ? await openInside(folder, file) : await open(file, "r");
+    // In the folder of a sandboxed session no link is followed, and what is opened is what the walk of the names
+    // reached (`confined.ts`).
+    const pinned = folder !== undefined && confines(folder, file) ? folder : undefined;
+    const handle = pinned === undefined ? undefined : await openInside(pinned, file);
 
     try {
-        const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        const info = handle === undefined ? await stat(file) : await handle.stat();
 
-        return viewBytes(file, buffer.subarray(0, bytesRead), info.size);
+        if (info.isDirectory()) {
+            const { entries, more } = await readSome(
+                resolve(file),
+                VIEW_ENTRIES,
+                allow && Date.now() + WALK_MS,
+                allow,
+                pinned,
+            );
+            const listed = entries
+                .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
+                .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+
+            return { kind: "folder", entries: listed, truncated: more };
+        }
+
+        // A pipe or a device would never finish reading: only regular files are opened.
+        if (!info.isFile()) {
+            return { kind: "other", size: info.size };
+        }
+
+        if (IMAGE_EXTENSIONS.test(file)) {
+            return { kind: "image", size: info.size };
+        }
+
+        const reader = handle ?? (await open(file, "r"));
+
+        try {
+            const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
+            const { bytesRead } = await reader.read(buffer, 0, buffer.length, 0);
+
+            return viewBytes(file, buffer.subarray(0, bytesRead), info.size);
+        } finally {
+            if (reader !== handle) {
+                await reader.close();
+            }
+        }
     } finally {
-        await handle.close();
+        await handle?.close();
     }
 }
 

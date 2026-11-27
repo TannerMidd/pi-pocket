@@ -7,6 +7,7 @@ import { realpathSync } from "node:fs";
 import { lstat, rm } from "node:fs/promises";
 import { devNull } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { sandboxedFolder, unlinkInside, writeInside } from "./confined.ts";
 import { type GitOptions, git as runGit } from "./git.ts";
 import type { ClientEntry } from "./projection.ts";
 
@@ -470,8 +471,26 @@ export async function revertFile(cwd: string, path: string, onlyHere = false): P
         throw new Error("A renamed file changes two paths: undo it with git.");
     }
 
+    // In the folder of a sandboxed session the guest may swap a folder for a link while this runs: the file is
+    // removed, and written back, by the walk of its names that `confined.ts` makes, never by its path.
+    const pinned = sandboxedFolder(root);
+
+    const remove = async () => {
+        try {
+            if (pinned) {
+                unlinkInside(root, join(root, path));
+            } else {
+                await rm(join(root, path), { force: true });
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+        }
+    };
+
     if (kind === "new") {
-        await rm(join(root, path), { force: true });
+        await remove();
 
         return kind;
     }
@@ -490,19 +509,40 @@ export async function revertFile(cwd: string, path: string, onlyHere = false): P
     if (kind === "added" && !inHead) {
         // Added since the last commit: out of the index, then gone.
         await git(root, ["rm", "--cached", "--quiet", "--force", "--", path]);
-        await rm(join(root, path), { force: true });
+        await remove();
 
         return kind;
     }
 
     if (!hasHead) {
         await git(root, ["rm", "--cached", "--quiet", "--force", "--", path]);
-        await rm(join(root, path), { force: true });
+        await remove();
 
         return kind;
     }
 
-    await git(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path]);
+    if (!pinned) {
+        await git(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path]);
+
+        return kind;
+    }
+
+    // The index by git, the file by its blob: git writes a work tree by path.
+    const [mode, , id] = (await git(root, ["ls-tree", "HEAD", "--", path])).split(/[ \t]/);
+
+    if (mode !== "100644" && mode !== "100755") {
+        throw new Error("This path is a link or a folder in the last commit: undo it with git.");
+    }
+
+    const blob = await git(root, ["cat-file", "blob", id!], { binary: true, maxBuffer: 1 << 30 });
+
+    writeInside(
+        root,
+        join(root, path),
+        Buffer.from(blob, "latin1"),
+        mode === "100755" ? 0o755 : 0o644,
+    );
+    await git(root, ["restore", "--source=HEAD", "--staged", "--", path]);
 
     return kind;
 }

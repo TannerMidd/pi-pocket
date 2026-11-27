@@ -6,8 +6,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { copyFile, lstat, mkdir } from "node:fs/promises";
+import { copyFile, lstat, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { confines, readInside } from "./confined.ts";
 import { describe, HttpError } from "./errors.ts";
 import { git, GitError } from "./git.ts";
 import { workspaceScheme } from "./paths.ts";
@@ -56,7 +57,21 @@ async function copyNewFiles(root: string, into: string): Promise<string[]> {
         }
 
         await mkdir(dirname(join(into, path)), { recursive: true });
-        await copyFile(from, join(into, path));
+
+        if (confines(root, from)) {
+            // In the folder of a sandboxed session the file is read by the walk of its names (`confined.ts`).
+            const bytes = await readInside(root, from, MAX_COPIED_BYTES);
+
+            if (bytes === undefined) {
+                skipped.push(path);
+                continue;
+            }
+
+            await writeFile(join(into, path), bytes, { mode: stats.mode & 0o777 });
+        } else {
+            await copyFile(from, join(into, path));
+        }
+
         copied += stats.size;
     }
 
