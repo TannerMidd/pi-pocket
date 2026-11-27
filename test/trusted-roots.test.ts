@@ -2,6 +2,8 @@
 // writes: a read-write sandbox is refused while a link under such a place leads into the folder, and a module in such a
 // folder, or that imports from one, is not loaded.
 import assert from "node:assert/strict";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,14 +11,18 @@ import { after, test } from "node:test";
 import { linkInto, onSandboxedFolders } from "../src/server/confined.ts";
 import { documentImports } from "../src/server/extension-document-imports.ts";
 import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
-import { cleanUp, newSession, openApp, owner, root, scriptedModel } from "./helpers.ts";
+import { SandboxDoc } from "../src/server/docs.ts";
+import { cleanUp, context, newSession, openApp, owner, root, scriptedModel } from "./helpers.ts";
 
 after(cleanUp);
 
 let opened = 0;
 
+let driver: FakeDriver;
+
 async function app() {
-    useDriver(new FakeDriver());
+    driver = new FakeDriver();
+    useDriver(driver);
     const fresh = await openApp(
         scriptedModel(),
         join(root, `data-trusted-${++opened}`),
@@ -199,3 +205,133 @@ test(
         }
     },
 );
+
+test("a link under a folder that a trusted link names is found: its content is under the trusted place", async () => {
+    const shared = project("trusted-nested");
+    const top = join(root, "trusted-nested-roots");
+    const outside = join(root, "trusted-nested-outside");
+
+    mkdirSync(join(top, "skills"), { recursive: true });
+    mkdirSync(join(outside, "tool"), { recursive: true });
+    symlinkSync(join(outside, "tool"), join(top, "skills", "tool"));
+    symlinkSync(join(shared, "example.ts"), join(outside, "tool", "SKILL.md"));
+
+    assert.deepEqual(await linkInto([top], shared), { link: join(outside, "tool", "SKILL.md") });
+});
+
+test("links that make a loop end the look: each folder is looked at once", async () => {
+    const shared = project("trusted-loop");
+    const top = join(root, "trusted-loop-roots");
+    const other = join(root, "trusted-loop-other");
+
+    mkdirSync(join(top, "a"), { recursive: true });
+    mkdirSync(other, { recursive: true });
+    symlinkSync(top, join(top, "a", "back"));
+    symlinkSync(join(top, "a"), join(top, "self"));
+    symlinkSync(other, join(top, "away"));
+    symlinkSync(top, join(other, "home"));
+    writeFileSync(join(other, "file"), "x");
+
+    assert.equal(await linkInto([top], shared), undefined);
+    // And it counts what it visits against the cap, the folder outside too.
+    assert.match(
+        ((await linkInto([top], shared, { limit: 3 })) as { unfinished: string }).unfinished,
+        /more than 3 entries/,
+    );
+});
+
+/**
+ * A server whose first look at the trusted places is held: a session that was sandboxed before is noted while it is held,
+ * and its folder has a link under the drop-in folder, so that the look ends in a refusal.
+ */
+async function firstLook() {
+    const running = await app();
+    const shared = project(`trusted-first-${opened}`);
+
+    mkdirSync(join(running.dataDir, "extensions"), { recursive: true });
+    symlinkSync(join(shared, "example.ts"), join(running.dataDir, "extensions", "example.ts"));
+    const id = await newSession(running, shared);
+    const first = running.trustedFolders[0]!;
+    const original = fsp.readdir;
+    let reach!: () => void;
+    let open!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    const held = new Promise<void>((resolve) => (open = resolve));
+    let taken = false;
+
+    (fsp as unknown as { readdir: unknown }).readdir = async (...args: unknown[]) => {
+        if (!taken && args[0] === first) {
+            taken = true;
+            reach();
+            await held;
+        }
+
+        return (original as (...call: unknown[]) => unknown)(...args);
+    };
+
+    syncBuiltinESMExports();
+
+    // Stored as sandboxed before: the setting is in, and nothing asked whether the folder may be shared.
+    await running.harness.commit(async (tx) => {
+        Object.assign(await tx.doc(SandboxDoc, id), { on: true });
+    }, context);
+    await reached;
+
+    return {
+        running,
+        shared,
+        id,
+        open,
+        restore: () => {
+            open();
+            (fsp as unknown as { readdir: unknown }).readdir = original;
+            syncBuiltinESMExports();
+        },
+    };
+}
+
+test("a browser launch while the first look is under way starts no VM when the look refuses", async () => {
+    const { running, id, open, restore } = await firstLook();
+
+    try {
+        const launch = running.sandboxes
+            .browserFor(Number(id))!
+            .launch([])
+            .then(
+                () => "launched",
+                (error: unknown) => String(error),
+            );
+
+        open();
+        assert.match(await launch, /being looked at|reaches into/);
+        assert.equal(driver.log.started.length, 0, "a VM started for a folder that was refused");
+    } finally {
+        restore();
+        useDriver(undefined);
+        await running.close();
+    }
+});
+
+test("an environment made while the first look is under way starts no VM when the look refuses", async () => {
+    const { running, shared, id, open, restore } = await firstLook();
+
+    try {
+        const env = running.sandboxes.env(id, shared);
+
+        open();
+        await running.sandboxes.settled(id);
+        const result = await env.exec("true", {}, context);
+
+        assert.equal(result.ok, false);
+        assert.equal(driver.log.started.length, 0, "a VM started for a folder that was refused");
+        // And an environment made after the look says why.
+        const later = await running.sandboxes.env(id, shared).exec("true", {}, context);
+
+        assert.equal(later.ok, false);
+        assert.match(String(later.ok ? "" : later.error.message), /reaches into/);
+    } finally {
+        restore();
+        useDriver(undefined);
+        await running.close();
+    }
+});

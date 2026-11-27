@@ -20,7 +20,7 @@ import {
     unlinkSync,
     writeSync,
 } from "node:fs";
-import { open, readdir, type FileHandle } from "node:fs/promises";
+import { open, readdir, stat, type FileHandle } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
@@ -158,8 +158,9 @@ export type LinkFound = { link: string } | { unfinished: string };
 /**
  * A link under `roots` (or a root that is one) that leads into `folder`, or through it. These are the places that the
  * server, or Pi, loads code and trusted settings from: a guest that can write the folder would write there. Each link
- * is walked, every name on its way, with the folder known by its inode. The roots are walked whole and no link is
- * followed while they are. A look that does not finish (more than `limit` entries, more than `ms` milliseconds, or a
+ * is walked, every name on its way, with the folder known by its inode. The roots are walked whole; a link to a folder
+ * outside brings that folder in as well (once, whichever way it is reached), and the links in it are walked. A look
+ * that does not finish (more than `limit` entries, more than `ms` milliseconds, or a
  * folder that cannot be read) is not clean: it answers why it stopped, and the caller refuses. Undefined: none, and done.
  */
 export async function linkInto(
@@ -179,6 +180,8 @@ export async function linkInto(
 
     const folders = [{ path: folder, key }];
     const deadline = Date.now() + ms;
+    // Each folder is looked at once, whichever way it is reached: a link in a loop ends the walk of it.
+    const seen = new Set<string>();
     let looked = 0;
 
     for (const root of roots) {
@@ -196,6 +199,15 @@ export async function linkInto(
             let entries;
 
             try {
+                const info = await stat(path, { bigint: true });
+                const id = `${info.dev}:${info.ino}`;
+
+                // What a link names may be a file: its link has been walked. A folder is looked at once.
+                if (!info.isDirectory() || seen.has(id)) {
+                    continue;
+                }
+
+                seen.add(id);
                 entries = await readdir(path, { withFileTypes: true });
             } catch (error) {
                 // A root that is not there has nothing in it; a folder that cannot be read may hold anything.
@@ -216,8 +228,15 @@ export async function linkInto(
                 const child = join(path, entry.name);
 
                 if (entry.isSymbolicLink()) {
-                    if ("entered" in walk(child, folders)) {
+                    const found = walk(child, folders);
+
+                    if ("entered" in found) {
                         return { link: child };
+                    }
+
+                    // A link to a folder outside brings that folder's content under the trusted place, links in it too.
+                    if (found.at !== undefined) {
+                        pending.push(found.at);
                     }
                 } else if (entry.isDirectory()) {
                     pending.push(child);

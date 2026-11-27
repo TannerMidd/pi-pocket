@@ -210,6 +210,9 @@ export function reloadedFolderProblem(
     return undefined;
 }
 
+const waiting = (cwd: string) =>
+    `The places that this server loads code from are being looked at for links into ${cwd}: try again in a moment.`;
+
 /** The environment of a sandboxed session that cannot run anything: every call fails, and says why. */
 export function failedEnv(cwd: string, message: string): ExecutionEnv {
     const file = () => Promise.resolve(err(new FileError("permission_denied", message)));
@@ -315,9 +318,7 @@ export class Sandboxes {
             void this.#look(cwd);
         }
 
-        return known === undefined
-            ? `The places that this server loads code from are being looked at for links into ${cwd}: try again in a moment.`
-            : known.problem;
+        return known === undefined ? waiting(cwd) : known.problem;
     }
 
     /** Look for links into `cwd` under the trusted folders: one look at a time for a folder, and its answer is kept. */
@@ -339,7 +340,12 @@ export class Sandboxes {
                 `The places that this server or Pi loads code or settings from could not be looked at for links into ${cwd} (${error instanceof Error ? error.message : String(error)}), so a sandbox that can write the folder is not allowed.`,
         );
 
-        this.#linked.set(cwd, { at: known?.at ?? 0, problem: known?.problem, looking });
+        // With no answer yet, the answer meanwhile is the refusal: a look that has not finished is never clean.
+        this.#linked.set(cwd, {
+            at: known?.at ?? 0,
+            problem: known === undefined ? waiting(cwd) : known.problem,
+            looking,
+        });
         void looking.then((problem) => {
             this.#linked.set(cwd, { at: Date.now(), problem });
         });
@@ -480,6 +486,13 @@ export class Sandboxes {
                             );
                         }
 
+                        // What was asked when the launcher was made may have changed (the look for links ended).
+                        const problem = this.#folderProblem(app.cwdOf(id));
+
+                        if (problem !== undefined) {
+                            throw new Error(problem);
+                        }
+
                         return browser.launch(flags);
                     }),
             };
@@ -523,11 +536,38 @@ export class Sandboxes {
         }
 
         try {
-            return provider.env({
+            const env = provider.env({
                 conversationId: id,
                 rootId: app.rootOf(id),
                 cwd,
                 uploadDir: app.workspace.uploadDirectory(app.rootOf(id)),
+            });
+
+            // Each call asks again before it can start the VM: what was clean when the environment was made may not be.
+            return new Proxy(env, {
+                get: (target, property) => {
+                    const value: unknown = Reflect.get(target, property, target);
+
+                    if (typeof value !== "function" || typeof property !== "string") {
+                        return value;
+                    }
+
+                    return (...args: unknown[]) => {
+                        const now = this.#folderProblem(cwd);
+
+                        return now === undefined
+                            ? (value as (...call: unknown[]) => unknown).apply(target, args)
+                            : (
+                                  Reflect.get(
+                                      failedEnv(
+                                          cwd,
+                                          `The sandbox cannot share this folder, so nothing ran: ${now}`,
+                                      ),
+                                      property,
+                                  ) as ((...call: unknown[]) => unknown) | undefined
+                              )?.(...args);
+                    };
+                },
             });
         } catch (error) {
             return failedEnv(
@@ -684,12 +724,25 @@ export class Sandboxes {
             throw new HttpError(409, problem);
         }
 
-        return provider.jobs({
+        const jobs = provider.jobs({
             conversationId: id,
             rootId: app.rootOf(id),
             cwd,
             uploadDir: app.workspace.uploadDirectory(app.rootOf(id)),
         });
+
+        return {
+            ...jobs,
+            start: async (request) => {
+                const now = this.#folderProblem(cwd);
+
+                if (now !== undefined) {
+                    throw new HttpError(409, now);
+                }
+
+                return jobs.start(request);
+            },
+        };
     }
 
     /**
