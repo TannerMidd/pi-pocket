@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -44,7 +44,9 @@ function walk(dir: string): string[] {
 
 /** The files as they are written. Every check reads their syntax tree, which has no comments or strings in its code. */
 const raws = new Map(
-    walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")] as const),
+    walk(ROOT).map(
+        (file) => [relative(ROOT, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
+    ),
 );
 
 const modulesOf = modulesIn;

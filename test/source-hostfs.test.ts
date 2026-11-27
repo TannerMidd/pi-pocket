@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { test } from "node:test";
 import { factsIn, modulesIn } from "./fs-scan.ts";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,12 @@ function walk(dir: string): string[] {
 }
 
 /** The files as they are written: module names are read from their syntax tree, which ignores comments itself. */
-const raws = new Map(walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")]));
+const raws = new Map(
+    walk(ROOT).map((file) => [
+        relative(ROOT, file).split(sep).join("/"),
+        readFileSync(file, "utf8"),
+    ]),
+);
 
 /** Whether the file loads one of the modules (`names`, with or without `node:`), read from its syntax tree. */
 const imports = (text: string, names: string[]): boolean => {

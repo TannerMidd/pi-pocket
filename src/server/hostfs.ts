@@ -1722,9 +1722,6 @@ function climbTo(path: string, key: string): boolean {
 /** Owns which folders sandboxed trees use, and makes folders and places. */
 export class Hostfs {
     readonly #view: SandboxView;
-    /** The identity of each nested folder at its first look, by stated path. */
-    readonly #roots = new Map<string, { dev: bigint; ino: bigint }>();
-
     readonly #maxPins: number;
     /**
      * A descriptor held open for each pinned sandboxed root (the sandboxed folders, and the nested folders pinned at their
@@ -1732,17 +1729,18 @@ export class Hostfs {
      * by a replacement folder: what a walk compares a root with is still the admitted folder. Plain folders hold none.
      */
     readonly #held = new Map<string, { fd: number; holders: Set<string> }>();
-    /** The key of each nested pin, by stated path, for teardown. */
-    readonly #heldNested = new Map<string, string>();
-    /** The identity of each nested pin, by stated path: the identity a folder for a walk starts with. */
-    readonly #pins = new Map<string, { dev: bigint; ino: bigint }>();
     /**
-     * The identity each nested pin must have, by its position: the sandboxed folder it lies in (by identity) and the names
-     * below it. A place carries the pins of the positions it passes through, whatever label or alias it was reached by.
+     * One owner for each pinned nested folder, by its position: the sandboxed folder it lies in (by identity) and the names
+     * below it. The owner has the identity the folder was admitted with, and the paths (aliases too) that hold it. Every
+     * alias points at the same owner, so an identity is never overwritten while it has holders, and a position is dropped
+     * only when its last holder ends.
      */
-    readonly #positions = new Map<string, { dev: bigint; ino: bigint }>();
-    /** The position of each nested pin, by stated path, for teardown. */
-    readonly #posOf = new Map<string, string>();
+    readonly #owners = new Map<
+        string,
+        { identity: { dev: bigint; ino: bigint }; key: string; paths: Set<string> }
+    >();
+    /** The position of each path that holds a nested pin. */
+    readonly #byPath = new Map<string, string>();
 
     /**
      * `maxPins`: how many root descriptors are held at once, sandboxed folders and nested pins together (default 256,
@@ -1761,13 +1759,17 @@ export class Hostfs {
         this.#maxPins = options.maxPins ?? 256;
 
         for (const pin of options.positions ?? []) {
-            this.#positions.set(pin.position, { dev: pin.dev, ino: pin.ino });
+            this.#owners.set(pin.position, {
+                identity: { dev: pin.dev, ino: pin.ino },
+                key: keyOf(pin),
+                paths: new Set(),
+            });
         }
     }
 
     /** @internal: every pinned position, for a worker, which descends by identity as the owner does. */
     positions(): { position: string; dev: bigint; ino: bigint }[] {
-        return [...this.#positions].map(([position, identity]) => ({ position, ...identity }));
+        return [...this.#owners].map(([position, owner]) => ({ position, ...owner.identity }));
     }
 
     /** How many root descriptors are held now. */
@@ -1775,27 +1777,31 @@ export class Hostfs {
         return this.#held.size;
     }
 
-    /** Admission teardown: the folder's pinned identity goes, and its descriptor with it unless another holder has it. */
+    /**
+     * Admission teardown: the path lets go of its position. The position, and its descriptor with it, go when the last path
+     * that holds it has let go (an alias is a holder too), and the descriptor only if the view does not hold it as well.
+     */
     unpinRoot(path: string): void {
         const target = resolve(path);
-        const key = this.#heldNested.get(target);
 
         // The view's holds are brought up to date first: a root that is still listed keeps its descriptor.
         this.#folders();
-        this.#roots.delete(target);
-        this.#heldNested.delete(target);
-        this.#pins.delete(target);
 
-        const position = this.#posOf.get(target);
+        const position = this.#byPath.get(target);
 
-        this.#posOf.delete(target);
+        this.#byPath.delete(target);
 
-        if (position !== undefined) {
-            this.#positions.delete(position);
+        const owner = position === undefined ? undefined : this.#owners.get(position);
+
+        if (position === undefined || owner === undefined) {
+            return;
         }
 
-        if (key !== undefined) {
-            this.#drop(key, `nested:${target}`);
+        owner.paths.delete(target);
+
+        if (owner.paths.size === 0) {
+            this.#owners.delete(position);
+            this.#drop(owner.key, `pos:${position}`);
         }
     }
 
@@ -1811,11 +1817,8 @@ export class Hostfs {
             }
         }
 
-        this.#roots.clear();
-        this.#heldNested.clear();
-        this.#pins.clear();
-        this.#positions.clear();
-        this.#posOf.clear();
+        this.#owners.clear();
+        this.#byPath.clear();
     }
 
     /**
@@ -1920,13 +1923,11 @@ export class Hostfs {
         );
         const startKey = keyOf(at.start);
 
-        for (let depth = 1; depth <= at.parts.length && this.#positions.size > 0; depth++) {
-            const identity = this.#positions.get(
-                `${startKey}\0${at.parts.slice(0, depth).join("/")}`,
-            );
+        for (let depth = 1; depth <= at.parts.length && this.#owners.size > 0; depth++) {
+            const owner = this.#owners.get(`${startKey}\0${at.parts.slice(0, depth).join("/")}`);
 
-            if (identity !== undefined && !found.has(depth)) {
-                found.set(depth, { depth, ...identity });
+            if (owner !== undefined && !found.has(depth)) {
+                found.set(depth, { depth, ...owner.identity });
             }
         }
 
@@ -1940,6 +1941,18 @@ export class Hostfs {
                 !found.has(names.length) &&
                 names.every((name, index) => name === at.parts[index])
             ) {
+                // The walk crosses a listed root: it must be held, or the operation is refused (a root that cannot be held
+                // could have its inode number reused by a replacement).
+                this.#holdStart(listed);
+
+                if (!this.#held.has(keyOf(listed))) {
+                    throw failure(
+                        "EMFILE",
+                        `${resolve(listed.path)} cannot be admitted: too many roots are pinned`,
+                        listed.path,
+                    );
+                }
+
                 found.set(names.length, { depth: names.length, dev: listed.dev, ino: listed.ino });
             }
         }
@@ -1986,76 +1999,68 @@ export class Hostfs {
      */
     traverse(path: string): FolderRef {
         const target = resolve(path);
+        const position = this.#byPath.get(target);
 
-        return new FolderRef(this, target, this.#pins.get(target));
+        return new FolderRef(
+            this,
+            target,
+            position === undefined ? undefined : this.#owners.get(position)?.identity,
+        );
     }
 
     /** A folder as a session works in it. */
     folder(path: string, pinned?: { dev: bigint; ino: bigint }): FolderRef {
         const target = resolve(path);
-        const known = pinned ?? this.#roots.get(target);
-        const ref = new FolderRef(this, target, known);
+        const here = this.#folders();
+        const where = here.length > 0 ? this.#locate(target, here, true) : undefined;
 
-        // A folder nested in a sandboxed one is pinned by admission (`pinned`) or by the first look: its identity is kept,
-        // and so is a descriptor, so the inode cannot be reused by a replacement. The guest can replace the folder, and a
-        // replacement is then not the root.
-        const identity = known ?? ref.identity;
-
-        if (identity !== undefined && ref.identity !== undefined) {
-            const here = this.#folders();
-
-            if (here.length > 0) {
-                const where = this.#locate(target, here, true);
-
-                if (where.kind === "confined" && where.parts.length > 0) {
-                    const key = keyOf(identity);
-
-                    this.#holdStart(where.start);
-
-                    if (!this.#held.has(key) || !this.#heldNested.has(target)) {
-                        if (!this.#held.has(key)) {
-                            // Opened by the walk from the sandboxed folder, and it must be the identity pinned.
-                            const { dir, release } = pinParent(
-                                where.start,
-                                [...where.parts, ""],
-                                target,
-                                false,
-                            );
-
-                            release(false);
-
-                            const info = fstatSync(dir, { bigint: true });
-
-                            if (keyOf(info) !== key) {
-                                closeSync(dir);
-
-                                throw failure(
-                                    "ESTALE",
-                                    `${target} is no longer the folder it was admitted as`,
-                                    target,
-                                );
-                            }
-
-                            this.#keep(key, dir, `nested:${target}`, target);
-                        } else {
-                            this.#keep(key, undefined, `nested:${target}`, target);
-                        }
-
-                        this.#heldNested.set(target, key);
-                        this.#pins.set(target, identity);
-
-                        const position = `${keyOf(where.start)}\0${where.parts.join("/")}`;
-
-                        this.#positions.set(position, identity);
-                        this.#posOf.set(target, position);
-                    }
-
-                    if (known === undefined) {
-                        this.#roots.set(target, ref.identity);
-                    }
-                }
-            }
+        // Not nested in a sandboxed folder: nothing is pinned or held, as for any plain folder.
+        if (where === undefined || where.kind !== "confined" || where.parts.length === 0) {
+            return new FolderRef(this, target, pinned);
         }
+
+        // A folder nested in a sandboxed one has one owner for its position, whatever path (an alias too) reaches it. The
+        // owner's identity is what it was admitted with: a later look reuses it, a mismatch with admission is refused before
+        // anything else is held, and an identity is never overwritten while the position has holders.
+        const position = `${keyOf(where.start)}\0${where.parts.join("/")}`;
+        const owner = this.#owners.get(position);
+
+        if (owner !== undefined) {
+            if (pinned !== undefined && keyOf(pinned) !== owner.key) {
+                throw failure("ESTALE", `${target} is not the folder it was admitted as`, target);
+            }
+
+            owner.paths.add(target);
+            this.#byPath.set(target, position);
+
+            return new FolderRef(this, target, owner.identity);
+        }
+
+        const ref = new FolderRef(this, target, pinned);
+        const identity = pinned ?? ref.identity;
+
+        if (identity === undefined || ref.identity === undefined) {
+            return ref;
+        }
+
+        const key = keyOf(identity);
+
+        this.#holdStart(where.start);
+
+        // Opened by the walk from the sandboxed folder: it must be the identity that is pinned.
+        const { dir, release } = pinParent(where.start, [...where.parts, ""], target, false);
+
+        release(false);
+
+        if (keyOf(fstatSync(dir, { bigint: true })) !== key) {
+            closeSync(dir);
+
+            throw failure("ESTALE", `${target} is no longer the folder it was admitted as`, target);
+        }
+
+        this.#keep(key, dir, `pos:${position}`, target);
+        this.#owners.set(position, { identity, key, paths: new Set([target]) });
+        this.#byPath.set(target, position);
 
         return ref;
     }

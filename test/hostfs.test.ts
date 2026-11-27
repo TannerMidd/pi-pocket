@@ -455,7 +455,12 @@ test(
             await assert.rejects(async () => run(), { code: "ESTALE" });
         }
 
-        // A new FolderRef without the pin is a new admission (the app keeps the first look, or core state's pin).
+        // A new FolderRef for the same position has the identity it was admitted with, not the replacement's. Only
+        // teardown (`unpinRoot`) lets a new admission take the name.
+        assert.throws(() => hostfs.readText(host.folder(nested).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        host.unpinRoot(nested);
         assert.equal(hostfs.readText(host.folder(nested).at("deep.txt")), "forged");
         rmSync(nested, { recursive: true });
         symlinkSync(outside, nested);
@@ -1128,3 +1133,74 @@ test(
         host.close();
     },
 );
+
+test(
+    "one owner for each position: an alias reuses the identity, and teardown of one path keeps the position for the others",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+        const alias = join(root, "..", "alias");
+
+        symlinkSync(root, alias);
+
+        const admitted = statSync(nested, { bigint: true });
+        const first = host.folder(nested);
+
+        assert.equal(hostfs.readText(first.at("deep.txt")), "deep");
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+
+        // The alias reaches the same position: it takes the identity of the owner, it does not make the replacement the root.
+        const viaAlias = host.folder(join(alias, "sub"));
+
+        assert.throws(() => hostfs.readText(viaAlias.at("deep.txt")), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+        // An admission that names another identity for the position is refused before anything is held.
+        const held = host.heldRoots;
+
+        assert.throws(
+            () => host.folder(join(alias, "sub"), { dev: admitted.dev + 1n, ino: admitted.ino }),
+            { code: "ESTALE" },
+        );
+        assert.equal(host.heldRoots, held);
+
+        // Two paths hold the position: ending one keeps it, ending the last drops it.
+        host.unpinRoot(join(alias, "sub"));
+        assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+        host.unpinRoot(nested);
+        assert.equal(hostfs.readText(host.at(root).child("sub").child("deep.txt")), "forged");
+        host.close();
+    },
+);
+
+test("a walk that crosses a listed root that cannot be held is refused", { skip: !linux }, (t) => {
+    const { root } = lab(t);
+    const outer = statSync(root, { bigint: true });
+    const inner = statSync(join(root, "sub"), { bigint: true });
+    const host = new hostfs.Hostfs(
+        {
+            sandboxedFolders: () => [
+                { path: root, dev: outer.dev, ino: outer.ino },
+                { path: join(root, "sub"), dev: inner.dev, ino: inner.ino },
+            ],
+        },
+        { maxPins: 1 },
+    );
+
+    // The table holds the outer root only. A path in the outer root that is not in the inner one still works.
+    assert.equal(hostfs.readText(host.at(join(root, "ok.txt"))), "ok");
+    // A path that crosses the inner root is refused: its inode could be reused, as nothing holds it.
+    assert.throws(() => hostfs.readText(host.at(join(root, "sub", "deep.txt"))), {
+        code: "EMFILE",
+    });
+    assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+        code: "EMFILE",
+    });
+    host.close();
+});
