@@ -140,6 +140,11 @@ async function fresh(): Promise<void> {
             }
         }
     `);
+    // A layer still open (a sheet) closes by going back in history, which the page starts a moment after the viewport
+    // changed. A traversal that the old page queues while this goes to "/" lands after it, on the session before it:
+    // the page is then in that session, and shows no list. Wait for the layers to close and history to follow.
+    await page.evaluate(`(await import("/store.js")).closeSheet()`);
+    await until(async () => (await where()).layers === 0, "the layers closed", 10_000);
     await page.navigate(`${base}/`);
     await until(
         async () =>
@@ -802,9 +807,22 @@ test(
         const { h, options, render } = await import("preact");
         const { Markdown } = await import("/ui.js");
         const { store } = await import("/store.js");
+        const { browserModuleState } = await import("/extension-ui.js");
         const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
         const box = document.createElement("div");
 
+        // Extensions' browser modules load after the list shows, and each one that finishes draws every row again
+        // (extensionsRev): not what this measures. Under load that comes late, so wait for them first.
+        while (store.state.server.ui.some((each) => {
+            const status = browserModuleState(each.module)?.status;
+
+            return status !== "ready" && status !== "failed";
+        })) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        await settle();
+        await settle();
         render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond", cache: false }), box);
         const first = box.querySelector("p");
 

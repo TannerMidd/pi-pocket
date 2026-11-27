@@ -8,6 +8,7 @@ import {
     existsSync,
     lstatSync,
     readFileSync,
+    renameSync,
     rmSync,
     statSync,
     symlinkSync,
@@ -300,7 +301,10 @@ test("a hand-made file with comments, or one Pi refuses, is left alone", async (
     const theirs = '{"providers":{"theirs":{}}}';
 
     await new Promise((resolve) => setImmediate(resolve));
-    writeFileSync(modelsFile, theirs);
+    // Put in place whole, as an editor does: written in place, the save's own read of the file could catch it half
+    // written, and refuse it as a file Pi cannot read, not as changed meanwhile.
+    writeFileSync(`${modelsFile}.theirs`, theirs);
+    renameSync(`${modelsFile}.theirs`, modelsFile);
     await assert.rejects(saving, /changed meanwhile/);
     assert.equal(readFileSync(modelsFile, "utf8"), theirs);
     writeFileSync(modelsFile, empty);

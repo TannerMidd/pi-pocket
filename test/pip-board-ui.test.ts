@@ -281,7 +281,7 @@ test("Board: the session under it stays marked open, and is where it closes to",
     assert.equal(await markedOpen(), Number(background));
 
     // Kept on PiP's history entry: through a reload, and back to it from another session.
-    await page.evaluate(`location.reload()`);
+    await page.reload();
     await boarded("PiP after a reload");
     await see(`document.querySelector('.sidebar .session-row') !== null`, "the list");
     assert.equal(await markedOpen(), Number(background));
@@ -353,7 +353,7 @@ test("Phones: × closes past the Files tile, and PiP opens again without it", re
     await page.evaluate(`sessionStorage.setItem('pocket.files', '1')`);
 
     for (const when of ["the update's reload", "another reload"]) {
-        await page.evaluate(`location.reload()`);
+        await page.reload();
         await boarded(`PiP after ${when}`);
         await settle();
         assert.equal(await inPage(`${STORE}.store.state.filesOpen`), false, when);
@@ -691,7 +691,7 @@ test("A queued message's Edit during a send: kept through a reload or a move", r
         await see(`window.reached`, "on the server, its answer lost");
         await edit(true);
         await see(`Object.keys(localStorage).some((key) => key.includes(':takenBack.'))`, "kept");
-        await page.evaluate(`location.reload()`);
+        await page.reload();
         await see(`${STORE}.store.state.streamId`, "loaded again");
         await back("hello", "only the words of the send");
         await page.press("Enter");
