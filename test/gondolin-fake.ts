@@ -69,6 +69,8 @@ export class FakeDriver implements SandboxDriver {
     closeGate: Promise<void> | undefined;
     /** Each VM's `close` fails with this message. */
     failClose: string | undefined;
+    /** Give each VM a runner process id (a number that no process has), as a real VM has. */
+    pids = false;
     readonly vms: FakeVm[] = [];
     #next = 1;
 
@@ -96,7 +98,10 @@ export class FakeDriver implements SandboxDriver {
             throw new Error(this.failStart);
         }
 
-        const vm = new FakeVm(`fake-${this.#next++}`, this.log, this);
+        const vm = new FakeVm(`fake-${this.#next}`, this.log, this);
+
+        vm.pid = this.pids ? 4_000_000 + this.#next : null;
+        this.#next++;
 
         this.vms.push(vm);
 
@@ -136,6 +141,8 @@ export class FakeVm extends EventEmitter implements GuestVm {
     closed = false;
     /** Set when `close` was called: a test waits for it, and then opens the driver's `closeGate`. */
     closeCalled = false;
+    /** The runner's process id, when the driver gives one. */
+    pid: number | null = null;
     readonly #log: FakeLog;
     readonly #driver: FakeDriver | undefined;
     readonly #children = new Set<ReturnType<typeof spawn>>();
@@ -148,7 +155,7 @@ export class FakeVm extends EventEmitter implements GuestVm {
     }
 
     hostPid(): number | null {
-        return null;
+        return this.pid;
     }
 
     onExit(listener: (reason: string) => void): void {

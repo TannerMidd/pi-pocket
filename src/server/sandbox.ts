@@ -235,6 +235,7 @@ export function failedEnv(cwd: string, message: string): ExecutionEnv {
 export class Sandboxes {
     readonly #app: PocketApp;
     readonly #platform: string;
+    readonly #kept = new Map<number, string>();
     /** Live registrations, newest last: the newest serves. A registration that ends leaves the list, whatever its order. */
     readonly #providers: { token: symbol; provider: SandboxProvider }[] = [];
 
@@ -242,6 +243,14 @@ export class Sandboxes {
     constructor(app: PocketApp, platform: string = process.platform) {
         this.#app = app;
         this.#platform = platform;
+    }
+
+    /**
+     * A VM of the session may still run, though its provider could not close it. Until a provider's `release` of the
+     * session succeeds, its sandbox stays on: with no provider to ask, turning it off is refused.
+     */
+    keepOn(id: ConversationId, reason: string): void {
+        this.#kept.set(Number(id), reason);
     }
 
     /** Why this machine cannot run a sandbox, or undefined. */
@@ -748,8 +757,18 @@ export class Sandboxes {
                 );
             }
         } else {
+            const kept = this.#kept.get(Number(id));
+
+            if (provider === undefined && kept !== undefined) {
+                throw new HttpError(
+                    409,
+                    `The sandbox could not be stopped, so it stays on: ${kept}`,
+                );
+            }
+
             try {
                 await provider?.release?.(id);
+                this.#kept.delete(Number(id));
             } catch (error) {
                 throw new HttpError(
                     409,

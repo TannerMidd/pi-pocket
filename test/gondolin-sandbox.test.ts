@@ -545,6 +545,72 @@ test("turning the sandbox off finishes when the VM is gone, and a VM that cannot
     }
 });
 
+test("the module's provider stays registered until every VM is closed, so a turn-off meanwhile still waits for its VM", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(calls("bash", { command: "true" }));
+    let open!: () => void;
+
+    driver.closeGate = new Promise<void>((resolve) => {
+        open = resolve;
+    });
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = await newSession(app, folder("dispose-order"));
+
+        await sandboxed(app, id);
+        await say(app, id, "go");
+        const disposing = app.setExtensionEnabled(owner(app), MODULE, false);
+
+        await until(() => driver.vms[0]!.closeCalled, "the close to begin");
+        assert.notEqual(app.sandboxes.provider, undefined, "the provider is still registered");
+        const off = app.sandboxes.set(id, owner(app), false);
+        const early = await Promise.race([
+            off.then(() => "done"),
+            new Promise((resolve) => setImmediate(() => resolve("waiting"))),
+        ]);
+
+        assert.equal(early, "waiting", "the turn-off waits for the VM");
+        assert.equal((await app.sandboxes.get(id)).on, true);
+        open();
+        await Promise.all([disposing, off]);
+        assert.equal(driver.vms[0]!.closed, true);
+        assert.equal((await app.sandboxes.get(id)).on, false);
+        assert.equal(app.sandboxes.provider, undefined, "and then it goes");
+    } finally {
+        open();
+        await app.close();
+    }
+});
+
+test("a VM that cannot be closed when the module goes off keeps its session on, with the reason, though the provider is gone", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(calls("bash", { command: "true" }));
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = await newSession(app, folder("dispose-stuck"));
+
+        await sandboxed(app, id);
+        await say(app, id, "go");
+        driver.failClose = "the runner does not answer";
+        await app.setExtensionEnabled(owner(app), MODULE, false);
+        await until(() => app.sandboxes.provider === undefined, "the provider to go");
+        await assert.rejects(
+            () => app.sandboxes.set(id, owner(app), false),
+            /could not be stopped, so it stays on: .*does not answer/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, true, "the setting stays on");
+    } finally {
+        driver.failClose = undefined;
+        await app.close();
+    }
+});
+
 test("too many sandboxes at once fail the call with the limit", async () => {
     const driver = new FakeDriver();
 

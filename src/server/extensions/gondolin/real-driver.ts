@@ -292,15 +292,50 @@ function wrapFs(
     };
 }
 
-class GondolinVm implements GuestVm {
+/** What a VM's close needs to know about its runner process. Tests give their own. */
+export interface RunnerControl {
+    /** Whether `pid` is still a Gondolin runner or QEMU (a number that another program reuses is not). */
+    alive(pid: number): boolean;
+    /** End the runner and its process group, as hard as there is. */
+    kill(pid: number): void;
+}
+
+const hostRunner: RunnerControl = {
+    alive(pid) {
+        try {
+            return /gondolin-krun-runner|qemu-system/.test(
+                readFileSync(`/proc/${pid}/cmdline`, "utf8"),
+            );
+        } catch {
+            return false;
+        }
+    },
+    kill(pid) {
+        for (const target of [-pid, pid]) {
+            try {
+                process.kill(target, "SIGKILL");
+            } catch {
+                // no such group, or process: gone
+            }
+        }
+    },
+};
+
+export class GondolinVm implements GuestVm {
     readonly id: string;
     readonly fs: GuestFs;
     readonly #vm: any;
+    readonly #runner: RunnerControl;
+    readonly #graceMs: number;
     #closed = false;
+    #closing: Promise<void> | undefined;
     readonly #exits: ((reason: string) => void)[] = [];
 
-    constructor(vm: any) {
+    /** `graceMs` is how long a runner that survives a close is waited for after the kill. */
+    constructor(vm: any, runner: RunnerControl = hostRunner, graceMs = 5000) {
         this.#vm = vm;
+        this.#runner = runner;
+        this.#graceMs = graceMs;
         this.id = String(vm.id);
 
         // The runner went away (a crash, a kill): say so, so the manager drops this VM and the next call starts another.
@@ -404,13 +439,50 @@ class GondolinVm implements GuestVm {
         };
     }
 
-    async close(): Promise<void> {
+    /**
+     * Closed means the runner is gone, which this proves: a close that failed is tried again and never counts as done
+     * while the runner may run. A runner that outlives the close is killed, with its process group, and waited for;
+     * one that cannot be shown gone makes the close fail.
+     */
+    close(): Promise<void> {
+        this.#closing ??= this.#shutdown().finally(() => {
+            this.#closing = undefined;
+        });
+
+        return this.#closing;
+    }
+
+    async #shutdown(): Promise<void> {
         if (this.#closed) {
             return;
         }
 
+        // Before the close: the package answers null once its runner is closed.
+        const pid: number | null = this.#vm.getHostPid();
+        let failure: unknown;
+
+        try {
+            await this.#vm.close();
+        } catch (error) {
+            failure = error;
+        }
+
+        if (pid !== null && this.#runner.alive(pid)) {
+            this.#runner.kill(pid);
+            const until = Date.now() + this.#graceMs;
+
+            while (this.#runner.alive(pid)) {
+                if (Date.now() >= until) {
+                    throw new Error(
+                        `the VM's runner (process ${pid}) is still running${failure === undefined ? "" : `: ${String(failure)}`}`,
+                    );
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+        }
+
         this.#closed = true;
-        await this.#vm.close();
     }
 }
 

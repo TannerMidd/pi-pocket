@@ -1073,6 +1073,7 @@ export class PocketApp {
                 set: (conversationId, person, on) => this.sandboxes.set(conversationId, person, on),
                 jobs: (conversationId) => this.sandboxes.jobs(conversationId),
                 unsupported: () => this.sandboxes.unsupported(),
+                keepOn: (conversationId, reason) => this.sandboxes.keepOn(conversationId, reason),
             },
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);

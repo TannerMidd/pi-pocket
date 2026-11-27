@@ -423,16 +423,31 @@ function createGondolin(
         }),
     ];
 
+    // The provider stays registered until every VM is really gone, so a turn-off in the meantime still goes through
+    // `release`. A VM that cannot be closed is handed to core, which keeps its session on, with the reason.
     web.onDispose(async () => {
-        unregister();
         setup.stop?.abort();
 
         for (const stop of stops) {
             stop();
         }
 
-        await manager.stopAll("the Gondolin sandbox module went off or loaded again");
-        jobs.shutdown("the Gondolin sandbox module went off or loaded again, so its VMs stopped");
+        const why = "the Gondolin sandbox module went off or loaded again";
+        const stuck = await manager.stopAll(why);
+
+        jobs.shutdown(`${why}, so its VMs stopped`);
+
+        for (const [rootId, reason] of stuck) {
+            host.sandbox.keepOn(rootId as unknown as ConversationId, reason);
+        }
+
+        unregister();
+
+        if (stuck.size > 0) {
+            throw new Error(
+                `${plural(stuck.size, "VM")} could not be closed (session ${[...stuck.keys()].join(", ")}), so their sandboxes stay on: ${[...stuck.values()].join("; ")}`,
+            );
+        }
     });
     // Rules that got stricter end the VMs that run with the old ones: a network that is off, fewer hosts, a read-only folder.
     web.onSettings(() => {

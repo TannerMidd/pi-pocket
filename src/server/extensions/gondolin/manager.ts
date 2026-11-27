@@ -75,7 +75,7 @@ interface Entry {
     /** The close of the VM, and the wait for a start under way, that an end began: every later end waits for it. */
     closing?: Promise<void>;
     /** A VM that could not be closed: no new one starts until a later end closes it. */
-    stuck?: GuestVm;
+    stuck?: { vm: GuestVm; error: string };
     busy: number;
     shell: string;
     last: number;
@@ -696,7 +696,7 @@ export class SandboxManager {
         try {
             await vm.close();
         } catch (error) {
-            entry.stuck = vm;
+            entry.stuck = { vm, error: String(error) };
             this.#options.log(`sandbox: closing a VM failed: ${String(error)}`);
         }
     }
@@ -721,7 +721,6 @@ export class SandboxManager {
             this.#changed(rootId);
 
             if (vm !== undefined) {
-                this.#forget(vm);
                 this.#ended(rootId, why);
             }
         }
@@ -733,14 +732,15 @@ export class SandboxManager {
                 // A start under way closes the VM it made (`#startOnce`): wait for that, and for a close that failed.
                 await starting?.catch(() => undefined);
 
-                for (const each of [entry.stuck, vm]) {
+                for (const each of [entry.stuck?.vm, vm]) {
                     if (each !== undefined) {
                         entry.stuck = undefined;
 
                         try {
                             await each.close();
+                            this.#forget(each);
                         } catch (error) {
-                            entry.stuck = each;
+                            entry.stuck = { vm: each, error: String(error) };
 
                             throw error;
                         }
@@ -789,6 +789,17 @@ export class SandboxManager {
         const entry = this.#entries.get(rootId);
 
         if (entry === undefined) {
+            // This manager holds no VM of the session. A runner of an earlier one (a module that loaded again) may be
+            // its VM: it ends now, or the release fails.
+            await this.reapStale();
+            const left = this.#orphans();
+
+            if (left.length > 0) {
+                throw new Error(
+                    `a runner that an earlier sandbox started (process ${left.join(", ")}) could not be ended`,
+                );
+            }
+
             return;
         }
 
@@ -797,9 +808,19 @@ export class SandboxManager {
         this.#entries.delete(rootId);
     }
 
-    async stopAll(why: string): Promise<void> {
+    /**
+     * Stop every VM, and finish when each is really gone. Returns the sessions whose VM could not be closed, with why:
+     * those VMs may still run.
+     */
+    async stopAll(why: string): Promise<Map<number, string>> {
         this.#stopped = true;
         await Promise.all([...this.#entries.keys()].map((rootId) => this.stop(rootId, why)));
+
+        return new Map(
+            [...this.#entries.entries()].flatMap(([rootId, entry]) =>
+                entry.stuck === undefined ? [] : [[rootId, entry.stuck.error] as const],
+            ),
+        );
     }
 
     /** Allow starting again after `stopAll` (a module that loaded again). */
@@ -947,8 +968,10 @@ export class SandboxManager {
     }
 
     /**
-     * End runners of VMs that an earlier server left running (it crashed, or was killed). A process counts only when
-     * its command line still names Gondolin's runner or QEMU: a number that another program reuses is left alone.
+     * End runners of VMs that no entry holds: an earlier server left them running (it crashed, or was killed), or a
+     * VM of an earlier module could not be closed. A process counts only when its command line still names Gondolin's
+     * runner or QEMU: a number that another program reuses is left alone. A runner that is still there after the kill
+     * stays in the pid file (`#orphans`).
      */
     async reapStale(): Promise<number> {
         const inspect = this.#options.inspect ?? psInspect;
@@ -957,24 +980,57 @@ export class SandboxManager {
             ((pid: number) => {
                 process.kill(pid, "SIGKILL");
             });
+        const named = async (pid: number) =>
+            /gondolin-krun-runner|qemu-system/.test((await inspect(pid)) ?? "");
+        const held = new Set(
+            [...this.#entries.values()]
+                .flatMap((entry) => [entry.vm, entry.stuck?.vm])
+                .map((vm) => vm?.hostPid()),
+        );
+        const kept: { pid: number; vm: string }[] = [];
         let reaped = 0;
 
-        for (const { pid } of this.#pids()) {
-            const line = await inspect(pid);
-
-            if (line !== undefined && /gondolin-krun-runner|qemu-system/.test(line)) {
+        for (const item of this.#pids()) {
+            if (held.has(item.pid)) {
+                kept.push(item);
+            } else if (await named(item.pid)) {
                 try {
-                    kill(pid);
+                    kill(item.pid);
                     reaped++;
                 } catch {
                     // gone already
                 }
+
+                // A killed process is gone a moment later: its parent has to collect it.
+                let alive = await named(item.pid);
+
+                for (let wait = 0; alive && wait < 20; wait++) {
+                    await new Promise((resolve) => setTimeout(resolve, 25));
+                    alive = await named(item.pid);
+                }
+
+                if (alive) {
+                    kept.push(item);
+                }
             }
         }
 
-        this.#writePids([]);
+        this.#writePids(kept);
 
         return reaped;
+    }
+
+    /** The runners that no entry holds and that are still there: a session's VM may be among them. */
+    #orphans(): number[] {
+        const held = new Set(
+            [...this.#entries.values()]
+                .flatMap((entry) => [entry.vm, entry.stuck?.vm])
+                .map((vm) => vm?.hostPid()),
+        );
+
+        return this.#pids()
+            .map((item) => item.pid)
+            .filter((pid) => !held.has(pid));
     }
 
     async check(): Promise<HostCheck> {

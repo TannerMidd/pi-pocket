@@ -223,6 +223,7 @@ export interface SandboxApi {
     ): Promise<void>;
     jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
     unsupported(): string | undefined;
+    keepOn(conversationId: ConversationId, reason: string): void;
 }
 
 /**

@@ -544,6 +544,11 @@ export interface SandboxApi {
     jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
     /** Why this machine cannot run a sandbox, or undefined. Core refuses to turn a session's sandbox on then. */
     unsupported(): string | undefined;
+    /**
+     * A VM of the session may still run, though the provider could not close it (a provider that goes away says so
+     * for each such session). Its sandbox stays on, with `reason`, until a provider's `release` of it succeeds.
+     */
+    keepOn(conversationId: ConversationId, reason: string): void;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */

@@ -348,7 +348,7 @@ test("a runner that an earlier server left behind is ended, and a reused process
         log: () => {},
         pidFile: file,
         settings: () => ({}) as never,
-        inspect: async (pid) => lines[pid],
+        inspect: async (pid) => (killed.includes(pid) ? undefined : lines[pid]),
         kill: (pid) => {
             killed.push(pid);
         },
