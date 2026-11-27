@@ -85,6 +85,11 @@ export interface SandboxProvider {
      * session has no browser: it never gets this machine's.
      */
     browser?(target: SandboxTarget): SandboxBrowser;
+    /**
+     * A session's sandbox is about to go: stop its VM and what runs in it, and finish when they are gone. The setting
+     * stays on until this ends, and a failure keeps it on.
+     */
+    release?(conversationId: ConversationId): Promise<void>;
     /** A session's setting changed. Runs after the change is stored; it cannot stop it. */
     changed?(conversationId: ConversationId, on: boolean): void;
 }
@@ -291,6 +296,9 @@ export class Sandboxes {
 
         return false;
     }
+
+    /** The change of each session's sandbox that is under way, by the session's number. */
+    readonly #changes = new Map<number, Promise<void>>();
 
     /** Which conversations are sandboxed, kept in step with their documents: the browser asks without waiting. */
     readonly #on = new Set<number>();
@@ -654,105 +662,123 @@ export class Sandboxes {
             }
         }
 
-        const touched: ConversationId[] = [];
-        const before = new Map<ConversationId, { on: boolean; by?: string; at?: number }>();
-        const changed = await app.harness.commit(async (tx) => {
-            const current = await tx.doc(SandboxDoc, id);
+        // One change of a session's sandbox at a time, and no tool call runs while it does (`settled`): what starts
+        // after it sees the setting that it leaves.
+        const root = Number(id);
+        const run = (this.#changes.get(root) ?? Promise.resolve())
+            .catch(() => undefined)
+            .then(() => this.#change(id, user, on));
 
-            touched.length = 0;
-            before.clear();
+        this.#changes.set(root, run);
 
-            if (current.on === on) {
-                return false;
+        try {
+            await run;
+        } finally {
+            if (this.#changes.get(root) === run) {
+                this.#changes.delete(root);
             }
+        }
+    }
 
-            if (
-                !on &&
-                !owner &&
-                current.by !== undefined &&
-                app.config.userById(current.by)?.role === "owner"
-            ) {
-                throw new HttpError(
-                    403,
-                    "The owner chose this sandbox: only the owner can turn it off.",
-                );
+    /** Resolves when no change of the sandbox of this conversation's session is under way. Tool calls wait here. */
+    async settled(id: ConversationId): Promise<void> {
+        const root = Number(this.#app.rootOf(id));
+
+        for (
+            let under = this.#changes.get(root);
+            under !== undefined;
+            under = this.#changes.get(root)
+        ) {
+            await under.catch(() => undefined);
+        }
+    }
+
+    /**
+     * The change itself. Turning on: what runs on this machine is looked for first, and the setting is stored only
+     * when none does, so that no VM exists for a setting that was not kept. Turning off: the VM is stopped, and gone,
+     * before the setting is stored: the folder stays confined until nothing can write it.
+     */
+    async #change(id: ConversationId, user: User, on: boolean): Promise<void> {
+        const app = this.#app;
+        const provider = this.provider;
+        const current = await this.get(id);
+
+        if (current.on === on) {
+            return;
+        }
+
+        if (
+            !on &&
+            user.role !== "owner" &&
+            current.by !== undefined &&
+            app.config.userById(current.by)?.role === "owner"
+        ) {
+            throw new HttpError(
+                403,
+                "The owner chose this sandbox: only the owner can turn it off.",
+            );
+        }
+
+        const conversations = [id];
+
+        for (let index = 0; index < conversations.length; index++) {
+            const agents = (
+                await app.harness.snapshot(SubagentsDoc, conversations[index]!, context)
+            )?.agents;
+
+            for (const agent of Object.values(agents ?? {})) {
+                conversations.push(agent.conversationId);
             }
+        }
 
-            const conversations = [id];
-
-            for (let index = 0; index < conversations.length; index++) {
-                for (const agent of Object.values(
-                    (await tx.doc(SubagentsDoc, conversations[index]!)).agents,
-                )) {
-                    conversations.push(agent.conversationId);
-                }
-            }
-
-            const at = Date.now();
-
-            for (const each of conversations) {
-                const doc = await tx.doc(SandboxDoc, each);
-
-                before.set(each, { ...doc });
-                Object.assign(doc, { on, by: user.id, at });
-            }
-
-            touched.push(...conversations);
-
-            return true;
-        }, context);
-
-        if (changed && on) {
-            // Work that runs on this machine keeps running there. The setting is stored first: what starts from now on
-            // is the VM's, so what is found now began before it, and the change is refused until it ends.
-            const running = await this.#hostWork(touched);
+        if (on) {
+            const running = await this.#hostWork(conversations);
 
             if (running.length > 0) {
-                await app.harness.commit(async (tx) => {
-                    for (const [each, was] of before) {
-                        const doc = await tx.doc(SandboxDoc, each);
-
-                        doc.on = was.on;
-
-                        for (const key of ["by", "at"] as const) {
-                            if (was[key] === undefined) {
-                                delete doc[key];
-                            } else {
-                                Object.assign(doc, { [key]: was[key] });
-                            }
-                        }
-                    }
-                }, context);
-
                 throw new HttpError(
                     409,
                     `This session still runs work on this machine: ${running.join("; ")}. A sandbox cannot take that work over, and it could go on running files that Pi now changes in the VM. Stop it, or wait until it ends, and then turn the sandbox on.`,
                 );
             }
-        }
-
-        if (changed) {
-            // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of
-            // its own (and the other way round: a page of the VM's browser ends when the sandbox goes off).
-            await Promise.all(
-                touched.map((each) => app.browsers.close(Number(each)).catch(() => undefined)),
-            );
-
+        } else {
             try {
-                provider?.changed?.(id, on);
+                await provider?.release?.(id);
             } catch (error) {
-                this.#app.notice(
-                    "warning",
-                    `The sandbox module failed to note a change: ${error instanceof Error ? error.message : String(error)}`,
-                    id,
+                throw new HttpError(
+                    409,
+                    `The sandbox could not be stopped, so it stays on: ${error instanceof Error ? error.message : String(error)}`,
                 );
             }
+        }
 
-            await app.collab.activity(
+        await app.harness.commit(async (tx) => {
+            const at = Date.now();
+
+            for (const each of conversations) {
+                Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
+            }
+        }, context);
+
+        // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of its
+        // own (and the other way round: a page of the VM's browser ends when the sandbox goes off).
+        await Promise.all(
+            conversations.map((each) => app.browsers.close(Number(each)).catch(() => undefined)),
+        );
+
+        try {
+            provider?.changed?.(id, on);
+        } catch (error) {
+            app.notice(
+                "warning",
+                `The sandbox module failed to note a change: ${error instanceof Error ? error.message : String(error)}`,
                 id,
-                user,
-                on ? "turned on the sandbox" : "turned off the sandbox",
             );
         }
+
+        await app.collab.activity(
+            id,
+            user,
+            on ? "turned on the sandbox" : "turned off the sandbox",
+        );
     }
 }

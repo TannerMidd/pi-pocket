@@ -381,11 +381,10 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
             },
             launch: (flags) => manager.launchBrowser(vmTarget(target), flags),
         }),
-        changed: (conversationId, on) => {
-            if (!on) {
-                void manager.stop(Number(conversationId), "the session's sandbox was turned off");
-            }
-
+        release: async (conversationId) => {
+            await manager.stop(Number(conversationId), "the session's sandbox was turned off");
+        },
+        changed: (conversationId) => {
             web.send("changed", { c: Number(conversationId) });
         },
     };

@@ -1007,6 +1007,8 @@ export class PocketApp {
                     hook(ToolTask, {
                         // A sandboxed session runs no tool that would run on the host (`sandbox.ts`).
                         beforeTool: async (call, api, hookContext) => {
+                            await this.sandboxes.settled(api.conversationId);
+
                             if (
                                 (await api.snapshot(SandboxDoc, api.conversationId, hookContext))
                                     ?.on !== true
@@ -1214,6 +1216,8 @@ export class PocketApp {
                 settings: this.#harnessSettings(),
                 now: this.now,
                 env: async ({ conversationId, cwd, read }) => {
+                    await this.sandboxes.settled(conversationId);
+
                     const sandboxed =
                         (await read.snapshot(SandboxDoc, conversationId, context))?.on === true;
 
@@ -1906,6 +1910,8 @@ export class PocketApp {
      * It never gives a sandboxed session an environment of the host.
      */
     async envForRun(id: ConversationId): Promise<ExecutionEnv> {
+        await this.sandboxes.settled(id);
+
         const sandboxed = (await this.harness.snapshot(SandboxDoc, id, context))?.on === true;
 
         return sandboxed ? this.#sandboxed(id, this.cwdOf(id)) : this.envFor(id);
