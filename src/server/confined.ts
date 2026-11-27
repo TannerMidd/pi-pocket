@@ -9,17 +9,20 @@
 import {
     closeSync,
     constants,
+    lstatSync,
     mkdirSync,
     openSync,
     readFileSync,
+    readlinkSync,
     realpathSync,
     renameSync,
+    statSync,
     unlinkSync,
     writeSync,
 } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 const READ = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | NO_FOLLOW;
@@ -42,32 +45,100 @@ function real(path: string): string {
     }
 }
 
-/**
- * Whether a sandboxed session works in `folder`, in a folder that holds it, or in one inside it: a guest may have
- * written what is in it. The paths are compared as stated, and as they are really: a guest can make a folder that
- * lies in the project a link to another place, and that must not take it out of the project's reach.
- */
-export function sandboxedFolder(folder: string): boolean {
-    const here = resolve(folder);
-    const overlap = (a: string, b: string) => within(a, b) || within(b, a);
+type Place = { start: string; names: string[] };
 
-    return [...sandboxedFolders].some((list) =>
-        [...list()].some((used) => overlap(here, used) || overlap(real(here), real(used))),
-    );
+/**
+ * How a session's folder `root` stands to the folders that sandboxed sessions work in: inside one (then `start` is that
+ * folder, and `names` lead from it to `root`), holding one (then `start` is `root`), or neither (undefined). The path
+ * is walked from `/`, one name at a time. A link is followed only while the walk is outside every sandboxed folder,
+ * where the guest cannot have put it; the walk is inside as soon as it reaches one of them, known by the device and the
+ * inode of the folder and not by any path to it, so an alias, or a mount of the same folder, finds it too. The names
+ * after that are not looked at: the walk of `pinParent` takes them without following a link, and refuses one.
+ */
+function place(root: string): Place | undefined {
+    const folders = [...sandboxedFolders]
+        .flatMap((list) => [...list()])
+        .flatMap((path) => {
+            try {
+                const { dev, ino } = statSync(path, { bigint: true });
+
+                return [{ path, key: `${dev}:${ino}` }];
+            } catch {
+                return [];
+            }
+        });
+    const top = parse(resolve(root)).root;
+    const pending = resolve(root).slice(top.length).split(sep).filter(Boolean);
+    let at = top;
+
+    for (let links = 0; pending.length > 0;) {
+        const name = pending.shift()!;
+
+        if (name === ".") {
+            continue;
+        }
+
+        if (name === "..") {
+            at = dirname(at);
+            continue;
+        }
+
+        const next = join(at, name);
+        let info;
+
+        try {
+            info = lstatSync(next, { bigint: true });
+        } catch {
+            return undefined;
+        }
+
+        if (info.isSymbolicLink()) {
+            if (++links > 40) {
+                return undefined;
+            }
+
+            const target = readlinkSync(next);
+            const start = isAbsolute(target) ? parse(target).root : at;
+
+            pending.unshift(
+                ...target
+                    .slice(isAbsolute(target) ? start.length : 0)
+                    .split(sep)
+                    .filter(Boolean),
+            );
+            at = start;
+            continue;
+        }
+
+        at = next;
+        const inside = folders.find((each) => each.key === `${info.dev}:${info.ino}`);
+
+        if (inside !== undefined) {
+            return { start: inside.path, names: pending };
+        }
+    }
+
+    return folders.some((each) => within(at, real(each.path)))
+        ? { start: at, names: [] }
+        : undefined;
 }
 
-/**
- * Where a walk to something in `root` starts: the outermost sandboxed folder that holds `root` by name, else `root`. A
- * session's folder that lies in a sandboxed one is reached from there, one name at a time, so that a link where the
- * guest has put it in place of a folder on the way is refused, and not followed to its end.
- */
-function anchor(root: string): string {
-    const here = resolve(root);
-    const holders = [...sandboxedFolders]
-        .flatMap((list) => [...list()].map((used) => resolve(used)))
-        .filter((used) => within(used, here));
+/** Whether a sandboxed session works in `folder`, in a folder that holds it, or in one inside it (`place`). */
+export function sandboxedFolder(folder: string): boolean {
+    return place(folder) !== undefined;
+}
 
-    return holders.sort((a, b) => a.length - b.length)[0] ?? here;
+/** Where the walk to `path` in `root` starts, and the names it takes from there. */
+function route(root: string, path: string): { start: string; parts: string[] } {
+    const into = names(root, path);
+    const at = place(root) ?? { start: root, names: [] };
+    const parts = [...at.names, ...into];
+
+    if (parts.includes("..")) {
+        throw refused(path);
+    }
+
+    return { start: at.start, parts: parts.filter((part) => part !== ".") };
 }
 
 /**
@@ -139,8 +210,7 @@ function pinRoot(root: string): number {
  * are missing). The caller closes the descriptor.
  */
 function pinParent(root: string, path: string, make = false): { dir: number; name: string } {
-    const start = anchor(root);
-    const parts = names(start, path);
+    const { start, parts } = route(root, path);
 
     if (parts.length === 0) {
         throw refused(path);
@@ -179,9 +249,9 @@ function pinParent(root: string, path: string, make = false): { dir: number; nam
 
 /** `path` in `root`, open for reading (a file or a folder), as a descriptor: the caller closes it. */
 export function openInsideSync(root: string, path: string): number {
-    const start = anchor(root);
+    const { start, parts } = route(root, path);
 
-    if (names(start, path).length === 0) {
+    if (parts.length === 0) {
         return pinRoot(start);
     }
 
