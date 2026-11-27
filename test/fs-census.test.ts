@@ -23,6 +23,7 @@ type Census = {
     files: Record<string, Entry>;
     indirect: Record<string, { verdict: string; reaches: string }>;
     escapes: Record<string, Record<string, string>>;
+    dynamicImport: Record<string, string>;
     loaders: { pattern: string; allowed: string[] };
     packages: { banned: string[]; capable: Record<string, string[]> };
 };
@@ -216,6 +217,25 @@ test("no package that wraps fs or spawn is imported, except where the census nam
             if (!imports) {
                 problems.push(`${file} is listed for ${name} and no longer imports it`);
             }
+        }
+    }
+
+    assert.deepEqual(problems, []);
+});
+
+test("import() and require() take a literal module name, except where the census says", () => {
+    const pattern = /(?<![.\w])(?:import|require)\s*\(\s*(?!["'`])/;
+    const problems: string[] = [];
+
+    for (const [file, text] of sources) {
+        if (pattern.test(text) && !(file in census.dynamicImport)) {
+            problems.push(`${file} loads a module by a name that is not a literal`);
+        }
+    }
+
+    for (const file of Object.keys(census.dynamicImport)) {
+        if (!pattern.test(sources.get(file) ?? "")) {
+            problems.push(`${file} is listed for dynamic import and no longer has one`);
         }
     }
 

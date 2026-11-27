@@ -112,3 +112,30 @@ test("no git or gh is started outside the hardened runner", () => {
 
     assert.deepEqual(problems, []);
 });
+
+test("hostfs exports no raw path-based file primitive: its operations take a Place", async () => {
+    const fs = await import("node:fs");
+    const fsp = await import("node:fs/promises");
+    const hostfs = (await import("../src/server/hostfs.ts")) as Record<string, unknown>;
+    const raw = new Set<unknown>(
+        [...Object.values(fs), ...Object.values(fsp)].filter(
+            (value) => typeof value === "function",
+        ),
+    );
+    const problems: string[] = [];
+
+    for (const [name, value] of Object.entries(hostfs)) {
+        if (raw.has(value)) {
+            problems.push(`${name} is a node:fs function re-exported`);
+        }
+    }
+
+    // A function that is named like a synchronous fs call is a `Place` wrapper: it takes no path string.
+    for (const name of Object.keys(hostfs).filter((each) => /Sync$/.test(each))) {
+        if (!["openSync", "openNoFollowSync", "opendirSyncAt"].includes(name)) {
+            problems.push(`${name} is a raw sync primitive`);
+        }
+    }
+
+    assert.deepEqual(problems, []);
+});

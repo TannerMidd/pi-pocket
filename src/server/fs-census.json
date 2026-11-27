@@ -481,5 +481,11 @@
             "@earendil-works/pi-mcp": [],
             "heic-convert": ["heic-worker.ts"]
         }
+    },
+    "dynamicImport": {
+        "reload.ts": "loads a module of an extension by its URL, after the resolve hook (`extension-document-imports.ts`) judged it",
+        "lancet.ts": "loads the guard module and its runtime from the guard's own install folder",
+        "themes.ts": "loads the app's own web theme list by URL from the install folder",
+        "themes/reserved.ts": "loads the app's own web theme list by URL from the install folder"
     }
 }

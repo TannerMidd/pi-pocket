@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
+    appendFileSync,
+    closeSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
@@ -124,15 +126,12 @@ test(
 
         const folder = host.folder(root);
 
-        assert.throws(() => hostfs.readText(folder.at("pipe")), { code: "EFBIG" });
-        await assert.rejects(hostfs.readFileAsync(folder.at("pipe")), { code: "EFBIG" });
+        assert.throws(() => hostfs.readText(folder.at("pipe")), { code: "ENXIO" });
+        await assert.rejects(hostfs.readFileAsync(folder.at("pipe")), { code: "ENXIO" });
+        // A look at it works; an open does not.
         assert.equal(hostfs.stat(folder.at("pipe")).isFIFO(), true);
-        assert.throws(() => hostfs.createReadStream(folder.at("pipe")), { code: "EACCES" });
-
-        const file = hostfs.openSync(folder.at("pipe"));
-
-        assert.equal(file.stat().isFIFO(), true);
-        file.close();
+        assert.throws(() => hostfs.createReadStream(folder.at("pipe")), { code: "ENXIO" });
+        assert.throws(() => hostfs.openSync(folder.at("pipe")), { code: "ENXIO" });
         assert.throws(() => hostfs.readText(folder.at("ok.txt"), { max: 1 }), { code: "EFBIG" });
     },
 );
@@ -397,5 +396,167 @@ test(
             // The folder is never found again by its name: a new FolderRef for it is a new admission.
             mkdirSync(nested, { recursive: true });
         }
+    },
+);
+
+test(
+    "an alias that enters the folder is the folder: a link after that point does not lead the path out",
+    { skip: !linux },
+    (t) => {
+        const { root, outside, host } = lab(t);
+        const alias = join(root, "..", "alias");
+
+        symlinkSync(root, alias);
+        symlinkSync(outside, join(root, "out"));
+
+        // /alias -> /project, /project/out -> /outside: the path enters the folder at /alias, so it is refused, though the file is outside.
+        assert.throws(() => host.at(join(alias, "out", "secret.txt")), { code: "EACCES" });
+        assert.throws(() => hostfs.readText(host.at(join(alias, "out", "secret.txt"))), {
+            code: "EACCES",
+        });
+        // A folder chosen as the alias works in the same folder, confined: the link inside it is not followed.
+        const chosen = host.folder(alias);
+
+        assert.throws(() => hostfs.readText(chosen.at("out/secret.txt")), { code: "EACCES" });
+        assert.equal(hostfs.readText(chosen.at("ok.txt")), "ok");
+        // A path outside every folder that never enters one is plain.
+        assert.equal(hostfs.readText(host.at(join(outside, "secret.txt"))), "secret");
+    },
+);
+
+test(
+    "a folder pinned at admission is refused when its name is a new folder, a link, or another inode",
+    { skip: !linux },
+    async (t) => {
+        const { root, outside, host } = lab(t);
+        const nested = join(root, "sub");
+        const admitted = statSync(nested, { bigint: true });
+        const pinned = host.folder(nested, { dev: admitted.dev, ino: admitted.ino });
+
+        assert.equal(hostfs.readText(pinned.at("deep.txt")), "deep");
+        // Same name, new inode: a folder the guest made in its place.
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+
+        for (const run of [
+            () => hostfs.readText(pinned.at("deep.txt")),
+            () => hostfs.readdir(pinned.at("")),
+            () => hostfs.stat(pinned.at("")),
+            () => hostfs.writeFile(pinned.at("new.txt"), "x"),
+            () => hostfs.openSync(pinned.at("deep.txt")),
+            () => hostfs.readFileAsync(pinned.at("deep.txt")),
+        ]) {
+            await assert.rejects(async () => run(), { code: "ESTALE" });
+        }
+
+        // A new FolderRef without the pin is a new admission (the app keeps the first look, or core state's pin).
+        assert.equal(hostfs.readText(host.folder(nested).at("deep.txt")), "forged");
+        rmSync(nested, { recursive: true });
+        symlinkSync(outside, nested);
+        await assert.rejects(async () => hostfs.readText(pinned.at("secret.txt")), {
+            code: /ESTALE|EACCES/,
+        });
+    },
+);
+
+test(
+    "a pipe, a device link, and a socket are never opened for write, read-write, or truncate",
+    { skip: !linux, timeout: 30_000 },
+    async (t) => {
+        const { root, host } = lab(t);
+        const folder = host.folder(root);
+
+        execFileSync("mkfifo", [join(root, "pipe")]);
+        symlinkSync("/dev/null", join(root, "null"));
+        writeFileSync(join(root, "keep.txt"), "keep");
+
+        const { createServer } = await import("node:net");
+        const server = createServer();
+
+        await new Promise<void>((done) => server.listen(join(root, "sock"), done));
+        t.after(() => server.close());
+
+        // A reader on the pipe would let a plain write through: the pipe is refused before it is opened.
+        const reader = (await import("node:fs")).openSync(join(root, "pipe"), "r+");
+
+        t.after(() => require_close(reader));
+
+        for (const name of ["pipe", "null", "sock"]) {
+            for (const flag of ["w", "r+", "a", "w+"]) {
+                assert.throws(
+                    () => hostfs.openSync(folder.at(name), flag),
+                    { code: /ENXIO|EACCES/ },
+                    `${name} ${flag}`,
+                );
+            }
+
+            assert.throws(
+                () => hostfs.writeFile(folder.at(name), "x"),
+                { code: /ENXIO|EACCES/ },
+                name,
+            );
+            await assert.rejects(
+                hostfs.open(folder.at(name), "r+"),
+                { code: /ENXIO|EACCES/ },
+                name,
+            );
+            assert.throws(
+                () => hostfs.createReadStream(folder.at(name)),
+                { code: /ENXIO|EACCES/ },
+                name,
+            );
+        }
+
+        assert.equal(readFileSync(join(root, "pipe").replace("pipe", "keep.txt"), "utf8"), "keep");
+        // A regular file truncates and writes, and a name that is not there is made.
+        hostfs.writeFile(folder.at("keep.txt"), "new");
+        assert.equal(readFileSync(join(root, "keep.txt"), "utf8"), "new");
+        hostfs.writeFile(folder.at("made.txt"), "made");
+        assert.equal(readFileSync(join(root, "made.txt"), "utf8"), "made");
+        assert.throws(() => hostfs.writeFile(folder.at("made.txt"), "x", { flag: "wx" }), {
+            code: "EEXIST",
+        });
+    },
+);
+
+function require_close(fd: number): void {
+    try {
+        closeSync(fd);
+    } catch {
+        // Closed.
+    }
+}
+
+test(
+    "a read is bounded by what it reads, not by the size it looked at first",
+    { skip: !linux },
+    async (t) => {
+        const { root, host } = lab(t);
+        const folder = host.folder(root);
+        const file = join(root, "grows.txt");
+
+        writeFileSync(file, "x".repeat(100));
+
+        const grow = () => appendFileSync(file, "y".repeat(5000));
+
+        assert.equal(hostfs.readFile(folder.at("grows.txt"), { max: 100 }).length, 100);
+        assert.throws(
+            () => hostfs.readFile(folder.at("grows.txt"), { max: 100, afterSize: grow }),
+            { code: "EFBIG" },
+        );
+        writeFileSync(file, "x".repeat(100));
+        await assert.rejects(
+            hostfs.readFileAsync(folder.at("grows.txt"), { max: 100, afterSize: grow }),
+            { code: "EFBIG" },
+        );
+        // The same for a descriptor's readAll, and for a file one byte past the cap.
+        writeFileSync(file, "x".repeat(101));
+        assert.throws(() => hostfs.readFile(folder.at("grows.txt"), { max: 100 }), {
+            code: "EFBIG",
+        });
+        assert.throws(() => hostfs.openSync(folder.at("grows.txt")).readAll(100), {
+            code: "EFBIG",
+        });
     },
 );

@@ -26,6 +26,7 @@ import {
     createReadStream as fsCreateReadStream,
     existsSync,
     fstatSync,
+    ftruncateSync,
     lstatSync,
     mkdirSync,
     openSync as fsOpenSync,
@@ -44,10 +45,7 @@ import {
     writeSync,
     appendFileSync,
     accessSync,
-    symlinkSync,
-    linkSync,
     chmodSync,
-    utimesSync,
     mkdtempSync,
 } from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -62,6 +60,8 @@ export type { BigIntStats, Dir, Dirent, FileHandle, ReadStream, Stats };
 /** The most that a read of a file in a sandboxed folder holds unless the caller says more. */
 export const MAX_TEXT = 1024 * 1024;
 
+/** `O_ACCMODE`: the bits that say read, write, or both. */
+const ACCMODE = 3;
 const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 const NON_BLOCK = constants.O_NONBLOCK ?? 0;
 const FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | NO_FOLLOW;
@@ -78,6 +78,12 @@ export type SandboxedFolder = { path: string; dev: bigint; ino: bigint };
  */
 export interface SandboxView {
     sandboxedFolders(): Iterable<SandboxedFolder>;
+    /**
+     * The identity (device and inode) that a conversation's folder had when it was admitted, which admission state owns.
+     * Without it, the first look at a nested folder pins it (`PocketApp.folderOf`). A folder that is no longer that
+     * folder makes every operation fail closed.
+     */
+    pinnedRoot?(conversation: number, path: string): { dev: bigint; ino: bigint } | undefined;
 }
 
 export const NO_SANDBOX: SandboxView = { sandboxedFolders: () => [] };
@@ -152,9 +158,16 @@ export class FolderRef {
     readonly #dev: bigint | undefined;
     readonly #ino: bigint | undefined;
 
-    constructor(host: Hostfs, path: string) {
+    constructor(host: Hostfs, path: string, pinned?: { dev: bigint; ino: bigint }) {
         this.#host = host;
         this.#path = resolve(path);
+
+        if (pinned !== undefined) {
+            this.#dev = pinned.dev;
+            this.#ino = pinned.ino;
+
+            return;
+        }
 
         try {
             const info = statSync(this.#path, { bigint: true });
@@ -412,6 +425,7 @@ function checkName(name: string, shown: string): string {
 function pin(
     place: Place,
     make = false,
+    byName = false,
 ): { path: string; release: () => void; confined: boolean; self: boolean } {
     const at = place.located;
 
@@ -432,17 +446,40 @@ function pin(
     try {
         const path = entry(dir, checkName(name!, shown));
 
-        // The entry itself is the admitted root: it must be that folder, not a link or another one in its place.
+        // The entry itself is the admitted root: the descriptor that is opened must be that folder (a link or another
+        // folder in its place is refused), and the call then uses that descriptor, not the name.
         if (at.root?.depth === at.parts.length) {
-            const info = lstatSync(path, { bigint: true });
+            const probe = noLink(shown, () => fsOpenSync(path, PATH_ONLY | NO_FOLLOW));
 
-            if (info.dev !== at.root.dev || info.ino !== at.root.ino) {
-                throw failure(
-                    "ESTALE",
-                    `${shown} is no longer the folder it was admitted as`,
-                    shown,
-                );
+            try {
+                const info = fstatSync(probe, { bigint: true });
+
+                if (info.dev !== at.root.dev || info.ino !== at.root.ino) {
+                    throw failure(
+                        "ESTALE",
+                        `${shown} is no longer the folder it was admitted as`,
+                        shown,
+                    );
+                }
+            } catch (error) {
+                closeSync(probe);
+
+                throw error;
             }
+
+            if (!byName) {
+                return {
+                    path: entry(probe),
+                    release: () => {
+                        closeSync(probe);
+                        closeSync(dir);
+                    },
+                    confined: true,
+                    self: true,
+                };
+            }
+
+            closeSync(probe);
         }
 
         return {
@@ -462,8 +499,9 @@ function use<T>(
     place: Place,
     run: (path: string, confined: boolean, self: boolean) => T,
     make = false,
+    byName = false,
 ): T {
-    const pinned = pin(place, make);
+    const pinned = pin(place, make, byName);
 
     try {
         return run(pinned.path, pinned.confined, pinned.self);
@@ -476,8 +514,9 @@ async function useAsync<T>(
     place: Place,
     run: (path: string, confined: boolean, self: boolean) => Promise<T>,
     make = false,
+    byName = false,
 ): Promise<T> {
-    const pinned = pin(place, make);
+    const pinned = pin(place, make, byName);
 
     try {
         return await run(pinned.path, pinned.confined, pinned.self);
@@ -485,10 +524,6 @@ async function useAsync<T>(
         pinned.release();
     }
 }
-
-/** Open `path` (made by `pin`) as the last name of a sandboxed place: never through a link. */
-const lastFlags = (flags: number, confined: boolean): number =>
-    confined ? flags | NO_FOLLOW : flags;
 
 function modeFlags(flags: string | number): number {
     if (typeof flags === "number") {
@@ -541,9 +576,11 @@ export class OpenFile {
         }
     }
 
-    /** What is left of the file, from the start. */
-    readAll(): Buffer {
-        return readFileSync(this.#fd);
+    /** What is left of the file, from the start; `max` bounds it (more than that is `EFBIG`). */
+    readAll(max?: number): Buffer {
+        return max === undefined
+            ? readFileSync(this.#fd)
+            : readBounded((buffer) => fsReadSync(this.#fd, buffer, 0, buffer.length, null), max);
     }
 
     close(): void {
@@ -555,12 +592,152 @@ export class OpenFile {
 }
 
 /** What a regular file read of a sandboxed place is bounded by. */
-export type ReadOptions = { max?: number };
+export type ReadOptions = {
+    max?: number;
+    /** @internal A test hook: runs between the look at the size and the read, where a guest can grow the file. */
+    afterSize?: () => void;
+};
 
-function readConfined(place: Place, path: string, max: number): Buffer {
-    const fd = noLink(place.display.text, () =>
-        fsOpenSync(path, constants.O_RDONLY | NON_BLOCK | NO_FOLLOW),
-    );
+const tooBig = (max: number): NodeJS.ErrnoException =>
+    failure("EFBIG", `a file of more than ${max} bytes is not read`);
+
+/** Read at most `max` bytes: one more arriving, whatever the size said, fails the read. */
+function readBounded(read: (buffer: Buffer) => number, max: number): Buffer {
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    for (;;) {
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, max + 1 - total));
+        const got = read(buffer);
+
+        if (got === 0) {
+            return Buffer.concat(chunks, total);
+        }
+
+        total += got;
+
+        if (total > max) {
+            throw tooBig(max);
+        }
+
+        chunks.push(buffer.subarray(0, got));
+    }
+}
+
+async function readBoundedAsync(
+    read: (buffer: Buffer) => Promise<number>,
+    max: number,
+): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    for (;;) {
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, max + 1 - total));
+        const got = await read(buffer);
+
+        if (got === 0) {
+            return Buffer.concat(chunks, total);
+        }
+
+        total += got;
+
+        if (total > max) {
+            throw tooBig(max);
+        }
+
+        chunks.push(buffer.subarray(0, got));
+    }
+}
+
+/**
+ * Open the entry `path` (a name below a descriptor) for a sandboxed place, and only a regular file (or, to read, a folder).
+ * The entry is classified first with `O_PATH` and no link followed, and what is opened is that classified descriptor
+ * (`/proc/self/fd/N`), so nothing can take its place in between: a pipe, a device, a socket, or a link is `ENXIO` or a
+ * refusal and is never opened, for a read, a write, or a truncate. A name that is not there is made with `O_EXCL`.
+ */
+function openChecked(path: string, flags: number, mode: number | undefined, shown: string): number {
+    const writes = (flags & ACCMODE) !== constants.O_RDONLY;
+
+    for (let attempt = 0; ; attempt++) {
+        let probe: number;
+
+        try {
+            probe = fsOpenSync(path, PATH_ONLY | NO_FOLLOW);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT" && flags & constants.O_CREAT) {
+                try {
+                    return fsOpenSync(
+                        path,
+                        (flags | constants.O_EXCL | NO_FOLLOW | NON_BLOCK) & ~constants.O_TRUNC,
+                        mode,
+                    );
+                } catch (made) {
+                    // Made by the guest between the look and here: look again, once.
+                    if (
+                        (made as NodeJS.ErrnoException).code === "EEXIST" &&
+                        !(flags & constants.O_EXCL) &&
+                        attempt === 0
+                    ) {
+                        continue;
+                    }
+
+                    return noLink(shown, () => {
+                        throw made;
+                    });
+                }
+            }
+
+            return noLink(shown, () => {
+                throw error;
+            });
+        }
+
+        try {
+            const info = fstatSync(probe, { bigint: true });
+
+            if (info.isSymbolicLink()) {
+                throw refused(shown);
+            }
+
+            if (!info.isFile() && !(info.isDirectory() && !writes)) {
+                throw failure("ENXIO", `${shown} is not a regular file`, shown);
+            }
+
+            if (flags & constants.O_CREAT && flags & constants.O_EXCL) {
+                throw failure("EEXIST", `${shown} is there`, shown);
+            }
+
+            const fd = fsOpenSync(
+                entry(probe),
+                flags & ~(constants.O_CREAT | constants.O_EXCL | constants.O_TRUNC | NO_FOLLOW),
+            );
+
+            try {
+                const after = fstatSync(fd, { bigint: true });
+
+                if (after.dev !== info.dev || after.ino !== info.ino) {
+                    throw failure("ESTALE", `${shown} changed as it was opened`, shown);
+                }
+
+                if (flags & constants.O_TRUNC && writes) {
+                    ftruncateSync(fd, 0);
+                }
+
+                return fd;
+            } catch (error) {
+                closeSync(fd);
+
+                throw error;
+            }
+        } finally {
+            closeSync(probe);
+        }
+    }
+}
+
+function readConfined(place: Place, path: string, options: ReadOptions): Buffer {
+    const max = options.max ?? MAX_TEXT;
+    const fd = openChecked(path, constants.O_RDONLY, undefined, place.display.text);
 
     try {
         const info = fstatSync(fd);
@@ -569,7 +746,9 @@ function readConfined(place: Place, path: string, max: number): Buffer {
             throw notRegular(place, max);
         }
 
-        return readFileSync(fd);
+        options.afterSize?.();
+
+        return readBounded((buffer) => fsReadSync(fd, buffer, 0, buffer.length, null), max);
     } finally {
         closeSync(fd);
     }
@@ -579,7 +758,7 @@ function readConfined(place: Place, path: string, max: number): Buffer {
 
 export function readFile(place: Place, options?: ReadOptions): Buffer {
     return use(place, (path, confined) =>
-        confined ? readConfined(place, path, options?.max ?? MAX_TEXT) : readFileSync(path),
+        confined ? readConfined(place, path, options ?? {}) : readFileSync(path),
     );
 }
 
@@ -593,19 +772,23 @@ export async function readFileAsync(place: Place, options?: ReadOptions): Promis
             return fsp.readFile(path);
         }
 
-        const handle = await noLink(place.display.text, () =>
-            fsp.open(path, constants.O_RDONLY | NON_BLOCK | NO_FOLLOW),
-        );
+        const max = options?.max ?? MAX_TEXT;
+        const fd = openChecked(path, constants.O_RDONLY, undefined, place.display.text);
+        const handle = await fsp.open(entry(fd), constants.O_RDONLY).finally(() => closeSync(fd));
 
         try {
             const info = await handle.stat();
-            const max = options?.max ?? MAX_TEXT;
 
             if (!info.isFile() || info.size > max) {
                 throw notRegular(place, max);
             }
 
-            return await handle.readFile();
+            options?.afterSize?.();
+
+            return await readBoundedAsync(
+                async (buffer) => (await handle.read(buffer, 0, buffer.length, null)).bytesRead,
+                max,
+            );
         } finally {
             await handle.close();
         }
@@ -853,19 +1036,19 @@ export async function mkdirAsync(
 }
 
 export function unlink(place: Place): void {
-    use(place, (path) => unlinkSync(path));
+    use(place, (path) => unlinkSync(path), false, true);
 }
 
 export async function unlinkAsync(place: Place): Promise<void> {
-    await useAsync(place, (path) => fsp.unlink(path));
+    await useAsync(place, (path) => fsp.unlink(path), false, true);
 }
 
 export function rmdir(place: Place): void {
-    use(place, (path) => rmdirSync(path));
+    use(place, (path) => rmdirSync(path), false, true);
 }
 
 export async function rmdirAsync(place: Place): Promise<void> {
-    await useAsync(place, (path) => fsp.rmdir(path));
+    await useAsync(place, (path) => fsp.rmdir(path), false, true);
 }
 
 /** Remove a file, a link (never what it names), or with `recursive` a folder and all in it. */
@@ -911,11 +1094,21 @@ export async function rmAsync(
 }
 
 export function rename(from: Place, to: Place): void {
-    use(from, (source) => use(to, (target) => renameSync(source, target)));
+    use(
+        from,
+        (source) => use(to, (target) => renameSync(source, target), false, true),
+        false,
+        true,
+    );
 }
 
 export async function renameAsync(from: Place, to: Place): Promise<void> {
-    await useAsync(from, (source) => useAsync(to, (target) => fsp.rename(source, target)));
+    await useAsync(
+        from,
+        (source) => useAsync(to, (target) => fsp.rename(source, target), false, true),
+        false,
+        true,
+    );
 }
 
 export function copyFile(from: Place, to: Place, mode?: number): void {
@@ -958,12 +1151,11 @@ export function writeFile(
                 return;
             }
 
-            const fd = noLink(place.display.text, () =>
-                fsOpenSync(
-                    path,
-                    lastFlags(modeFlags(options.flag ?? "w"), true),
-                    options.mode ?? 0o666,
-                ),
+            const fd = openChecked(
+                path,
+                modeFlags(options.flag ?? "w"),
+                options.mode ?? 0o666,
+                place.display.text,
             );
 
             try {
@@ -1017,13 +1209,9 @@ export function append(
 export function openSync(place: Place, flags: string | number = "r", mode?: number): OpenFile {
     return use(place, (path, confined) => {
         const bits = modeFlags(flags);
-        const fd = noLink(place.display.text, () =>
-            fsOpenSync(
-                path,
-                confined ? lastFlags(bits | (bits & 3 ? 0 : NON_BLOCK), true) : bits,
-                mode,
-            ),
-        );
+        const fd = confined
+            ? openChecked(path, bits, mode, place.display.text)
+            : noLink(place.display.text, () => fsOpenSync(path, bits, mode));
 
         return new OpenFile(fd);
     });
@@ -1067,7 +1255,7 @@ export function openNoFollowSync(
             return new OpenFile(fd);
         }
 
-        return new OpenFile(noLink(place.display.text, () => fsOpenSync(path, flags | NO_FOLLOW)));
+        return new OpenFile(openChecked(path, flags, undefined, place.display.text));
     });
 }
 
@@ -1079,13 +1267,16 @@ export async function open(
     return useAsync(place, async (path, confined) => {
         const bits = modeFlags(flags);
 
-        return noLink(place.display.text, () =>
-            fsp.open(
-                path,
-                confined ? lastFlags(bits | (bits & 3 ? 0 : NON_BLOCK), true) : bits,
-                mode,
-            ),
-        );
+        if (!confined) {
+            return fsp.open(path, bits, mode);
+        }
+
+        // Checked and made as a regular file, then opened again through the checked descriptor.
+        const fd = openChecked(path, bits, mode, place.display.text);
+
+        return fsp
+            .open(entry(fd), bits & (ACCMODE | constants.O_APPEND))
+            .finally(() => closeSync(fd));
     });
 }
 
@@ -1127,7 +1318,11 @@ export async function openNoFollow(
             return handle;
         }
 
-        return noLink(place.display.text, () => fsp.open(path, flags | NO_FOLLOW));
+        const fd = openChecked(path, flags, undefined, place.display.text);
+
+        return fsp
+            .open(entry(fd), flags & (ACCMODE | constants.O_APPEND))
+            .finally(() => closeSync(fd));
     });
 }
 
@@ -1141,9 +1336,7 @@ export function createReadStream(
             return fsCreateReadStream(path, options);
         }
 
-        const fd = noLink(place.display.text, () =>
-            fsOpenSync(path, constants.O_RDONLY | NON_BLOCK | NO_FOLLOW),
-        );
+        const fd = openChecked(path, constants.O_RDONLY, undefined, place.display.text);
 
         if (!fstatSync(fd).isFile()) {
             closeSync(fd);
@@ -1159,7 +1352,16 @@ export function makeTemporaryFolder(prefix: string): string {
     return mkdtempSync(prefix);
 }
 
-export { appendFileSync, accessSync, chmodSync, copyFileSync, linkSync, symlinkSync, utimesSync };
+/** Whether a file on an owner's path (the server's `PATH`) can be run. Not for a session's folder. */
+export function isExecutable(path: string): boolean {
+    try {
+        accessSync(path, constants.X_OK);
+
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /** The link a sandboxed or plain place is, as text. */
 export function readlink(place: Place): string {
@@ -1352,6 +1554,8 @@ function climbTo(path: string, key: string): boolean {
 /** Owns which folders sandboxed trees use, and makes folders and places. */
 export class Hostfs {
     readonly #view: SandboxView;
+    /** The identity of each nested folder at its first look, by stated path. */
+    readonly #roots = new Map<string, { dev: bigint; ino: bigint }>();
 
     constructor(view: SandboxView = NO_SANDBOX) {
         this.#view = view;
@@ -1366,8 +1570,34 @@ export class Hostfs {
     }
 
     /** A folder as a session works in it. */
-    folder(path: string): FolderRef {
-        return new FolderRef(this, path);
+    folder(path: string, pinned?: { dev: bigint; ino: bigint }): FolderRef {
+        const target = resolve(path);
+        const known = pinned ?? this.#roots.get(target);
+        const ref = new FolderRef(this, target, known);
+
+        // A folder nested in a sandboxed one is pinned by the first look, when admission gave no identity: the guest can
+        // replace it, and a replacement is then not the root.
+        if (known === undefined && ref.identity !== undefined) {
+            const here = this.#folders();
+
+            if (here.length > 0) {
+                const where = this.#locate(target, here, true);
+
+                if (where.kind === "confined" && where.parts.length > 0) {
+                    this.#roots.set(target, ref.identity);
+
+                    for (const old of this.#roots.keys()) {
+                        if (this.#roots.size <= 1000) {
+                            break;
+                        }
+
+                        this.#roots.delete(old);
+                    }
+                }
+            }
+        }
+
+        return ref;
     }
 
     /** Whether a sandboxed tree uses `path`, a folder that holds it, or one inside it (by name, and by identity). */
@@ -1443,6 +1673,12 @@ export class Hostfs {
                     parts: found.entered.names,
                 };
             }
+        }
+
+        // A raw path is followed component by component, links and all, until it is in a sandboxed folder: from there
+        // it is that folder's, and a link after that point does not matter. Entering by a link at any step is refused.
+        if (!chosen && "entered" in walk(target, folders)) {
+            throw refused(path);
         }
 
         if (passesThrough(target, folders)) {

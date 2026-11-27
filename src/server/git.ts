@@ -20,8 +20,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { execute, GitError, type GitOptions, type GitPlan } from "./git-own.ts";
 import {
     above,
-    accessSync,
-    constants,
+    isExecutable,
     FolderRef,
     folderPath,
     lstat,
@@ -43,22 +42,12 @@ export function absolutePath(path: string | undefined = process.env.PATH): strin
     return (path ?? "").split(delimiter).filter((entry) => entry !== "" && isAbsolute(entry));
 }
 
-function executable(path: string): boolean {
-    try {
-        accessSync(path, constants.X_OK);
-
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 /** The first absolute `git` on the absolute entries of `PATH`; undefined when there is none. */
 export function findGit(path: string | undefined = process.env.PATH): string | undefined {
     for (const folder of absolutePath(path)) {
         const candidate = join(folder, process.platform === "win32" ? "git.exe" : "git");
 
-        if (executable(candidate)) {
+        if (isExecutable(candidate)) {
             return candidate;
         }
     }

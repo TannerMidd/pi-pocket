@@ -575,6 +575,7 @@ export class PocketApp {
 
     private constructor(options: OpenOptions) {
         this.#configureModels = options.configureModels;
+        this.#sandboxView = options.sandboxView;
         this.hostfs = new Hostfs(options.sandboxView);
         this.snapshots = new Snapshots(this.hostfs, join(options.dataDir, "snapshots"));
         this.#home = options.home ?? (process.env.HOME || homedir());
@@ -3988,8 +3989,14 @@ export class PocketApp {
      * path: it goes to `hostfs`, the Git runner, or a named spawn wrapper. A workspace URI (`ssh://`) has no folder here.
      */
     folderOf(id: ConversationId): FolderRef {
-        return this.hostfs.folder(this.cwdOf(id));
+        const cwd = this.cwdOf(id);
+
+        // The identity the folder was admitted with (admission state gives it through the view); else `Hostfs.folder`
+        // pins the first look at a nested folder.
+        return this.hostfs.folder(cwd, this.#sandboxView?.pinnedRoot?.(Number(id), cwd));
     }
+
+    readonly #sandboxView: SandboxView | undefined;
 
     /** The folder a conversation works in, as text: a label, a key, or a URI. Not for opening files (`folderOf`). */
     cwdOf(id: ConversationId): string {

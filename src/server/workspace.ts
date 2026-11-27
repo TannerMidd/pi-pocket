@@ -4,7 +4,7 @@
  * operations people call directly check who may do them; `conversationPath` and `uploadDirectory` leave seeing the
  * conversation to their callers.
  */
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -27,7 +27,7 @@ import { uploadDirectory } from "./upload-references.ts";
 import { filePolicy } from "./file-policy.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { displayPath, expandHome } from "./paths.ts";
-import { lstat, mkdir, Place, stat } from "./hostfs.ts";
+import { lstat, mkdir, Place, stat, within } from "./hostfs.ts";
 import type { ClientEntry } from "./projection.ts";
 
 /** How many sessions' Pi edits are kept between looks at Changes (`#edits`). */
@@ -345,7 +345,17 @@ export class Workspace {
 
         // A path into a sandboxed folder is read through the confined walk; one through a link into it is refused.
         try {
-            return typeof result === "string" ? this.#app.hostfs.at(result) : result;
+            if (typeof result !== "string") {
+                return result;
+            }
+
+            // A name in the session's folder is resolved from the folder's admitted root, so a replacement of the
+            // folder is not accepted as the root.
+            const cwd = this.#app.cwdOf(id);
+
+            return within(cwd, result)
+                ? this.#app.folderOf(id).at(relative(cwd, result))
+                : this.#app.hostfs.at(result);
         } catch {
             throw new HttpError(404, "Image not found");
         }
