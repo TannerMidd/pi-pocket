@@ -127,6 +127,19 @@ export interface WorkspaceProvider {
     env(cwd: string): ExecutionEnv;
     /** @experimental @since 0.28.0 */
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+    /**
+     * Marks workspaces of this scheme as untrusted sandboxes enforced by core: blocks host tools and host browser,
+     * skips host `commandEnv` injection, restricts memory writes to session scope, and forbids moving across the
+     * isolation boundary.
+     * @experimental @since 0.31.0
+     */
+    readonly isolated?: boolean;
+    /**
+     * Called when no active session remains on `cwd` (after archive or removal) so the provider can stop or clean up
+     * resources for that workspace.
+     * @experimental @since 0.31.0
+     */
+    disposeWorkspace?(cwd: string): Promise<void> | void;
 }
 
 /**
