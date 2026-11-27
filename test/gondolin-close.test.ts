@@ -488,3 +488,75 @@ test("the record is replaced in one step: written under another name and renamed
         await vms.stopAll("the test ended");
     }
 });
+
+test("a runner that exits while its record cannot be updated still ends the VM, keeps the record, and tells the owner", async () => {
+    const driver = new FakeDriver();
+    const file = join(folder, "exit.json");
+    const problems: string[] = [];
+    const ended: [number, string][] = [];
+
+    driver.pids = true;
+    const vms = new SandboxManager({
+        driver,
+        log: () => {},
+        pidFile: file,
+        settings: settings(),
+        onEnded: (rootId, reason) => ended.push([rootId, reason]),
+        onProblem: (message) => problems.push(message),
+        inspect: async () => ({ state: "gone" }),
+    });
+    const env = vms.envFor(1, { rootId: 1, cwd: folder, uploadDir: undefined });
+
+    try {
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        const pid = driver.vms[0]!.pid;
+
+        // From now on the record cannot be written.
+        mkdirSync(`${file}.${process.pid}.tmp`);
+        assert.doesNotThrow(
+            () => driver.vms[0]!.crash("the runner died"),
+            "the exit callback does not throw",
+        );
+        assert.equal(vms.state(1)?.phase, "stopped");
+        assert.match(vms.state(1)?.note ?? "", /runner died.*still on record/);
+        assert.deepEqual(
+            ended.map(([rootId]) => rootId),
+            [1],
+            "what ran in the VM is told that it ended",
+        );
+        assert.equal(problems.length, 1);
+        assert.match(problems[0]!, /cannot be written/);
+        assert.deepEqual(pidsIn(file), [pid], "the record stays for a later retry");
+
+        // The retry: a release finds the runner gone, and takes the record off.
+        rmSync(`${file}.${process.pid}.tmp`, { recursive: true });
+        await vms.release(1, "turned off");
+        assert.equal(readFileSync(file, "utf8"), "[]");
+    } finally {
+        await vms.stopAll("the test ended");
+    }
+});
+
+test("a listener that fails does not throw out of the runner's exit event, and the others still hear it", () => {
+    const handlers: Record<string, (info: { code?: number }) => void> = {};
+    const vm = new GondolinVm(
+        {
+            ...packageVm(null),
+            server: {
+                on: (event: string, handler: (info: { code?: number }) => void) => {
+                    handlers[event] = handler;
+                },
+            },
+        },
+        undefined,
+        30,
+    );
+    const heard: string[] = [];
+
+    vm.onExit(() => {
+        throw new Error("a listener failed");
+    });
+    vm.onExit((reason) => heard.push(reason));
+    assert.doesNotThrow(() => handlers.exit!({ code: 1 }));
+    assert.deepEqual(heard, ["the VM's runner exited (code 1)"]);
+});
