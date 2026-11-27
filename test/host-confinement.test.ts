@@ -459,3 +459,50 @@ test(
         }
     },
 );
+
+test(
+    "a session's folder reached through an alias is confined as the sandboxed folder it enters",
+    { skip: LINUX },
+    async () => {
+        const project = folder("alias-project");
+        const beyond = folder("alias-beyond");
+        const links = folder("alias-links");
+
+        writeFileSync(join(beyond, "data.txt"), `${SECRET}\n`);
+        mkdirSync(join(project, "deep"), { recursive: true });
+        symlinkSync(beyond, join(project, "sub"));
+        symlinkSync(beyond, join(project, "deep", "leaf"));
+        symlinkSync(project, join(links, "alias"));
+        symlinkSync(join(links, "alias"), join(links, "chain-1"));
+        symlinkSync(join(links, "chain-1"), join(links, "chain-2"));
+        symlinkSync(join(project, "deep"), join(links, "middle"));
+        symlinkSync(beyond, join(links, "elsewhere"));
+        const stop = onSandboxedFolders(() => [project]);
+
+        try {
+            // Neither the stated path nor the real one lies in the project: the walk finds it by its inode.
+            for (const root of [
+                join(links, "alias", "sub"),
+                join(links, "chain-2", "sub"),
+                join(links, "middle", "leaf"),
+            ]) {
+                assert.equal(sandboxedFolder(root), true, root);
+                await assert.rejects(
+                    viewFile(join(root, "data.txt"), undefined, root),
+                    /not followed/,
+                    root,
+                );
+                await assert.rejects(
+                    openInside(root, join(root, "data.txt")),
+                    /not followed/,
+                    root,
+                );
+            }
+
+            assert.equal(sandboxedFolder(join(links, "alias")), true);
+            assert.equal(sandboxedFolder(join(links, "elsewhere")), false);
+        } finally {
+            stop();
+        }
+    },
+);

@@ -12,6 +12,7 @@ import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
+    loadTools,
     newSession,
     openApp,
     owner,
@@ -255,6 +256,70 @@ test("a subagent that is made after the sandbox looked for them, and before it i
         held.open();
         await change;
         assert.equal((await app.harness.snapshot(SandboxDoc, child, context))?.on, true);
+    } finally {
+        useDriver(undefined);
+        held.open();
+        await app.close();
+    }
+});
+
+test("the sandbox is not turned on while a background call has not made its record, and the call goes on", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const model = scriptedModel((request) => {
+        const { messages } = request as { messages: { role: string }[] };
+
+        return messages.at(-1)?.role === "toolResult"
+            ? fauxAssistantMessage([fauxText("done")])
+            : fauxAssistantMessage(
+                  [
+                      fauxToolCall("background", {
+                          action: "start",
+                          command: "echo hi",
+                          notify: false,
+                      }),
+                  ],
+                  { stopReason: "toolUse" },
+              );
+    });
+    const app = await openApp(
+        model,
+        join(root, `data-transition-${++opened}`),
+        undefined,
+        undefined,
+        sandboxOptions(),
+    );
+    const held = gate();
+
+    try {
+        const folder = join(root, "transition-background");
+
+        mkdirSync(folder, { recursive: true });
+        await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
+        const id = await newSession(app, folder);
+
+        await loadTools(app, id, "background");
+        const start = app.background.start.bind(app.background);
+
+        // The call is in flight, and has not reserved its record: the point where a turn-on used to find nothing.
+        app.background.start = async (...args: Parameters<typeof start>) => {
+            await held.wait();
+
+            return start(...args);
+        };
+
+        const run = say(app, id, "start it");
+
+        await held.reached;
+        await assert.rejects(
+            app.sandboxes.set(id, owner(app), true),
+            /still runs work on this machine: a background call that is running/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, false);
+        held.open();
+        await run;
+        assert.equal(driver.log.started.length, 0);
     } finally {
         useDriver(undefined);
         held.open();

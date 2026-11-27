@@ -466,7 +466,10 @@ export class Sandboxes {
                         (each) => each.taskId === node.id,
                     )?.name ?? "a tool";
 
-                if (name === "a tool" || ROUTED.has(name)) {
+                // Any call but the ones that touch only Pi Pocket's own state may be running on this machine: not
+                // only `bash` and the file tools, but `background`, which has not made its record yet, `browser`, and
+                // the rest. One that begins from now on waits for this change (`settled`).
+                if (!INERT.has(name)) {
                     found.push(`a ${name} call that is running`);
                 }
             }
