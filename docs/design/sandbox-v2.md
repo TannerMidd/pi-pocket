@@ -265,9 +265,16 @@ Every implementation-level item from the two critics' reviews. Each PR's descrip
 
 **`hostfs` and `GuardedFs` (PR 2, PR 4).**
 
+- **Pin the root descriptor (PR 2).** `hostfs` opens each approved root **once** and keeps that descriptor with its device and inode for the life of the `FolderRef`. Every operation in that folder starts from the pinned descriptor. It never calls `realpath(root)` again. If a later check finds that the root's path now has another device or inode, the operation **fails closed** and the tree is `suspended`. #415 re-resolved the root on every walk, so a guest could swap a nested session's root for a link. A test swaps the root of a nested session folder for a link between two operations.
 - **`hostfs` on plain folders.** It confines only folders that a sandboxed tree uses. For every other folder it behaves as today: links are followed, and the error codes are the same. A **plain-session parity test** in PR 2 runs the existing file, changes, and viewer cases on a plain folder, with and without `hostfs`, and compares results.
 - **`GuardedFs` and guest-made special files.** A **link** the guest makes is stored as a link and never followed on the host: reads of it return the link, and a path through it is refused by the descriptor walk. A **FIFO** or a device node is never opened on the host. A `stat` on it works. An `open` returns `ENXIO`, so the bridge cannot block on it. A guest `mknod` is refused with `EPERM`, except for a regular file. A socket is refused the same way. A test makes each kind in the guest-side API and checks the host side stays unblocked.
 - Both pieces fail closed off Linux and without `/proc`.
+
+**Git boundary details from the late file-system review (PR 4).**
+
+- **Pointer ancestors.** Protect the ancestors of every `.git` **pointer file** from rename, not only the ancestors of the resolved git dir. Moving a nested checkout changes what a relative `gitdir:` means. Refuse writable links along the pointer's resolution path.
+- **Bare repositories.** Audit the config of **every discovered bare repository** explicitly, with `--git-dir`, as for any other repository.
+- **Hooks directory.** Refuse a read-write VM when the guest can **create a child** in the resolved hooks directory, not only when existing hook names are writable. No exemption for the sandbox root or for a folder that holds git metadata: an empty hooks dir must not gain a new hook. Tests: an empty hooks dir inside the folder; a hooks dir that is the folder itself.
 
 **Trusted places and MCP (PR 3).**
 
@@ -297,25 +304,27 @@ Each class names the element that makes it **impossible**. Sources: Greptile on 
 
 **B. Host Git or Pocket runs guest-written code.**
 
-| Finding                                                                                                                                                                                                               | Element                                                     |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| G: `commondir`; custom hooks path; receive hooks; submodule hooks; separate git dir; fsmonitor and other scripts. I: sequencer, `pager.<cmd>`, `core.gitProxy`, `interactive.diffFilter`, `gpg.ssh.defaultKeyCommand` | Every git dir read-only whole; repo-scope key allow-list    |
-| G: effective value; dangling and `..` links; `~user` includes; split index. I: include expansion differs from Git; empty config; `GIT_CONFIG_*`                                                                       | Link-chain walk, no clean-up; no lists; one Git environment |
-| I: discovery visits only cwd; a session rooted at `.git/hooks`; subfolder skips the parent; nested and existing bare repos; the containing repo; global and system includes with no repo                              | Full descriptor discovery; session in a git dir refused     |
-| I: a writable link in the chain swaps later; hard links; a hook links to project code                                                                                                                                 | Chain walk inside git dirs; `nlink > 1`                     |
-| I: clean filters run in Changes' `git status`; husky scripts                                                                                                                                                          | Hardened runner in sandboxed folders; husky is a limit      |
+| Finding                                                                                                                                                                                                               | Element                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| G: `commondir`; custom hooks path; receive hooks; submodule hooks; separate git dir; fsmonitor and other scripts. I: sequencer, `pager.<cmd>`, `core.gitProxy`, `interactive.diffFilter`, `gpg.ssh.defaultKeyCommand` | Every git dir read-only whole; repo-scope key allow-list                                                        |
+| G: effective value; dangling and `..` links; `~user` includes; split index. I: include expansion differs from Git; empty config; `GIT_CONFIG_*`                                                                       | Link-chain walk, no clean-up; no lists; one Git environment                                                     |
+| I: discovery visits only cwd; a session rooted at `.git/hooks`; subfolder skips the parent; nested and existing bare repos; the containing repo; global and system includes with no repo                              | Full descriptor discovery; session in a git dir refused                                                         |
+| Late review: a pointer file's ancestors are renamed, so a relative `gitdir:` points elsewhere; a bare repository is not audited; an empty hooks dir gains a new hook                                                  | Pointer-ancestor protection; every bare repo audited; refuse when a child can be created in the hooks dir (4.8) |
+| I: a writable link in the chain swaps later; hard links; a hook links to project code                                                                                                                                 | Chain walk inside git dirs; `nlink > 1`                                                                         |
+| I: clean filters run in Changes' `git status`; husky scripts                                                                                                                                                          | Hardened runner in sandboxed folders; husky is a limit                                                          |
 
 **C. Host reads or writes follow a guest link.**
 
-| Finding                                                                                                                                           | Element                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| G: mentioned links, images, downloads. I: owner file viewer; prompt loading (`AGENTS.md -> id_rsa`)                                               | `hostfs` + `FolderRef`; snapshot loaders    |
-| I: parent swap; `stat`/`fstat` agree on an outside file; listing reopens a checked name; Changes undo deletes outside                             | Descriptor walk, `unlinkat`                 |
-| I: nested root redirected by a link; aliases bypass confinement                                                                                   | Identity classification for every requester |
-| I: skill discovery reads `/dev/zero`; `/skill` expansion unrestricted                                                                             | Confined reads, `O_NONBLOCK`, snapshot      |
-| G: artifacts read `assets[].path`                                                                                                                 | Gate: no path anywhere                      |
-| Critic 2: `project-model.ts`, `check-ignore`, `copyNewFiles`, `switchBranch`, `gitDirOf`, `makeFolder`                                            | The inventory in 4.2                        |
-| Round 2: `design/guide.ts`, `design/files.ts`, `skills.ts` `existsSync`, project MCP config, `github`, `heic`, `reveal`, `browser/*`, `processes` | The census (4.2) and type-forced conversion |
+| Finding                                                                                                                                           | Element                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| G: mentioned links, images, downloads. I: owner file viewer; prompt loading (`AGENTS.md -> id_rsa`)                                               | `hostfs` + `FolderRef`; snapshot loaders                         |
+| I: parent swap; `stat`/`fstat` agree on an outside file; listing reopens a checked name; Changes undo deletes outside                             | Descriptor walk, `unlinkat`                                      |
+| I: nested root redirected by a link; aliases bypass confinement                                                                                   | Identity classification for every requester                      |
+| I: skill discovery reads `/dev/zero`; `/skill` expansion unrestricted                                                                             | Confined reads, `O_NONBLOCK`, snapshot                           |
+| G: artifacts read `assets[].path`                                                                                                                 | Gate: no path anywhere                                           |
+| Critic 2: `project-model.ts`, `check-ignore`, `copyNewFiles`, `switchBranch`, `gitDirOf`, `makeFolder`                                            | The inventory in 4.2                                             |
+| Late file-system review: `realpath(root)` re-resolved on every walk, so a nested session's root is swapped for a link                             | Pinned root descriptor with a dev/inode check; fail closed (4.8) |
+| Round 2: `design/guide.ts`, `design/files.ts`, `skills.ts` `existsSync`, project MCP config, `github`, `heic`, `reveal`, `browser/*`, `processes` | The census (4.2) and type-forced conversion                      |
 
 **D. Trusted code reachable from the folder.**
 
