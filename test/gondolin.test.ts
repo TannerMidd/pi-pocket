@@ -772,9 +772,14 @@ test("seedWorkspace rejects symlinked parent folders, preserves executable bits,
             symlinkSync(externalDir, join(repo, "config"));
         }
 
-        // Stage a brand-new file (not in HEAD yet).
+        // Stage a brand-new file (not in HEAD yet), then configure core.fsmonitor to prove seeding never runs it.
+        const fsmonitorMarker = join(tmpdir(), `pocket-fsmonitor-marker-${Date.now()}`);
+
         writeFileSync(join(repo, "staged-new.txt"), "from staging area\n");
         execFileSync("git", ["add", "staged-new.txt"], { cwd: repo });
+        execFileSync("git", ["config", "core.fsmonitor", `sh -c 'touch "${fsmonitorMarker}"'`], {
+            cwd: repo,
+        });
 
         // Seed with includeUncommitted: true.
         const seeded = await seedWorkspace(vm, {
@@ -782,6 +787,13 @@ test("seedWorkspace rejects symlinked parent folders, preserves executable bits,
             sourcePath: repo,
             includeUncommitted: true,
         });
+
+        assert.equal(
+            existsSync(fsmonitorMarker),
+            false,
+            "core.fsmonitor must never execute during seeding",
+        );
+        rmSync(fsmonitorMarker, { force: true });
 
         assert.match(seeded.baseCommit ?? "", /^[0-9a-f]{40,64}$/);
 

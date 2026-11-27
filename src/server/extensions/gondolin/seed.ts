@@ -272,8 +272,14 @@ async function restoreGuestExecutables(
 
     for (let i = 0; i < guestPaths.length; i += batchSize) {
         signal?.throwIfAborted();
-        const batch = guestPaths.slice(i, i + batchSize);
-        const res = await execInGuest(vm, ["chmod", "+x", "--", ...batch], "/", signal);
+        // Every path is rooted under `/workspace/`, never option-like (`-`), so `chmod +x` works on both BusyBox/GNU and BSD.
+        const batch = guestPaths.slice(i, i + batchSize).filter((p) => p.startsWith("/workspace/"));
+
+        if (batch.length === 0) {
+            continue;
+        }
+
+        const res = await execInGuest(vm, ["chmod", "+x", ...batch], "/", signal);
 
         if (res.exitCode !== 0) {
             throw new Error(
@@ -324,6 +330,17 @@ async function initGuestSnapshotRepo(
 
     return guestHeadCommit(vm, signal);
 }
+
+const SEED_GIT_FLAGS = [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.attributesFile=/dev/null",
+    "-c",
+    "safe.bareRepository=explicit",
+] as const;
 
 /**
  * Seeds `/workspace` inside `vm` from an empty directory, a local host repo/folder (filtered one-way snapshot, never a
@@ -381,8 +398,11 @@ export async function seedWorkspace(
     const sourcePath = realpathSync(options.sourcePath);
     const isGitRepo = await execFileAsync(
         "git",
-        ["-c", "core.hooksPath=/dev/null", "rev-parse", "--verify", "HEAD"],
-        { cwd: sourcePath, env: cleanGitEnv() },
+        [...SEED_GIT_FLAGS, "rev-parse", "--verify", "HEAD"],
+        {
+            cwd: sourcePath,
+            env: cleanGitEnv(),
+        },
     ).then(
         () => true,
         () => false,
@@ -417,8 +437,8 @@ export async function seedWorkspace(
         // renames are included alongside HEAD-tracked files; otherwise read HEAD's tree (`ls-tree`).
         const gitArgs =
             options.includeUncommitted === true
-                ? ["-c", "core.hooksPath=/dev/null", "ls-files", "--stage", "-z"]
-                : ["-c", "core.hooksPath=/dev/null", "ls-tree", "-r", "-z", "HEAD"];
+                ? [...SEED_GIT_FLAGS, "ls-files", "--stage", "-z"]
+                : [...SEED_GIT_FLAGS, "ls-tree", "-r", "-z", "HEAD"];
         const { stdout: lsOut } = await execFileAsync("git", gitArgs, {
             cwd: sourcePath,
             env: cleanGitEnv(),
@@ -482,7 +502,7 @@ export async function seedWorkspace(
 
                 const { stdout: blob } = await execFileAsync(
                     "git",
-                    ["-c", "core.hooksPath=/dev/null", "cat-file", "blob", obj],
+                    [...SEED_GIT_FLAGS, "cat-file", "blob", obj],
                     {
                         cwd: sourcePath,
                         env: cleanGitEnv(),
