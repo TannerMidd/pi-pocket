@@ -447,6 +447,118 @@ test(
     },
 );
 
+/** The stylesheet without its `@supports` blocks: what a browser without relative colors reads. */
+function withoutSupports(css: string): string {
+    let out = "";
+    let at = 0;
+
+    for (;;) {
+        const start = css.indexOf("@supports", at);
+
+        if (start < 0) {
+            return out + css.slice(at);
+        }
+
+        out += css.slice(at, start);
+        let depth = 0;
+        let index = css.indexOf("{", start);
+
+        for (; index < css.length; index++) {
+            depth += css[index] === "{" ? 1 : css[index] === "}" ? -1 : 0;
+
+            if (depth === 0) {
+                break;
+            }
+        }
+
+        at = index + 1;
+    }
+}
+
+const luminance = (rgb: number[]) => {
+    const [r = 0, g = 0, b = 0] = rgb.map((channel) => {
+        const unit = channel / 255;
+
+        return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    });
+
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+const contrast = (a: number[], b: number[]) => {
+    const [high = 0, low = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+
+    return (high + 0.05) / (low + 0.05);
+};
+
+test(
+    "without relative colors, Pocket neutral's coral keeps a dark ink and a readable mark, in dark and light",
+    real,
+    async () => {
+        const css = withoutSupports(
+            await readFile(
+                join(import.meta.dirname, "..", "web", "themes", "pocket", "theme.css"),
+                "utf8",
+            ),
+        );
+        const chosen = { "pocket.themeChosen": { theme: true, look: false } };
+
+        for (const [mode, kept] of [
+            ["dark", {}],
+            ["light", { ...chosen, "pocket.appearance": { theme: "pocket-neutral-light" } }],
+        ] as const) {
+            await visit(kept);
+            // Unlayered, so these rules beat the theme's own: only the values that browser would have are left.
+            const seen = JSON.parse(
+                await page.evaluate(`
+                    const style = document.createElement("style");
+
+                    style.textContent = ${JSON.stringify(css)};
+                    document.head.append(style);
+
+                    const canvas = document.createElement("canvas");
+
+                    canvas.width = canvas.height = 1;
+
+                    const paint = canvas.getContext("2d", { willReadFrequently: true });
+                    const token = (name) => {
+                        const probe = document.createElement("span");
+
+                        probe.style.color = "var(" + name + ")";
+                        document.body.append(probe);
+                        paint.clearRect(0, 0, 1, 1);
+                        paint.fillStyle = getComputedStyle(probe).color;
+                        paint.fillRect(0, 0, 1, 1);
+                        probe.remove();
+
+                        return [...paint.getImageData(0, 0, 1, 1).data].slice(0, 3);
+                    };
+                    const seen = {
+                        fill: token("--accent-fill"),
+                        ink: token("--accent-ink"),
+                        accent: token("--accent"),
+                        bg: token("--bg"),
+                        row: token("--row-on"),
+                    };
+
+                    style.remove();
+
+                    return JSON.stringify(seen);
+                `),
+            ) as Record<"fill" | "ink" | "accent" | "bg" | "row", number[]>;
+
+            assert.ok(
+                contrast(seen.ink, seen.fill) >= 4.5,
+                `${mode}: New's label ${seen.ink} on ${seen.fill} is ${contrast(seen.ink, seen.fill).toFixed(2)}:1`,
+            );
+            assert.ok(
+                contrast(seen.accent, seen.bg) >= 4.5 && contrast(seen.accent, seen.row) >= 4.5,
+                `${mode}: the accent ${seen.accent} on ${seen.bg} and ${seen.row}`,
+            );
+        }
+    },
+);
+
 test("the folded sidebar holds the whole rail, labels and badges included", real, async () => {
     await visit({});
     await page.evaluate(`(await import("/theme.js")).setPrefs({ sidebar: "rail" }); return "true"`);

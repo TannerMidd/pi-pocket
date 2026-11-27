@@ -161,10 +161,12 @@
 
 /*
  * Pocket neutral carries the brand coral (the π mark) as its hue. Its red is close to coral, so the failed color moves
- * toward crimson to stay apart from it. Any other palette keeps its own accent and its own red.
+ * toward crimson to stay apart from it. Its ink on the coral is a fixed dark, and its light mark has a fixed deep coral
+ * where relative colors are missing. Any other palette keeps its own accent and its own red.
  */
 :root[data-colors^="pocket-neutral"] {
     --hue: #eb927b;
+    --accent-ink: #1f1c19;
 }
 
 @supports (color: oklch(from red l c h)) {
@@ -219,6 +221,7 @@
     --lift-card: 3%;
     --lift-card-2: 6%;
     --lift-raised: 10%;
+    --accent: #a44430;
     --mute: 66%;
     --faint-pct: 56%;
     --row-on: color-mix(in oklab, var(--body) 8%, var(--bg));
@@ -233,6 +236,7 @@
         --accent-c: 1;
         --hue-l: 0.47;
         --hue-c: 1.1;
+        --accent: oklch(from var(--hue) var(--hue-l) calc(c * var(--hue-c)) h);
         --err: oklch(from var(--o-red) 0.48 calc(c * 1.3) calc(h - 12));
     }
 }
