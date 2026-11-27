@@ -156,12 +156,17 @@ test("a turn-on checks every conversation of the tree: a subagent outside the fo
         agents.inside = { conversationId: inside.id, reported: [] };
         agents.stray = { conversationId: stray.id, reported: [] };
     }, context);
+    // A subagent that runs counts: the stray one is made to look busy.
+    const busy = app.isBusy.bind(app);
+
+    app.isBusy = (conversation) => conversation === stray.id || busy(conversation);
     await assert.rejects(
         app.sandboxes.turnOn(a, owner(app)),
         new RegExp(`subagent #${String(stray.id)} .*outside the session's folder`),
     );
     assert.equal(app.sandboxes.isOn(a), false);
     assert.equal(app.sandboxes.phaseOf(a), "stable");
+    app.isBusy = busy;
     // With the stray one moved inside the folder, it turns on.
     await app.commands.configure(stray.id, owner(app), { cwd: dir });
     await app.sandboxes.turnOn(a, owner(app));

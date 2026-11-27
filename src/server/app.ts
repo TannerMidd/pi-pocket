@@ -1178,6 +1178,7 @@ export class PocketApp {
                 notify: (level, message) => this.ownerNotice(level, message),
                 // A module's sandbox is revoked and proved gone before it is replaced, turned off, or removed.
                 suspend: (file, leave) => this.sandboxes.suspendOwner(file, leave),
+                reloadFailed: (file) => this.sandboxes.reloadFailed(file),
             },
         );
         await this.themes.load().catch((error: unknown) => {

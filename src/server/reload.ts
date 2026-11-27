@@ -384,6 +384,8 @@ export class ExtensionLoader {
      * replacement or removal waits for it (a sandbox provider, `sandbox.ts`). It rejects when that cannot be proved.
      */
     readonly #suspend: (file: string, leave: boolean) => Promise<void>;
+    /** The old version stays after a failed reload: whatever its suspension stopped goes on again. */
+    readonly #reloadFailed: (file: string) => Promise<void>;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -411,6 +413,8 @@ export class ExtensionLoader {
             loadLimitMs?: number;
             /** `leave`: the module goes (turned off or removed), not replaced by a new version of itself. */
             suspend?: (file: string, leave: boolean) => Promise<void>;
+            /** A new version of a module failed to load after its old one was suspended: the old one stays, and goes on. */
+            reloadFailed?: (file: string) => Promise<void>;
         } = {},
     ) {
         this.#registry = registry;
@@ -422,6 +426,7 @@ export class ExtensionLoader {
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
         this.#suspend = options.suspend ?? (() => Promise.resolve());
+        this.#reloadFailed = options.reloadFailed ?? (() => Promise.resolve());
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -680,6 +685,11 @@ export class ExtensionLoader {
             // A failed load is tried again at the next event about its file, even one that leaves the file as it was.
             if (!(error instanceof Overtaken)) {
                 this.#stamps.delete(file);
+
+                // The old version stays installed: what its suspension stopped (a sandbox) is let go on with it.
+                if (this.#installed.has(file)) {
+                    await this.#reloadFailed(file).catch(() => undefined);
+                }
             }
 
             throw error;

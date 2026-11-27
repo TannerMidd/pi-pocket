@@ -41,6 +41,8 @@ export class FakeProvider implements SandboxProvider {
     /** What the fake guest's readers closed, and the readers it opened. */
     closed: string[] = [];
     readers: { close(): Promise<void> }[] = [];
+    /** Holds the open of a reader until opened, when set. */
+    holdOpen: Gate | undefined;
     /** Holds `listFiles` until opened, when set. */
     holdList: Gate | undefined;
     /** Holds `release` until opened, when set. */
@@ -72,7 +74,9 @@ export class FakeProvider implements SandboxProvider {
                 return Promise.resolve(ok({ exitCode: 0 }));
             },
             readTextFile: () => Promise.resolve(ok("guest")),
-            openTextLineReader: () => {
+            openTextLineReader: async () => {
+                await this.holdOpen?.wait();
+
                 const reader = {
                     readLine: () => Promise.resolve(ok(undefined)),
                     close: () => {
@@ -84,7 +88,7 @@ export class FakeProvider implements SandboxProvider {
 
                 this.readers.push(reader);
 
-                return Promise.resolve(ok(reader));
+                return ok(reader);
             },
             listFiles: async () => {
                 await this.holdList?.wait();

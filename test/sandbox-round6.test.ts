@@ -132,12 +132,17 @@ test("a move of a sandboxed root checks every conversation as the move leaves it
         (await tx.doc(SubagentsDoc, a)).agents.helper = { conversationId: child.id, reported: [] };
     }, context);
     await app.sandboxes.turnOn(a, owner(app));
+    // The subagent runs, so it counts (a stopped one does not).
+    const busy = app.isBusy.bind(app);
+
+    app.isBusy = (conversation) => conversation === child.id || busy(conversation);
     await assert.rejects(
         app.commands.configure(a, owner(app), { cwd: to }),
         new RegExp(`subagent #${String(child.id)} .*outside the session's folder`),
     );
     assert.equal(app.cwdOf(a), from, "nothing moved");
     assert.deepEqual(provider.released, [], "and nothing was stopped");
+    app.isBusy = busy;
     // The child goes first, into a folder the new place holds: then the root may follow.
     mkdirSync(join(to, "sub"));
     await assert.rejects(

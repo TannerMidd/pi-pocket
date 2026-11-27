@@ -472,7 +472,14 @@ export class Sandboxes {
                 for (const root of roots) {
                     const current = this.#phases.get(root);
 
-                    if (current === undefined || current.lifecycle === true) {
+                    // The teardown owns every tree it stops, also one whose change is still under way (a wait for it ran out):
+                    // the revision moves, so that change cannot commit or reopen the tree over it. Only a suspension that
+                    // another recovery owns (a failed release, the rules) keeps its record.
+                    if (
+                        current === undefined ||
+                        current.phase !== "suspended" ||
+                        current.lifecycle === true
+                    ) {
                         owned.set(root, this.#setPhase(root, "suspended", why, true));
                     }
                 }
@@ -690,6 +697,16 @@ export class Sandboxes {
         return this.#revisions.get(root) ?? 0;
     }
 
+    /** A change that waited asks whether its phase is still its own before it writes: a teardown may have taken the tree. */
+    #assertOwner(root: number, token: number | undefined): void {
+        if (this.#revision(root) !== token) {
+            throw new HttpError(
+                409,
+                "The session was taken over by a provider change meanwhile, so this was not done. Try again.",
+            );
+        }
+    }
+
     /** Write a phase, and answer the tree's new revision. */
     #setPhase(root: number, phase: Phase, reason?: string, lifecycle = false): number {
         this.#epoch++;
@@ -752,6 +769,39 @@ export class Sandboxes {
     #unreserve(reservation: Reservation): void {
         this.#epoch++;
         this.#reservations.delete(reservation);
+        this.#wake();
+    }
+
+    /** Tell everything that waits for a phase or a reservation that something changed. */
+    #wake(): void {
+        for (const listener of [...this.#changed]) {
+            listener();
+        }
+    }
+
+    /**
+     * Wait until a reservation ends (or any change that could free the folder), with a bound: a change that is queued behind
+     * another waits for it, and gives up with that change's reason when it takes too long.
+     */
+    async #untilUnreserved(reason: string): Promise<void> {
+        const stop = new AbortController();
+        let wake!: () => void;
+        const outcome = await Promise.race([
+            this.#timer(this.#waitMs, stop.signal).then(() =>
+                stop.signal.aborted ? new Promise<never>(() => {}) : ("late" as const),
+            ),
+            new Promise<"woke">((resolve) => {
+                wake = () => resolve("woke");
+                this.#changed.add(wake);
+            }),
+        ]).finally(() => {
+            stop.abort();
+            this.#changed.delete(wake);
+        });
+
+        if (outcome === "late") {
+            throw new HttpError(409, reason);
+        }
     }
 
     /**
@@ -1099,6 +1149,12 @@ export class Sandboxes {
                 continue;
             }
 
+            // A subagent that is stopped or finished does not count: nothing of it runs. If it is given work again it is looked at
+            // then (`#outsideProblem`, at the grant and at the delivery), so stopping it really clears this refusal.
+            if (!this.#app.isBusy(conversation) && !resulting.has(id)) {
+                continue;
+            }
+
             const there = resulting.get(id) ?? this.#app.cwdOf(conversation);
 
             if (workspaceScheme(there) !== undefined || !within(rootCwd, there)) {
@@ -1113,6 +1169,23 @@ export class Sandboxes {
         }
 
         return undefined;
+    }
+
+    /**
+     * Why a conversation of a sandboxed tree may not run: it works outside the session's folder, which the one VM does not
+     * serve. Undefined for the session itself, for a conversation of a plain tree, and for one inside the folder.
+     */
+    #outsideProblem(conversation: number, root: number): string | undefined {
+        if (conversation === root || !this.#on.has(root)) {
+            return undefined;
+        }
+
+        const there = this.#app.cwdOf(conversation as unknown as ConversationId);
+        const rootCwd = this.#folderOfRoot(root);
+
+        return workspaceScheme(there) !== undefined || !within(rootCwd, there)
+            ? `The subagent #${conversation} works in ${there}, outside the session's folder (${rootCwd}), so it cannot run in the sandbox. Move it into ${rootCwd}.`
+            : undefined;
     }
 
     /** `#folderProblem`, with a check that throws taken as a refusal that says so. */
@@ -1599,10 +1672,14 @@ export class Sandboxes {
             };
         };
 
+        let token: number | undefined;
+
         const commit = (request: Request) =>
             this.exclusive(() =>
                 this.#app.harness
                     .commit(async (tx) => {
+                        this.#assertOwner(root, token);
+
                         // The entry point's own writes read the state as it was; admission then writes what it owns.
                         const done = await steps.commit(tx);
 
@@ -1630,29 +1707,37 @@ export class Sandboxes {
             what: `#${root}`,
         };
 
-        // The token of this change's phase record: only it may end it.
-        let token: number | undefined;
+        // `token` (above) is the revision of this change's phase record: only it may end it.
+        // (1) Plan, in a short hold: reserve the union of the old and the new group before anything else. A change that
+        // another tree's reservation covers is queued, not refused: it waits (outside the hold, which others need) for that
+        // change to end, and plans again. Several sessions of one folder archived together all go through, in order.
+        for (;;) {
+            const planned = await this.exclusive(() => {
+                const reserved = this.#reservedProblem(reservation.folders);
 
-        // (1) Plan, in a short hold: reserve the union of the old and the new group before anything else.
-        await this.exclusive(() => {
-            const reserved = this.#reservedProblem(reservation.folders);
+                if (reserved !== undefined) {
+                    return Promise.resolve(reserved);
+                }
 
-            if (reserved !== undefined) {
-                throw new HttpError(409, reserved);
+                if (this.#phases.has(root)) {
+                    throw new HttpError(
+                        409,
+                        "The sandbox of this session is changing. Try again in a moment.",
+                    );
+                }
+
+                this.#reserve(reservation);
+                token = this.#setPhase(root, "moving");
+
+                return Promise.resolve(undefined);
+            });
+
+            if (planned === undefined) {
+                break;
             }
 
-            if (this.#phases.has(root)) {
-                throw new HttpError(
-                    409,
-                    "The sandbox of this session is changing. Try again in a moment.",
-                );
-            }
-
-            this.#reserve(reservation);
-            token = this.#setPhase(root, "moving");
-
-            return Promise.resolve();
-        });
+            await this.#untilUnreserved(planned);
+        }
 
         // Set once the release began: a failure after that leaves the tree suspended until a recovery succeeds.
         let released = false;
@@ -1681,6 +1766,8 @@ export class Sandboxes {
                 await this.#release([root], "the session is being changed");
             }
 
+            // The folder of a removed worktree goes only while this change still owns the tree.
+            this.#assertOwner(root, token);
             await steps.afterRelease?.();
             released = releases;
 
@@ -1836,6 +1923,12 @@ export class Sandboxes {
                 throw new HttpError(409, fenced);
             }
 
+            const outside = this.#outsideProblem(Number(conversation), root);
+
+            if (outside !== undefined) {
+                throw new HttpError(409, outside);
+            }
+
             return this.#grant(root, Number(conversation), request);
         });
     }
@@ -1917,7 +2010,7 @@ export class Sandboxes {
             };
         }
 
-        const problem = this.#grantProblem(root);
+        const problem = this.#grantProblem(root) ?? this.#outsideProblem(Number(id), root);
 
         return problem === undefined
             ? { ok: true }
@@ -2200,7 +2293,11 @@ export class Sandboxes {
 
             // (3) Commit, in a short hold: I1 again, and the setting on the root.
             await this.exclusive(() =>
-                app.harness.commit((tx) => this.admit(tx, { kind: "on", id, user }), context),
+                app.harness.commit((tx) => {
+                    this.#assertOwner(root, token);
+
+                    return this.admit(tx, { kind: "on", id, user });
+                }, context),
             );
 
             // Pages of this machine's browser end now: a sandboxed session has none of its own.
@@ -2308,7 +2405,11 @@ export class Sandboxes {
         try {
             // (4) Commit off.
             await this.exclusive(() =>
-                app.harness.commit((tx) => this.admit(tx, { kind: "off", id, user }), context),
+                app.harness.commit((tx) => {
+                    this.#assertOwner(root, token);
+
+                    return this.admit(tx, { kind: "off", id, user });
+                }, context),
             );
             this.#dropReservations(root);
             this.#setIf(root, token, "stable");
@@ -2377,7 +2478,28 @@ export class Sandboxes {
         if (this.#revision(root) === token) {
             this.#dropReservations(root);
             this.#setPhase(root, "stable");
+
+            // An explicit recovery with the kept provider ends the fence that a reload left up (`reloadFailed`), when no
+            // teardown or shutdown is going on.
+            if (!this.#stopping && this.#provider !== undefined && this.#fence !== undefined) {
+                this.#fence = undefined;
+            }
         }
+    }
+
+    /**
+     * A reload of the module that serves the sandbox failed: the loader keeps the old module, and with it the kept provider. The
+     * teardown's fence comes down, and the trees that the reload suspended are looked at again and go on.
+     */
+    async reloadFailed(owner: string): Promise<void> {
+        await this.#serialised(async () => {
+            if (this.#stopping || this.#provider?.owner !== owner || this.#fence === undefined) {
+                return;
+            }
+
+            this.#fence = undefined;
+            await this.reconcile();
+        });
     }
 
     #dropReservations(root: number): void {
@@ -2386,6 +2508,9 @@ export class Sandboxes {
                 this.#reservations.delete(reservation);
             }
         }
+
+        this.#epoch++;
+        this.#wake();
     }
 
     // ─── Rules, recovery, reload, shutdown ──────────────────────────────────
@@ -2711,38 +2836,19 @@ export class Sandboxes {
                     // A reader or a watcher is used after its open returns: its lease lasts until it is closed.
                     const resource = RESOURCE_CALLS[property];
                     let closeResource: (() => Promise<void>) | undefined;
+                    // A revoke that comes while the call is still opening is remembered: what the open brings back is closed.
+                    let revoked = false;
                     let lease: Lease;
 
-                    try {
-                        lease = await this.lease(
-                            id,
-                            boxed
-                                ? {
-                                      kind,
-                                      folder: cwd,
-                                      revoke: (reason) => {
-                                          cancel?.cancel(new Error(reason));
-
-                                          return closeResource?.();
-                                      },
-                                  }
-                                : { kind: "host", folder: cwd, what: `a ${property} call` },
-                        );
-                    } catch (error) {
-                        return failure(describeError(error), property);
-                    }
-
-                    // What the handle was made for is looked at again at every call: the state of the tree, its folder,
-                    // and the provider. When any changed, the call goes to the environment that the new state gives.
-                    // The folder is compared by its path here. PR 2 adds its identity (`pinnedRoot`, the descriptor of the
-                    // folder that `hostfs` opened): a swap of the folder under the same path then makes the handle stale too.
-                    if (
-                        lease.sandboxed !== boxed ||
+                    // What the handle was made for: the tree's state, its folder, and the provider. When any has changed, the call
+                    // goes to the environment that the new state gives, and it is decided **before** a lease is asked for the old
+                    // folder, which the new state may refuse though the call itself is allowed.
+                    const stale = () =>
+                        this.#on.has(this.#rootOfNumber(Number(id))) !== boxed ||
                         this.#generation !== generation ||
-                        this.#app.cwdOf(id) !== cwd
-                    ) {
-                        lease.end();
+                        this.#app.cwdOf(id) !== cwd;
 
+                    const redirect = () => {
                         if (hops >= 2) {
                             return failure(
                                 "The sandbox of this session changed again and again, so nothing ran.",
@@ -2756,6 +2862,43 @@ export class Sandboxes {
                         >;
 
                         return again[property]!(...args);
+                    };
+
+                    if (stale()) {
+                        return redirect();
+                    }
+
+                    try {
+                        lease = await this.lease(
+                            id,
+                            boxed
+                                ? {
+                                      kind,
+                                      folder: cwd,
+                                      revoke: (reason) => {
+                                          revoked = true;
+                                          cancel?.cancel(new Error(reason));
+
+                                          return closeResource?.();
+                                      },
+                                  }
+                                : { kind: "host", folder: cwd, what: `a ${property} call` },
+                        );
+                    } catch (error) {
+                        // The wait for the lease may have outlived the state the handle was made for: the new state decides.
+                        if (stale()) {
+                            return redirect();
+                        }
+
+                        return failure(describeError(error), property);
+                    }
+
+                    // The folder is compared by its path here. PR 2 adds its identity (`pinnedRoot`, the descriptor of the
+                    // folder that `hostfs` opened): a swap of the folder under the same path then makes the handle stale too.
+                    if (lease.sandboxed !== boxed || stale()) {
+                        lease.end();
+
+                        return redirect();
                     }
 
                     let result: unknown;
@@ -2789,6 +2932,20 @@ export class Sandboxes {
 
                     const done = opened[resource] as
                         ((context: Context) => Promise<void>) | undefined;
+
+                    // Revoked while it opened: what arrived is closed at once, its lease ends, and the call fails.
+                    if (revoked) {
+                        try {
+                            await done?.call(opened, context);
+                        } finally {
+                            lease.end();
+                        }
+
+                        return failure(
+                            "The sandbox of this session was stopped while this opened, so it was closed.",
+                            property,
+                        );
+                    }
 
                     // A revoke closes the resource itself, and the lease ends with it.
                     closeResource = async () => {
