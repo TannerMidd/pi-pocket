@@ -38,6 +38,8 @@ const SWITCH_NOTE =
     "Pi's file and shell tools, your ! commands and the browser run in a Linux virtual machine. Only this session's folder is shared with it. It starts at the first call, and stops when it is idle.";
 const STALE_NOTE =
     "This VM keeps the rules it started with. The new settings apply when it starts again.";
+const NO_SESSION_NOTE =
+    "Open a session to choose whether its tools run in a sandbox. Set up below works without one.";
 const REMOVE_NOTE =
     "This stops every sandbox VM and deletes the package and the images. Sessions keep their sandbox setting and fail until you set up again.";
 
@@ -61,6 +63,7 @@ export default function setup(pocket) {
     let state = null;
     let item = null;
     let row = null;
+    let owner = false;
     const listeners = new Set();
 
     const notify = () => {
@@ -145,6 +148,31 @@ export default function setup(pocket) {
         }
     };
 
+    // The owner can set up the sandbox with no session open: a row in the app menu and a launcher action, and the
+    // module's entry in the Extensions sheet lists the row. Others have no Set up, so they get no entry.
+    pocket.api("owner").then(
+        () => {
+            owner = true;
+            pocket.menu({
+                id: "sandbox-setup",
+                label: "Sandbox set up",
+                hint: "Install Gondolin and see what this machine has",
+                sheet: "sandbox",
+            });
+            pocket.launcher({
+                id: "sandbox-setup",
+                label: "Sandbox set up",
+                detail: "install Gondolin, build the guest image, see what runs where",
+                keywords: ["sandbox", "gondolin", "micro-vm", "setup", "set up"],
+                sheet: "sandbox",
+            });
+            notify();
+        },
+        () => {
+            // Not the owner, or an older server: no Set up for this person.
+        },
+    );
+
     pocket.onConversation((id) => {
         conversation = id;
         state = null;
@@ -168,7 +196,7 @@ export default function setup(pocket) {
             return () => listeners.delete(again);
         }, []);
 
-        return { conversation, state };
+        return { conversation, state, owner };
     }
 
     function Switcher({ close }) {
@@ -193,6 +221,10 @@ export default function setup(pocket) {
                 setBusy(false);
             }
         }, [id, mine]);
+
+        if (id === null) {
+            return html`<p class="muted small">${NO_SESSION_NOTE}</p>`;
+        }
 
         if (mine === null) {
             return html`<p class="muted">The sandbox is not available for this session.</p>`;
@@ -324,7 +356,7 @@ export default function setup(pocket) {
     }
 
     function Host() {
-        const { state: mine } = useSandbox();
+        const { owner: admin } = useSandbox();
         const [host, setHost] = useState(null);
         const [error, setError] = useState(null);
         const [busy, setBusy] = useState(false);
@@ -339,7 +371,7 @@ export default function setup(pocket) {
         }, []);
 
         useEffect(() => {
-            if (mine?.admin !== true) {
+            if (!admin) {
                 return undefined;
             }
 
@@ -365,9 +397,9 @@ export default function setup(pocket) {
                     stop();
                 }
             };
-        }, [mine?.admin, refresh]);
+        }, [admin, refresh]);
 
-        if (mine?.admin !== true) {
+        if (!admin) {
             return null;
         }
 

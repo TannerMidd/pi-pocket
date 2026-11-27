@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { browserModuleState, leaveSafeMode, safeMode } from "../extension-ui.js";
+import { browserModuleState, extensionEntries, leaveSafeMode, safeMode } from "../extension-ui.js";
 import { useBack } from "../back.js";
 import { api, attempt, openSheet, store } from "../store.js";
 import { html, Icon, Loader, shortPath, Switch } from "../ui.js";
@@ -375,6 +375,7 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
             : "Drop-in";
     const slug = module.file.replace(/\.ts$/, "");
     const here = browserModuleState(slug);
+    const entries = module.enabled && here?.status === "ready" ? extensionEntries(slug) : [];
     const note = guard && data?.guard ? guardNote(module, data.guard) : null;
     const profileNote = !dropIn && NEW_PROFILE_NOTES[module.file];
     const settings = owner && module.enabled && (guard || pip || module.web?.settings);
@@ -539,6 +540,18 @@ function Inspector({ module, data, onChanged, installed, galleryManaged = false 
             model=${store.state.guard?.model ?? data?.guard?.model}
             onStart=${() => mutate("guard/model", {})}
         />`
+        }
+        ${
+            entries.length > 0 &&
+            html`<section class="ext-inspector-section">
+            <h4>Open</h4>
+            ${entries.map(
+                (each) => html`<div class="ext-inspector-entry" key=${each.key}>
+                    <button class="button small" onClick=${each.run}>${each.label}</button>
+                    ${each.hint && html`<p class="small muted">${each.hint}</p>`}
+                </div>`,
+            )}
+        </section>`
         }
         ${
             settings &&

@@ -690,6 +690,9 @@ test("the routes: who sees the sandbox, who chooses, and the owner's set-up", as
         assert.equal((await call("guest", "session", { c: id, on: true })).status, 403);
         assert.equal((await call("guest", "host")).status, 404, "the owner's page is the owner's");
         assert.equal((await call("guest", "setup", { browser: false })).status, 404);
+        // The owner is known with no session: the browser adds Set up entries only for them.
+        assert.deepEqual((await call("owner", "owner")).body, { owner: true });
+        assert.equal((await call("guest", "owner")).status, 404);
         assert.equal((await call("owner", "session", { c: id, on: "yes" })).status, 400);
         assert.equal((await call("owner", "session", { c: 999999, on: true })).status, 404);
         // The owner chooses; then the guest sees it, and cannot take it away.

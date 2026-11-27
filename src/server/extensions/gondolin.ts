@@ -350,7 +350,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
 
             return lastCheck === undefined || lastCheck.ok
                 ? undefined
-                : `The sandbox is not ready: ${failed?.name}: ${failed?.detail} Open Menu → Extensions → Gondolin sandbox.`;
+                : `The sandbox is not ready: ${failed?.name}: ${failed?.detail} The owner sets it up in the Sandbox sheet (Menu → Sandbox, or Gondolin sandbox in Menu → Extensions).`;
         },
         folderProblem: (cwd) => folderProblem(cwd, places()),
         otherFolders: () => web.setting("teamFolders") === true,
@@ -622,6 +622,9 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
     );
 
     web.route("POST", "check", async () => ({ check: await check() }), { access: "owner" });
+
+    // Whether this person is the owner, with no session: the browser adds its Set up entries (menu row, launcher) only for them.
+    web.route("GET", "owner", async () => ({ owner: true }), { access: "owner" });
 
     web.route(
         "POST",

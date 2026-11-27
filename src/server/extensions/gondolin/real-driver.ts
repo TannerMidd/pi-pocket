@@ -464,7 +464,7 @@ export class GondolinDriver implements SandboxDriver {
         if (!this.installed()) {
             return Promise.reject(
                 new Error(
-                    "Gondolin is not installed. Open Menu → Extensions → Gondolin sandbox and tap Set up.",
+                    "Gondolin is not installed. Open the Sandbox sheet (Menu → Sandbox) and tap Set up.",
                 ),
             );
         }

@@ -7,11 +7,11 @@ A sandbox limits what a mistake, or a prompt injection that Pi reads, can do to 
 ## Turn it on
 
 1. **Menu → Extensions → Gondolin sandbox**: turn it on. The owner does this. A new profile has it off.
-2. Open the module and tap **Set up**. The sheet says what it will do before it starts:
+2. Open the module's entry in the same sheet and tap **Sandbox set up** (under **Open**), or press Ctrl+K and type `sandbox`. This works with no session open, for the owner only. The Sandbox sheet opens, with **Set up** in its **This machine** part. The sheet says what it will do before it starts:
     - It installs the package `@earendil-works/gondolin` (0.14.0) into the `gondolin` folder of Pi Pocket's data folder. Nothing global, nothing outside that folder. It uses `npm install --ignore-scripts`.
     - It downloads the guest image into the same folder: about 110 MB (325 MB on disk), and then **builds the standard image with `git`** on this machine from it (about 10 seconds, 11 MB more on disk, 336 MB in all). It needs `mke2fs`, `cpio`, and `lz4` on Linux (Docker or Podman on macOS); without them Set up says so and the sandbox works without git in the VM.
     - **Set up with a browser** also builds a second image with Chromium (and git) on this machine: about 250 MB of packages, 1.2 GB on disk, a minute or two. Pi Pocket publishes no image: the images are made here. Without it, a sandboxed session has no browser.
-3. Choose a session's sandbox: **Menu → Sandbox** in the session (or the **Sandbox** item in its status line once it is on). The owner always may. Guests who steer may only when the owner turns on **People who steer may choose the sandbox**. Viewers, and people invited to one session, never.
+3. Choose a session's sandbox: **Menu → Sandbox** in the session (in **This session**, with Rename and Pin) (or the **Sandbox** item in its status line once it is on). The owner always may. Guests who steer may only when the owner turns on **People who steer may choose the sandbox**. Viewers, and people invited to one session, never.
 
 **New sessions start in the sandbox** is a setting too (off by default).
 

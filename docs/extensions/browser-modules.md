@@ -85,7 +85,7 @@ Each of these does one thing when a person uses it:
 
 The buttons, rows, and actions of modules show in the order that the server lists the modules. An edit keeps a module's place.
 
-App menu rows show in the menu without a session. Session menu rows show only in a session, in its menu. Both groups use the same row action and update rules.
+App menu rows show in the menu without a session, and the module's entry in the Extensions sheet lists them under **Open** while the module is on. Session menu rows show only in a session, in the **This session** part of its menu. Both groups use the same row action and update rules.
 
 ## Pages and sheets
 

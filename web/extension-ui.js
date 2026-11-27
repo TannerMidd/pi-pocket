@@ -2034,6 +2034,11 @@ export function extensionMenuItems(group = "app") {
         }));
 }
 
+/** A module's own rows of the app menu, for its entry in the Extensions sheet: `{ key, label, hint, run }`. */
+export function extensionEntries(module) {
+    return extensionMenuItems().filter((each) => each.key.startsWith(`${module}:`));
+}
+
 /** The launcher's actions that extensions added, as launcher items. */
 export function extensionLauncherItems() {
     return added("launcher").map(({ record, spec }) => ({
