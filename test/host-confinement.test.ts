@@ -41,6 +41,12 @@ import {
 after(cleanUp);
 
 const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
+/** Only Linux has the primitive that these tests need (`confined.ts`): elsewhere a sandboxed folder is refused. */
+const LINUX =
+    process.platform === "linux"
+        ? false
+        : "the walk of names needs Linux; elsewhere it fails closed";
+
 const SECRET = "HOST_SECRET_MARKER_7f3a";
 const PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
@@ -120,78 +126,82 @@ test("the sandbox cannot be chosen for a folder of the server's own code or data
     }
 });
 
-test("in a sandboxed session's folder the viewer and the file route never follow a link out of it", async () => {
-    const work = folder("view-work");
-    const beyond = folder("view-beyond");
+test(
+    "in a sandboxed session's folder the viewer and the file route never follow a link out of it",
+    { skip: LINUX },
+    async () => {
+        const work = folder("view-work");
+        const beyond = folder("view-beyond");
 
-    writeFileSync(join(work, "plain.txt"), "plain\n");
-    writeFileSync(join(beyond, "other.txt"), `${SECRET}\n`);
-    writeFileSync(join(beyond, "image.png"), PNG);
-    writeFileSync(join(work, "real.png"), PNG);
-    symlinkSync(secret, join(work, "AGENTS.md"));
-    symlinkSync(secret, join(work, "link.txt"));
-    symlinkSync(beyond, join(work, "linked-dir"));
-    symlinkSync("plain.txt", join(work, "inner.txt"));
-    symlinkSync(join(beyond, "image.png"), join(work, "pic.png"));
+        writeFileSync(join(work, "plain.txt"), "plain\n");
+        writeFileSync(join(beyond, "other.txt"), `${SECRET}\n`);
+        writeFileSync(join(beyond, "image.png"), PNG);
+        writeFileSync(join(work, "real.png"), PNG);
+        symlinkSync(secret, join(work, "AGENTS.md"));
+        symlinkSync(secret, join(work, "link.txt"));
+        symlinkSync(beyond, join(work, "linked-dir"));
+        symlinkSync("plain.txt", join(work, "inner.txt"));
+        symlinkSync(join(beyond, "image.png"), join(work, "pic.png"));
 
-    const text = async (path: string) => {
-        const view = await viewFile(join(work, path), undefined, work);
+        const text = async (path: string) => {
+            const view = await viewFile(join(work, path), undefined, work);
 
-        return view.kind === "text" ? view.text : view.kind;
-    };
+            return view.kind === "text" ? view.text : view.kind;
+        };
 
-    const status = async (name: string) => {
-        const server = createServer((request, response) => {
-            Promise.resolve(serveImage(request, response, join(work, name), work)).catch(
-                (error: { status?: number }) => {
-                    response.writeHead(error.status ?? 500).end();
-                },
-            );
-        });
+        const status = async (name: string) => {
+            const server = createServer((request, response) => {
+                Promise.resolve(serveImage(request, response, join(work, name), work)).catch(
+                    (error: { status?: number }) => {
+                        response.writeHead(error.status ?? 500).end();
+                    },
+                );
+            });
 
-        await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+            await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+
+            try {
+                const { port } = server.address() as { port: number };
+
+                return (await fetch(`http://127.0.0.1:${port}/`)).status;
+            } finally {
+                server.close();
+            }
+        };
+
+        // No sandboxed session uses the folder: Pi has the whole machine here anyway, and a shared file linked in works.
+        assert.equal(await text("link.txt"), `${SECRET}\n`);
+        assert.equal(await text("linked-dir/other.txt"), `${SECRET}\n`);
+        assert.equal(await status("pic.png"), 200);
+
+        const stop = onSandboxedFolders((used) => used === work);
 
         try {
-            const { port } = server.address() as { port: number };
+            assert.equal(await text("plain.txt"), "plain\n");
 
-            return (await fetch(`http://127.0.0.1:${port}/`)).status;
+            for (const path of [
+                "AGENTS.md",
+                "link.txt",
+                "inner.txt",
+                "linked-dir/other.txt",
+                "linked-dir",
+            ]) {
+                await assert.rejects(text(path), /link, which is not followed/, path);
+            }
+
+            await assert.rejects(openInside(work, join(work, "link.txt")), /not followed/);
+
+            // A path outside the folder that someone names is theirs to read, as before.
+            const named = await viewFile(secret, undefined, work);
+
+            assert.equal(named.kind === "text" && named.text, `${SECRET}\n`);
+            assert.equal(await status("real.png"), 200);
+            assert.equal(await status("pic.png"), 404);
         } finally {
-            server.close();
+            stop();
         }
-    };
-
-    // No sandboxed session uses the folder: Pi has the whole machine here anyway, and a shared file linked in works.
-    assert.equal(await text("link.txt"), `${SECRET}\n`);
-    assert.equal(await text("linked-dir/other.txt"), `${SECRET}\n`);
-    assert.equal(await status("pic.png"), 200);
-
-    const stop = onSandboxedFolders((used) => used === work);
-
-    try {
-        assert.equal(await text("plain.txt"), "plain\n");
-
-        for (const path of [
-            "AGENTS.md",
-            "link.txt",
-            "inner.txt",
-            "linked-dir/other.txt",
-            "linked-dir",
-        ]) {
-            await assert.rejects(text(path), /link, which is not followed/, path);
-        }
-
-        await assert.rejects(openInside(work, join(work, "link.txt")), /not followed/);
-
-        // A path outside the folder that someone names is theirs to read, as before.
-        const named = await viewFile(secret, undefined, work);
-
-        assert.equal(named.kind === "text" && named.text, `${SECRET}\n`);
-        assert.equal(await status("real.png"), 200);
-        assert.equal(await status("pic.png"), 404);
-    } finally {
-        stop();
-    }
-});
+    },
+);
 
 /** Send `@mentioned.txt` with its file, as the message box does. */
 async function mention(app: App, id: ConversationId): Promise<void> {
@@ -204,88 +214,94 @@ async function mention(app: App, id: ConversationId): Promise<void> {
     await (await app.harness.submission(submissionId, context))!.wait(context);
 }
 
-test("a link in a sandboxed session's folder puts no host file in the prompt, a mention, or a template", async () => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
-    const seen: string[] = [];
-    const app = await openApp(
-        scriptedModel((request) => {
-            seen.push(JSON.stringify(request));
+test(
+    "a link in a sandboxed session's folder puts no host file in the prompt, a mention, or a template",
+    { skip: LINUX },
+    async () => {
+        (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
+        const seen: string[] = [];
+        const app = await openApp(
+            scriptedModel((request) => {
+                seen.push(JSON.stringify(request));
 
-            return fauxAssistantMessage([fauxText(lastText(request as never).text.slice(0, 20))]);
-        }),
-        join(root, "data-prompts"),
-    );
+                return fauxAssistantMessage([
+                    fauxText(lastText(request as never).text.slice(0, 20)),
+                ]);
+            }),
+            join(root, "data-prompts"),
+        );
 
-    const linkedFolder = (name: string) => {
-        const path = folder(name);
+        const linkedFolder = (name: string) => {
+            const path = folder(name);
 
-        symlinkSync(secret, join(path, "AGENTS.md"));
-        symlinkSync(secret, join(path, "mentioned.txt"));
-        mkdirSync(join(path, ".pi", "prompts"), { recursive: true });
-        symlinkSync(secret, join(path, ".pi", "prompts", "evil.md"));
-        writeFileSync(join(path, ".pi", "prompts", "fine.md"), "Fine $1");
+            symlinkSync(secret, join(path, "AGENTS.md"));
+            symlinkSync(secret, join(path, "mentioned.txt"));
+            mkdirSync(join(path, ".pi", "prompts"), { recursive: true });
+            symlinkSync(secret, join(path, ".pi", "prompts", "evil.md"));
+            writeFileSync(join(path, ".pi", "prompts", "fine.md"), "Fine $1");
 
-        return path;
-    };
+            return path;
+        };
 
-    const names = (path: string) =>
-        loadPromptTemplates(path, join(root, "agent"), []).map((each) => each.name);
+        const names = (path: string) =>
+            loadPromptTemplates(path, join(root, "agent"), []).map((each) => each.name);
 
-    const sent = async (id: ConversationId) => {
-        seen.length = 0;
-        await mention(app, id);
+        const sent = async (id: ConversationId) => {
+            seen.length = 0;
+            await mention(app, id);
 
-        return seen.join("\n");
-    };
+            return seen.join("\n");
+        };
 
-    try {
-        await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
+        try {
+            await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
 
-        const sandboxedPath = linkedFolder("prompt-sandboxed");
-        const ordinaryPath = linkedFolder("prompt-ordinary");
-        const sharedPath = linkedFolder("prompt-shared");
-        const honest = folder("prompt-honest");
+            const sandboxedPath = linkedFolder("prompt-sandboxed");
+            const ordinaryPath = linkedFolder("prompt-ordinary");
+            const sharedPath = linkedFolder("prompt-shared");
+            const honest = folder("prompt-honest");
 
-        writeFileSync(join(honest, "AGENTS.md"), "HONEST_INSTRUCTIONS");
-        writeFileSync(join(honest, "mentioned.txt"), "HONEST_MENTION");
+            writeFileSync(join(honest, "AGENTS.md"), "HONEST_INSTRUCTIONS");
+            writeFileSync(join(honest, "mentioned.txt"), "HONEST_MENTION");
 
-        // An ordinary session: links work as before, so a shared AGENTS.md outside the repository is read.
-        const ordinary = await newSession(app, ordinaryPath);
-        const before = await sent(ordinary);
+            // An ordinary session: links work as before, so a shared AGENTS.md outside the repository is read.
+            const ordinary = await newSession(app, ordinaryPath);
+            const before = await sent(ordinary);
 
-        assert.match(before, new RegExp(SECRET));
-        assert.deepEqual(names(ordinaryPath).sort(), ["evil", "fine"]);
+            assert.match(before, new RegExp(SECRET));
+            assert.deepEqual(names(ordinaryPath).sort(), ["evil", "fine"]);
 
-        // A sandboxed session: no host file reaches the prompt, a mention, or a template.
-        const sandboxed = await newSession(app, sandboxedPath);
+            // A sandboxed session: no host file reaches the prompt, a mention, or a template.
+            const sandboxed = await newSession(app, sandboxedPath);
 
-        await app.sandboxes.set(sandboxed, owner(app), true);
-        assert.doesNotMatch(await sent(sandboxed), new RegExp(SECRET));
-        assert.deepEqual(names(sandboxedPath), ["fine"]);
+            await app.sandboxes.set(sandboxed, owner(app), true);
+            assert.doesNotMatch(await sent(sandboxed), new RegExp(SECRET));
+            assert.deepEqual(names(sandboxedPath), ["fine"]);
 
-        // A folder that a sandboxed session shares with an ordinary one is confined for both.
-        const shared = await newSession(app, sharedPath);
-        const guestShared = await newSession(app, sharedPath);
+            // A folder that a sandboxed session shares with an ordinary one is confined for both.
+            const shared = await newSession(app, sharedPath);
+            const guestShared = await newSession(app, sharedPath);
 
-        assert.match(await sent(shared), new RegExp(SECRET));
-        await app.sandboxes.set(guestShared, owner(app), true);
-        assert.doesNotMatch(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
-        assert.deepEqual(names(sharedPath), ["fine"]);
+            assert.match(await sent(shared), new RegExp(SECRET));
+            await app.sandboxes.set(guestShared, owner(app), true);
+            assert.doesNotMatch(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
+            assert.deepEqual(names(sharedPath), ["fine"]);
 
-        // Turned off again, the folder is ordinary again.
-        await app.sandboxes.set(guestShared, owner(app), false);
-        assert.match(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
+            // Turned off again, the folder is ordinary again.
+            await app.sandboxes.set(guestShared, owner(app), false);
+            assert.match(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
 
-        const second = await newSession(app, honest);
-        const text = await sent(second);
+            const second = await newSession(app, honest);
+            const text = await sent(second);
 
-        assert.match(text, /HONEST_INSTRUCTIONS/);
-        assert.match(text, /HONEST_MENTION/);
-    } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
-        await app.close();
-    }
-});
+            assert.match(text, /HONEST_INSTRUCTIONS/);
+            assert.match(text, /HONEST_MENTION/);
+        } finally {
+            (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+            await app.close();
+        }
+    },
+);
 
 /** A repository in a fresh folder with one commit; `config` lines are added to its own configuration. */
 function repository(name: string, files: Record<string, string>, config = ""): string {
