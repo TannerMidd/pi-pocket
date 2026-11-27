@@ -166,6 +166,68 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                 throw new Error("Only jobs takes a page cursor (after).");
             }
 
+            // A sandboxed session's tasks run in its VM, and nowhere else: this never reaches the host's own below.
+            const inVm =
+                typeof host.sandbox?.jobs === "function"
+                    ? await host.sandbox.jobs(api.conversationId)
+                    : undefined;
+
+            if (inVm !== undefined) {
+                if (guarded) {
+                    throw new Error(
+                        "A job resume or guarded stop (jobId, expectedAttempt) is not available in a sandbox: its tasks end with the VM and never resume. Start a new task, or stop one by its id.",
+                    );
+                }
+
+                if (args.action === "jobs") {
+                    return reply(await inVm.jobs());
+                }
+
+                if (args.action === "list") {
+                    return reply(await inVm.list());
+                }
+
+                if (args.action === "start") {
+                    if (args.command === undefined) {
+                        throw new Error("start needs a command.");
+                    }
+
+                    const requestedBy = host.requesterOf(api.conversationId);
+
+                    return reply(
+                        await inVm.start({
+                            command: args.command,
+                            key,
+                            ...(args.notify === undefined ? {} : { notify: args.notify }),
+                            ...(typeof args.quietMinutes === "number" &&
+                            Number.isFinite(args.quietMinutes)
+                                ? { quietMinutes: args.quietMinutes }
+                                : {}),
+                            ...(requestedBy === undefined ? {} : { requestedBy }),
+                        }),
+                    );
+                }
+
+                if (args.id === undefined) {
+                    throw new Error(`${args.action} needs the task's id.`);
+                }
+
+                if (args.action === "stop") {
+                    return reply(await inVm.stop(args.id));
+                }
+
+                const said = await api.memo<string>(`background.output.${args.id}`, context);
+
+                return reply(
+                    said ??
+                        (await api.memo(
+                            `background.output.${args.id}`,
+                            await inVm.output(args.id),
+                            context,
+                        )),
+                );
+            }
+
             if (
                 (guarded && typeof background.controlJob !== "function") ||
                 (args.action === "jobs" && typeof host.jobSupervision !== "function")
@@ -309,6 +371,18 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
         name: BACKGROUND_EXTENSION,
         tasks: [background.task],
         tools: [tool],
-        sections: [section("background_tasks", () => guide(...quietNote()))],
+        sections: [
+            section("background_tasks", async (input) => {
+                const sandboxed =
+                    typeof host.sandbox?.get === "function" &&
+                    (await host.sandbox.get(input.conversationId)).on;
+
+                return `${guide(...quietNote())}${
+                    sandboxed
+                        ? " This session runs in a sandbox: a background task runs inside the sandbox's VM, and a server you start there is reached at localhost by the browser in the sandbox. A restart of Pi Pocket ends the VM and every task in it (you are told); a task never resumes."
+                        : ""
+                }`;
+            }),
+        ],
     });
 }

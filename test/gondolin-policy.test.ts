@@ -108,14 +108,25 @@ test("an environment that cannot run answers every call with the reason, and is 
 });
 
 test("the table of what runs where follows the host-tools setting", () => {
-    const blocked = whereTable("block").find((row) => row.what.startsWith("background"));
-    const allowed = whereTable("allow").find((row) => row.what.startsWith("background"));
+    const blocked = whereTable("block").find((row) => row.what.startsWith("session tools"));
+    const allowed = whereTable("allow").find((row) => row.what.startsWith("session tools"));
 
     assert.equal(blocked?.where, "blocked");
     assert.equal(allowed?.where, "host");
     assert.ok(
         whereTable("block").some((row) => row.where === "sandbox" && row.what.includes("bash")),
     );
+
+    // Background tasks and the team tool run in the sandbox whatever the owner allows for host tools.
+    for (const mode of ["block", "allow"] as const) {
+        for (const what of ["background", "team"]) {
+            assert.equal(
+                whereTable(mode).find((row) => row.what.startsWith(what))?.where,
+                "sandbox",
+            );
+        }
+    }
+
     assert.ok(
         whereTable("block").some((row) => row.what.includes("browser") && row.where === "sandbox"),
     );

@@ -7,6 +7,7 @@
  * reason. The sandbox itself (the VM, its files, its network, its lifecycle) is a module's (`extensions/gondolin.ts`)
  * and comes in through `host.sandbox.register`.
  */
+import { resolve } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { ExecutionError, FileError, type ExecutionEnv, err } from "@earendil-works/pi-durable/env";
@@ -30,6 +31,26 @@ export interface SandboxTarget {
     readonly uploadDir: string | undefined;
 }
 
+/**
+ * Commands that run in the sandbox's VM and outlive the call that started them (the `background` tool of a sandboxed
+ * session). Each method answers with the words Pi reads. They end with the VM: a restart of the server ends the VM, so
+ * a task never resumes.
+ */
+export interface SandboxJobs {
+    start(request: {
+        command: string;
+        key: string;
+        notify?: boolean;
+        quietMinutes?: number;
+        /** The person Pi works for: a message about the task goes as their work. */
+        requestedBy?: string;
+    }): Promise<string>;
+    output(id: string): Promise<string>;
+    list(): Promise<string>;
+    jobs(): Promise<string>;
+    stop(id: string): Promise<string>;
+}
+
 export interface SandboxPerson {
     readonly id: string;
     readonly role: Role;
@@ -48,6 +69,12 @@ export interface SandboxProvider {
     hostTools(): "block" | "allow";
     /** Why a session cannot be put in the sandbox now (the host lacks something), or undefined when it can. */
     problem(): string | undefined;
+    /** Why a folder may not be the working folder of a sandboxed session (it holds sign-ins or keys), or undefined. */
+    folderProblem?(cwd: string): string | undefined;
+    /** Whether a session that a sandboxed session starts may work in a folder other than its parent's. */
+    otherFolders?(): boolean;
+    /** The commands of this session that run in its VM. Without it, a sandboxed session has no background tasks. */
+    jobs?(target: SandboxTarget): SandboxJobs;
     /** The environment of one conversation's tools. It starts the VM on first use and fails each call it cannot run. */
     env(target: SandboxTarget): ExecutionEnv;
     /**
@@ -58,6 +85,9 @@ export interface SandboxProvider {
     /** A session's setting changed. Runs after the change is stored; it cannot stop it. */
     changed?(conversationId: ConversationId, on: boolean): void;
 }
+
+/** The tool that starts and messages linked sessions: it runs in the server, and core keeps its sessions in the sandbox. */
+const TEAM = "team";
 
 /** Tools that run through the execution environment, so they run in the VM. */
 const ROUTED = new Set(["read", "write", "edit", "bash"]);
@@ -129,7 +159,8 @@ export function failedEnv(cwd: string, message: string): ExecutionEnv {
 
 export class Sandboxes {
     readonly #app: PocketApp;
-    #provider: { token: symbol; provider: SandboxProvider } | undefined;
+    /** Live registrations, newest last: the newest serves. A registration that ends leaves the list, whatever its order. */
+    readonly #providers: { token: symbol; provider: SandboxProvider }[] = [];
 
     constructor(app: PocketApp) {
         this.#app = app;
@@ -138,19 +169,20 @@ export class Sandboxes {
     /** Use `provider` for sandboxed sessions until the returned function is called. The last registration wins. */
     register(provider: SandboxProvider): () => void {
         const token = Symbol("sandbox");
-        const previous = this.#provider;
 
-        this.#provider = { token, provider };
+        this.#providers.push({ token, provider });
 
         return () => {
-            if (this.#provider?.token === token) {
-                this.#provider = previous?.token === token ? undefined : previous;
+            const at = this.#providers.findIndex((each) => each.token === token);
+
+            if (at !== -1) {
+                this.#providers.splice(at, 1);
             }
         };
     }
 
     get provider(): SandboxProvider | undefined {
-        return this.#provider?.provider;
+        return this.#providers.at(-1)?.provider;
     }
 
     /** Which conversations are sandboxed, kept in step with their documents: the browser asks without waiting. */
@@ -176,7 +208,7 @@ export class Sandboxes {
 
         const id = conversationId as unknown as ConversationId;
         const app = this.#app;
-        const provider = this.#provider?.provider;
+        const provider = this.provider;
         const root = Number(app.rootOf(id));
         const none = (problem: string): RemoteBrowser => ({
             key: `none:${root}`,
@@ -211,7 +243,7 @@ export class Sandboxes {
     /** Whether sessions start in the sandbox, as the module says; false without a module. */
     get newSessions(): boolean {
         try {
-            return this.#provider?.provider.newSessions() === true;
+            return this.provider?.newSessions() === true;
         } catch {
             return false;
         }
@@ -220,7 +252,7 @@ export class Sandboxes {
     /** The environment for a sandboxed conversation: the module's, or one that fails every call with the reason. */
     env(id: ConversationId, cwd: string): ExecutionEnv {
         const app = this.#app;
-        const provider = this.#provider?.provider;
+        const provider = this.provider;
 
         if (app.workspaceScheme(cwd) !== undefined) {
             return failedEnv(cwd, "A sandbox does not support a remote workspace.");
@@ -254,6 +286,18 @@ export class Sandboxes {
             return undefined;
         }
 
+        // Linked sessions a sandboxed session starts inherit its sandbox, in its own folder (`linked-sessions.ts`).
+        if (tool === TEAM) {
+            return undefined;
+        }
+
+        // Background tasks of a sandboxed session run in its VM, or not at all: the tool never starts a host process.
+        if (tool === "background") {
+            return this.provider?.jobs === undefined
+                ? `${hostToolBlocked(tool)} The sandbox module here cannot run background tasks in the VM.`
+                : undefined;
+        }
+
         // The browser tool drives the browser of the session's VM. This machine's browser is never used for a sandboxed
         // session, whatever the owner allows for host tools: its pages would run next to this machine's services.
         if (tool === "browser") {
@@ -277,12 +321,81 @@ export class Sandboxes {
         let allow = false;
 
         try {
-            allow = this.#provider?.provider.hostTools() === "allow";
+            allow = this.provider?.hostTools() === "allow";
         } catch {
             allow = false;
         }
 
         return allow ? undefined : hostToolBlocked(tool);
+    }
+
+    /**
+     * The background tasks of a sandboxed session, in its VM. Undefined for a session that is not sandboxed (the tool
+     * uses this machine, as always). A sandboxed session never gets this machine's: with no sandbox module, or one that
+     * cannot run tasks, this throws.
+     */
+    async jobs(id: ConversationId): Promise<SandboxJobs | undefined> {
+        if (!(await this.get(id)).on) {
+            return undefined;
+        }
+
+        const app = this.#app;
+        const provider = this.provider;
+
+        if (provider?.jobs === undefined) {
+            throw new HttpError(
+                409,
+                "This session runs in a sandbox, and the sandbox cannot run background tasks now, so nothing ran.",
+            );
+        }
+
+        const cwd = app.cwdOf(id);
+
+        if (app.workspaceScheme(cwd) !== undefined) {
+            throw new HttpError(409, "A sandbox does not support a remote workspace.");
+        }
+
+        return provider.jobs({
+            conversationId: id,
+            rootId: app.rootOf(id),
+            cwd,
+            uploadDir: app.workspace.uploadDirectory(app.rootOf(id)),
+        });
+    }
+
+    /**
+     * Why a session that a session starts may not work in `cwd`, when the starter is sandboxed: the child runs in the
+     * starter's sandbox, so its folder is the starter's own, unless the owner allowed others; and a folder that holds
+     * sign-ins or keys never mounts. Undefined when it may.
+     */
+    async linkedFolder(source: ConversationId, cwd: string): Promise<string | undefined> {
+        if (!(await this.get(source)).on) {
+            return undefined;
+        }
+
+        const provider = this.provider;
+        const own = this.#app.cwdOf(source);
+
+        if (resolve(cwd) !== resolve(own) && provider?.otherFolders?.() !== true) {
+            return `This session runs in a sandbox, so a linked session it starts works in its folder (${own}), not in ${cwd}. The owner can allow other folders in Menu → Extensions → Gondolin sandbox.`;
+        }
+
+        return provider?.folderProblem?.(cwd);
+    }
+
+    /**
+     * Whether a sandboxed session may message `target`: a session that also runs in a sandbox, or the one that started
+     * it (a reply: its answer goes there anyway). A message to any other session would be work on this machine.
+     */
+    async mayMessage(source: ConversationId, target: ConversationId): Promise<boolean> {
+        if (!(await this.get(source)).on) {
+            return true;
+        }
+
+        return (
+            (await this.get(target)).on ||
+            this.#app.sessionMeta(source)?.linkedFrom?.id === Number(target)
+        );
     }
 
     /** A session's setting, as stored. */
@@ -321,7 +434,7 @@ export class Sandboxes {
             );
         }
 
-        const provider = this.#provider?.provider;
+        const provider = this.provider;
         const owner = user.role === "owner";
 
         if (on) {
@@ -331,6 +444,12 @@ export class Sandboxes {
 
             if (app.workspaceScheme(app.cwdOf(id)) !== undefined) {
                 throw new HttpError(409, "A sandbox does not support a remote workspace.");
+            }
+
+            const folder = provider.folderProblem?.(app.cwdOf(id));
+
+            if (folder !== undefined) {
+                throw new HttpError(409, folder);
             }
         }
 
@@ -346,8 +465,11 @@ export class Sandboxes {
             }
         }
 
+        const touched: ConversationId[] = [];
         const changed = await app.harness.commit(async (tx) => {
             const current = await tx.doc(SandboxDoc, id);
+
+            touched.length = 0;
 
             if (current.on === on) {
                 return false;
@@ -381,10 +503,18 @@ export class Sandboxes {
                 Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
             }
 
+            touched.push(...conversations);
+
             return true;
         }, context);
 
         if (changed) {
+            // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of
+            // its own (and the other way round: a page of the VM's browser ends when the sandbox goes off).
+            await Promise.all(
+                touched.map((each) => app.browsers.close(Number(each)).catch(() => undefined)),
+            );
+
             try {
                 provider?.changed?.(id, on);
             } catch (error) {

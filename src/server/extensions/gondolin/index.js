@@ -208,6 +208,8 @@ export default function setup(pocket) {
         }
 
         const vm = mine.vm;
+        const network = vm?.network ?? mine.settings.network;
+        const hosts = vm?.allowedHosts ?? mine.settings.allowedHosts;
 
         const stop = async () => {
             setBusy(true);
@@ -244,14 +246,20 @@ export default function setup(pocket) {
                     <dt>Network</dt>
                     <dd>
                         ${
-                            mine.settings.network === "off"
+                            network === "off"
                                 ? "None"
-                                : mine.settings.network === "open"
+                                : network === "open"
                                   ? "Public hosts (never this machine or your local network)"
-                                  : html`Only the ${mine.settings.allowedHosts.length} allowed hosts
-                                        <div class="muted small">
-                                            ${mine.settings.allowedHosts.join(", ")}
-                                        </div>`
+                                  : html`Only the ${hosts.length} allowed hosts
+                                        <div class="muted small">${hosts.join(", ")}</div>`
+                        }
+                        ${
+                            vm?.stale === true
+                                ? html`<div class="muted small">
+                                      This VM keeps the rules it started with. The new settings
+                                      apply when it starts again.
+                                  </div>`
+                                : null
                         }
                     </dd>
                     <dt>Size</dt>
@@ -368,8 +376,38 @@ export default function setup(pocket) {
                                   )}
                               </ul>
                               <p class="muted small">
-                                  ${host.running} VM${host.running === 1 ? "" : "s"} running.
+                                  ${host.running} of ${host.max} VM${host.max === 1 ? "" : "s"}
+                                  running.
                               </p>
+                              ${
+                                  host.vms.length === 0
+                                      ? null
+                                      : html`<h3 class="gdl-h">Running sandboxes</h3>
+                                            <ul class="gdl-vms">
+                                                ${host.vms.map(
+                                                    (each) => html`
+                                                        <li class="gdl-vm">
+                                                            <span class="gdl-line">
+                                                                <b>Session ${each.rootId}</b>
+                                                                <span class="mono small"
+                                                                    >${each.cwd}</span
+                                                                >
+                                                                <span class="muted small"
+                                                                    >${each.busy > 0 ? "working" : "idle"}</span
+                                                                >
+                                                            </span>
+                                                            <button
+                                                                class="button"
+                                                                disabled=${busy}
+                                                                onClick=${() => act("stop-vm", { c: each.rootId })}
+                                                            >
+                                                                Stop
+                                                            </button>
+                                                        </li>
+                                                    `,
+                                                )}
+                                            </ul>`
+                              }
                               ${
                                   running
                                       ? html`
@@ -418,7 +456,7 @@ ${host.setup.lines.join("\n")}</pre>
                                                 </button>
                                             </div>
                                             ${
-                                                sure === null
+                                                sure !== "plain" && sure !== "browser"
                                                     ? null
                                                     : html`
                                                           <div class="gdl-confirm">

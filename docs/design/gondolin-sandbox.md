@@ -10,7 +10,7 @@ Pi Pocket runs Pi's commands on the machine, as the user who started the server.
     - **`krun`** (libkrun). A prebuilt runner comes in an optional npm package for `linux-x64` and `darwin-arm64`. Linux needs read and write access to `/dev/kvm`. This is the one that **ran on this machine** (no QEMU is installed here).
     - **QEMU**, the upstream default. It needs `qemu-system-x86_64` or `qemu-system-aarch64` on `PATH`, with KVM (Linux) or HVF (macOS).
 - **Windows has no Gondolin support.** Windows people use Pi Pocket inside WSL2 (Linux support applies if the WSL2 kernel has KVM).
-- A guest image of about 200 MB (325 MB on disk, unpacked), downloaded once from GitHub releases into an image store. Alpine Linux, with `bash`, `sh`, `curl`, `node`, `npm`, `python3`, `find`, `grep`, `sed`, `awk`, `tar`. **Not in it: `git`, `rg`, `make`, compilers.** A custom image (`gondolin build`) can add them.
+- A guest image of about 200 MB (325 MB on disk, unpacked), downloaded once from GitHub releases into an image store. Alpine Linux, with `bash`, `sh`, `curl`, `node`, `npm`, `python3`, `find`, `grep`, `sed`, `awk`, `tar`. **Not in the published image: `git`, `rg`, `make`, compilers.** Set up adds `git` (D13).
 - Its disk is 270 MB with 80 MB free by default. The VM option `rootfs.size` makes it larger.
 - A host folder mounts into the guest through a FUSE bridge. The mount path in the guest can be any path. **We mount the session's folder at its host path** (for example `/home/me/app` in the VM is `/home/me/app` on the host), so paths in the transcript, in `AGENTS.md`, and in tool results stay true. Gondolin's `RealFSProvider` refuses symlinks that leave the folder. A symlink inside the guest is resolved by the guest, not the host.
 - Network: the guest has no route to the host's `localhost`, and none to private ranges (`192.168.x.x`, `169.254.169.254`, `10.x`): the proxy answers 403. Public HTTP and HTTPS go through Gondolin's proxy, which can limit hosts (`allowedHosts`), and can hold secrets outside the guest.
@@ -47,14 +47,15 @@ All of Pi's execution environment, because Pi Durable's tools reach files and pr
 
 ### D3. What stays on the host (and the UI says so)
 
-| Tool or feature                                                                                                              | In a sandboxed session                                                                                                                                           |
-| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`browser` tool and the Browser panel**                                                                                     | Run **in the VM** (Chromium in the guest, the image with a browser). **Without** that image: no browser. The host browser is never used for a sandboxed session. |
-| Files, Changes, Git panels, uploads, the file viewer                                                                         | Run on the host and read the shared folder. They are for people, not for Pi.                                                                                     |
-| `ask`, `ui`, `memory`, `schedule`, `tool_search`, `subagent`, `codemode`, plan and goal tools                                | Allowed. They change Pi Pocket's own state only, or they pass through the gate again.                                                                            |
-| `artifact` with `content` or `edits`                                                                                         | Allowed. With `path` it reads a host file, so it is blocked.                                                                                                     |
-| **`background`** (host processes that outlive a call)                                                                        | **Blocked by default.** A host shell is the way out of the VM.                                                                                                   |
-| Session tools (`session_start`, `session_send`, `team`, …), `design_*` tools, `watch_pr`, MCP tools, other extensions' tools | **Blocked by default**: they run on the host or start work on the host.                                                                                          |
+| Tool or feature                                                                                                      | In a sandboxed session                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`browser` tool and the Browser panel**                                                                             | Run **in the VM** (Chromium in the guest, the image with a browser). **Without** that image: no browser. The host browser is never used for a sandboxed session. |
+| Files, Changes, Git panels, uploads, the file viewer                                                                 | Run on the host and read the shared folder. They are for people, not for Pi.                                                                                     |
+| `ask`, `ui`, `memory`, `schedule`, `tool_search`, `subagent`, `codemode`, plan and goal tools                        | Allowed. They change Pi Pocket's own state only, or they pass through the gate again.                                                                            |
+| `artifact` with `content` or `edits`                                                                                 | Allowed. With `path` it reads a host file, so it is blocked.                                                                                                     |
+| **`background`**                                                                                                     | **Runs in the VM** (D11): its processes are the VM's, keep it up, and end with it. Never a host process.                                                         |
+| **`team`** (start, send, list)                                                                                       | **Allowed** (D12): the linked session is sandboxed too, in its own VM and the parent's folder.                                                                   |
+| Session tools (`session_start`, `session_send`, …), `design_*` tools, `watch_pr`, MCP tools, other extensions' tools | **Blocked by default**: they run on the host or start work on the host.                                                                                          |
 
 The owner can change the blocked row with the module's setting **Host tools in sandboxed sessions: Block (default) or Allow**. A tool that is not in the lists above counts as a host tool. This is an allow list, so a new tool is blocked until someone classifies it. The sheet lists, with words, what runs where.
 
@@ -108,7 +109,7 @@ The pattern: **the browser runs inside the same boundary as the code it tests**,
 
 - **One VM per session** (subagents share it). **Start:** on the first tool call, never at module load. The call waits (about 1 to 3 seconds; the first one after set-up downloads nothing). **Stop:** after **idle minutes** (default 30, 0 for never) with no call running (and no browser page open); when the session is archived or removed; when the module goes off; when the server stops.
 - **A stopped VM keeps nothing.** Files that the VM made outside the folder go. Files in the folder stay (they are on the host). Processes in the VM end. The sheet says so.
-- **Limits:** **CPUs** (default 2), **memory** (default 2 GB), **disk** (the VM's root disk, default 4 GB, thin), **Most sandboxes at once** (default 3). A fourth session gets a visible failure ("3 sandboxes already run: stop one or raise the limit"). Each command also has Pi's own timeout.
+- **Limits:** **CPUs** (default 2), **memory** (default 2 GB), **disk** (the VM's root disk, default 4 GB, thin), **Sandboxes at once** (default 3, from 1 to 16). When it is full, the call fails and the message names the sessions that hold VMs (session, folder, working or idle) and how to free one: the owner's **Stop** per VM in the sheet's **Running sandboxes** list, or a higher limit. Each command also has Pi's own timeout.
 - **Restart of the server:** the VMs end with the server (they are its child processes). A tool call that the restart cut off comes back as **interrupted** and is never replayed: Pi's `bash`, `write`, and `edit` are not replay-safe, and this feature does not change that. The next call starts a new VM. A process that wrote a pid file (`pi-pocket/gondolin/vms.json`) lets the next start remove a runner that a crash left behind: it checks the process's command line before it ends it.
 - **Cleanup:** VM disks live in the system's temp folder and go when the VM stops (`rootDiskDeleteOnClose`). The image store is in `<data>/gondolin/images`, owned by the module; **Remove image** in the sheet deletes it.
 
@@ -143,9 +144,43 @@ The pattern: **the browser runs inside the same boundary as the code it tests**,
 - People: anyone who can steer can already do what the owner does with Pi. The sandbox limits Pi, not people; owner-only settings stay owner-only.
 - A resource attack on the host's CPU or disk beyond the limits above (the limits are best effort).
 
+### D11. Background tasks in the VM
+
+In a sandboxed session the `background` tool runs its commands in the session's VM. `host.sandbox.jobs(conversationId)` gives the module's `SandboxJobs`; the tool uses it first and never reaches its host code for a sandboxed session (with no module, or one without `jobs`, the call fails). The gate lets the tool through only when the provider has `jobs`.
+
+- **Process:** `bash -lc <command>` in the guest, in the session's folder, with no stdin, started with `vm.exec`. Output is kept in memory (the last 512 KB) and read from a cursor; the tail of an ended task is kept in `<data>/gondolin/jobs.json`. A task's own quiet limit, or the owner's setting for background tasks, stops it when it prints nothing. A stop kills the guest process and its children (the same marker as a stopped `bash`), and the stop waits until they are gone.
+- **The VM stays up** while a task runs: the task holds the VM like a running call (`hold`), so the idle stop does not apply.
+- **Notice:** when a task ends (and Pi did not stop it), the session gets a message through `host.inbox`, from the person Pi worked for, fenced as data.
+- **A restart** ends the VM, so it ends the task. At the next start the module reads `jobs.json`, marks the tasks that were running as "ended: the server restarted", and tells the session. It never says "resumed", and the tool says that a sandboxed task does not resume. The same holds when the VM is stopped (from the sheet, by the owner's stricter rules, by a crash) or the module goes off.
+- **Reaching it:** a dev server in the VM listens on the VM's own `localhost`. The browser in the sandbox reaches it there. Nothing listens on the host.
+- The limit of running tasks for a session is the same setting as for host tasks. Subagents cannot start tasks, as on the host. Resuming a job (`jobId`) is refused.
+
+### D12. Team tools in a sandboxed session
+
+`team` (start, send, list) was a host tool because it starts sessions. A session that a sandboxed session starts already inherits the sandbox (`SandboxDoc` is copied in the same commit that makes it), so each has a VM of its own with the parent's settings. The tool is allowed now, and core keeps it from being a way out:
+
+- `start` with a folder other than the parent's is refused with the reason, unless the owner turned on **Linked sessions may use other folders**; the child is still sandboxed then, and a folder with sign-ins or keys is never allowed. The tool has no `cwd` argument, so a child works in the parent's folder; the check holds for every caller of `linkedSessions.start`.
+- `send` from a sandboxed session reaches only sandboxed linked sessions and the session that started it: a message to a session that runs on this machine would be work on this machine.
+- Each linked session counts for the limit of VMs at once.
+
+### D13. Git in the VM
+
+- **Image:** Set up adds `git` to the image it builds on this machine: `pocket-base:latest` (the published image's root disk with `git`, built with `buildAssets`, the same method as the browser image: +11 MB, 336 MB in all) and `pocket-browser:latest` (Chromium and git). No image is hosted. The standard choice uses `pocket-base` when it is in the store, else the published image (no git, and the check says so). A host without `mke2fs`, `cpio`, and `lz4` (Docker or Podman on macOS) gets a note, and the sandbox works without git.
+- **Writes:** Gondolin's `ShadowProvider` makes a protected file look missing, which would hide a repository's remotes and settings from git. The driver uses its own guard (`refuseWrites`) instead: reads pass; a write, rename, link, chmod, symlink, or copy onto a protected path (also through a link inside the folder) fails with `EACCES`. Moving a folder that holds a protected path is refused too, so a nested repository cannot be moved away, written, and moved back. The index, objects, and refs are writable. `git init`, `clone`, `remote add`, and `config` write `.git/config` and fail: they are host jobs.
+- **Worktrees:** a `.git` file that git wrote (the worktree's `gitdir` file names this `.git` file back, or a separate git directory's `core.worktree` names this folder) makes the VM mount the main repository's `.git` at its host path, with the same rules. Nothing else of the main repository.
+- **Guest settings:** `/etc/gitconfig` in the guest has `safe.directory` for the mounted folders (the owner of the files is not the guest's user), a default author ("Pi (sandbox)"; the repository's own config wins), and a credential helper and `core.sshCommand` that say there are no credentials and that push is for the host. No credential enters the VM.
+- **Skills:** the folders of the skills the session uses (`host.skills(cwd)`), when they lie outside the session's folder, are mounted read only at their paths. Nothing else of `~/.pi/agent`: a skill folder that is or holds a place with sign-ins is not mounted.
+
+### D14. Private folders, stricter rules, and crashed VMs
+
+- **Private folders.** A sandbox never mounts a folder that is, holds, or lies inside the home folder's private places (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.pi`, `~/.password-store`, the data folder, and Pi's folder); a folder that holds `~/.config`, `~/.local/share`, `~/.cache` is refused too, but one inside them is fine, and so is a worktree under the data folder's `worktrees`. Choosing the sandbox for such a folder is refused; a stored setting fails each call without a VM; git directories and skill folders are checked too (skills may lie inside Pi's `skills`).
+- **Stricter rules end VMs.** When the owner turns the network off or down (open → allow list → off), removes hosts from the list, or makes the folder read only, the VMs that run with the old rules stop at once. Looser changes wait for the next start. The sheet shows each VM's own rules.
+- **Crashed VMs.** The runner's exit is wired to the manager: the VM is dropped, its slot is free, its tasks end, and the next call starts a new VM.
+- **Host browser pages** of a session end when its sandbox is turned on, and a page that is still opening checks the browser choice again when it is ready.
+
 ## Out of scope
 
-Copy-on-write mounts; snapshots that survive a restart; a sandbox for the whole Pi Pocket process (Docker does that: [docker.md](../docker.md)); Windows without WSL2; extra mounts chosen by people; secret injection into the VM (Gondolin can do it, we do not offer it); routing the `background` tool into the VM (a later change); a per-folder rule; a sandboxed git worktree session's `.git` link (the worktree's `.git` file names a path outside the folder, so `git` in the VM does not find its repository: use the session's folder, or run git on the host); sandboxed sessions of a remote workspace (`ssh://`): refused.
+Copy-on-write mounts; snapshots that survive a restart; a sandbox for the whole Pi Pocket process (Docker does that: [docker.md](../docker.md)); Windows without WSL2; extra mounts chosen by people; secret injection into the VM (Gondolin can do it, we do not offer it); a per-folder rule; sandboxed sessions of a remote workspace (`ssh://`): refused.
 
 ## Platform support
 

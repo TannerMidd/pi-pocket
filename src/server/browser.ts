@@ -440,6 +440,16 @@ export class Browsers {
                 throw new BrowserError("The browser was closed.");
             }
 
+            // The session may have gone into a sandbox (or out of one) while the browser started: a page that opened
+            // in the other browser must not stay.
+            if ((this.#options.remote?.(conversationId)?.key ?? "") !== key) {
+                page.close();
+
+                throw new BrowserError(
+                    "The session's browser changed while the page opened (its sandbox was turned on or off). Open it again.",
+                );
+            }
+
             this.#pages.set(conversationId, page);
             this.#hosts.set(conversationId, key);
             this.#remoteIdle.delete(key);

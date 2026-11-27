@@ -957,6 +957,13 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const cwd = approved?.cwd ?? (await this.#directory(source, user, agent, request.cwd));
+        // A sandboxed session's linked sessions run in its sandbox, in its folder: no way out through another folder.
+        const folder = await app.sandboxes.linkedFolder(source, cwd);
+
+        if (folder !== undefined) {
+            throw new HttpError(403, folder);
+        }
+
         const now = Date.now();
 
         return app.harness.commit(async (tx) => {
@@ -1081,6 +1088,15 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const id = target as unknown as ConversationId;
+
+        // A sandboxed session's message to a session that runs on this machine would be work on this machine.
+        if (!(await app.sandboxes.mayMessage(source, id))) {
+            throw new HttpError(
+                403,
+                "This session runs in a sandbox, so it can message only linked sessions that run in a sandbox too, and the session that started it.",
+            );
+        }
+
         const listed = app.config.subagentModels;
         const runs = (await app.agentState(id))?.model;
 

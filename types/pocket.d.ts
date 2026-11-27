@@ -161,6 +161,26 @@ export interface SandboxBrowser {
 }
 
 /**
+ * Commands of a sandboxed session that run in its VM and outlive the call that started them (the `background` tool).
+ * Each method answers with the words Pi reads.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SandboxJobs {
+    start(request: {
+        command: string;
+        key: string;
+        notify?: boolean;
+        quietMinutes?: number;
+        requestedBy?: string;
+    }): Promise<string>;
+    output(id: string): Promise<string>;
+    list(): Promise<string>;
+    jobs(): Promise<string>;
+    stop(id: string): Promise<string>;
+}
+
+/**
  * What a module gives core so that sessions can run in its sandbox.
  * @since 0.31.0
  * @experimental
@@ -170,6 +190,12 @@ export interface SandboxProvider {
     newSessions(): boolean;
     hostTools(): "block" | "allow";
     problem(): string | undefined;
+    /** Why a folder may not be the working folder of a sandboxed session (it holds sign-ins or keys), or undefined. */
+    folderProblem?(cwd: string): string | undefined;
+    /** Whether a session that a sandboxed session starts may work in another folder than its parent's. */
+    otherFolders?(): boolean;
+    /** The session's commands that run in its VM. Without it, a sandboxed session has no background tasks. */
+    jobs?(target: SandboxTarget): SandboxJobs;
     env(target: SandboxTarget): ExecutionEnv;
     /** The browser in the conversation's VM: a Chromium whose DevTools pipe only this server holds. */
     browser?(target: SandboxTarget): SandboxBrowser;
@@ -189,6 +215,7 @@ export interface SandboxApi {
         person: { id: string; role: Role },
         on: boolean,
     ): Promise<void>;
+    jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
 }
 
 /**

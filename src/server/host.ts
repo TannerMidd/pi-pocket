@@ -514,9 +514,9 @@ export interface WorkspaceProvider {
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
 }
 
-import type { SandboxProvider } from "./sandbox.ts";
+import type { SandboxJobs, SandboxProvider } from "./sandbox.ts";
 
-export type { SandboxPerson, SandboxProvider, SandboxTarget } from "./sandbox.ts";
+export type { SandboxJobs, SandboxPerson, SandboxProvider, SandboxTarget } from "./sandbox.ts";
 
 /** Sandboxed sessions (`sandbox.ts`). Experimental, since 0.31.0. */
 export interface SandboxApi {
@@ -537,6 +537,11 @@ export interface SandboxApi {
         person: { id: string; role: Role },
         on: boolean,
     ): Promise<void>;
+    /**
+     * The background tasks of a sandboxed session, which run in its VM; undefined for a session that is not sandboxed.
+     * Throws when the session is sandboxed and its sandbox cannot run them: the tool then never uses this machine.
+     */
+    jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */

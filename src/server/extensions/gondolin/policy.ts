@@ -2,7 +2,95 @@
  * What the sandbox allows, as data and small functions: which files of the folder the guest may not write, which hosts
  * the network allows by default, and what runs where. The sheet shows the same table that the gate uses.
  */
+import { realpathSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { SANDBOX_INERT_TOOLS, SANDBOX_ROUTED_TOOLS } from "../../sandbox.ts";
+
+/** Where this machine keeps what a sandbox must never share. */
+export interface PrivatePlaces {
+    readonly home: string;
+    /** Pi Pocket's data folder (`PI_POCKET_DIR`): sign-ins, the token, every session's files. */
+    readonly dataDir: string;
+    /** Pi's folder (`~/.pi/agent`): sign-ins. */
+    readonly agentDir: string;
+}
+
+/** Folders of the home folder that hold sign-ins and keys: a sandbox shares none, and none that is inside one. */
+const SECRET_FOLDERS = [
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".pi",
+    ".password-store",
+    ".netrc",
+    ".config/gcloud",
+    ".config/gh",
+];
+/** Folders that hold other programs' data and tokens: a sandbox shares none, but may share one inside them. */
+const BROAD_FOLDERS = [".config", ".local/share", ".local/state", ".cache", ".mozilla", ".agents"];
+
+function canonical(path: string): string {
+    try {
+        return realpathSync(path);
+    } catch {
+        return resolve(path);
+    }
+}
+
+function within(child: string, parent: string): boolean {
+    return child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
+}
+
+/**
+ * Why a sandbox may not mount `path`, or undefined when it may. A sandbox shares a folder with the guest whole, so a
+ * folder that is, or holds, the home folder or a place that keeps sign-ins and keys would hand those to it. `kind`
+ * "folder" is the session's own folder, a git directory, "skill" a skill folder that is read only: those may lie inside
+ * Pi's own `skills` folder, and nothing else of Pi's folder.
+ */
+export function folderProblem(
+    path: string,
+    places: PrivatePlaces,
+    kind: "folder" | "skill" = "folder",
+): string | undefined {
+    const target = canonical(path);
+    const home = canonical(places.home);
+    const data = canonical(places.dataDir);
+    const agent = canonical(places.agentDir);
+    const secret = [...SECRET_FOLDERS.map((name) => join(home, name)), data, agent].map(canonical);
+    const broad = BROAD_FOLDERS.map((name) => join(home, name)).map(canonical);
+    const say = (what: string) =>
+        `${path} is, or holds, ${what}, which keeps sign-ins and keys: a sandbox cannot share it. Use a project folder inside it.`;
+
+    if (within(home, target)) {
+        return say("your home folder");
+    }
+
+    for (const place of [...secret, ...broad]) {
+        if (within(place, target)) {
+            return say(place);
+        }
+    }
+
+    if (kind === "skill") {
+        return undefined;
+    }
+
+    // The data folder keeps the sessions' own worktrees: those are project folders.
+    if (within(target, join(data, "worktrees"))) {
+        return undefined;
+    }
+
+    for (const place of secret) {
+        if (within(target, place)) {
+            return say(place);
+        }
+    }
+
+    return undefined;
+}
 
 /** Operations that change an entry, as Gondolin's file system names them. */
 const CHANGES = new Set([
@@ -72,7 +160,7 @@ function gitProtected(segments: string[], op: string): boolean {
     return false;
 }
 
-/** A predicate for Gondolin's `ShadowProvider`: true for a path the guest may not write (nor read: it looks missing). */
+/** A predicate for the paths the guest may not write: it still reads them (`real-driver.ts` refuses the writes). */
 export function protectedMatcher(
     rules: readonly string[],
 ): (context: { op: string; path: string; flags?: string }) => boolean {
@@ -91,6 +179,23 @@ export function protectedMatcher(
 
         return gitProtected(segments, op);
     };
+}
+
+/**
+ * The same rules for a mount whose root is a `.git` folder itself (the main repository's, for a session on a worktree):
+ * its `config`, `hooks`, and `info` are as protected as those of a `.git` folder inside the session's folder.
+ */
+export function gitDirMatcher(
+    rules: readonly string[],
+): (context: { op: string; path: string; flags?: string }) => boolean {
+    const inner = protectedMatcher(rules);
+
+    return ({ op, path, flags }) =>
+        inner({
+            op,
+            path: `/.git/${path.replace(/^\/+/, "")}`,
+            ...(flags === undefined ? {} : { flags }),
+        });
 }
 
 /** The hosts a sandbox may reach by default: package registries and GitHub. The owner edits the list. */
@@ -150,7 +255,17 @@ export function whereTable(hostTools: "block" | "allow"): WhereRow[] {
             note: "A Chromium inside the VM (needs the image With browser), with the sandbox's network rules. This machine's browser is never used for a sandboxed session.",
         },
         {
-            what: "background, session and team tools, design tools, MCP and other extensions' tools",
+            what: "background",
+            where: "sandbox",
+            note: "Its processes run in the VM and keep it up. They end with the VM (a restart of Pi Pocket ends it, and Pi is told), and never resume. A server there is reached by the browser in the sandbox at localhost.",
+        },
+        {
+            what: "team (start, send, list)",
+            where: "sandbox",
+            note: "A linked session that a sandboxed session starts runs in a sandbox of its own, with the same rules and in the same folder (the owner can allow other folders). It can message only sandboxed linked sessions and the session that started it.",
+        },
+        {
+            what: "session tools, design tools, watch_pr, MCP and other extensions' tools",
             where: host,
             note:
                 hostTools === "allow"

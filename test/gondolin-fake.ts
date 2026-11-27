@@ -133,7 +133,7 @@ export class FakeVm extends EventEmitter implements GuestVm {
     /** End the VM as if its runner died. */
     crash(reason = "the runner died"): void {
         for (const child of this.#children) {
-            child.kill("SIGKILL");
+            killGroup(child);
         }
 
         this.closed = true;
@@ -171,13 +171,7 @@ export class FakeVm extends EventEmitter implements GuestVm {
 
         this.#children.add(child);
 
-        const stop = () => {
-            try {
-                process.kill(-child.pid!, "SIGKILL");
-            } catch {
-                child.kill("SIGKILL");
-            }
-        };
+        const stop = () => killGroup(child);
 
         options.signal?.addEventListener("abort", stop, { once: true });
         const chunks: GuestChunk[] = [];
@@ -235,9 +229,21 @@ export class FakeVm extends EventEmitter implements GuestVm {
             this.#log.closed.push(this.id);
 
             for (const child of this.#children) {
-                child.kill("SIGKILL");
+                killGroup(child);
             }
         }
+    }
+}
+
+/**
+ * End a command and everything it started, as a VM that stops does. Ending only the shell leaves a child (`tail -f` under
+ * macOS's `sh`, which does not exec its last command) holding the output pipe open, so the command never reports its end.
+ */
+function killGroup(child: ReturnType<typeof spawn>): void {
+    try {
+        process.kill(-child.pid!, "SIGKILL");
+    } catch {
+        child.kill("SIGKILL");
     }
 }
 

@@ -217,15 +217,15 @@ test("host tools are stopped in a sandboxed session, named as host tools, and al
     const driver = new FakeDriver();
 
     useDriver(driver);
-    const app = await openFresh(calls("background", { action: "list" }));
+    const app = await openFresh(calls("watch_pr", { action: "status" }));
 
     try {
         await app.setExtensionEnabled(owner(app), MODULE, true);
         const id = await newSession(app, folder("host"));
         const plain = await newSession(app, folder("host-plain"));
 
-        await loadTools(app, id, "background");
-        await loadTools(app, plain, "background");
+        await loadTools(app, id, "watch_pr");
+        await loadTools(app, plain, "watch_pr");
 
         await sandboxed(app, id);
         await say(app, id, "list");
@@ -374,7 +374,9 @@ test("a graceful stop ends the VM, and the call it ran ends with the VM's exit c
 
     useDriver(driver);
     const app = await openFresh(
-        calls("bash", { command: `echo run >> ${marker}; tail -f /dev/null` }),
+        // `tail` is not the last command, so the shell stays its parent (as macOS's `sh` always does): stopping the VM
+        // must end the whole group, or the pipe stays open and the call never reports its end.
+        calls("bash", { command: `echo run >> ${marker}; tail -f /dev/null; echo never` }),
     );
 
     try {
@@ -510,7 +512,7 @@ test("too many sandboxes at once fail the call with the limit", async () => {
         await say(app, two, "go");
         assert.match(
             (await modelTexts(app, two)).join("\n"),
-            /1 sandboxes already run \(the most is 1\)/,
+            /1 sandboxes already run, and the most is 1: session #\d+ \(.*work-limit-1, idle\)/,
         );
         assert.equal(driver.log.started.length, 1);
     } finally {

@@ -749,18 +749,19 @@ export class GuestEnv implements ExecutionEnv {
             }
         }
 
+        // The shell is known only once the VM is up: the first command must not guess it.
         return this.#run(
             typeof command === "string"
-                ? [this.#shell(), "-lc", command]
+                ? () => [this.#shell(), "-lc", command]
                 : ["/bin/sh", "-c", 'exec "$0" "$@"', ...command],
             options,
             context,
         );
     }
 
-    /** Run `argv` in the guest, as is. */
+    /** Run `argv` in the guest, as is. A function makes it after the VM is up. */
     async #run(
-        argv: string[],
+        argv: string[] | (() => string[]),
         options: ShellExecOptions | undefined,
         context: Context,
     ): Promise<Result<ShellExecResult, ExecutionError>> {
@@ -814,7 +815,7 @@ export class GuestEnv implements ExecutionEnv {
                 }
             }
 
-            const process = vm.exec(argv, {
+            const process = vm.exec(typeof argv === "function" ? argv() : argv, {
                 cwd: options?.cwd === undefined ? this.cwd : this.#resolve(options.cwd),
                 env,
                 signal: stop.signal,

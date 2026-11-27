@@ -1039,6 +1039,7 @@ export class PocketApp {
                 register: (provider) => this.sandboxes.register(provider),
                 get: (conversationId) => this.sandboxes.get(conversationId),
                 set: (conversationId, person, on) => this.sandboxes.set(conversationId, person, on),
+                jobs: (conversationId) => this.sandboxes.jobs(conversationId),
             },
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);

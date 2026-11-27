@@ -36,7 +36,10 @@ web.onDispose(
 - `env(target)` returns an `ExecutionEnv` ([Pi Durable](https://github.com/earendil-works/pi-durable)). It returns at once: start the VM when the first call needs it. A call that cannot get one returns its error result with the reason. `target` has `conversationId`, `rootId` (the session: one VM serves it and its subagents), `cwd`, and `uploadDir`. Use `rootId` to find the VM.
 - `browser(target)` (optional) gives a `{ problem(), launch(flags) }`. `launch` starts a Chromium in the sandbox with Pi Pocket's flags and returns `{ input, output, stop, exited }`: the DevTools pipe (`--remote-debugging-pipe`) as streams that only the server holds. Do not open a port on this machine for it.
 - `mayChoose(person)`, `newSessions()`, `hostTools()`, and `problem()` are read at each use. `problem()` says why a session cannot be put in the sandbox now.
-- The last registration wins. The returned function removes it, and puts back the one before.
+- `folderProblem(cwd)` (optional) says why a folder may not be a sandboxed session's folder (it holds sign-ins or keys). Core asks when a session is put in the sandbox and for the folder of a linked session.
+- `otherFolders()` (optional) says whether a linked session that a sandboxed session starts may use a folder other than its parent's. Without it, it may not.
+- `jobs(target)` (optional) gives the session's `background` tasks as `{ start, output, list, jobs, stop }`, each answering with the words Pi reads. The tasks run in the sandbox. Without it, the `background` tool is blocked in a sandboxed session; with it, the tool calls `host.sandbox.jobs(conversationId)` and never starts a process on this machine.
+- The newest live registration wins. The returned function removes that registration only, in any order: one that ended never comes back.
 
 ## Set a session's sandbox
 

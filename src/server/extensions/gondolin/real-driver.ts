@@ -23,7 +23,8 @@ import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { protectedMatcher } from "./policy.ts";
+import { guestGitConfig } from "./git.ts";
+import { gitDirMatcher, protectedMatcher } from "./policy.ts";
 import type {
     Backend,
     CheckLine,
@@ -45,8 +46,12 @@ export const GONDOLIN_VERSION = "0.14.0";
 /** The image everyone gets, and the one with a browser that Set up builds on request. */
 export const PLAIN_IMAGE = "alpine-base:latest";
 export const BROWSER_IMAGE = "pocket-browser:latest";
+/** The standard image with git added, built on this machine by Set up. The standard choice uses it when it is there. */
+export const GIT_IMAGE = "pocket-base:latest";
 /** The packages the browser image adds to the plain one. */
 const BROWSER_PACKAGES = ["chromium", "ttf-freefont", "nss-tools"];
+/** What Set up adds to every image it builds: Pi needs git in the VM for status, diff, commit, branch, log, and stash. */
+const GIT_PACKAGES = ["git"];
 
 type Library = any;
 
@@ -64,6 +69,162 @@ function onPath(name: string): string | undefined {
     }
 
     return undefined;
+}
+
+/** The image a choice runs: the standard one is the published image, or the one built with git when it is there. */
+export function resolveImage(
+    choice: string,
+    images: readonly { name: string; git?: boolean }[],
+): string {
+    return choice === PLAIN_IMAGE && images.some((image) => image.name === GIT_IMAGE && image.git)
+        ? GIT_IMAGE
+        : choice;
+}
+
+const NO_WRITE = new Set([
+    "mkdir",
+    "mkdirSync",
+    "rmdir",
+    "rmdirSync",
+    "unlink",
+    "unlinkSync",
+    "rename",
+    "renameSync",
+    "link",
+    "linkSync",
+    "chmod",
+    "chmodSync",
+    "symlink",
+    "symlinkSync",
+    "copyFile",
+    "copyFileSync",
+    "open",
+    "openSync",
+]);
+
+/**
+ * `backend` with the writes that `deny` names refused (`EACCES`), and every read as it is: the guest reads `.git/config`
+ * and hooks, and cannot change them. (Gondolin's own `ShadowProvider` hides such files, which would hide a
+ * repository's remotes and settings from git in the guest.) A path is checked as named and as its link resolves, so a
+ * link inside the folder is no way to write the file.
+ */
+function refuseWrites(
+    library: Library,
+    backend: any,
+    deny: (context: { op: string; path: string }) => boolean,
+): unknown {
+    const { isWriteFlag, normalizeVfsPath, ERRNO } = library;
+
+    const refuse = (op: string, path: string): never => {
+        const error = new Error(`EACCES: ${op} '${path}' (protected by the sandbox)`) as Error & {
+            code: string;
+            errno: number;
+            syscall: string;
+            path: string;
+        };
+
+        error.code = "EACCES";
+        error.errno = ERRNO.EACCES;
+        error.syscall = op;
+        error.path = path;
+
+        throw error;
+    };
+
+    const protectedPath = (op: string, path: string): boolean => {
+        const named = normalizeVfsPath(path);
+
+        if (deny({ op, path: named })) {
+            return true;
+        }
+
+        try {
+            return deny({ op, path: normalizeVfsPath(backend.realpathSync?.(named) ?? named) });
+        } catch {
+            return false;
+        }
+    };
+
+    // Moving a folder moves what is under it: a nested repository (`sub/.git`) moved away, written, and moved back
+    // would be a way round the rule. A folder that holds a protected entry (or too many entries to look through) stays.
+    const holdsProtected = (path: string): boolean => {
+        const root = backend.rootPath as string | undefined;
+
+        if (typeof root !== "string") {
+            return false;
+        }
+
+        let budget = 20_000;
+
+        const look = (vfs: string, real: string): boolean => {
+            let entries: import("node:fs").Dirent[];
+
+            try {
+                entries = readdirSync(real, { withFileTypes: true });
+            } catch {
+                return false;
+            }
+
+            for (const entry of entries) {
+                const child = `${vfs === "/" ? "" : vfs}/${entry.name}`;
+
+                if (--budget < 0 || deny({ op: "write", path: child })) {
+                    return true;
+                }
+
+                if (entry.isDirectory() && look(child, join(real, entry.name))) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        return look(normalizeVfsPath(path), join(root, normalizeVfsPath(path)));
+    };
+
+    return new Proxy(backend, {
+        get(target, property) {
+            const value = Reflect.get(target, property, target);
+
+            if (typeof value !== "function") {
+                return value;
+            }
+
+            const name = String(property);
+
+            if (!NO_WRITE.has(name)) {
+                return value.bind(target);
+            }
+
+            return (...args: unknown[]) => {
+                const base = name.replace(/Sync$/, "");
+                const paths: unknown[] =
+                    base === "open"
+                        ? isWriteFlag(String(args[1] ?? "r"))
+                            ? [args[0]]
+                            : []
+                        : base === "symlink" || base === "copyFile"
+                          ? [args[1]]
+                          : base === "rename" || base === "link"
+                            ? [args[0], args[1]]
+                            : [args[0]];
+
+                for (const path of paths) {
+                    if (
+                        typeof path === "string" &&
+                        (protectedPath("write", path) ||
+                            (base === "rename" && holdsProtected(path)))
+                    ) {
+                        refuse(base, path);
+                    }
+                }
+
+                // A change to the entry named `.git` itself is a change too (the check above names it `write`).
+                return value.apply(target, args);
+            };
+        },
+    });
 }
 
 function kvm(): boolean {
@@ -146,6 +307,20 @@ class GondolinVm implements GuestVm {
     constructor(vm: any) {
         this.#vm = vm;
         this.id = String(vm.id);
+
+        // The runner went away (a crash, a kill): say so, so the manager drops this VM and the next call starts another.
+        try {
+            vm.server?.on?.("exit", (info: { code?: number | null; signal?: string | null }) =>
+                this.ended(
+                    info?.signal
+                        ? `the VM's runner was stopped (${info.signal})`
+                        : `the VM's runner exited${info?.code === undefined || info.code === null ? "" : ` (code ${info.code})`}`,
+                ),
+            );
+        } catch {
+            // an older package without the event: the VM is then noticed when a call fails
+        }
+
         this.fs = wrapFs(vm, async (script, ...args) => {
             try {
                 return (await vm.exec(["/bin/sh", "-c", script, ...args])).exitCode as number;
@@ -163,10 +338,11 @@ class GondolinVm implements GuestVm {
         this.#exits.push(listener);
     }
 
-    /** Called by the driver when the runner went away without a close. */
+    /** The runner went away without a close. Gondolin could start it again on a call: it is closed for good here. */
     ended(reason: string): void {
         if (!this.#closed) {
             this.#closed = true;
+            void Promise.resolve(this.#vm.close()).catch(() => undefined);
 
             for (const listener of this.#exits) {
                 listener(reason);
@@ -179,15 +355,20 @@ class GondolinVm implements GuestVm {
 
         // Gondolin ends the stream when its signal fires but leaves the guest's process running: end it here, by the
         // marker that each process and its children carry in their environment.
+        let killing: Promise<void> | undefined;
+
         const kill = () => {
-            void this.#vm
-                .exec([
+            killing = Promise.resolve(
+                this.#vm.exec([
                     "/bin/sh",
                     "-c",
                     'me=$$; for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = "$me" ] && continue; if tr "\\0" "\\n" < "$d/environ" 2>/dev/null | grep -qx "PI_POCKET_EXEC=$0"; then kill -9 "$p" 2>/dev/null; fi; done',
                     marker,
-                ])
-                .catch(() => undefined);
+                ]),
+            ).then(
+                () => undefined,
+                () => undefined,
+            );
         };
 
         options.signal?.addEventListener("abort", kill, { once: true });
@@ -200,9 +381,19 @@ class GondolinVm implements GuestVm {
             stderr: "pipe",
             ...(options.stdin === true ? { stdin: true } : {}),
         });
-        const result = Promise.resolve(process_).then((done: { exitCode: number }) => ({
-            exitCode: done.exitCode,
-        }));
+        // A command that was stopped is over only when the guest's processes are: the result waits for the kill.
+        const result = Promise.resolve(process_).then(
+            async (done: { exitCode: number }) => {
+                await killing;
+
+                return { exitCode: done.exitCode };
+            },
+            async (error: unknown) => {
+                await killing;
+
+                throw error;
+            },
+        );
 
         result.catch(() => undefined);
 
@@ -393,14 +584,15 @@ export class GondolinDriver implements SandboxDriver {
                     : `Will use ${backend.backend}.`,
         });
         const images = installed ? this.#images() : [];
-        const chosen = images.find((image) => image.name === settings.image);
+        const resolved = resolveImage(settings.image, images);
+        const chosen = images.find((image) => image.name === resolved);
 
         lines.push({
             name: "Image",
             ok: chosen !== undefined,
             detail:
                 chosen !== undefined
-                    ? `${chosen.name}${chosen.browser ? " (with a browser)" : ""}`
+                    ? `${chosen.name}${chosen.browser ? " (with a browser)" : ""}${chosen.git ? "" : " (without git: tap Set up to build the image with git)"}`
                     : `The image ${settings.image} is not in the store. Tap Set up.`,
         });
 
@@ -426,9 +618,9 @@ export class GondolinDriver implements SandboxDriver {
         };
     }
 
-    #images(): { name: string; browser: boolean }[] {
+    #images(): { name: string; browser: boolean; git: boolean }[] {
         const refs = join(this.imageStore, "refs");
-        const found: { name: string; browser: boolean }[] = [];
+        const found: { name: string; browser: boolean; git: boolean }[] = [];
 
         try {
             for (const name of readdirSync(refs)) {
@@ -437,19 +629,21 @@ export class GondolinDriver implements SandboxDriver {
                     const arches = readdirSync(join(refs, name, tag));
                     const link = join(refs, name, tag, arches[0] ?? "");
                     let browser = false;
+                    let git = false;
 
                     try {
                         const manifest = JSON.parse(
                             readFileSync(join(link, "manifest.json"), "utf8"),
                         ) as { config?: { alpine?: { rootfsPackages?: string[] } } };
+                        const packages = manifest.config?.alpine?.rootfsPackages ?? [];
 
-                        browser =
-                            manifest.config?.alpine?.rootfsPackages?.includes("chromium") === true;
+                        browser = packages.includes("chromium");
+                        git = packages.includes("git");
                     } catch {
-                        // no manifest: not a browser image as far as we know
+                        // no manifest: not a browser image, and no git, as far as we know
                     }
 
-                    found.push({ name: reference, browser });
+                    found.push({ name: reference, browser, git });
                 }
             }
         } catch {
@@ -498,32 +692,58 @@ export class GondolinDriver implements SandboxDriver {
 
         signal.throwIfAborted();
 
-        if (options.browser && !this.#images().some((image) => image.name === BROWSER_IMAGE)) {
-            await this.#buildBrowserImage(library, progress, signal);
+        const have = this.#images();
+
+        // Built here, never downloaded: the root disk of the published image plus git. Without the tools to build it,
+        // the sandbox still works, with no git in the VM.
+        if (!have.some((image) => image.name === GIT_IMAGE && image.git)) {
+            try {
+                await this.#buildImage(library, GIT_IMAGE, GIT_PACKAGES, progress, signal);
+            } catch (error) {
+                signal.throwIfAborted();
+                progress(
+                    `Could not build the image with git (${error instanceof Error ? error.message.split("\n")[0] : String(error)}). The sandbox works without git in the VM.`,
+                );
+            }
+        }
+
+        signal.throwIfAborted();
+
+        if (options.browser && !have.some((image) => image.name === BROWSER_IMAGE && image.git)) {
+            await this.#buildImage(
+                library,
+                BROWSER_IMAGE,
+                [...BROWSER_PACKAGES, ...GIT_PACKAGES],
+                progress,
+                signal,
+            );
         }
 
         progress("Set up is done.");
     }
 
     /**
-     * The image with Chromium: Gondolin 0.14's own build gives a krun kernel that does not boot, so we build only the
-     * root disk with it, and put that disk into the published image's directory, which has a kernel that boots.
+     * An image with more packages than the published one: Gondolin 0.14's own build gives a krun kernel that does not
+     * boot, so we build only the root disk with them, and put that disk into the published image's directory, which
+     * has a kernel that boots.
      */
-    async #buildBrowserImage(
+    async #buildImage(
         library: Library,
+        name: string,
+        packages: readonly string[],
         progress: (line: string) => void,
         signal: AbortSignal,
     ): Promise<void> {
         const work = mkdtempSync(join(tmpdir(), "pocket-gondolin-build-"));
 
         try {
-            progress("Building the image with a browser (downloads about 250 MB of packages) …");
+            progress(`Building the image ${name} with ${packages.join(", ")} on this machine …`);
             const config = library.getDefaultBuildConfig() as {
                 alpine: { rootfsPackages: string[] };
             };
 
             config.alpine.rootfsPackages = [
-                ...new Set([...config.alpine.rootfsPackages, ...BROWSER_PACKAGES]),
+                ...new Set([...config.alpine.rootfsPackages, ...packages]),
             ];
             const built = join(work, "built");
 
@@ -555,7 +775,7 @@ export class GondolinDriver implements SandboxDriver {
                 arch: string;
             };
 
-            library.setImageRef(BROWSER_IMAGE, imported.buildId, imported.arch);
+            library.setImageRef(name, imported.buildId, imported.arch);
         } finally {
             rmSync(work, { recursive: true, force: true });
         }
@@ -578,7 +798,7 @@ export class GondolinDriver implements SandboxDriver {
             throw new Error(`This machine cannot run the sandbox. ${why.join(" ")}`);
         }
 
-        const { VM, RealFSProvider, ReadonlyProvider, ShadowProvider, createHttpHooks } = library;
+        const { VM, RealFSProvider, ReadonlyProvider, createHttpHooks } = library;
 
         const real = (folder: string, readOnly: boolean): unknown => {
             const base = new RealFSProvider(folder);
@@ -587,18 +807,26 @@ export class GondolinDriver implements SandboxDriver {
         };
 
         const matcher = protectedMatcher(spec.protect);
+        const gitMatcher = gitDirMatcher(spec.protect);
         const folder =
             spec.mount === "rw" && spec.protect.length > 0
-                ? new ShadowProvider(real(spec.cwd, false), {
-                      shouldShadow: (context: { op: string; path: string }) => matcher(context),
-                      writeMode: "deny",
-                  })
+                ? refuseWrites(library, real(spec.cwd, false), matcher)
                 : real(spec.cwd, spec.mount === "ro");
         const mounts: Record<string, unknown> = { [spec.cwd]: folder };
 
         for (const extra of spec.readOnlyMounts) {
             if (extra !== spec.cwd && existsSync(extra)) {
                 mounts[extra] = real(extra, true);
+            }
+        }
+
+        // A worktree's main repository: its objects, index, and refs are as writable as the folder, so git works.
+        for (const dir of spec.gitDirs) {
+            if (dir !== spec.cwd && existsSync(dir)) {
+                mounts[dir] =
+                    spec.mount === "rw" && spec.protect.length > 0
+                        ? refuseWrites(library, real(dir, false), gitMatcher)
+                        : real(dir, spec.mount === "ro");
             }
         }
 
@@ -611,7 +839,7 @@ export class GondolinDriver implements SandboxDriver {
         const vm = await VM.create({
             sandbox: {
                 vmm: check.backend,
-                imagePath: spec.image,
+                imagePath: resolveImage(spec.image, check.images),
                 memory: `${spec.memoryMb}M`,
                 cpus: spec.cpus,
                 ...(spec.network.mode === "off" ? { netEnabled: false } : {}),
@@ -630,6 +858,16 @@ export class GondolinDriver implements SandboxDriver {
 
         // Make the VM boot now, so the first call does not pay for it unseen and a broken VM shows here.
         await vm.start();
+
+        // The guest's own git settings: trust for the mounted folders, an author, and no way to sign in.
+        try {
+            await vm.fs.writeFile(
+                "/etc/gitconfig",
+                Buffer.from(guestGitConfig(spec.safeDirectories), "utf8"),
+            );
+        } catch {
+            // without it git in the guest says "dubious ownership": the call that needs it says so
+        }
 
         return new GondolinVm(vm);
     }

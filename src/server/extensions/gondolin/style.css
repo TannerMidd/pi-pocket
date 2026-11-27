@@ -143,3 +143,19 @@
 .gdl-setting-label {
     flex: 1;
 }
+
+.gdl-vms {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.gdl-vm {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}

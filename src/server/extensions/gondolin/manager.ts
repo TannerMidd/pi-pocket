@@ -8,7 +8,16 @@ import { dirname } from "node:path";
 import { Readable, Writable } from "node:stream";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { GuestEnv } from "./guest-env.ts";
-import type { Backend, GuestVm, HostCheck, NetworkMode, SandboxDriver, VmSpec } from "./guest.ts";
+import { gitMounts } from "./git.ts";
+import type {
+    Backend,
+    GuestExecOptions,
+    GuestVm,
+    HostCheck,
+    NetworkMode,
+    SandboxDriver,
+    VmSpec,
+} from "./guest.ts";
 
 export interface SandboxSettings {
     readonly backend: Backend;
@@ -29,6 +38,8 @@ export interface VmTarget {
     readonly rootId: number;
     readonly cwd: string;
     readonly uploadDir: string | undefined;
+    /** Folders of the skills the session uses, outside its folder: mounted read only. */
+    readonly skillDirs?: readonly string[];
 }
 
 export type Phase = "starting" | "running" | "stopped" | "error";
@@ -39,6 +50,10 @@ export interface VmState {
     readonly cwd: string;
     readonly mount: "rw" | "ro";
     readonly network: NetworkMode;
+    /** The hosts the VM reaches (network mode allow list): the rules it started with. */
+    readonly allowedHosts: readonly string[];
+    /** The VM runs with rules the settings have since changed (looser ones: stricter ones end it). */
+    readonly stale: boolean;
     readonly startedAt?: number;
     readonly stoppedAt?: number;
     /** Why it stopped, or why it could not start. */
@@ -84,6 +99,10 @@ export interface ManagerOptions {
     readonly kill?: (pid: number) => void;
     /** Called when the state of a VM changes. */
     readonly onChange?: (rootId: number) => void;
+    /** Called when a VM ends, for whatever reason, with its session and the reason: what ran in it ended too. */
+    readonly onEnded?: (rootId: number, reason: string) => void;
+    /** Why a folder may not be mounted (`policy.ts`), or undefined. A session's own folder that fails never starts. */
+    readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
 }
 
 function sessionLabel(rootId: number, cwd: string): string {
@@ -161,6 +180,14 @@ export class SandboxManager {
         }
 
         return entry;
+    }
+
+    #ended(rootId: number, reason: string): void {
+        try {
+            this.#options.onEnded?.(rootId, reason);
+        } catch (error) {
+            this.#options.log(`sandbox: an end listener failed: ${String(error)}`);
+        }
     }
 
     #changed(rootId: number): void {
@@ -261,13 +288,19 @@ export class SandboxManager {
 
     async #start(rootId: number, entry: Entry): Promise<GuestVm> {
         const settings = this.#options.settings();
-        const running = [...this.#entries.entries()].filter(
+        const holders = [...this.#entries.entries()].filter(
             ([id, other]) =>
                 id !== rootId && (other.vm !== undefined || other.starting !== undefined),
-        ).length;
+        );
 
-        if (running >= settings.maxVms) {
-            const message = `The sandbox could not start: ${running} sandboxes already run (the most is ${settings.maxVms}). Stop one, or ask the owner to raise the limit.`;
+        if (holders.length >= settings.maxVms) {
+            const names = holders
+                .map(
+                    ([id, other]) =>
+                        `session #${id} (${other.target.cwd}, ${other.busy > 0 || other.starting !== undefined ? "working" : "idle"})`,
+                )
+                .join("; ");
+            const message = `The sandbox could not start: ${holders.length} sandboxes already run, and the most is ${settings.maxVms}: ${names}. The owner can stop an idle one in the sandbox sheet (Menu → Sandbox → Running sandboxes), or raise "Sandboxes at once" in Menu → Extensions → Gondolin sandbox.`;
 
             entry.phase = "error";
             entry.note = message;
@@ -277,14 +310,45 @@ export class SandboxManager {
         }
 
         const target = entry.target;
+        const problem = this.#options.folderProblem?.(target.cwd, "folder");
+
+        if (problem !== undefined) {
+            entry.phase = "error";
+            entry.note = `The sandbox could not start: ${problem}`;
+            this.#changed(rootId);
+
+            throw new Error(entry.note);
+        }
+
+        const git = gitMounts(target.cwd);
+        const usable = (folders: readonly string[], kind: "folder" | "skill") =>
+            folders.filter((folder) => {
+                const why = this.#options.folderProblem?.(folder, kind);
+
+                if (why !== undefined) {
+                    this.#options.log(`sandbox: ${folder} is not mounted: ${why}`);
+                }
+
+                return why === undefined;
+            });
+        const gitDirs = usable(git.gitDirs, "folder");
         const spec: VmSpec = {
             label: sessionLabel(rootId, target.cwd),
             backend: settings.backend,
             cwd: target.cwd,
             mount: settings.mount,
             protect: ["git"],
-            readOnlyMounts: target.uploadDir === undefined ? [] : [target.uploadDir],
-            network: { mode: settings.network, allowedHosts: settings.allowedHosts },
+            readOnlyMounts: [
+                ...(target.uploadDir === undefined ? [] : [target.uploadDir]),
+                ...usable(target.skillDirs ?? [], "skill"),
+            ],
+            gitDirs,
+            safeDirectories: [
+                ...git.safeDirectories.filter(
+                    (path) => path === target.cwd || gitDirs.some((dir) => dir.startsWith(path)),
+                ),
+            ],
+            network: { mode: settings.network, allowedHosts: [...settings.allowedHosts] },
             cpus: settings.cpus,
             memoryMb: settings.memoryMb,
             diskMb: settings.diskMb,
@@ -337,6 +401,7 @@ export class SandboxManager {
                     entry.stoppedAt = this.#now();
                     entry.note = `The sandbox ended: ${reason}`;
                     this.#forget(vm);
+                    this.#ended(rootId, `the sandbox ended: ${reason}`);
                     this.#changed(rootId);
                 }
             });
@@ -467,6 +532,7 @@ export class SandboxManager {
 
         if (vm !== undefined) {
             this.#forget(vm);
+            this.#ended(rootId, why);
 
             try {
                 await vm.close();
@@ -502,17 +568,93 @@ export class SandboxManager {
         }
 
         const settings = this.#options.settings();
+        const spec = entry.spec;
+        const alive = entry.vm !== undefined;
+        const network = spec?.network.mode ?? settings.network;
+        const allowedHosts = spec?.network.allowedHosts ?? settings.allowedHosts;
+        const mount = spec?.mount ?? settings.mount;
 
         return {
             phase: entry.phase,
             cwd: entry.target.cwd,
-            mount: entry.spec?.mount ?? settings.mount,
-            network: entry.spec?.network.mode ?? settings.network,
+            mount,
+            network,
+            allowedHosts,
+            stale:
+                alive &&
+                (mount !== settings.mount ||
+                    network !== settings.network ||
+                    allowedHosts.join(" ") !== settings.allowedHosts.join(" ")),
             ...(entry.startedAt === undefined ? {} : { startedAt: entry.startedAt }),
             ...(entry.stoppedAt === undefined ? {} : { stoppedAt: entry.stoppedAt }),
             ...(entry.note === undefined ? {} : { note: entry.note }),
             busy: entry.busy,
         };
+    }
+
+    /** Every VM that runs or starts, for the owner's list. */
+    vms(): { rootId: number; cwd: string; phase: Phase; busy: number; startedAt?: number }[] {
+        return [...this.#entries.entries()]
+            .filter(([, entry]) => entry.vm !== undefined || entry.starting !== undefined)
+            .map(([rootId, entry]) => ({
+                rootId,
+                cwd: entry.target.cwd,
+                phase: entry.phase,
+                busy: entry.busy,
+                ...(entry.startedAt === undefined ? {} : { startedAt: entry.startedAt }),
+            }));
+    }
+
+    /**
+     * Stop the VMs that run with looser rules than the settings now say: a network that is off now, fewer hosts, a
+     * folder that is read only now. The calls that ran in them end, as a stop ends them. Looser settings change nothing
+     * until a VM starts again (`state` says so). Returns the sessions it stopped.
+     */
+    async enforce(): Promise<number[]> {
+        const settings = this.#options.settings();
+        const rank = { off: 0, allowlist: 1, open: 2 } as const;
+        const stopped: number[] = [];
+
+        for (const [rootId, entry] of [...this.#entries.entries()]) {
+            const spec = entry.spec;
+
+            if (entry.vm === undefined || spec === undefined) {
+                continue;
+            }
+
+            const hosts = new Set(settings.allowedHosts);
+            const stricter =
+                (spec.mount === "rw" && settings.mount === "ro") ||
+                rank[settings.network] < rank[spec.network.mode] ||
+                (spec.network.mode === "allowlist" &&
+                    settings.network === "allowlist" &&
+                    spec.network.allowedHosts.some((host) => !hosts.has(host)));
+
+            if (
+                stricter &&
+                (await this.stop(rootId, "the owner made the sandbox's rules stricter"))
+            ) {
+                stopped.push(rootId);
+            }
+        }
+
+        return stopped;
+    }
+
+    /** Keep a session's VM from stopping while something that runs in it (a background task) needs it. */
+    hold(target: VmTarget): () => void {
+        this.#entry(target);
+
+        return this.#busy(target.rootId);
+    }
+
+    /** Start a command in a session's VM, as its shell runs it; the VM starts first when it is not there. */
+    async spawnShell(target: VmTarget, command: string, options: GuestExecOptions = {}) {
+        this.#entry(target);
+        const vm = await this.#ready(target.rootId);
+        const shell = this.#entries.get(target.rootId)?.shell ?? "/bin/sh";
+
+        return vm.exec([shell, "-lc", command], options);
     }
 
     get running(): number {

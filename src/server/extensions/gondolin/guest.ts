@@ -82,8 +82,15 @@ export interface VmSpec {
     readonly mount: MountMode;
     /** Rule sets that keep files of the folder from the guest's writes (see `policy.ts`): `git`. */
     readonly protect: readonly "git"[];
-    /** More folders mounted read-only at their own paths (the session's uploads). */
+    /** More folders mounted read-only at their own paths (the session's uploads, the skills it uses). */
     readonly readOnlyMounts: readonly string[];
+    /**
+     * Git directories outside the folder (a worktree's main repository) mounted at their own paths: as writable as the
+     * folder is (`mount`), with the same protections for `config`, `hooks`, and `info`.
+     */
+    readonly gitDirs: readonly string[];
+    /** Folders that git in the guest trusts (`safe.directory`). */
+    readonly safeDirectories: readonly string[];
     readonly network: { readonly mode: NetworkMode; readonly allowedHosts: readonly string[] };
     readonly cpus: number;
     readonly memoryMb: number;
@@ -108,7 +115,11 @@ export interface HostCheck {
     /** The back end that would run, when one can. */
     readonly backend?: "krun" | "qemu";
     /** Images in the store, by name. */
-    readonly images: readonly { readonly name: string; readonly browser: boolean }[];
+    readonly images: readonly {
+        readonly name: string;
+        readonly browser: boolean;
+        readonly git?: boolean;
+    }[];
 }
 
 export interface SetupOptions {
