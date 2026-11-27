@@ -138,7 +138,7 @@ import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
-import { BASE_THEME, Themes } from "./themes.ts";
+import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
 import { UsageStore, type UsageProvider, type UsageSnapshot } from "./usage.ts";
@@ -4416,8 +4416,8 @@ export class PocketApp {
 
     /**
      * The owner's default after a theme went (removed in Appearance or the gallery, or its folder deleted): a theme that
-     * is gone gives way to Pocket, and colors that went with it (its own) to the desktop's; with both gone, no default.
-     * Everyone's tabs hear it.
+     * is gone gives way to Pocket, and colors that went with it (its own) to the app's own (Pocket neutral); with both
+     * gone, no default. Everyone's tabs hear it.
      */
     async #themeDefaultStillHere(): Promise<void> {
         const before = this.config.themeDefault;
@@ -4431,19 +4431,21 @@ export class PocketApp {
             const lookGone =
                 before.look !== BASE_THEME &&
                 !this.themes.list().some((each) => each.id === before.look);
-            // The desktop's colors are the app's own default: they never go.
+            // The desktop's colors and the app's own default never go.
             const colorsGone =
-                before.colors !== "desktop" && !(await this.themes.hasColors(before.colors));
+                before.colors !== "desktop" &&
+                before.colors !== DEFAULT_COLORS &&
+                !(await this.themes.hasColors(before.colors));
 
             if (!lookGone && !colorsGone) {
                 return;
             }
 
             const look = lookGone ? BASE_THEME : before.look;
-            const colors = colorsGone ? "desktop" : before.colors;
+            const colors = colorsGone ? DEFAULT_COLORS : before.colors;
 
             this.config.themeDefault =
-                look === BASE_THEME && colors === "desktop" ? undefined : { look, colors };
+                look === BASE_THEME && colors === DEFAULT_COLORS ? undefined : { look, colors };
             await this.#refreshClients();
         } catch (error) {
             this.#log(`The default theme could not be checked: ${describe(error)}`);

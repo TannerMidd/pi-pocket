@@ -11,9 +11,13 @@ const KEY = "pocket.appearance";
 const CACHE = "pocket.themeCache";
 const DESKTOP_CACHE = "pocket.desktopTheme";
 const PINNED = "pocket.pinned";
+
+/** The colors of a browser that chose none and has no owner's default: Pocket's own greys (`themes.js`). */
+export const DEFAULT_COLORS = "pocket-neutral";
+/** The palette for colors that are not here: a theme folder that went, or "Desktop" on a machine without one. */
 const FALLBACK = "tokyo-night";
 
-/** The app's own look, which every theme builds on: it loads no stylesheet. */
+/** The app's own look, which every theme builds on. Its folder (`web/themes/pocket/`) is the look; others load theirs instead. */
 export const BASE_LOOK = "pocket";
 
 /** The conversation's text size in pixels: anything from MIN_TEXT to MAX_TEXT, in steps of STEP_TEXT. */
@@ -37,9 +41,10 @@ export const SIDEBAR_WIDTH = 432;
 const DEFAULTS = {
     /**
      * The colors: "desktop" follows the Omarchy theme of the machine Pi Pocket runs on; otherwise a key of THEMES, or the
-     * id of a theme folder with a colors.toml. (Its name is from before themes were folders.)
+     * id of a theme folder with a colors.toml. (Its name is from before themes were folders.) Until someone chooses, the
+     * owner's default, or Pocket neutral.
      */
-    theme: "desktop",
+    theme: DEFAULT_COLORS,
     /** The theme: a theme folder's id, or "pocket", the app's own look. */
     look: BASE_LOOK,
     /** Wide screens: the sidebar and the conversation as Hyprland windows, with gaps and borders. */
@@ -172,8 +177,8 @@ let own = { ...DEFAULTS, ...savedPrefs() };
 /** Which of the theme (`look`) and the colors (`theme`) this browser's person chose; the rest follow the owner's default. */
 const CHOSEN = "pocket.themeChosen";
 const chosen = readJson(CHOSEN, null) ?? {
-    // From before there were defaults: colors other than the desktop's were someone's choice.
-    theme: own.theme !== DEFAULTS.theme,
+    // From before there were defaults: colors other than the desktop's (then the default) were someone's choice.
+    theme: own.theme !== "desktop" && own.theme !== DEFAULTS.theme,
     look: own.look !== DEFAULTS.look,
 };
 
@@ -191,7 +196,9 @@ function inForce() {
     return {
         ...own,
         ...(fallback && !chosen.look ? { look: fallback.look } : {}),
-        ...(fallback && !chosen.theme ? { theme: fallback.colors } : {}),
+        // Colors nobody chose are the owner's default, or else the app's: what this browser saved before it chose none
+        // (the desktop's colors, once the default) does not stand.
+        ...(chosen.theme ? {} : { theme: fallback ? fallback.colors : DEFAULTS.theme }),
     };
 }
 
@@ -376,9 +383,12 @@ const themesListed = () => Array.isArray(store.state.themeList);
 
 // ─── Theme folders ──────────────────────────────────────────────────────────────
 
-/** The theme folder this browser uses: the one it chose, if the server offers it; else the app's own look. */
+/**
+ * The theme folder this browser uses: the one it chose, if the server offers it, and Pocket's own when it lists one
+ * with a stylesheet (a server that does not leaves the app's own CSS as it is). None in safe mode.
+ */
 function lookOf(id = prefs().look) {
-    if (safeMode() || id === BASE_LOOK) {
+    if (safeMode()) {
         return null;
     }
 
@@ -391,7 +401,7 @@ function lookOf(id = prefs().look) {
 
 /** The stylesheets of the theme this tab shows, or null while the server has not listed them yet. */
 function themeSheets() {
-    if (safeMode() || prefs().look === BASE_LOOK) {
+    if (safeMode()) {
         return [];
     }
 
@@ -482,8 +492,10 @@ export function lookLabel() {
     const palette = paletteOf();
     const colors = palette.desktop ? `${palette.name} (desktop)` : palette.name;
 
-    return look && prefs().theme.split("@")[0] === look.id
-        ? look.name
+    // Pocket with the colors it starts with is "Pocket", as a theme with its own colors is named once.
+    return (look && prefs().theme.split("@")[0] === look.id) ||
+        (prefs().look === BASE_LOOK && palette.id === DEFAULT_COLORS)
+        ? (look?.name ?? "Pocket")
         : `${look?.name ?? "Pocket"} · ${colors}`;
 }
 
@@ -601,7 +613,9 @@ export function apply() {
     const cached = readJson(CACHE, {});
     // Colors of a theme folder before the server listed them: keep what index.html put on the page from the cache.
     const palette = paletteKnown(p.theme) ? paletteOf() : null;
-    const vars = palette ? themeVars(palette) : (cached.palette ?? themeVars(paletteOf(FALLBACK)));
+    const vars = palette
+        ? themeVars(palette)
+        : (cached.palette ?? themeVars(paletteOf(DEFAULT_COLORS)));
 
     if (palette) {
         setPalette(vars);
