@@ -182,7 +182,7 @@ test("git reads work in the VM, and add and commit say that Git metadata is read
     assert.deepEqual(readFileSync(join(repo, ".git", "index")), before, "status wrote no index");
 });
 
-test("the guest cannot write a git directory by any path: a file, a new entry, a .git variant, a renamed ancestor, a link", async (t) => {
+test("the guest cannot write a git directory by any path: a file, a new entry, a .git variant, a link", async (t) => {
     if (unavailable(t)) {
         return;
     }
