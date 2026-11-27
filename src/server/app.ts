@@ -4804,6 +4804,8 @@ export class PocketApp {
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
             this.guard.close();
+            // The descriptors held for pinned sandboxed roots.
+            this.hostfs.close();
 
             // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.
             const cleaned = this.loader?.close();

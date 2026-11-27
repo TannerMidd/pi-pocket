@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
     mkdirSync,
     mkdtempSync,
+    opendirSync,
     readdirSync,
     rmSync,
     statSync,
@@ -201,5 +202,46 @@ test(
             expandSkillCommand(plain, "/skill:careful go", [command]) ?? "",
             /PRIVATE KEY/,
         );
+    },
+);
+
+test(
+    "a snapshot reads a big folder as its entries come and stops at its budget",
+    { skip: !linux },
+    async (t) => {
+        const { root, sandboxed } = lab(t);
+        const big = join(root, ".pi", "skills", "big");
+
+        mkdirSync(big, { recursive: true });
+
+        for (let index = 0; index < 200; index++) {
+            writeFileSync(join(big, `f${String(index).padStart(3, "0")}.md`), "x");
+        }
+
+        const sample = opendirSync(big);
+        const proto = Object.getPrototypeOf(sample) as { readSync: (this: unknown) => unknown };
+
+        sample.closeSync();
+        const read = proto.readSync;
+        let reads = 0;
+
+        proto.readSync = function (this: unknown) {
+            reads++;
+
+            return read.call(this);
+        } as typeof read;
+        t.after(() => {
+            proto.readSync = read;
+        });
+
+        const copies = new Snapshots(sandboxed, join(root, "..", "snapshots"), 5);
+        let copied = 0;
+
+        copies.run([big], (view) => {
+            copied = readdirSync(view.to(big)).length;
+        });
+        assert.ok(copied <= 5, `${copied} files copied against a budget of 5`);
+        // The listing was read as it came (a few entries), not all 200 at once.
+        assert.ok(reads > 0 && reads <= 20, `${reads} entries read`);
     },
 );

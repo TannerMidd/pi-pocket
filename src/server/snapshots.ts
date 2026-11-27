@@ -18,7 +18,7 @@ import {
     makeTemporaryFolder,
     mkdir,
     own,
-    readdir,
+    opendirSyncAt,
     readFile,
     rm,
     writeFile,
@@ -89,10 +89,24 @@ function copyTree(host: Hostfs, from: string, to: string, budget: { left: number
         budget.left--;
         mkdir(own(target), { recursive: true });
 
-        let names: string[];
+        // The names are read as they come, no more than the budget that is left: a folder the guest fills is not loaded
+        // whole. Only the names kept are sorted.
+        const names: string[] = [];
 
         try {
-            names = readdir(host.at(source));
+            const listing = opendirSyncAt(host.at(source));
+
+            try {
+                for (let each = listing.readSync(); each !== null; each = listing.readSync()) {
+                    if (names.length >= budget.left) {
+                        break;
+                    }
+
+                    names.push(each.name);
+                }
+            } finally {
+                listing.closeSync();
+            }
         } catch {
             return;
         }
@@ -139,10 +153,13 @@ const CONTEXT_NAMES = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.m
 export class Snapshots {
     readonly #host: Hostfs;
     readonly #dir: string;
+    readonly #limit: number;
 
-    constructor(host: Hostfs, dir: string) {
+    /** `limit`: how many files and folders one copy holds (default `MAX_COPIED`). */
+    constructor(host: Hostfs, dir: string, limit = MAX_COPIED) {
         this.#host = host;
         this.#dir = resolve(dir);
+        this.#limit = limit;
     }
 
     /** Whether any of `paths` is in, or leads through, a folder that a sandboxed session works in. */
@@ -204,7 +221,7 @@ export class Snapshots {
         mkdir(own(this.#dir), { recursive: true });
 
         const root = makeTemporaryFolder(join(this.#dir, "snapshot-"));
-        const budget = { left: MAX_COPIED };
+        const budget = { left: this.#limit };
 
         try {
             for (const path of paths) {

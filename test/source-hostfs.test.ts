@@ -26,6 +26,10 @@ function walk(dir: string): string[] {
     );
 }
 
+/** The files as they are written: module names are read from their syntax tree, which ignores comments itself. */
+const raws = new Map(walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")]));
+
+/** The files with their comments cut, for the check that looks for a word with a pattern. */
 const sources = new Map(
     walk(ROOT).map((file) => [
         relative(ROOT, file),
@@ -48,7 +52,7 @@ test("fs is imported only by hostfs.ts and files of Pocket's own data", () => {
             .filter(([, entry]) => ["own", "hostfs"].includes(entry.verdict))
             .map(([file]) => file),
     );
-    const found = [...sources]
+    const found = [...raws]
         .filter(([, text]) => imports(text, ["fs", "fs\\/promises"]))
         .map(([file]) => file);
 
@@ -64,7 +68,7 @@ test("child_process is imported only by the named spawn wrappers and files of Po
             .filter(([, entry]) => ["own", "wrapper"].includes(entry.verdict))
             .map(([file]) => file),
     );
-    const found = [...sources]
+    const found = [...raws]
         .filter(([, text]) => imports(text, ["child_process"]))
         .map(([file]) => file);
 
@@ -102,7 +106,7 @@ test("no git or gh is started outside the hardened runner", () => {
         }
 
         // A command list that names git as its program, handed to a spawn helper of the file's own.
-        if (bare.test(text) && imports(text, ["child_process"])) {
+        if (bare.test(text) && imports(raws.get(file) ?? "", ["child_process"])) {
             problems.push(`${file} names git or gh as a program beside child_process`);
         }
     }

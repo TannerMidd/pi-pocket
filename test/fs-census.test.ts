@@ -47,6 +47,12 @@ function code(text: string): string {
     return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
+/** The files as they are written: module names are read from their syntax tree, which ignores comments itself. */
+const raws = new Map(
+    walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")] as const),
+);
+
+/** The files with their comments cut, for the checks that look for a word with a pattern. */
 const sources = new Map(
     walk(ROOT).map((file) => [relative(ROOT, file), code(readFileSync(file, "utf8"))] as const),
 );
@@ -67,7 +73,7 @@ const primitivesOf = (text: string): string[] =>
 
 test("the census lists every importer of fs, fs/promises, and child_process, and no stale entry", () => {
     const actual = new Map(
-        [...sources].flatMap(([file, text]) => {
+        [...raws].flatMap(([file, text]) => {
             const found = primitivesOf(text);
 
             return found.length === 0 ? [] : [[file, found] as const];
@@ -128,7 +134,7 @@ test("the census has the sizes the design names", () => {
 
 test("each indirect user exists and imports no primitive", () => {
     for (const file of Object.keys(census.indirect)) {
-        const text = sources.get(file);
+        const text = raws.get(file);
 
         assert.notEqual(text, undefined, `${file} is not a file`);
 
@@ -176,7 +182,7 @@ test("Pi's loaders, which read the paths they are given, are called only on a sn
 test("no package that wraps fs or spawn is imported, except where the census names it", () => {
     const problems: string[] = [];
 
-    for (const [file, text] of sources) {
+    for (const [file, text] of raws) {
         for (const name of modulesOf(text)) {
             const bare = name.startsWith("@")
                 ? name.split("/").slice(0, 2).join("/")
@@ -196,7 +202,7 @@ test("no package that wraps fs or spawn is imported, except where the census nam
 
     for (const [name, files] of Object.entries(census.packages.capable)) {
         for (const file of files) {
-            const imports = [...modulesOf(sources.get(file) ?? "")].some(
+            const imports = [...modulesOf(raws.get(file) ?? "")].some(
                 (each) => each === name || each.startsWith(`${name}/`),
             );
 
@@ -293,4 +299,17 @@ test("a module is read by its decoded name: backticks and escapes are the same m
     assert.deepEqual(primitives('type T = import("node:fs").Stats;'), ["fs"]);
     assert.deepEqual(primitives('import("node:path");'), []);
     assert.deepEqual(primitives('const text = "import(`node:fs`)"; // import("fs")'), []);
+});
+
+test("a string that holds a comment marker does not hide an import: the source is read as it is written", () => {
+    const hidden = 'const open = "/*";\nimport fs from "node:fs";\nconst close = "*/";\n';
+
+    // What cutting comments by pattern leaves: the import is gone.
+    assert.deepEqual(primitivesOf(code(hidden)), []);
+    // What is read as written: it is there.
+    assert.deepEqual(primitivesOf(hidden), ["fs"]);
+    assert.equal(
+        [...raws.values()].some((text) => primitivesOf(text).length > 0),
+        true,
+    );
 });

@@ -368,7 +368,7 @@ function pinParent(
     shown: string,
     make = false,
     root?: PinnedRoot,
-): { dir: number; name: string | undefined } {
+): { dir: number; name: string | undefined; release: (closeDir?: boolean) => void } {
     let dir = openStart(start);
 
     try {
@@ -406,7 +406,15 @@ function pinParent(
             dir = next;
         }
 
-        return { dir, name: parts.at(-1) };
+        return {
+            dir,
+            name: parts.at(-1),
+            release: (closeDir = true) => {
+                if (closeDir) {
+                    closeSync(dir);
+                }
+            },
+        };
     } catch (error) {
         closeSync(dir);
 
@@ -955,13 +963,52 @@ function withFolder<T>(place: Place, run: (path: string) => T): T {
     });
 }
 
-export function readdir(place: Place): string[];
-export function readdir(place: Place, options: { withFileTypes: true }): Dirent[];
+/** The most entries of one folder of a sandboxed place that a listing holds: a folder the guest fills is not read whole. */
+export const MAX_ENTRIES = 100_000;
 
-export function readdir(place: Place, options?: { withFileTypes: true }): string[] | Dirent[] {
-    return withFolder(place, (path) =>
-        options === undefined ? readdirSync(path) : readdirSync(path, options),
-    );
+/** Entries read as they come, no more than `limit`: more than that is `EFBIG`, not a list that holds them all. */
+function entriesOf(path: string, limit: number): Dirent[] {
+    const dir = opendirSync(path);
+    const found: Dirent[] = [];
+
+    try {
+        for (let each = dir.readSync(); each !== null; each = dir.readSync()) {
+            if (found.length >= limit) {
+                throw failure(
+                    "EFBIG",
+                    `a folder of more than ${limit} entries is not listed`,
+                    path,
+                );
+            }
+
+            found.push(each);
+        }
+    } finally {
+        dir.closeSync();
+    }
+
+    return found;
+}
+
+export function readdir(place: Place, options?: { max?: number }): string[];
+export function readdir(place: Place, options: { withFileTypes: true; max?: number }): Dirent[];
+
+export function readdir(
+    place: Place,
+    options?: { withFileTypes?: true; max?: number },
+): string[] | Dirent[] {
+    return withFolder(place, (path) => {
+        // A plain folder is the plain call; a sandboxed one is read as the entries come, up to a cap.
+        if (place.located.kind === "plain") {
+            return options?.withFileTypes === true
+                ? readdirSync(path, { withFileTypes: true })
+                : readdirSync(path);
+        }
+
+        const found = entriesOf(path, options?.max ?? MAX_ENTRIES);
+
+        return options?.withFileTypes === true ? found : found.map((each) => each.name);
+    });
 }
 
 export async function readdirAsync(place: Place): Promise<string[]>;
@@ -986,9 +1033,9 @@ export async function readdirAsync(
         );
 
         try {
-            return options === undefined
-                ? await fsp.readdir(entry(handle.fd))
-                : await fsp.readdir(entry(handle.fd), options);
+            const found = entriesOf(entry(handle.fd), MAX_ENTRIES);
+
+            return options === undefined ? found.map((each) => each.name) : found;
         } finally {
             await handle.close();
         }
@@ -1308,7 +1355,10 @@ export function openSync(place: Place, flags: string | number = "r", mode?: numb
         const bits = modeFlags(flags);
         const fd = confined
             ? openChecked(path, bits, mode, place.display.text)
-            : noLink(place.display.text, () => fsOpenSync(path, bits, mode));
+            : noLink(place.display.text, () =>
+                  // A pipe named like a file does not hold the open: the caller looks at what it is before it reads.
+                  fsOpenSync(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode),
+              );
 
         return new OpenFile(fd);
     });
@@ -1365,7 +1415,7 @@ export async function open(
         const bits = modeFlags(flags);
 
         if (!confined) {
-            return fsp.open(path, bits, mode);
+            return fsp.open(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode);
         }
 
         // Checked and made as a regular file, then opened again through the checked descriptor.
@@ -1655,24 +1705,136 @@ export class Hostfs {
     readonly #roots = new Map<string, { dev: bigint; ino: bigint }>();
 
     readonly #maxPins: number;
+    /**
+     * A descriptor held open for each pinned sandboxed root (the sandboxed folders, and the nested folders pinned at their
+     * first look), by device and inode. An open descriptor keeps its inode allocated, so the inode number cannot be reused
+     * by a replacement folder: what a walk compares a root with is still the admitted folder. Plain folders hold none.
+     */
+    readonly #held = new Map<string, number>();
+    /** The key of each nested pin, by stated path, for teardown. */
+    readonly #heldNested = new Map<string, string>();
 
-    /** `maxPins`: how many nested folders keep their first-look identity; a pin is never dropped to make room. */
+    /**
+     * `maxPins`: how many root descriptors are held at once, sandboxed folders and nested pins together (default 256,
+     * well under a usual soft limit of 1024 descriptors for the process). A pin is never dropped to make room: at the
+     * limit a new root is refused with `EMFILE`.
+     */
     constructor(view: SandboxView = NO_SANDBOX, options: { maxPins?: number } = {}) {
         this.#view = view;
-        this.#maxPins = options.maxPins ?? 10_000;
+        this.#maxPins = options.maxPins ?? 256;
     }
 
-    /** Admission teardown: the folder's pinned identity goes (a new look pins it again). */
+    /** How many root descriptors are held now. */
+    get heldRoots(): number {
+        return this.#held.size;
+    }
+
+    /** Admission teardown: the folder's pinned identity and its descriptor go (a new look pins it again). */
     unpinRoot(path: string): void {
-        this.#roots.delete(resolve(path));
+        const target = resolve(path);
+        const key = this.#heldNested.get(target);
+
+        this.#roots.delete(target);
+        this.#heldNested.delete(target);
+
+        if (key !== undefined && ![...this.#heldNested.values()].includes(key)) {
+            this.#release(key);
+        }
+    }
+
+    /** Shutdown: every held descriptor is closed. */
+    close(): void {
+        for (const key of [...this.#held.keys()]) {
+            this.#release(key);
+        }
+
+        this.#roots.clear();
+        this.#heldNested.clear();
+    }
+
+    #release(key: string): void {
+        const fd = this.#held.get(key);
+
+        this.#held.delete(key);
+
+        if (fd !== undefined) {
+            try {
+                closeSync(fd);
+            } catch {
+                // Already closed.
+            }
+        }
+    }
+
+    /** Hold the descriptor of `fd`'s folder under `key`; at the limit the root is refused and the descriptor closed. */
+    #keep(key: string, fd: number, shown: string): void {
+        if (this.#held.has(key)) {
+            closeSync(fd);
+
+            return;
+        }
+
+        if (this.#held.size >= this.#maxPins) {
+            closeSync(fd);
+
+            throw failure(
+                "EMFILE",
+                `${shown} cannot be admitted: too many roots are pinned`,
+                shown,
+            );
+        }
+
+        this.#held.set(key, fd);
+    }
+
+    /** Hold the sandboxed folder's descriptor (once); a folder that cannot be opened now is left to fail at its use. */
+    #holdStart(start: SandboxedFolder): void {
+        const key = keyOf(start);
+
+        if (this.#held.has(key)) {
+            return;
+        }
+
+        let fd: number;
+
+        try {
+            fd = openStart(start);
+        } catch {
+            return;
+        }
+
+        this.#keep(key, fd, start.path);
+    }
+
+    /** A place for `located`, with the descriptor of the sandboxed folder it is in held. */
+    #placed(located: Located, label: string): Place {
+        if (located.kind === "confined") {
+            this.#holdStart(located.start);
+        }
+
+        return new Place(located, label, this);
     }
 
     #folders(): Folder[] {
-        return [...this.#view.sandboxedFolders()].map((each) => ({
+        const listed = [...this.#view.sandboxedFolders()].map((each) => ({
             ...each,
             path: resolve(each.path),
             key: keyOf(each),
         }));
+
+        // A sandboxed folder that the view no longer lists is torn down: its descriptor goes unless a nested pin holds it.
+        if (this.#held.size > 0) {
+            const live = new Set(listed.map((each) => each.key));
+            const nested = new Set(this.#heldNested.values());
+
+            for (const key of [...this.#held.keys()]) {
+                if (!live.has(key) && !nested.has(key)) {
+                    this.#release(key);
+                }
+            }
+        }
+
+        return listed;
     }
 
     /** A folder as a session works in it. */
@@ -1681,26 +1843,55 @@ export class Hostfs {
         const known = pinned ?? this.#roots.get(target);
         const ref = new FolderRef(this, target, known);
 
-        // A folder nested in a sandboxed one is pinned by the first look, when admission gave no identity: the guest can
-        // replace it, and a replacement is then not the root.
-        if (known === undefined && ref.identity !== undefined) {
+        // A folder nested in a sandboxed one is pinned by admission (`pinned`) or by the first look: its identity is kept,
+        // and so is a descriptor, so the inode cannot be reused by a replacement. The guest can replace the folder, and a
+        // replacement is then not the root.
+        const identity = known ?? ref.identity;
+
+        if (identity !== undefined && ref.identity !== undefined) {
             const here = this.#folders();
 
             if (here.length > 0) {
                 const where = this.#locate(target, here, true);
 
                 if (where.kind === "confined" && where.parts.length > 0) {
-                    // A pin is a security fact: it is kept until admission is torn down (`unpinRoot`), never evicted. At
-                    // the limit a new nested folder is refused.
-                    if (this.#roots.size >= this.#maxPins) {
-                        throw failure(
-                            "EMFILE",
-                            `${target} cannot be admitted: too many folders are pinned`,
-                            target,
-                        );
+                    const key = keyOf(identity);
+
+                    this.#holdStart(where.start);
+
+                    if (!this.#held.has(key) || !this.#heldNested.has(target)) {
+                        if (!this.#held.has(key)) {
+                            // Opened by the walk from the sandboxed folder, and it must be the identity pinned.
+                            const { dir, release } = pinParent(
+                                where.start,
+                                [...where.parts, ""],
+                                target,
+                                false,
+                            );
+
+                            release(false);
+
+                            const info = fstatSync(dir, { bigint: true });
+
+                            if (keyOf(info) !== key) {
+                                closeSync(dir);
+
+                                throw failure(
+                                    "ESTALE",
+                                    `${target} is no longer the folder it was admitted as`,
+                                    target,
+                                );
+                            }
+
+                            this.#keep(key, dir, target);
+                        }
+
+                        this.#heldNested.set(target, key);
                     }
 
-                    this.#roots.set(target, ref.identity);
+                    if (known === undefined) {
+                        this.#roots.set(target, ref.identity);
+                    }
                 }
             }
         }
@@ -1808,7 +1999,7 @@ export class Hostfs {
     at(path: string): Place {
         const folders = this.#folders();
 
-        return new Place(this.#locate(path, folders, false), resolve(path), this);
+        return this.#placed(this.#locate(path, folders, false), resolve(path));
     }
 
     /** Whether a path is there. A refused path (a link into a sandboxed folder) is not. */
@@ -1857,7 +2048,7 @@ export class Hostfs {
         if (own.kind === "confined") {
             const identity = ref.identity;
 
-            return new Place(
+            return this.#placed(
                 {
                     kind: "confined",
                     start: own.start,
@@ -1867,19 +2058,18 @@ export class Hostfs {
                         : { root: { depth: own.parts.length, ...identity } }),
                 },
                 join(base, ...parts),
-                this,
             );
         }
 
         // The folder is plain, but the name may pass through a sandboxed folder below it.
         const joined = join(base, ...parts);
 
-        return new Place(this.#locate(joined, folders, false), joined, this);
+        return this.#placed(this.#locate(joined, folders, false), joined);
     }
 
     /** @internal: a path below a plain place, classified as a raw path is. */
     classified(path: string, label: string): Place {
-        return new Place(this.#locate(path, this.#folders(), false), label, this);
+        return this.#placed(this.#locate(path, this.#folders(), false), label);
     }
 }
 

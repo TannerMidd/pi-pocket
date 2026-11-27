@@ -608,7 +608,7 @@ test(
         const info = statSync(root, { bigint: true });
         const host = new hostfs.Hostfs(
             { sandboxedFolders: () => [{ path: root, dev: info.dev, ino: info.ino }] },
-            { maxPins: 2 },
+            { maxPins: 3 },
         );
 
         assert.ok(unused);
@@ -732,5 +732,107 @@ test(
             300,
         );
         assert.equal(statSync(join(root, "counted.txt")).size, 300);
+    },
+);
+
+test(
+    "a pinned root keeps its descriptor, so its inode number cannot be reused by a replacement",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+        const pinned = statSync(nested, { bigint: true });
+        const folder = host.folder(nested);
+
+        assert.equal(hostfs.readText(folder.at("deep.txt")), "deep");
+        assert.ok(host.heldRoots >= 2, "the sandboxed folder and the nested pin are held");
+
+        // The guest removes the folder, then makes many: a freed inode number is reused at once on many file systems.
+        rmSync(nested, { recursive: true });
+
+        const reused: string[] = [];
+
+        for (let index = 0; index < 200; index++) {
+            const candidate = join(root, `candidate-${index}`);
+
+            mkdirSync(candidate);
+
+            if (statSync(candidate, { bigint: true }).ino === pinned.ino) {
+                reused.push(candidate);
+            }
+        }
+
+        assert.deepEqual(reused, [], "a held inode is not handed out again");
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(folder.at("deep.txt")), { code: "ESTALE" });
+
+        // Teardown closes the descriptor of the nested pin; shutdown closes the rest.
+        const before = host.heldRoots;
+
+        host.unpinRoot(nested);
+        assert.equal(host.heldRoots, before - 1);
+        host.close();
+        assert.equal(host.heldRoots, 0);
+    },
+);
+
+test(
+    "held root descriptors are capped, the cap fails closed with EMFILE, and a sandboxed folder that is no longer listed is released",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const info = statSync(root, { bigint: true });
+        let listed = true;
+        const host = new hostfs.Hostfs(
+            {
+                sandboxedFolders: () =>
+                    listed ? [{ path: root, dev: info.dev, ino: info.ino }] : [],
+            },
+            { maxPins: 2 },
+        );
+
+        for (const name of ["one", "two"]) {
+            mkdirSync(join(root, name));
+        }
+
+        host.folder(join(root, "one"));
+        assert.equal(host.heldRoots, 2, "the sandboxed folder and the first nested pin");
+        assert.throws(() => host.folder(join(root, "two")), { code: "EMFILE" });
+        // The view stops listing the folder: its descriptor goes at the next look, and the nested pin stays.
+        listed = false;
+        host.at(root);
+        assert.equal(host.heldRoots, 1);
+        host.close();
+    },
+);
+
+test(
+    "a sandboxed folder is listed as the entries come, and a folder past the cap is refused, not read whole",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const folder = host.folder(root);
+
+        mkdirSync(join(root, "many"));
+
+        for (let index = 0; index < 50; index++) {
+            writeFileSync(join(root, "many", `f${index}`), "");
+        }
+
+        assert.equal(hostfs.readdir(folder.at("many")).length, 50);
+        assert.throws(() => hostfs.readdir(folder.at("many"), { max: 10 }), { code: "EFBIG" });
+        assert.throws(() => hostfs.readdir(folder.at("many"), { withFileTypes: true, max: 10 }), {
+            code: "EFBIG",
+        });
+        // A plain folder is the plain call, with no cap.
+        assert.equal(
+            hostfs.readdir(
+                host.at(join(root, "many")).sandboxed
+                    ? hostfs.own(root).child("many")
+                    : hostfs.own(root),
+            ).length,
+            50,
+        );
     },
 );
