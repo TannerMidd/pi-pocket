@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
@@ -331,6 +331,100 @@ test("an environment made while the first look is under way starts no VM when th
         assert.match(String(later.ok ? "" : later.error.message), /reaches into/);
     } finally {
         restore();
+        useDriver(undefined);
+        await running.close();
+    }
+});
+
+/** Pi's settings file for a test, removed after. */
+async function withSettings(settings: unknown, run: () => Promise<void>): Promise<void> {
+    const file = join(process.env.PI_CODING_AGENT_DIR!, "settings.json");
+
+    writeFileSync(file, JSON.stringify(settings));
+
+    try {
+        await run();
+    } finally {
+        rmSync(file, { force: true });
+    }
+}
+
+for (const [name, key] of [
+    ["skill", "skills"],
+    ["prompt", "prompts"],
+] as const) {
+    test(`a ${name} path that Pi's settings name, inside the folder, refuses a read-write sandbox; one outside does not`, async () => {
+        const running = await app();
+
+        try {
+            const shared = project(`trusted-configured-${name}`);
+            const elsewhere = project(`trusted-configured-${name}-elsewhere`);
+            const id = await newSession(running, shared);
+
+            // Named by an absolute path, a path in the home folder's style, and (not there yet) a path of a new file.
+            await withSettings({ [key]: [join(elsewhere, "skill")] }, async () => {
+                await running.sandboxes.set(id, owner(running), true);
+                await running.sandboxes.set(id, owner(running), false);
+            });
+
+            for (const path of [
+                join(shared, "skill", "SKILL.md"),
+                join(shared, "not-there-yet", "new.md"),
+                `+${join(shared, "skill")}`,
+                join(shared, "skill", "*.md"),
+            ]) {
+                await withSettings({ [key]: [path] }, async () => {
+                    await assert.rejects(
+                        running.sandboxes.set(id, owner(running), true),
+                        /reaches into/,
+                        path,
+                    );
+                });
+            }
+
+            // Exclusions load nothing, and a settings change is read again at the next look.
+            await withSettings({ [key]: [`!${join(shared, "skill")}`] }, async () => {
+                await running.sandboxes.set(id, owner(running), true);
+            });
+        } finally {
+            useDriver(undefined);
+            await running.close();
+        }
+    });
+}
+
+test("a folder that a configured path holds, a package, a program, and an MCP server in the folder refuse a read-write sandbox", async () => {
+    const running = await app();
+
+    try {
+        const shared = project("trusted-configured-more");
+        const id = await newSession(running, shared);
+        const cases: [string, unknown][] = [
+            ["a directory that holds the folder", { skills: [root] }],
+            ["a local package", { packages: [{ source: shared }] }],
+            ["a program", { shellPath: join(shared, "shell") }],
+            ["an MCP server's program", {}],
+        ];
+
+        for (const [what, settings] of cases) {
+            writeFileSync(
+                join(process.env.PI_CODING_AGENT_DIR!, "mcp.json"),
+                JSON.stringify(
+                    what === "an MCP server's program"
+                        ? { mcpServers: { tool: { command: join(shared, "server") } } }
+                        : {},
+                ),
+            );
+            await withSettings(settings, async () => {
+                await assert.rejects(
+                    running.sandboxes.set(id, owner(running), true),
+                    /reaches into/,
+                    what,
+                );
+            });
+        }
+    } finally {
+        rmSync(join(process.env.PI_CODING_AGENT_DIR!, "mcp.json"), { force: true });
         useDriver(undefined);
         await running.close();
     }

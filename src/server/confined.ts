@@ -185,8 +185,20 @@ export async function linkInto(
     let looked = 0;
 
     for (const root of roots) {
+        // The place is the folder, or is in it, or leads into it; or it holds the folder, and what it loads of its own
+        // reaches the folder's files (a skills folder loads every `SKILL.md` below it).
         if ("entered" in walk(root, folders)) {
             return { link: root };
+        }
+
+        try {
+            const { dev, ino } = await stat(root, { bigint: true });
+
+            if ("entered" in walk(folder, [{ path: root, key: `${dev}:${ino}` }])) {
+                return { link: root };
+            }
+        } catch {
+            // Not there (yet): nothing of the folder is in it.
         }
 
         const pending = [root];

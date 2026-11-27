@@ -321,6 +321,16 @@ export class Sandboxes {
         return known === undefined ? waiting(cwd) : known.problem;
     }
 
+    /**
+     * A look that begins now: one under way began before this request, and read the settings then, so its answer is
+     * waited for and a new look is made. Turning the sandbox on asks for this.
+     */
+    async #fresh(cwd: string): Promise<string | undefined> {
+        await this.#linked.get(cwd)?.looking;
+
+        return this.#look(cwd);
+    }
+
     /** Look for links into `cwd` under the trusted folders: one look at a time for a folder, and its answer is kept. */
     #look(cwd: string): Promise<string | undefined> {
         const known = this.#linked.get(cwd);
@@ -329,16 +339,18 @@ export class Sandboxes {
             return known.looking;
         }
 
-        const looking = linkInto(this.#app.trustedFolders, cwd).then(
-            (found) =>
-                found === undefined
-                    ? undefined
-                    : "link" in found
-                      ? `${found.link} reaches into ${cwd} (it lies there, or it is a link that leads there), and this server or Pi loads code or settings from it: a sandbox that can write the folder could change what runs on this machine. Remove the link, or choose Read only for the session's folder.`
-                      : `The places that this server or Pi loads code or settings from could not all be looked at for links into ${cwd} (${found.unfinished}), so a sandbox that can write the folder is not allowed. Choose Read only for the session's folder.`,
-            (error: unknown) =>
-                `The places that this server or Pi loads code or settings from could not be looked at for links into ${cwd} (${error instanceof Error ? error.message : String(error)}), so a sandbox that can write the folder is not allowed.`,
-        );
+        const looking = Promise.resolve()
+            .then(() => linkInto(this.#app.trustedPlaces(), cwd))
+            .then(
+                (found) =>
+                    found === undefined
+                        ? undefined
+                        : "link" in found
+                          ? `${found.link} reaches into ${cwd} (it lies there, is a link that leads there, or holds the folder), and this server or Pi loads code or settings from it: a sandbox that can write the folder could change what runs on this machine. Remove the link, or choose Read only for the session's folder.`
+                          : `The places that this server or Pi loads code or settings from could not all be looked at for links into ${cwd} (${found.unfinished}), so a sandbox that can write the folder is not allowed. Choose Read only for the session's folder.`,
+                (error: unknown) =>
+                    `The places that this server or Pi loads code or settings from could not be looked at for links into ${cwd} (${error instanceof Error ? error.message : String(error)}), so a sandbox that can write the folder is not allowed.`,
+            );
 
         // With no answer yet, the answer meanwhile is the refusal: a look that has not finished is never clean.
         this.#linked.set(cwd, {
@@ -851,7 +863,7 @@ export class Sandboxes {
             const folder =
                 reloadedFolderProblem(cwd, app.codeFolders, app.dataDir) ??
                 provider.folderProblem?.(cwd) ??
-                (provider.mount?.() === "ro" ? undefined : await this.#look(cwd));
+                (provider.mount?.() === "ro" ? undefined : await this.#fresh(cwd));
 
             if (folder !== undefined) {
                 throw new HttpError(409, folder);

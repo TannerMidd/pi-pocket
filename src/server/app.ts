@@ -141,6 +141,7 @@ import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
 import { onSandboxedFolders } from "./confined.ts";
+import { configuredPlaces } from "./trusted-places.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
@@ -437,6 +438,11 @@ export class PocketApp {
      * the guest those (`Sandboxes`).
      */
     readonly trustedFolders: readonly string[];
+
+    /** `trustedFolders` and every path that Pi's settings and MCP file name, read now (`trusted-places.ts`). Throws when unreadable. */
+    trustedPlaces(): string[] {
+        return [...this.trustedFolders, ...configuredPlaces(getAgentDir(), this.#home)];
+    }
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
