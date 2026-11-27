@@ -1,7 +1,7 @@
 // Fixes of the second review round, with a fake VM: stricter settings reach a VM that runs or starts, parallel
 // background starts keep their records, ended tasks leave memory, and the owner's list follows the VMs.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -370,6 +370,7 @@ test("the manager says when a VM goes from idle to working and back", async () =
 /** The sheet's browser module, with a `pocket` that records what it listens to. */
 async function openSheet(
     markup?: (strings: TemplateStringsArray, ...values: unknown[]) => unknown,
+    answer?: object,
 ) {
     const listeners = new Map<string, Set<() => void>>();
     let host = 0;
@@ -416,7 +417,7 @@ async function openSheet(
                 };
             }
 
-            return { admin: true, session: { on: false } };
+            return answer ?? { admin: true, session: { on: false } };
         },
         sheet: (spec: { component: (props: object) => unknown }) => {
             sheets.push(spec.component);
@@ -486,6 +487,16 @@ async function openSheet(
             effects.length = 0;
 
             return input.flat(Host());
+        },
+        /** One component of the sheet, drawn with the host's answer and the confirm that is open. */
+        component: (name: string, hostAnswer: unknown, sure: string | null) => {
+            slot = 0;
+            states.clear();
+            states.set(1, hostAnswer);
+            states.set(4, sure);
+            effects.length = 0;
+
+            return find(sheet, name)!({ close: () => {} });
         },
         fire: (name: string) => listeners.get(name)?.forEach((listener) => listener()),
         hostReads: () => host,
@@ -694,4 +705,277 @@ test("the sheet's text keeps its spaces and lays each VM out as a title, a folde
         text,
         /<strong>Session 13<\/strong><span>\/tmp\/gdl\/w2<\/span><span>Idle<\/span>/,
     );
+});
+
+// ─── Guard: running text of the sheet keeps its spaces ──────────────────────
+
+/** The `html` templates of a source, each with its expressions replaced by NUL (nested ones as templates too). */
+function htmlTemplates(source: string): string[] {
+    const found: string[] = [];
+    const open = (from: number) => source.slice(from).search(/(?<![`\w])html`/);
+    let at = open(0) === -1 ? -1 : open(0);
+
+    while (at !== -1) {
+        let index = at + 5;
+        let text = "";
+
+        while (index < source.length && source[index] !== "`") {
+            if (source[index] === "\\") {
+                text += source.slice(index, index + 2);
+                index += 2;
+            } else if (source.startsWith("${", index)) {
+                let depth = 1;
+                const start = index + 2;
+
+                index = start;
+
+                while (index < source.length && depth > 0) {
+                    if (source[index] === "{") {
+                        depth++;
+                    } else if (source[index] === "}") {
+                        depth--;
+                    } else if (source[index] === "`") {
+                        // a template inside the expression: skip it as a whole, and check it by itself
+                        index++;
+
+                        while (index < source.length && source[index] !== "`") {
+                            index += source[index] === "\\" ? 2 : 1;
+                        }
+                    }
+
+                    index++;
+                }
+
+                found.push(...htmlTemplates(source.slice(start, index - 1)));
+                text += "\0";
+            } else {
+                text += source[index++];
+            }
+        }
+
+        found.push(text);
+        const again = open(index + 1);
+
+        at = again === -1 ? -1 : index + 1 + again;
+    }
+
+    return found;
+}
+
+const INLINE = /^<(span|b|strong|code|a|em|i|kbd|small)[\s>]/;
+
+test("the sheet's source has no running text that a line break could split from its neighbours", () => {
+    const source = readFileSync(
+        new URL("../src/server/extensions/gondolin/index.js", import.meta.url),
+        "utf8",
+    );
+    const flagged: string[] = [];
+
+    for (const template of htmlTemplates(source)) {
+        const lines = template
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line !== "");
+        const isText = (line: string | undefined) =>
+            line !== undefined && /^[^<>=\0{}$]+$/.test(line) && /[A-Za-z]/.test(line);
+
+        lines.forEach((line, row) => {
+            if (!isText(line)) {
+                return;
+            }
+
+            const next = lines[row + 1];
+            const before = lines[row - 1];
+
+            if (
+                isText(next) ||
+                next?.startsWith("\0") === true ||
+                (next !== undefined && INLINE.test(next)) ||
+                (before !== undefined && (isText(before) || before.endsWith("\0")))
+            ) {
+                flagged.push(`${line} (next: ${next ?? "-"})`);
+            }
+        });
+    }
+
+    assert.deepEqual(flagged, [], "running text across lines: use one string");
+});
+
+test("each state of the sheet renders with no two words run together", async () => {
+    const { default: htm } = (await import("htm")) as unknown as {
+        default: { bind: (h: never) => unknown };
+    };
+
+    type Node = { tag: string; kids: unknown[] } | string | number | boolean | null | undefined;
+    const h = (type: unknown, _props: unknown, ...kids: unknown[]) =>
+        typeof type === "function"
+            ? { tag: "component", kids: [], fn: type }
+            : { tag: String(type), kids };
+    const html = htm.bind(h as never) as (...args: unknown[]) => unknown;
+    const problems: string[] = [];
+    const wordEnd = /[A-Za-z0-9,.:;)'"]$/;
+    const wordStart = /^[A-Za-z0-9(]/;
+
+    const check = (node: unknown, where: string): void => {
+        if (Array.isArray(node)) {
+            node.forEach((each) => check(each, where));
+
+            return;
+        }
+
+        if (typeof node !== "object" || node === null) {
+            return;
+        }
+
+        const kids = (node as { kids: unknown[] }).kids.flat(Infinity) as Node[];
+
+        kids.forEach((kid, index) => {
+            const next = kids[index + 1];
+            const texty = (value: Node) => typeof value === "string" || typeof value === "number";
+
+            if (texty(kid) && String(kid).trim() !== "") {
+                const a = String(kid);
+
+                // text, then text from an expression, with nothing between: "GB" and "on disk"
+                if (texty(next) && wordEnd.test(a) && wordStart.test(String(next))) {
+                    problems.push(
+                        `${where}: "${a.slice(-20)}" runs into "${String(next).slice(0, 20)}"`,
+                    );
+                }
+
+                // text, then an inline element at once: "folder's" and <span>
+                if (
+                    typeof next === "object" &&
+                    next !== null &&
+                    ["span", "b", "strong", "code"].includes(next.tag) &&
+                    /[A-Za-z0-9,:']$/.test(a)
+                ) {
+                    problems.push(`${where}: "${a.slice(-20)}" runs into <${next.tag}>`);
+                }
+            }
+
+            if (
+                typeof kid === "object" &&
+                kid !== null &&
+                ["span", "b", "strong", "code"].includes(kid.tag) &&
+                texty(next) &&
+                wordStart.test(String(next))
+            ) {
+                problems.push(`${where}: <${kid.tag}> runs into "${String(next).slice(0, 20)}"`);
+            }
+
+            check(kid, where);
+        });
+    };
+
+    const estimate = {
+        plain: { download: "about 110 MB", disk: "about 330 MB", time: "a minute or two" },
+        browser: { download: "about 250 MB", disk: "about 1.2 GB", time: "two to five minutes" },
+    };
+    const host = (over: object = {}) => ({
+        check: {
+            lines: [
+                { name: "Node.js", ok: true, detail: "26 (needs 22)" },
+                { name: "QEMU", ok: false, optional: true, detail: "Not installed." },
+                { name: "Image", ok: false, detail: "Tap Set up." },
+            ],
+        },
+        running: 1,
+        max: 3,
+        vms: [
+            { rootId: 3, title: "A title", cwd: "/work/a", busy: 1 },
+            { rootId: 4, title: "", cwd: "/work/b", busy: 0 },
+        ],
+        setup: { running: false, lines: ["one", "two"], error: null, done: true },
+        estimate,
+        ...over,
+    });
+    const session = (over: object = {}) => ({
+        admin: true,
+        mayChoose: true,
+        problem: null,
+        ready: true,
+        session: { on: true, by: "owner", at: 1 },
+        settings: {
+            network: "allowlist",
+            allowedHosts: ["a.test", "b.test"],
+            mount: "rw",
+            cpus: 2,
+            memoryMb: 2048,
+            hostTools: "block",
+        },
+        where: [{ what: "bash", where: "sandbox", note: "Runs in the VM." }],
+        vm: null,
+        ...over,
+    });
+    const vm = (over: object = {}) => ({
+        phase: "running",
+        cwd: "/work/a",
+        mount: "rw",
+        network: "allowlist",
+        allowedHosts: ["a.test", "b.test"],
+        cpus: 2,
+        memoryMb: 2048,
+        stale: false,
+        busy: 0,
+        ...over,
+    });
+    const states: {
+        name: string;
+        component: string;
+        state: object;
+        host?: object;
+        sure?: string | null;
+    }[] = [
+        { name: "switch on", component: "Switcher", state: session() },
+        { name: "switch off", component: "Switcher", state: session({ session: { on: false } }) },
+        { name: "switch refused", component: "Switcher", state: session({ mayChoose: false }) },
+        { name: "vm none", component: "Vm", state: session() },
+        { name: "vm running", component: "Vm", state: session({ vm: vm() }) },
+        {
+            name: "vm stale",
+            component: "Vm",
+            state: session({ vm: vm({ stale: true, mount: "ro" }) }),
+        },
+        {
+            name: "vm off",
+            component: "Vm",
+            state: session({ vm: vm({ network: "off", note: "Stopped." }) }),
+        },
+        { name: "vm open", component: "Vm", state: session({ vm: vm({ network: "open" }) }) },
+        { name: "where", component: "Where", state: session() },
+        { name: "host", component: "Host", state: session(), host: host() },
+        { name: "host plain", component: "Host", state: session(), host: host(), sure: "plain" },
+        {
+            name: "host browser",
+            component: "Host",
+            state: session(),
+            host: host(),
+            sure: "browser",
+        },
+        { name: "host remove", component: "Host", state: session(), host: host(), sure: "remove" },
+        {
+            name: "host running",
+            component: "Host",
+            state: session(),
+            host: host({
+                vms: [],
+                setup: { running: true, lines: ["x"], error: null, done: false },
+            }),
+        },
+        {
+            name: "host error",
+            component: "Host",
+            state: session(),
+            host: host({ setup: { running: false, lines: [], error: "It failed.", done: false } }),
+        },
+    ];
+
+    for (const each of states) {
+        const sheet = await openSheet(html as never, each.state);
+
+        check(sheet.component(each.component, each.host, each.sure ?? null), each.name);
+    }
+
+    assert.deepEqual(problems, []);
 });

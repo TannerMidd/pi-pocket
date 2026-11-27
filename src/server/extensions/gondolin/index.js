@@ -25,9 +25,21 @@ function sizeText({ cpus, memoryMb }) {
     return `${cpus} CPUs, ${size(memoryMb)} of memory`;
 }
 
+function allowedText(count) {
+    return `Only the ${count} allowed hosts`;
+}
+
 function runningText(host) {
     return `${host.running} of ${host.max} VM${host.max === 1 ? "" : "s"} running.`;
 }
+
+/** Running text of the sheet, each as one string: a line break inside the text of an `html` template is no space. */
+const SWITCH_NOTE =
+    "Pi's file and shell tools, your ! commands and the browser run in a Linux virtual machine. Only this session's folder is shared with it. It starts at the first call, and stops when it is idle.";
+const STALE_NOTE =
+    "This VM keeps the rules it started with. The new settings apply when it starts again.";
+const REMOVE_NOTE =
+    "This stops every sandbox VM and deletes the package and the images. Sessions keep their sandbox setting and fail until you set up again.";
 
 /** What Set up does, in one string for the same reason. */
 function setupText(host, browser) {
@@ -205,15 +217,7 @@ export default function setup(pocket) {
                 </div>
                 ${why === null ? null : html`<p class="muted small">${why}</p>`}
                 ${problem === null ? null : html`<div class="error-box">${problem}</div>`}
-                ${
-                    mine.session.on
-                        ? html`<p class="muted small">
-                              Pi's file and shell tools, your ! commands and the browser run in a
-                              Linux virtual machine. Only this session's folder is shared with it.
-                              It starts at the first call, and stops when it is idle.
-                          </p>`
-                        : null
-                }
+                ${mine.session.on ? html`<p class="muted small">${SWITCH_NOTE}</p>` : null}
             </div>
         `;
     }
@@ -269,15 +273,12 @@ export default function setup(pocket) {
                                 ? "None"
                                 : network === "open"
                                   ? "Public hosts (never this machine or your local network)"
-                                  : html`Only the ${hosts.length} allowed hosts
+                                  : html`<div>${allowedText(hosts.length)}</div>
                                         <div class="muted small">${hosts.join(", ")}</div>`
                         }
                         ${
                             vm?.stale === true
-                                ? html`<div class="muted small">
-                                      This VM keeps the rules it started with. The new settings
-                                      apply when it starts again.
-                                  </div>`
+                                ? html`<div class="muted small">${STALE_NOTE}</div>`
                                 : null
                         }
                     </dd>
@@ -530,12 +531,7 @@ ${host.setup.lines.join("\n")}</pre>
                                             ${
                                                 sure === "remove"
                                                     ? html`<div class="gdl-confirm">
-                                                          <p>
-                                                              This stops every sandbox VM and
-                                                              deletes the package and the images.
-                                                              Sessions keep their sandbox setting
-                                                              and fail until you set up again.
-                                                          </p>
+                                                          <p>${REMOVE_NOTE}</p>
                                                           <div class="gdl-actions">
                                                               <button
                                                                   class="button"
