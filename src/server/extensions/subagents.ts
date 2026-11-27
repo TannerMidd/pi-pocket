@@ -591,8 +591,13 @@ async function working(tx: Tx, task: number | undefined): Promise<boolean> {
 
     const status = (await tx.task(task as never))?.state.status;
 
-    // One completing has taken its last reports already.
-    return status === "pending" || status === "running" || status === "waiting";
+    // One completing has taken its last reports already. A sleeping one (the stall watch between its looks) is there.
+    return (
+        status === "pending" ||
+        status === "running" ||
+        status === "waiting" ||
+        status === "sleeping"
+    );
 }
 
 /** Wait until the submission `id` has left `conversationId`'s queue: placed, withdrawn, or aborted. */
