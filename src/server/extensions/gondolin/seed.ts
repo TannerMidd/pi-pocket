@@ -7,7 +7,10 @@
  * - Local Git repositories NEVER transfer raw Git history (which could contain historically deleted `.env` or secret
  *   files): only the current filtered file tree is copied into a fresh initial commit inside `/workspace`.
  * - Secret-like files (`.env`, `.env.*`, `*.pem`, `*.key`) and symlinks/special files are excluded consistently across
- *   both committed and uncommitted files.
+ *   committed, staged, and working-tree files. Every path component is checked with `lstatSync` and `realpathSync` so
+ *   a symlinked intermediate folder can never copy external host files into the VM.
+ * - Executable permissions (`100755` / `+x`) are preserved before creating the initial guest commit.
+ * - Oversized repositories fail explicitly with a clear error rather than silently seeding an incomplete tree.
  * - Returns the guest's initial `baseCommit` SHA so later diff/export compares against that fixed base even after the
  *   agent creates new commits inside the VM.
  */
@@ -20,9 +23,9 @@ import type { GuestVm } from "./guest.ts";
 
 const execFileAsync = promisify(execFile);
 
-const MAX_SNAPSHOT_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_SNAPSHOT_TOTAL_BYTES = 50 * 1024 * 1024;
-const MAX_SNAPSHOT_FILES = 2_000;
+export const MAX_SNAPSHOT_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_SNAPSHOT_TOTAL_BYTES = 100 * 1024 * 1024;
+export const MAX_SNAPSHOT_FILES = 10_000;
 
 const SKIP_DIRS = new Set([
     ".git",
@@ -53,6 +56,73 @@ export function isExcludedSeedPath(relativePath: string): boolean {
     const base = parts.at(-1) ?? "";
 
     return /^\.env($|\.)/i.test(base) || /\.(pem|key|p12|pfx)$/i.test(base);
+}
+
+/**
+ * Safely reads `relPath` beneath canonical `sourceRoot`, verifying EVERY intermediate path component with `lstatSync`
+ * (rejecting any symlinked directory or file) and confirming `realpathSync` stays within `sourceRoot`.
+ * Throws if a regular file exceeds `maxFileBytes`; returns `undefined` if missing or symlink/non-regular.
+ */
+function readConfinedHostFile(
+    sourceRoot: string,
+    relPath: string,
+    maxFileBytes: number,
+): { bytes: Uint8Array; executable: boolean } | undefined {
+    const parts = relPath.split("/");
+    let current = sourceRoot;
+
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i]!;
+
+        if (part === "" || part === "." || part === "..") {
+            return undefined;
+        }
+
+        current = join(current, part);
+
+        let st;
+
+        try {
+            st = lstatSync(current);
+        } catch {
+            return undefined;
+        }
+
+        if (st.isSymbolicLink()) {
+            return undefined;
+        }
+
+        const isLast = i === parts.length - 1;
+
+        if (!isLast) {
+            if (!st.isDirectory()) {
+                return undefined;
+            }
+        } else {
+            if (!st.isFile()) {
+                return undefined;
+            }
+
+            const real = realpathSync(current);
+
+            if (!within(real, sourceRoot)) {
+                return undefined;
+            }
+
+            if (st.size > maxFileBytes) {
+                throw new Error(
+                    `Cannot seed sandbox: "${relPath}" is ${(st.size / 1024 / 1024).toFixed(1)} MiB, exceeding the ${maxFileBytes / 1024 / 1024} MiB per-file snapshot limit.`,
+                );
+            }
+
+            return {
+                bytes: new Uint8Array(readFileSync(real)),
+                executable: (st.mode & 0o111) !== 0,
+            };
+        }
+    }
+
+    return undefined;
 }
 
 /**
@@ -193,6 +263,26 @@ async function configureGuestGit(vm: GuestVm, signal?: AbortSignal): Promise<voi
     );
 }
 
+async function restoreGuestExecutables(
+    vm: GuestVm,
+    guestPaths: readonly string[],
+    signal?: AbortSignal,
+): Promise<void> {
+    const batchSize = 100;
+
+    for (let i = 0; i < guestPaths.length; i += batchSize) {
+        signal?.throwIfAborted();
+        const batch = guestPaths.slice(i, i + batchSize);
+        const res = await execInGuest(vm, ["chmod", "+x", "--", ...batch], "/", signal);
+
+        if (res.exitCode !== 0) {
+            throw new Error(
+                `Failed to restore executable permissions in sandbox: ${res.stderr.trim() || res.stdout.trim()}`,
+            );
+        }
+    }
+}
+
 async function guestHeadCommit(vm: GuestVm, signal?: AbortSignal): Promise<string | undefined> {
     const rev = await execInGuest(
         vm,
@@ -212,8 +302,13 @@ async function guestHeadCommit(vm: GuestVm, signal?: AbortSignal): Promise<strin
 async function initGuestSnapshotRepo(
     vm: GuestVm,
     message: string,
+    executables: readonly string[],
     signal?: AbortSignal,
 ): Promise<string | undefined> {
+    if (executables.length > 0) {
+        await restoreGuestExecutables(vm, executables, signal);
+    }
+
     await execInGuest(
         vm,
         [
@@ -241,14 +336,19 @@ export async function seedWorkspace(
     options:
         | { kind: "empty" }
         | { kind: "git"; repoUrl: string }
-        | { kind: "repo"; sourcePath: string; includeUncommitted?: boolean },
+        | {
+              kind: "repo";
+              sourcePath: string;
+              includeUncommitted?: boolean;
+              limits?: { maxFiles?: number; maxFileBytes?: number; maxTotalBytes?: number };
+          },
     signal?: AbortSignal,
 ): Promise<{ baseCommit?: string }> {
     await vm.fs.mkdir("/workspace", true, signal);
     await configureGuestGit(vm, signal);
 
     if (options.kind === "empty") {
-        const baseCommit = await initGuestSnapshotRepo(vm, "Empty sandbox", signal);
+        const baseCommit = await initGuestSnapshotRepo(vm, "Empty sandbox", [], signal);
 
         return { ...(baseCommit === undefined ? {} : { baseCommit }) };
     }
@@ -273,8 +373,12 @@ export async function seedWorkspace(
         return { ...(baseCommit === undefined ? {} : { baseCommit }) };
     }
 
+    const maxFiles = options.limits?.maxFiles ?? MAX_SNAPSHOT_FILES;
+    const maxFileBytes = options.limits?.maxFileBytes ?? MAX_SNAPSHOT_FILE_BYTES;
+    const maxTotalBytes = options.limits?.maxTotalBytes ?? MAX_SNAPSHOT_TOTAL_BYTES;
+
     // Local repo or plain folder: build a filtered single-commit snapshot (no raw .git history or excluded secrets).
-    const sourcePath = options.sourcePath;
+    const sourcePath = realpathSync(options.sourcePath);
     const isGitRepo = await execFileAsync(
         "git",
         ["-c", "core.hooksPath=/dev/null", "rev-parse", "--verify", "HEAD"],
@@ -286,18 +390,48 @@ export async function seedWorkspace(
 
     let copiedFiles = 0;
     let copiedBytes = 0;
+    const executables: string[] = [];
+
+    const checkLimits = (relPath: string, nextBytes: number) => {
+        if (nextBytes > maxFileBytes) {
+            throw new Error(
+                `Cannot seed sandbox: "${relPath}" is ${(nextBytes / 1024 / 1024).toFixed(1)} MiB, exceeding the ${maxFileBytes / 1024 / 1024} MiB per-file snapshot limit.`,
+            );
+        }
+
+        if (copiedFiles + 1 > maxFiles) {
+            throw new Error(
+                `Cannot seed sandbox: source exceeds the ${maxFiles}-file snapshot limit. Clone via https:// inside the VM or pick a smaller folder.`,
+            );
+        }
+
+        if (copiedBytes + nextBytes > maxTotalBytes) {
+            throw new Error(
+                `Cannot seed sandbox: source exceeds the ${maxTotalBytes / 1024 / 1024} MiB total snapshot limit. Clone via https:// inside the VM or pick a smaller folder.`,
+            );
+        }
+    };
 
     if (isGitRepo) {
-        // List tracked files in HEAD (regular files only, never symlinks 120000 or submodules 160000).
-        const { stdout: lsOut } = await execFileAsync(
-            "git",
-            ["-c", "core.hooksPath=/dev/null", "ls-tree", "-r", "-z", "HEAD"],
-            { cwd: sourcePath, env: cleanGitEnv(), maxBuffer: MAX_SNAPSHOT_TOTAL_BYTES },
-        );
+        // When includeUncommitted is enabled, read the Git index (`ls-files --stage`) so newly staged files and staged
+        // renames are included alongside HEAD-tracked files; otherwise read HEAD's tree (`ls-tree`).
+        const gitArgs =
+            options.includeUncommitted === true
+                ? ["-c", "core.hooksPath=/dev/null", "ls-files", "--stage", "-z"]
+                : ["-c", "core.hooksPath=/dev/null", "ls-tree", "-r", "-z", "HEAD"];
+        const { stdout: lsOut } = await execFileAsync("git", gitArgs, {
+            cwd: sourcePath,
+            env: cleanGitEnv(),
+            maxBuffer: maxTotalBytes,
+        });
 
-        const entries = lsOut.split("\0").filter((entry) => entry !== "");
+        const seenPaths = new Set<string>();
 
-        for (const entry of entries) {
+        for (const entry of lsOut.split("\0")) {
+            if (entry === "") {
+                continue;
+            }
+
             signal?.throwIfAborted();
 
             const tab = entry.indexOf("\t");
@@ -307,42 +441,39 @@ export async function seedWorkspace(
             }
 
             const meta = entry.slice(0, tab).split(" ");
-            const mode = meta[0];
-            const type = meta[1];
             const relPath = entry.slice(tab + 1);
 
-            // Regular blobs only (100644 / 100755); skip symlinks (120000), submodules (160000), and excluded secrets.
-            if (
-                type !== "blob" ||
-                (mode !== "100644" && mode !== "100755") ||
-                isExcludedSeedPath(relPath)
-            ) {
+            if (seenPaths.has(relPath)) {
                 continue;
             }
 
-            if (copiedFiles >= MAX_SNAPSHOT_FILES) {
-                break;
+            const mode = meta[0];
+            // `ls-tree` format: "<mode> <type> <sha>"; `ls-files --stage` format: "<mode> <sha> <stage>".
+            const isBlob =
+                options.includeUncommitted === true
+                    ? mode === "100644" || mode === "100755"
+                    : meta[1] === "blob" && (mode === "100644" || mode === "100755");
+
+            if (!isBlob || isExcludedSeedPath(relPath)) {
+                continue;
             }
 
+            seenPaths.add(relPath);
+
             let bytes: Uint8Array;
+            let executable = mode === "100755";
 
             if (options.includeUncommitted === true) {
-                // Read current host working-tree bytes if still a regular non-symlink file; skip if deleted.
-                const hostFile = join(sourcePath, relPath);
+                // Confined working-tree read: rejects any symlink in intermediate folders or the file itself.
+                const confined = readConfinedHostFile(sourcePath, relPath, maxFileBytes);
 
-                try {
-                    const st = lstatSync(hostFile);
-
-                    if (st.isSymbolicLink() || !st.isFile() || st.size > MAX_SNAPSHOT_FILE_BYTES) {
-                        continue;
-                    }
-
-                    bytes = new Uint8Array(readFileSync(hostFile));
-                } catch {
+                if (confined === undefined) {
                     continue;
                 }
+
+                bytes = confined.bytes;
+                executable = executable || confined.executable;
             } else {
-                // Read exact blob from HEAD without running host smudge/clean filters.
                 const obj = meta[2];
 
                 if (!obj || !/^[0-9a-f]{40,64}$/i.test(obj)) {
@@ -356,20 +487,24 @@ export async function seedWorkspace(
                         cwd: sourcePath,
                         env: cleanGitEnv(),
                         encoding: "buffer",
-                        maxBuffer: MAX_SNAPSHOT_FILE_BYTES + 1024,
+                        maxBuffer: maxFileBytes + 4096,
                     },
-                ).catch(() => ({ stdout: null }));
+                ).catch((error: unknown) => {
+                    const code = (error as { code?: string }).code;
 
-                if (blob === null || blob.byteLength > MAX_SNAPSHOT_FILE_BYTES) {
-                    continue;
-                }
+                    if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+                        throw new Error(
+                            `Cannot seed sandbox: "${relPath}" exceeds the ${maxFileBytes / 1024 / 1024} MiB per-file snapshot limit.`,
+                        );
+                    }
+
+                    throw error;
+                });
 
                 bytes = new Uint8Array(blob);
             }
 
-            if (copiedBytes + bytes.byteLength > MAX_SNAPSHOT_TOTAL_BYTES) {
-                continue;
-            }
+            checkLimits(relPath, bytes.byteLength);
 
             const guestPath = posix.join("/workspace", relPath);
             const guestParent = posix.dirname(guestPath);
@@ -379,11 +514,21 @@ export async function seedWorkspace(
             }
 
             await vm.fs.writeFile(guestPath, bytes, signal);
+
+            if (executable) {
+                executables.push(guestPath);
+            }
+
             copiedFiles++;
             copiedBytes += bytes.byteLength;
         }
 
-        const baseCommit = await initGuestSnapshotRepo(vm, "Initial workspace snapshot", signal);
+        const baseCommit = await initGuestSnapshotRepo(
+            vm,
+            "Initial workspace snapshot",
+            executables,
+            signal,
+        );
 
         return { ...(baseCommit === undefined ? {} : { baseCommit }) };
     }
@@ -413,21 +558,16 @@ export async function seedWorkspace(
             if (stat.isDirectory()) {
                 await walk(hostPath, relPath);
             } else if (stat.isFile()) {
-                if (
-                    stat.size > MAX_SNAPSHOT_FILE_BYTES ||
-                    copiedFiles >= MAX_SNAPSHOT_FILES ||
-                    copiedBytes + stat.size > MAX_SNAPSHOT_TOTAL_BYTES
-                ) {
-                    continue;
+                checkLimits(relPath, stat.size);
+                const bytes = readFileSync(hostPath);
+                const guestPath = posix.join("/workspace", relPath);
+
+                await vm.fs.writeFile(guestPath, new Uint8Array(bytes), signal);
+
+                if ((stat.mode & 0o111) !== 0) {
+                    executables.push(guestPath);
                 }
 
-                const bytes = readFileSync(hostPath);
-
-                await vm.fs.writeFile(
-                    posix.join("/workspace", relPath),
-                    new Uint8Array(bytes),
-                    signal,
-                );
                 copiedFiles++;
                 copiedBytes += bytes.byteLength;
             }
@@ -435,7 +575,12 @@ export async function seedWorkspace(
     };
 
     await walk(sourcePath, "");
-    const baseCommit = await initGuestSnapshotRepo(vm, "Initial workspace snapshot", signal);
+    const baseCommit = await initGuestSnapshotRepo(
+        vm,
+        "Initial workspace snapshot",
+        executables,
+        signal,
+    );
 
     return { ...(baseCommit === undefined ? {} : { baseCommit }) };
 }

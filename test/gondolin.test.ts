@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { after, test } from "node:test";
 import {
+    chmodSync,
     existsSync,
     lstatSync,
     mkdirSync,
@@ -10,6 +11,7 @@ import {
     readFileSync,
     renameSync,
     rmSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -32,7 +34,11 @@ import {
     inspectPatch,
     validBranchName,
 } from "../src/server/extensions/gondolin/patch.ts";
-import { validateGitUrl, validateSeedSource } from "../src/server/extensions/gondolin/seed.ts";
+import {
+    seedWorkspace,
+    validateGitUrl,
+    validateSeedSource,
+} from "../src/server/extensions/gondolin/seed.ts";
 import {
     parseSandboxUri,
     SandboxManager,
@@ -741,5 +747,82 @@ test("createGondolin binds apply to reviewed patchHash and exposes sandboxByConv
         await disposeFn?.();
         rmSync(repo, { recursive: true, force: true });
         await app.close();
+    }
+});
+
+test("seedWorkspace rejects symlinked parent folders, preserves executable bits, includes staged files, and fails loudly when oversized", async () => {
+    const repo = makeTempGitRepo();
+    const externalDir = mkdtempSync(join(tmpdir(), "pocket-gondolin-ext-"));
+    const vm = new FakeVm("seed-checks");
+
+    try {
+        // Track an executable script and a nested config file.
+        mkdirSync(join(repo, "config"), { recursive: true });
+        writeFileSync(join(repo, "config", "data.txt"), "internal\n");
+        writeFileSync(join(repo, "run.sh"), "#!/bin/sh\necho ok\n");
+        chmodSync(join(repo, "run.sh"), 0o755);
+        execFileSync("git", ["add", "config/data.txt", "run.sh"], { cwd: repo });
+        execFileSync("git", ["update-index", "--chmod=+x", "run.sh"], { cwd: repo });
+        execFileSync("git", ["commit", "-q", "-m", "add script and config"], { cwd: repo });
+
+        // Replace `config/` in the working tree with a symlink pointing outside the repo (POSIX).
+        if (process.platform !== "win32") {
+            writeFileSync(join(externalDir, "data.txt"), "EXTERNAL-HOST-SECRET\n");
+            rmSync(join(repo, "config"), { recursive: true, force: true });
+            symlinkSync(externalDir, join(repo, "config"));
+        }
+
+        // Stage a brand-new file (not in HEAD yet).
+        writeFileSync(join(repo, "staged-new.txt"), "from staging area\n");
+        execFileSync("git", ["add", "staged-new.txt"], { cwd: repo });
+
+        // Seed with includeUncommitted: true.
+        const seeded = await seedWorkspace(vm, {
+            kind: "repo",
+            sourcePath: repo,
+            includeUncommitted: true,
+        });
+
+        assert.match(seeded.baseCommit ?? "", /^[0-9a-f]{40,64}$/);
+
+        // 1. Symlinked parent directory MUST NOT leak external host file.
+        if (process.platform !== "win32") {
+            await assert.rejects(vm.fs.readFile("/workspace/config/data.txt"));
+        }
+
+        // 2. Staged new file MUST be present.
+        const stagedBytes = await vm.fs.readFile("/workspace/staged-new.txt");
+
+        assert.equal(Buffer.from(stagedBytes).toString("utf8"), "from staging area\n");
+
+        // 3. Executable bit MUST be preserved in the initial guest commit (100755) on POSIX.
+        if (process.platform !== "win32") {
+            const modeOut = execFileSync("git", ["ls-tree", "HEAD", "run.sh"], {
+                cwd: join(vm.rootDir, "workspace"),
+                encoding: "utf8",
+            });
+
+            assert.match(modeOut, /^100755 blob /);
+        }
+
+        // 4. Oversized seed MUST fail loudly instead of silently truncating.
+        const vm2 = new FakeVm("seed-oversized");
+
+        try {
+            await assert.rejects(
+                seedWorkspace(vm2, {
+                    kind: "repo",
+                    sourcePath: repo,
+                    limits: { maxFiles: 1 },
+                }),
+                /exceeds the 1-file snapshot limit/,
+            );
+        } finally {
+            await vm2.close();
+        }
+    } finally {
+        await vm.close();
+        rmSync(externalDir, { recursive: true, force: true });
+        rmSync(repo, { recursive: true, force: true });
     }
 });

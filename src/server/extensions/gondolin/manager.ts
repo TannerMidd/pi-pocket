@@ -144,6 +144,7 @@ export class SandboxManager {
     readonly #driver: SandboxDriver;
     readonly #getSettings: () => SandboxSettings;
     readonly #onChange: () => void;
+    readonly #onWarning: (message: string) => void;
     readonly #records = new Map<string, SandboxRecord>();
     readonly #running = new Map<string, RunningEntry>();
     readonly #envs = new Map<string, GuestEnv>();
@@ -156,12 +157,14 @@ export class SandboxManager {
         driver: SandboxDriver;
         settings: () => SandboxSettings;
         onChange?: () => void;
+        onWarning?: (message: string) => void;
     }) {
         this.#dir = options.dir;
         this.#dataDir = options.dataDir;
         this.#driver = options.driver;
         this.#getSettings = options.settings;
         this.#onChange = options.onChange ?? (() => undefined);
+        this.#onWarning = options.onWarning ?? (() => undefined);
 
         mkdirSync(this.#dir, { recursive: true });
         this.#loadRecords();
@@ -416,7 +419,11 @@ export class SandboxManager {
         const idleMs = Math.max(1, this.#getSettings().idleMinutes) * 60_000;
 
         entry.idleTimer = setTimeout(() => {
-            void this.stop(id).catch(() => undefined);
+            void this.stop(id).catch((error: unknown) => {
+                this.#onWarning(
+                    `Gondolin sandbox ${id} stayed running because saving /workspace failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            });
         }, idleMs);
         entry.idleTimer.unref();
     }
@@ -548,16 +555,24 @@ export class SandboxManager {
         );
 
         if (packed.exitCode !== 0) {
+            await vm.fs
+                .remove("/tmp/pocket-workspace.tar.gz", { recursive: false, force: true })
+                .catch(() => undefined);
+
             throw new Error(
                 `Could not snapshot /workspace (tar exited ${packed.exitCode}): ${packed.stderr.trim() || "unknown error"}`,
             );
         }
 
-        const bytes = await vm.fs.readFile("/tmp/pocket-workspace.tar.gz");
+        let bytes: Uint8Array;
 
-        await vm.fs
-            .remove("/tmp/pocket-workspace.tar.gz", { recursive: false, force: true })
-            .catch(() => undefined);
+        try {
+            bytes = await vm.fs.readFile("/tmp/pocket-workspace.tar.gz");
+        } finally {
+            await vm.fs
+                .remove("/tmp/pocket-workspace.tar.gz", { recursive: false, force: true })
+                .catch(() => undefined);
+        }
 
         const dir = this.#sandboxDir(id);
 
@@ -636,6 +651,10 @@ export class SandboxManager {
 
                             throw error;
                         }
+
+                        this.#onWarning(
+                            `Gondolin sandbox ${id} stopped during shutdown without saving /workspace: ${error instanceof Error ? error.message : String(error)}`,
+                        );
                     }
                 }
 

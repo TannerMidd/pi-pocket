@@ -151,6 +151,7 @@ export default function createGondolin(
         driver,
         settings: readSettings,
         onChange: () => web?.send("changed"),
+        onWarning: (message) => host.notice("warning", message),
     });
 
     const unregisterProvider = host.registerWorkspaceProvider(SANDBOX_SCHEME, {
