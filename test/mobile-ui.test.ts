@@ -140,6 +140,11 @@ async function fresh(): Promise<void> {
             }
         }
     `);
+    // A layer still open (a sheet) closes by going back in history, which the page starts a moment after the viewport
+    // changed. A traversal that the old page queues while this goes to "/" lands after it, on the session before it:
+    // the page is then in that session, and shows no list. Wait for the layers to close and history to follow.
+    await page.evaluate(`(await import("/store.js")).closeSheet()`);
+    await until(async () => (await where()).layers === 0, "the layers closed", 10_000);
     await page.navigate(`${base}/`);
     await until(
         async () =>
