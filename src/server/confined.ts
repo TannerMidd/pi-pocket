@@ -12,7 +12,6 @@ import {
     lstatSync,
     mkdirSync,
     openSync,
-    readdirSync,
     readFileSync,
     readlinkSync,
     realpathSync,
@@ -21,7 +20,7 @@ import {
     unlinkSync,
     writeSync,
 } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { open, readdir, type FileHandle } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
@@ -153,16 +152,21 @@ export function inSandboxedFolder(path: string): boolean {
     return folders.length > 0 && "entered" in walk(path, folders);
 }
 
+/** What a look for links into a folder found: a link, or why the look did not finish. */
+export type LinkFound = { link: string } | { unfinished: string };
+
 /**
- * A link under `roots` (or a root that is one) that leads into `folder`, or through it; undefined when none does. These are the places that the server, or Pi, loads code and trusted settings from: a guest that can write the
- * folder would write there. Each link is walked, every name on its way, with the folder known by its inode. Real
- * folders are entered to `depth` levels, and at most `limit` entries are looked at, so a large tree costs little.
+ * A link under `roots` (or a root that is one) that leads into `folder`, or through it. These are the places that the
+ * server, or Pi, loads code and trusted settings from: a guest that can write the folder would write there. Each link
+ * is walked, every name on its way, with the folder known by its inode. The roots are walked whole and no link is
+ * followed while they are. A look that does not finish (more than `limit` entries, more than `ms` milliseconds, or a
+ * folder that cannot be read) is not clean: it answers why it stopped, and the caller refuses. Undefined: none, and done.
  */
-export function linkInto(
+export async function linkInto(
     roots: readonly string[],
     folder: string,
-    { depth = 3, limit = 20_000 } = {},
-): string | undefined {
+    { limit = 250_000, ms = 20_000 } = {},
+): Promise<LinkFound | undefined> {
     let key: string;
 
     try {
@@ -174,49 +178,51 @@ export function linkInto(
     }
 
     const folders = [{ path: folder, key }];
+    const deadline = Date.now() + ms;
     let looked = 0;
 
-    const scan = (path: string, level: number): string | undefined => {
-        if (level >= depth) {
-            return undefined;
-        }
-
-        let entries;
-
-        try {
-            entries = readdirSync(path, { withFileTypes: true });
-        } catch {
-            return undefined;
-        }
-
-        for (const entry of entries) {
-            if (++looked > limit) {
-                return undefined;
-            }
-
-            const child = join(path, entry.name);
-
-            if (entry.isSymbolicLink()) {
-                if ("entered" in walk(child, folders)) {
-                    return child;
-                }
-            } else if (entry.isDirectory()) {
-                const found = scan(child, level + 1);
-
-                if (found !== undefined) {
-                    return found;
-                }
-            }
-        }
-
-        return undefined;
-    };
-
     for (const root of roots) {
-        const found = "entered" in walk(root, folders) ? root : scan(root, 0);
+        if ("entered" in walk(root, folders)) {
+            return { link: root };
+        }
 
-        if (found !== undefined) {
-            return found;
+        const pending = [root];
+
+        for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+            if (Date.now() > deadline) {
+                return { unfinished: `it took more than ${ms / 1000} seconds` };
+            }
+
+            let entries;
+
+            try {
+                entries = await readdir(path, { withFileTypes: true });
+            } catch (error) {
+                // A root that is not there has nothing in it; a folder that cannot be read may hold anything.
+                if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                    continue;
+                }
+
+                return {
+                    unfinished: `${path} cannot be read (${(error as NodeJS.ErrnoException).code})`,
+                };
+            }
+
+            for (const entry of entries) {
+                if (++looked > limit) {
+                    return { unfinished: `there are more than ${limit} entries` };
+                }
+
+                const child = join(path, entry.name);
+
+                if (entry.isSymbolicLink()) {
+                    if ("entered" in walk(child, folders)) {
+                        return { link: child };
+                    }
+                } else if (entry.isDirectory()) {
+                    pending.push(child);
+                }
+            }
         }
     }
 

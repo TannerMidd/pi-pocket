@@ -279,46 +279,72 @@ export class Sandboxes {
         return this.#providers.at(-1)?.provider;
     }
 
-    /** Why `cwd` may not be a sandbox's folder: the server's own (`reloadedFolderProblem`), or the module's. */
-    #folderProblem(cwd: string, fresh = false): string | undefined {
+    /** Why `cwd` may not be a sandbox's folder: the server's own (`reloadedFolderProblem`), the module's, or a link. */
+    #folderProblem(cwd: string): string | undefined {
         const app = this.#app;
 
         return (
             reloadedFolderProblem(cwd, app.codeFolders, app.dataDir) ??
             this.provider?.folderProblem?.(cwd) ??
-            this.#trustedLink(cwd, fresh)
+            this.#trustedLink(cwd)
         );
     }
 
-    /** The links found under the trusted folders, by session folder: looked for again after a few seconds. */
-    readonly #linked = new Map<string, { at: number; problem: string | undefined }>();
+    /** What the look for links under the trusted folders found, by session folder, and when; and a look under way. */
+    readonly #linked = new Map<
+        string,
+        { at: number; problem: string | undefined; looking?: Promise<string | undefined> }
+    >();
 
     /**
      * Why a folder that the guest may write cannot be shared: a link under a place that the server or Pi loads code or
      * trusted settings from leads into it, or through it (`app.trustedFolders`), so a guest could change what runs
-     * there. A folder shared read only is not written. Asked each time a call needs the sandbox, but the folders are
-     * walked at most once in a few seconds for one folder; `fresh` (turning it on) walks them now.
+     * there; or those places could not all be looked at. A folder shared read only is not written. The look walks whole
+     * trees, so it does not hold the server (`#look`): a call that needs the sandbox uses the last answer, and starts a
+     * new look when that one is a minute old. With no answer yet it fails and says the look is under way: a look that is
+     * not done is never counted as clean.
      */
-    #trustedLink(cwd: string, fresh: boolean): string | undefined {
+    #trustedLink(cwd: string): string | undefined {
         if (this.provider?.mount?.() === "ro") {
             return undefined;
         }
 
         const known = this.#linked.get(cwd);
 
-        if (!fresh && known !== undefined && Date.now() - known.at < 5_000) {
-            return known.problem;
+        if (known === undefined || Date.now() - known.at > 60_000) {
+            void this.#look(cwd);
         }
 
-        const link = linkInto(this.#app.trustedFolders, cwd);
-        const problem =
-            link === undefined
-                ? undefined
-                : `${link} reaches into ${cwd} (it lies there, or it is a link that leads there), and this server or Pi loads code or settings from it: a sandbox that can write the folder could change what runs on this machine. Remove the link, or choose Read only for the session's folder.`;
+        return known === undefined
+            ? `The places that this server loads code from are being looked at for links into ${cwd}: try again in a moment.`
+            : known.problem;
+    }
 
-        this.#linked.set(cwd, { at: Date.now(), problem });
+    /** Look for links into `cwd` under the trusted folders: one look at a time for a folder, and its answer is kept. */
+    #look(cwd: string): Promise<string | undefined> {
+        const known = this.#linked.get(cwd);
 
-        return problem;
+        if (known?.looking !== undefined) {
+            return known.looking;
+        }
+
+        const looking = linkInto(this.#app.trustedFolders, cwd).then(
+            (found) =>
+                found === undefined
+                    ? undefined
+                    : "link" in found
+                      ? `${found.link} reaches into ${cwd} (it lies there, or it is a link that leads there), and this server or Pi loads code or settings from it: a sandbox that can write the folder could change what runs on this machine. Remove the link, or choose Read only for the session's folder.`
+                      : `The places that this server or Pi loads code or settings from could not all be looked at for links into ${cwd} (${found.unfinished}), so a sandbox that can write the folder is not allowed. Choose Read only for the session's folder.`,
+            (error: unknown) =>
+                `The places that this server or Pi loads code or settings from could not be looked at for links into ${cwd} (${error instanceof Error ? error.message : String(error)}), so a sandbox that can write the folder is not allowed.`,
+        );
+
+        this.#linked.set(cwd, { at: known?.at ?? 0, problem: known?.problem, looking });
+        void looking.then((problem) => {
+            this.#linked.set(cwd, { at: Date.now(), problem });
+        });
+
+        return looking;
     }
 
     /** A session and the subagents under it, to any depth, as `agentsOf` lists them. */
@@ -390,6 +416,13 @@ export class Sandboxes {
     noted(id: ConversationId, on: boolean): void {
         if (on) {
             this.#on.add(Number(id));
+
+            // A session that was sandboxed before this start: its folder is looked at now, not at its first call.
+            try {
+                void this.#look(this.#app.cwdOf(id));
+            } catch {
+                // Not known yet: the first call looks.
+            }
         } else {
             this.#on.delete(Number(id));
         }
@@ -676,7 +709,20 @@ export class Sandboxes {
             return `This session runs in a sandbox, so a linked session it starts works in its folder (${own}), not in ${cwd}. The owner can allow other folders in Menu → Extensions → Gondolin sandbox.`;
         }
 
-        return this.#folderProblem(cwd);
+        return (
+            reloadedFolderProblem(cwd, this.#app.codeFolders, this.#app.dataDir) ??
+            provider?.folderProblem?.(cwd) ??
+            (provider?.mount?.() === "ro" ? undefined : await this.#checked(cwd))
+        );
+    }
+
+    /** The answer of the last look for links into `cwd`, or of a new one when there is none or it is old. */
+    async #checked(cwd: string): Promise<string | undefined> {
+        const known = this.#linked.get(cwd);
+
+        return known !== undefined && known.looking === undefined && Date.now() - known.at <= 60_000
+            ? known.problem
+            : this.#look(cwd);
     }
 
     /**
@@ -748,7 +794,11 @@ export class Sandboxes {
                 throw new HttpError(409, "A sandbox does not support a remote workspace.");
             }
 
-            const folder = this.#folderProblem(app.cwdOf(id), true);
+            const cwd = app.cwdOf(id);
+            const folder =
+                reloadedFolderProblem(cwd, app.codeFolders, app.dataDir) ??
+                provider.folderProblem?.(cwd) ??
+                (provider.mount?.() === "ro" ? undefined : await this.#look(cwd));
 
             if (folder !== undefined) {
                 throw new HttpError(409, folder);
@@ -795,6 +845,18 @@ export class Sandboxes {
             under = this.#changes.get(root)
         ) {
             await under.catch(() => undefined);
+        }
+
+        // A sandboxed session's first look at the trusted places is waited for here: its calls then find the answer.
+        if (this.#on.has(Number(id))) {
+            try {
+                const cwd = this.#app.cwdOf(id);
+
+                await (this.#linked.get(cwd)?.looking ??
+                    (this.#linked.has(cwd) ? undefined : this.#look(cwd)));
+            } catch {
+                // A session that is gone has nothing to look at.
+            }
         }
     }
 
