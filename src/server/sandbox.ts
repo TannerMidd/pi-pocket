@@ -409,7 +409,11 @@ export class Sandboxes {
             const handle = {
                 unregister: () =>
                     this.#serialised(async () => {
-                        // A staged provider that was dropped is never current: nothing to stop.
+                        // A staged provider that its own cleanup withdrew is never installed by the reload's commit.
+                        if (this.#reloading?.staged === mine) {
+                            this.#reloading.staged = undefined;
+                        }
+
                         if (this.#provider === mine) {
                             await this.#stop(mine, true, "the sandbox module went away");
                         }

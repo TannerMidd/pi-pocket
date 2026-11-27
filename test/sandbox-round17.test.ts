@@ -172,3 +172,16 @@ export default async () => {
     assert.equal(shared.lateMade?.ran.length ?? 0, 0);
     shared.lateSandbox = undefined;
 });
+
+test("a staged provider that its own handle unregistered is not installed by the reload's commit", async () => {
+    const { app, provider } = await boot();
+
+    await app.sandboxes.suspendOwner("a.ts", false);
+    const staged = new FakeProvider();
+    const handle = await app.sandboxes.register(staged, "a.ts");
+
+    await handle.unregister();
+    await app.sandboxes.reloadCommitted("a.ts");
+    assert.notEqual(app.sandboxes.provider, staged, "the withdrawn provider was not installed");
+    assert.equal(app.sandboxes.provider, provider);
+});
