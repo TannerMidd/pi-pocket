@@ -85,10 +85,6 @@ const where = () =>
             path: location.pathname,
             layers: history.state?.pocket?.layers ?? 0,
             sheet: store.state.sheet?.type ?? null,
-                navigation: performance.getEntriesByType("navigation").map((entry) => entry.name + " " + entry.type),
-                history: history.length + " " + JSON.stringify(history.state),
-                storage: Object.keys(sessionStorage).join(","),
-                ready: document.readyState,
             files: document.querySelector(".files-tile:not(.leaving)") !== null,
             file: document.querySelector(".ft-view:not(.leaving) .ft-view-name")?.textContent ?? null,
         });
@@ -165,6 +161,10 @@ async function fresh(): Promise<void> {
                 rows: document.querySelectorAll(".home-list .session-row").length,
                 boot: document.querySelector(".boot") !== null,
                 sheet: store.state.sheet?.type ?? null,
+                navigation: performance.getEntriesByType("navigation").map((entry) => entry.name + " " + entry.type),
+                history: history.length + " " + JSON.stringify(history.state),
+                storage: Object.keys(sessionStorage).join(","),
+                ready: document.readyState,
             });
         `).catch((cause) => `the page could not be read: ${cause}`);
 
