@@ -2,6 +2,7 @@
 // message box, only after the person taps the page (not after `window.focus()`), marked as the artifact's, unsent;
 // nothing from a frame inside it, or once it navigates elsewhere (not even before that page's load event, and no answer
 // held back reaches it); one follow-up every 2 seconds; and a notice, not a message, for a viewer.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -263,7 +264,7 @@ const savedFor = async (artifact: string) =>
     ]?.value;
 
 async function publish(id: string, content: string, type?: string) {
-    await createArtifacts({} as PocketHost).tools![0]!.execute(
+    await createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!.execute(
         { id, title: id === "calc" ? "Calculator" : id, content, type } as never,
         {
             conversationId: session,

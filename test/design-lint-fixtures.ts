@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import { dimensionCss } from "../src/server/design/lint-color.ts";
 import { createPublicFetch } from "../src/server/public-fetch.ts";
 import type { PocketHost } from "../src/server/host.ts";
@@ -12,7 +13,7 @@ import type {
     TokenType,
 } from "../src/server/design/system-types.ts";
 
-export const host = { fetchPublic: createPublicFetch() } as PocketHost;
+export const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 
 export function token(
     name: string,

@@ -1,4 +1,5 @@
 // Sharing an artifact to anyone with its address: no sign-in, one version or the newest, for a time or until ended.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -46,7 +47,7 @@ after(async () => {
 async function publish(content: string, title = "Demo"): Promise<ConversationId> {
     app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
     const { id } = await app.commands.createSession(owner(app), { cwd: work });
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
     const api = {
         conversationId: id,
         taskId: 1000 + (calls += 1),
@@ -86,7 +87,7 @@ test("a published artifact opens with no sign-in, and follows its newest version
 
     // A newer version: the page that follows shows it.
     app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
 
     await tool.execute(
         { id: "demo", title: "Demo", content: "<h1>two</h1>" } as never,
@@ -311,7 +312,7 @@ test("a share whose artifact is gone, or which names a version that never was, s
 
 test("a published bundle serves its files at the share's address, follows the newest version, and closes with it", async () => {
     const id = await publish("<p>first</p>");
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
     let call = 0;
     const write = (content: string, css: string) =>
         tool.execute(

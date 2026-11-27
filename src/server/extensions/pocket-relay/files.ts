@@ -1,9 +1,14 @@
 /** Files for the relay: what Pi sends is read from its session's folder only, and what it fetches is kept there. */
 import { randomUUID } from "node:crypto";
-import { renameSync } from "node:fs";
-import { open, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { openNoFollow } from "../../no-follow.ts";
+import {
+    type Hostfs,
+    open,
+    openNoFollow,
+    realpathAsync,
+    renameAsync,
+    unlinkAsync,
+} from "../../hostfs.ts";
 import { workspaceScheme } from "../../paths.ts";
 import { isEnvFile } from "../../secrets.ts";
 import type { RelayOutFile } from "./types.ts";
@@ -52,22 +57,23 @@ export function safeName(name: string, fallback = "file"): string {
     return clean === "" ? fallback : clean;
 }
 
-export async function folderOf(cwd: string | undefined): Promise<string> {
+export async function folderOf(host: Hostfs, cwd: string | undefined): Promise<string> {
     if (cwd === undefined || cwd === "" || workspaceScheme(cwd) !== undefined) {
         throw new Error("Files work only in a session whose folder is on this machine.");
     }
 
-    return realpath(cwd);
+    return realpathAsync(host.at(cwd));
 }
 
 /** Stage bytes privately. A route change cannot interleave between the last check and publication. */
 export async function publishFetchedFile(
+    host: Hostfs,
     path: string,
     data: Uint8Array,
     checkCurrent: () => void,
 ): Promise<void> {
     checkCurrent();
-    const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
+    const temporary = host.at(join(dirname(path), `.${randomUUID()}.tmp`));
     const handle = await open(temporary, "wx", 0o600);
 
     try {
@@ -79,9 +85,9 @@ export async function publishFetchedFile(
         }
 
         checkCurrent();
-        renameSync(temporary, path);
+        await renameAsync(temporary, host.at(path));
     } catch (error) {
-        await unlink(temporary);
+        await unlinkAsync(temporary);
 
         throw error;
     }
@@ -89,6 +95,7 @@ export async function publishFetchedFile(
 
 /** Pi's paths, read with every check: in the session's folder (links too), not hidden, not the server's data. */
 export async function readFiles(
+    host: Hostfs,
     cwd: string | undefined,
     dataDir: string,
     paths: readonly string[],
@@ -98,14 +105,14 @@ export async function readFiles(
         throw new Error(`This connector sends ${caps.max} files at most: nothing was sent.`);
     }
 
-    const root = await folderOf(cwd);
-    const data = await realpath(dataDir).catch(() => resolve(dataDir));
+    const root = await folderOf(host, cwd);
+    const data = host.real(dataDir) ?? resolve(dataDir);
     const files: RelayOutFile[] = [];
     let total = 0;
 
     for (const path of paths) {
         const shown = JSON.stringify(path).slice(0, 120);
-        const real = await realpath(resolve(root, path)).catch(() => undefined);
+        const real = host.real(resolve(root, path));
 
         if (real === undefined) {
             throw new Error(`No file ${shown} in this session's folder: nothing was sent.`);
@@ -139,7 +146,7 @@ export async function readFiles(
             );
         }
 
-        const handle = await openNoFollow(real);
+        const handle = await openNoFollow(host.at(real));
 
         try {
             const stat = await handle.stat();

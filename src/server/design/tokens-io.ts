@@ -1,20 +1,19 @@
 // A read never follows a symlink and reads at most a limit's worth of bytes of each file.
 // A write renames a temporary file next to the target, so a reader never sees half a file, and a link at the target is replaced, not followed.
 import { randomUUID } from "node:crypto";
-import {
-    closeSync,
-    fstatSync,
-    lstatSync,
-    mkdirSync,
-    readdirSync,
-    readFileSync,
-    readSync,
-    renameSync,
-    rmSync,
-    writeFileSync,
-} from "node:fs";
 import { basename, join } from "node:path";
-import { openNoFollowSync } from "../no-follow.ts";
+import {
+    type FolderRef,
+    lstat,
+    mkdir,
+    openNoFollowSync,
+    type Place,
+    readdir,
+    readFile,
+    rename,
+    rm,
+    writeFile,
+} from "../hostfs.ts";
 import type { SystemProblem } from "./system-types.ts";
 import { LIMITS, boundedText, type RawSystem } from "./tokens-base.ts";
 import { forgetSystem } from "./tokens-cache.ts";
@@ -28,11 +27,11 @@ export interface Folder {
 }
 
 // A link is an error: nothing here follows one.
-function kindOf(path: string, label: string): "file" | "directory" | undefined {
+function kindOf(path: Place, label: string): "file" | "directory" | undefined {
     let info;
 
     try {
-        info = lstatSync(path);
+        info = lstat(path);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return undefined;
@@ -50,9 +49,9 @@ function kindOf(path: string, label: string): "file" | "directory" | undefined {
     return info.isDirectory() ? "directory" : info.isFile() ? "file" : undefined;
 }
 
-function lstatOf(path: string): ReturnType<typeof lstatSync> | undefined {
+function lstatOf(path: Place): ReturnType<typeof lstat> | undefined {
     try {
-        return lstatSync(path);
+        return lstat(path);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return undefined;
@@ -62,8 +61,8 @@ function lstatOf(path: string): ReturnType<typeof lstatSync> | undefined {
     }
 }
 
-function hasDesignFolder(cwd: string): boolean {
-    const pi = kindOf(join(cwd, ".pi"), "The project's .pi folder");
+function hasDesignFolder(cwd: FolderRef): boolean {
+    const pi = kindOf(cwd.at(".pi"), "The project's .pi folder");
 
     if (pi === undefined) {
         return false;
@@ -73,7 +72,7 @@ function hasDesignFolder(cwd: string): boolean {
         throw new Error("The project's .pi path must be a folder.");
     }
 
-    const design = kindOf(join(cwd, DESIGN_DIR), ".pi/design");
+    const design = kindOf(cwd.at(DESIGN_DIR), ".pi/design");
 
     if (design === undefined) {
         return false;
@@ -86,11 +85,11 @@ function hasDesignFolder(cwd: string): boolean {
     return true;
 }
 
-function readHead(path: string, max: number): { bytes: Buffer; more: boolean } {
+function readHead(path: Place, max: number): { bytes: Buffer; more: boolean } {
     const fd = openNoFollowSync(path);
 
     try {
-        if (!fstatSync(fd).isFile()) {
+        if (!fd.stat().isFile()) {
             throw new Error("not a regular file");
         }
 
@@ -98,7 +97,7 @@ function readHead(path: string, max: number): { bytes: Buffer; more: boolean } {
         let size = 0;
 
         while (size < buffer.length) {
-            const read = readSync(fd, buffer, size, buffer.length - size, null);
+            const read = fd.read(buffer, size, buffer.length - size, null);
 
             if (read <= 0) {
                 break;
@@ -109,22 +108,22 @@ function readHead(path: string, max: number): { bytes: Buffer; more: boolean } {
 
         return { bytes: buffer.subarray(0, Math.min(size, max)), more: size > max };
     } finally {
-        closeSync(fd);
+        fd.close();
     }
 }
 
 const kb = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
 
-export function readFolder(cwd: string): Folder | undefined {
+export function readFolder(cwd: FolderRef): Folder | undefined {
     if (!hasDesignFolder(cwd)) {
         return undefined;
     }
 
-    const root = join(cwd, DESIGN_DIR);
+    const root = cwd.at(DESIGN_DIR);
     const problems: SystemProblem[] = [];
     const broken = new Set<string>();
     const raw: RawSystem = {
-        folder: basename(cwd),
+        folder: basename(cwd.display.text),
         tokens: undefined,
         modes: new Map(),
         components: new Map(),
@@ -133,7 +132,7 @@ export function readFolder(cwd: string): Folder | undefined {
     };
 
     const text = (name: string, max: number, whole = true): string | undefined => {
-        const path = join(root, name);
+        const path = root.child(name);
 
         try {
             if (kindOf(path, name) !== "file") {
@@ -197,7 +196,7 @@ export function readFolder(cwd: string): Folder | undefined {
     let entries;
 
     try {
-        entries = readdirSync(root, { withFileTypes: true }).slice(0, 500);
+        entries = readdir(root, { withFileTypes: true }).slice(0, 500);
     } catch (error) {
         throw new Error(`.pi/design could not be read: ${(error as Error).message}`);
     }
@@ -253,8 +252,8 @@ export function readFolder(cwd: string): Folder | undefined {
 
     if (entries.some((entry) => entry.name === "components")) {
         try {
-            if (kindOf(join(root, "components"), "components") === "directory") {
-                const names = readdirSync(join(root, "components"))
+            if (kindOf(root.child("components"), "components") === "directory") {
+                const names = readdir(root.child("components"))
                     .filter((name) => name.endsWith(".html") && !name.startsWith("."))
                     .sort();
 
@@ -283,7 +282,7 @@ const READABLE =
 
 // The name must be one of the folder's own files; a link or a name with a path is refused.
 export function readDesignFile(
-    cwd: string,
+    cwd: FolderRef,
     name: string,
     max = 60_000,
 ): { text: string; truncated: boolean } | undefined {
@@ -299,11 +298,14 @@ export function readDesignFile(
 
     const parts = name.split("/");
 
-    if (parts.length === 2 && kindOf(join(cwd, DESIGN_DIR, parts[0]!), parts[0]!) !== "directory") {
+    if (
+        parts.length === 2 &&
+        kindOf(cwd.at(join(DESIGN_DIR, parts[0]!)), parts[0]!) !== "directory"
+    ) {
         return undefined;
     }
 
-    const path = join(cwd, DESIGN_DIR, ...parts);
+    const path = cwd.at(join(DESIGN_DIR, ...parts));
 
     if (kindOf(path, name) !== "file") {
         return undefined;
@@ -315,10 +317,10 @@ export function readDesignFile(
     return { text: text.replace(/^\uFEFF/, ""), truncated: more };
 }
 
-export function emptyFolder(cwd: string): Folder {
+export function emptyFolder(cwd: FolderRef): Folder {
     return {
         raw: {
-            folder: basename(cwd),
+            folder: basename(cwd.display.text),
             tokens: undefined,
             modes: new Map(),
             components: new Map(),
@@ -329,11 +331,11 @@ export function emptyFolder(cwd: string): Folder {
     };
 }
 
-function ensureFolder(path: string, label: string): void {
+function ensureFolder(path: Place, label: string): void {
     const kind = kindOf(path, label);
 
     if (kind === undefined) {
-        mkdirSync(path);
+        mkdir(path);
     } else if (kind !== "directory") {
         throw new Error(`${label} must be a folder.`);
     }
@@ -344,19 +346,17 @@ interface WriteResult {
     removed: string[];
 }
 
-export function writeFiles(cwd: string, files: Map<string, string | null>): WriteResult {
+export function writeFiles(cwd: FolderRef, files: Map<string, string | null>): WriteResult {
     const result: WriteResult = { written: [], removed: [] };
 
     forgetSystem(cwd);
-    ensureFolder(join(cwd, ".pi"), "The project's .pi folder");
-    ensureFolder(join(cwd, DESIGN_DIR), ".pi/design");
+    ensureFolder(cwd.at(".pi"), "The project's .pi folder");
+    ensureFolder(cwd.at(DESIGN_DIR), ".pi/design");
 
-    const root = join(cwd, DESIGN_DIR);
+    const root = cwd.at(DESIGN_DIR);
 
     for (const [name, content] of files) {
         const parts = name.split("/");
-        const dir = parts.length === 2 ? join(root, parts[0]!) : root;
-        const path = join(root, ...parts);
 
         if (
             parts.length > 2 ||
@@ -366,6 +366,9 @@ export function writeFiles(cwd: string, files: Map<string, string | null>): Writ
         ) {
             throw new Error(`Refusing to write ${name}.`);
         }
+
+        const dir = parts.length === 2 ? root.child(parts[0]!) : root;
+        const path = root.child(parts.join("/"));
 
         // Check the parent for removals too: O_NOFOLLOW on the final name cannot protect it.
         if (parts.length === 2) {
@@ -389,7 +392,7 @@ export function writeFiles(cwd: string, files: Map<string, string | null>): Writ
 
         if (content === null) {
             if (present !== undefined && !present.isDirectory()) {
-                rmSync(path);
+                rm(path);
                 result.removed.push(name);
             }
 
@@ -403,7 +406,7 @@ export function writeFiles(cwd: string, files: Map<string, string | null>): Writ
             if (
                 present?.isFile() === true &&
                 present.size === bytes.length &&
-                readFileSync(path).equals(bytes)
+                readFile(path).equals(bytes)
             ) {
                 continue;
             }
@@ -412,13 +415,13 @@ export function writeFiles(cwd: string, files: Map<string, string | null>): Writ
         }
 
         // A fresh name each time, in the same folder: the rename stays on one file system.
-        const temp = join(dir, `.${randomUUID()}.tmp`);
+        const temp = dir.child(`.${randomUUID()}.tmp`);
 
         try {
-            writeFileSync(temp, bytes, { flag: "wx" });
-            renameSync(temp, path);
+            writeFile(temp, bytes, { flag: "wx" });
+            rename(temp, path);
         } finally {
-            rmSync(temp, { force: true });
+            rm(temp, { force: true });
         }
 
         result.written.push(name);

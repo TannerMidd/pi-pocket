@@ -1,4 +1,4 @@
-import { cleanUp, newSession, openApp, root, scriptedModel } from "./helpers.ts";
+import { cleanUp, hostFolder, newSession, openApp, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -32,13 +32,13 @@ before(async () => {
     await publishDesign(app, session, {
         id: "ferry",
         title: "Ferry booking",
-        content: ferryPage(loadDesignSystem(folder)!.compiled.css),
+        content: ferryPage(loadDesignSystem(hostFolder(folder))!.compiled.css),
     });
     // A grey that reads on the light canvas (5.9:1) and not on the dark one (3.2:1).
     await publishDesign(app, session, {
         id: "scheme",
         title: "Scheme",
-        content: `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>${loadDesignSystem(folder)!.compiled.css}body{margin:0;background:var(--color-bg-canvas)}</style><p data-pid="low" style="margin:0;padding:var(--space-4);color:#5d647d">Quiet words</p>`,
+        content: `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>${loadDesignSystem(hostFolder(folder))!.compiled.css}body{margin:0;background:var(--color-bg-canvas)}</style><p data-pid="low" style="margin:0;padding:var(--space-4);color:#5d647d">Quiet words</p>`,
     });
 });
 

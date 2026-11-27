@@ -1,6 +1,5 @@
 /** `/api/c/:id`: one conversation's routes, for people the API has checked may see it. */
 import { createHash, randomUUID } from "node:crypto";
-import type { FileHandle } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -9,7 +8,7 @@ import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { readJobSupervision } from "../job-supervision.ts";
-import { openNoFollow } from "../no-follow.ts";
+import { type FileHandle, openNoFollow, Place } from "../hostfs.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
@@ -469,7 +468,15 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
-        await reveal(app.workspace.conversationPath(id, body.path));
+        let place;
+
+        try {
+            place = app.hostfs.at(app.workspace.conversationPath(id, body.path));
+        } catch {
+            throw new HttpError(404, "That is not there");
+        }
+
+        await reveal(place);
 
         return json(response, 200, { ok: true });
     }
@@ -496,7 +503,7 @@ export async function conversationRoutes(
         app.requireSteer(user);
 
         const file = app.workspace.readableFile(user, id, requested);
-        const name = basename(typeof file === "string" ? file : file.path);
+        const name = basename(file instanceof Place ? file.display.text : file.path);
         const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
         const headers = (size: number) => ({
             "content-type": "application/octet-stream",
@@ -506,7 +513,7 @@ export async function conversationRoutes(
             "x-content-type-options": "nosniff",
         });
 
-        if (typeof file !== "string") {
+        if (!(file instanceof Place)) {
             return withUploadBytes(file, async (bytes) => {
                 response.writeHead(200, headers(bytes.length));
                 await pipeline(Readable.from([bytes]), response);

@@ -3,10 +3,10 @@
  * the upload ends (`prepareModelImage`), while the person still writes: the message that sends it finds it ready
  * (`issuedModelImage`). A file not prepared (after a restart, or one that left the cache) is made then.
  */
-import { readFile } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { formatDimensionNote, resizeImage } from "@earendil-works/pi-coding-agent";
 import { HEIC_TYPES, heicToJpeg } from "./heic.ts";
+import { type Place, readFileAsync } from "./hostfs.ts";
 import { type BoundUpload, withUploadBytes } from "./upload-content.ts";
 
 /** Attached images that also go to the model itself, when it takes images. */
@@ -159,9 +159,15 @@ export async function issuedModelImage(file: IssuedImage): Promise<ModelImage> {
 }
 
 /** Convert a workspace image or a buffer already verified by the caller. */
-export function modelImage(source: string | Buffer, mimeType: string): Promise<ModelImage> {
+export function modelImage(source: Place | Buffer, mimeType: string): Promise<ModelImage> {
     return inTurn(
-        async () => convert(typeof source === "string" ? await readFile(source) : source, mimeType),
+        async () =>
+            convert(
+                Buffer.isBuffer(source)
+                    ? source
+                    : await readFileAsync(source, { max: MAX_INLINE_IMAGE }),
+                mimeType,
+            ),
         true,
     );
 }

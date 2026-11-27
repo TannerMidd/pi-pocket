@@ -27,6 +27,7 @@ import {
 import { checkDesign } from "../src/server/design/lint.ts";
 import { loadDesignSystem } from "../src/server/design/tokens.ts";
 import { join } from "node:path";
+import { hostFolder } from "./helpers.ts";
 
 const browser = { skip: findBrowser() === undefined, timeout: 120_000 };
 
@@ -1027,7 +1028,9 @@ test(
     browser,
     async () => {
         const flagship = loadDesignSystem(
-            join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket"),
+            hostFolder(
+                join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket"),
+            ),
         )!;
         const assets = [
             { name: "ds/tokens.css", type: "text/css", bytes: Buffer.from(flagship.compiled.css) },

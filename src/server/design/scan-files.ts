@@ -1,8 +1,7 @@
 // The walk never follows a symlink, so a project cannot lead it out of the folder.
-import { closeSync, type Dirent, fstatSync, lstatSync, readdirSync, readSync } from "node:fs";
-import { extname, join, relative, sep } from "node:path";
+import { extname } from "node:path";
 import { quoted } from "../fence.ts";
-import { openNoFollowSync } from "../no-follow.ts";
+import { type Dirent, lstat, openNoFollowSync, type Place, readdir } from "../hostfs.ts";
 import { figHeaderReason } from "./scan-fig-container.ts";
 
 const SKIP = new Set(
@@ -96,18 +95,16 @@ const wanted = (rel: string, name: string) =>
     /\.fig$/i.test(name) ||
     (STYLE.test(name) ? !name.endsWith(".d.ts") : TOKEN_JSON.test(rel) && name.endsWith(".json"));
 
-function sortedEntries(dir: string): Dirent[] {
+function sortedEntries(dir: Place): Dirent[] {
     try {
-        return readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-            a.name.localeCompare(b.name),
-        );
+        return readdir(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     } catch {
         return [];
     }
 }
 
 // A project's config names such folders; none may lead the scan out of the project (no `..`, no absolute path, no symlink).
-export function folderInside(root: string, dir: string): boolean {
+export function folderInside(root: Place, dir: string): boolean {
     let path = root;
 
     for (const part of dir === "" ? [] : dir.split("/")) {
@@ -115,10 +112,10 @@ export function folderInside(root: string, dir: string): boolean {
             return false;
         }
 
-        path = join(path, part);
+        path = path.child(part);
 
         try {
-            const info = lstatSync(path);
+            const info = lstat(path);
 
             if (info.isSymbolicLink() || !info.isDirectory()) {
                 return false;
@@ -131,12 +128,12 @@ export function folderInside(root: string, dir: string): boolean {
     return true;
 }
 
-function studioSets(root: string, dir: string, depth: number, found: string[]): void {
+function studioSets(root: Place, dir: string, depth: number, found: string[]): void {
     if (!folderInside(root, dir)) {
         return;
     }
 
-    for (const entry of sortedEntries(join(root, dir))) {
+    for (const entry of sortedEntries(root.child(dir))) {
         const rel = dir === "" ? entry.name : `${dir}/${entry.name}`;
 
         if (found.length >= LIMITS.candidates) {
@@ -156,7 +153,7 @@ function studioSets(root: string, dir: string, depth: number, found: string[]): 
     }
 }
 
-export function collectFiles(root: string): {
+export function collectFiles(root: Place): {
     files: string[];
     partial: boolean;
     skipped: Skipped[];
@@ -173,7 +170,7 @@ export function collectFiles(root: string): {
         }
     };
 
-    const isFigma = (path: string, rel: string): boolean => {
+    const isFigma = (path: Place, rel: string): boolean => {
         let reason: string | undefined;
 
         try {
@@ -194,7 +191,7 @@ export function collectFiles(root: string): {
         return reason === undefined;
     };
 
-    const walk = (dir: string, depth: number) => {
+    const walk = (dir: Place, prefix: string, depth: number) => {
         for (const entry of sortedEntries(dir)) {
             if (found.length >= LIMITS.candidates || ++seen > LIMITS.entries) {
                 partial = true;
@@ -202,8 +199,8 @@ export function collectFiles(root: string): {
                 return;
             }
 
-            const path = join(dir, entry.name);
-            const rel = relative(root, path).split(sep).join("/");
+            const path = dir.child(entry.name);
+            const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
             const hidden = entry.name.startsWith(".");
 
             // Dirent reports a symlink as a symlink, not as its target: neither branch below takes one.
@@ -211,7 +208,7 @@ export function collectFiles(root: string): {
                 const skip = SKIP.has(entry.name) || (hidden && !DOT_STYLE_FOLDERS.has(entry.name));
 
                 if (!skip && depth < LIMITS.depth) {
-                    walk(path, depth + 1);
+                    walk(path, rel, depth + 1);
                 } else if (!skip) {
                     partial = true;
                     note(`${rel}/`, `deeper than ${LIMITS.depth} levels`);
@@ -232,7 +229,7 @@ export function collectFiles(root: string): {
         }
     };
 
-    walk(root, 0);
+    walk(root, "", 0);
 
     // One note for all the `.fig` files that are no Figma files, and first: 450 notes filled the list,
     // and the Figma file that could not be read went unnamed.
@@ -278,20 +275,20 @@ export function collectFiles(root: string): {
 }
 
 /** Reads no more than `limit` bytes and never follows a link. */
-export function readHead(path: string, limit: number = LIMITS.fileBytes): string {
+export function readHead(path: Place, limit: number = LIMITS.fileBytes): string {
     return readBytes(path, limit).toString("utf8");
 }
 
-function readBytes(path: string, limit: number): Buffer {
+function readBytes(path: Place, limit: number): Buffer {
     const fd = openNoFollowSync(path);
 
     try {
         // No more than the file has (a regular file), so that a small file does not cost a large buffer.
-        const buffer = Buffer.alloc(Math.min(limit, Math.max(0, fstatSync(fd).size)));
+        const buffer = Buffer.alloc(Math.min(limit, Math.max(0, fd.stat().size)));
         let size = 0;
 
         while (size < buffer.length) {
-            const read = readSync(fd, buffer, size, buffer.length - size, null);
+            const read = fd.read(buffer, size, buffer.length - size, null);
 
             if (read <= 0) {
                 break;
@@ -302,6 +299,6 @@ function readBytes(path: string, limit: number): Buffer {
 
         return buffer.subarray(0, size);
     } finally {
-        closeSync(fd);
+        fd.close();
     }
 }

@@ -8,7 +8,6 @@
  * could otherwise write instructions into every later session.
  */
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -20,6 +19,7 @@ import { ChatDoc, type Lesson, MemoryDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { INVISIBLE_CLASS } from "./fence.ts";
 import { git } from "./git.ts";
+import type { Hostfs } from "./hostfs.ts";
 import { workspaceScheme } from "./paths.ts";
 import { snippet } from "./projection.ts";
 
@@ -128,15 +128,16 @@ const ordered = (lessons: Lesson[]) =>
     lessons.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 
 /** The project a folder belongs to: its repository's shared git folder, or the folder itself. */
-async function projectOf(cwd: string): Promise<Project> {
+async function projectOf(host: Hostfs, cwd: string): Promise<Project> {
     // A workspace URI names a folder on another machine: it is its own project, with no git here.
     if (workspaceScheme(cwd) !== undefined) {
         return { key: cwd, name: named(basename(cwd), cwd) };
     }
 
-    const folder = await realpath(cwd).catch(() => resolve(cwd));
-    const common = await git(folder, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .catch(() => git(folder, ["rev-parse", "--git-common-dir"]))
+    const folder = host.real(cwd) ?? resolve(cwd);
+    const repo = host.folder(folder);
+    const common = await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .catch(() => git(repo, ["rev-parse", "--git-common-dir"]))
         .then(
             (out) => out.trim(),
             () => "",
@@ -146,7 +147,7 @@ async function projectOf(cwd: string): Promise<Project> {
         return { key: folder, name: named(basename(folder), folder) };
     }
 
-    const key = await realpath(resolve(folder, common)).catch(() => resolve(folder, common));
+    const key = host.real(resolve(folder, common)) ?? resolve(folder, common);
     // `repo/.git` is named for `repo`; a bare repository (`repo.git`) for itself.
     const name =
         basename(key) === ".git" ? basename(dirname(key)) : basename(key).replace(/\.git$/, "");
@@ -182,7 +183,7 @@ export class Memory {
         let cached = this.#projects.get(folder);
 
         if (cached === undefined || now - cached.at > PROJECT_FOR_MS) {
-            cached = { at: now, project: projectOf(folder) };
+            cached = { at: now, project: projectOf(this.#app.hostfs, folder) };
             this.#projects.set(folder, cached);
         }
 

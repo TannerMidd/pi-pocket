@@ -30,7 +30,6 @@
  * trust from Pi's own settings object, and loads package skills: Pi Pocket keeps its trust code and its folders.
  * `test/skills.test.ts` checks the skills against Pi's own loader.
  */
-import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
     CONFIG_DIR_NAME,
@@ -40,9 +39,15 @@ import {
     type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { minimatch } from "minimatch";
+import type { Hostfs } from "./hostfs.ts";
+import type { Snapshots } from "./snapshots.ts";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
+    /** How raw paths are classified: Pi's loaders read paths themselves, so a sandboxed folder is loaded from a snapshot. */
+    host: Hostfs;
+    /** The copies Pi's loaders run on for a sandboxed folder (`snapshots.ts`). */
+    snapshots: Snapshots;
     /** Pi's folder (`~/.pi/agent`): its `skills/`, and `trust.json`, which projects Pi was told to trust or not. */
     agentDir: string;
     /** The home folder, whose `.agents/skills/` every session has. */
@@ -54,9 +59,9 @@ export type SkillSources = {
 };
 
 /** The root of the git repository `folder` is in, or undefined outside one. */
-function gitRoot(folder: string): string | undefined {
+function gitRoot(host: Hostfs, folder: string): string | undefined {
     for (let current = folder; ; current = dirname(current)) {
-        if (existsSync(join(current, ".git"))) {
+        if (host.has(join(current, ".git"))) {
             return current;
         }
 
@@ -67,8 +72,8 @@ function gitRoot(folder: string): string | undefined {
 }
 
 /** The project's `.agents/skills/` folders, nearest first: in `cwd` and above it, up to its repository's root. */
-function projectAgentsFolders(cwd: string, home: string): string[] {
-    const top = gitRoot(cwd);
+function projectAgentsFolders(host: Hostfs, cwd: string, home: string): string[] {
+    const top = gitRoot(host, cwd);
     const own = resolve(home, ".agents", "skills");
     const folders: string[] = [];
 
@@ -76,7 +81,7 @@ function projectAgentsFolders(cwd: string, home: string): string[] {
         const folder = join(current, ".agents", "skills");
 
         // The home folder's is everyone's, not the project's, even in a session in the home folder.
-        if (folder !== own && existsSync(folder)) {
+        if (folder !== own && host.has(folder)) {
             folders.push(folder);
         }
 
@@ -87,13 +92,17 @@ function projectAgentsFolders(cwd: string, home: string): string[] {
 }
 
 /** The `SKILL.md` files (or skill files) under `path`, a skill folder or file. */
-function skillFilesAt(path: string): string[] {
-    if (!existsSync(path)) {
+function skillFilesAt(sources: SkillSources, path: string): string[] {
+    if (!sources.host.has(path)) {
         return [];
     }
 
-    return statSync(path).isDirectory()
-        ? loadSkillsFromDir({ dir: path, source: "path" }).skills.map((each) => each.filePath)
+    return sources.host.isFolder(path)
+        ? sources.snapshots.run([path], (view) =>
+              view
+                  .from(loadSkillsFromDir({ dir: view.to(path), source: "path" }))
+                  .skills.map((each) => each.filePath),
+          )
         : path.endsWith(".md")
           ? [path]
           : [];
@@ -178,12 +187,8 @@ export type ProjectTrust = {
 };
 
 /** A folder as the trust store names it: links resolved, when it exists. */
-function canonical(folder: string): string {
-    try {
-        return realpathSync(folder);
-    } catch {
-        return resolve(folder);
-    }
+function canonical(host: Hostfs, folder: string): string {
+    return host.real(folder) ?? resolve(folder);
 }
 
 /** The decision saved for `cwd` or the nearest folder above it: null for none, undefined for an unreadable store. */
@@ -228,7 +233,7 @@ export function projectDistrusted(cwd: string, sources: SkillSources): boolean {
     const folder = resolve(cwd);
 
     return (
-        existsSync(join(folder, CONFIG_DIR_NAME, "prompts")) &&
+        sources.host.has(join(folder, CONFIG_DIR_NAME, "prompts")) &&
         decides(savedDecision(folder, sources.agentDir), sources) === "distrusted"
     );
 }
@@ -237,8 +242,8 @@ export function projectDistrusted(cwd: string, sources: SkillSources): boolean {
 export function skillPlaces(cwd: string, sources: SkillSources): string[] {
     const folder = resolve(cwd);
     const own = join(folder, CONFIG_DIR_NAME, "skills");
-    const hasOwn = existsSync(own);
-    const agents = projectAgentsFolders(folder, sources.home);
+    const hasOwn = sources.host.has(own);
+    const agents = projectAgentsFolders(sources.host, folder, sources.home);
     // The trust store is read only for a project with skills of its own: Pi needs no trust from one without.
     const decision =
         hasOwn || agents.length > 0
@@ -255,6 +260,7 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
         const each = raw.trim();
 
         return skillFilesAt(
+            sources,
             resolve(
                 sources.agentDir,
                 each.startsWith("~/") ? join(sources.home, each.slice(2)) : each,
@@ -268,7 +274,7 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
         ...enabledBy(listed, entries.filter(isPattern), sources.agentDir, sources.home),
         ...user.flatMap(([folder, base]) =>
             enabledBy(
-                skillFilesAt(folder),
+                skillFilesAt(sources, folder),
                 entries.filter((each) => /^[-+!]/.test(each)),
                 base,
                 sources.home,
@@ -279,33 +285,46 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
 
 /** Pi's skills for a session in `cwd`: the first of each name, from `skillPlaces`. */
 export function loadSessionSkills(cwd: string, sources: SkillSources): Skill[] {
-    return loadSkills({
-        cwd,
-        agentDir: sources.agentDir,
-        skillPaths: skillPlaces(cwd, sources),
-        includeDefaults: false,
-    }).skills;
+    return loadSkillsAt(cwd, skillPlaces(cwd, sources), sources);
+}
+
+/**
+ * Pi's `loadSkills` for `places`: as it is, except that the places in a sandboxed folder are read from a copy that is
+ * made through the confined walk (`snapshots.ts`), and the answer names the folder's own paths.
+ */
+function loadSkillsAt(cwd: string, places: string[], sources: SkillSources): Skill[] {
+    const mine = places.filter((place) => sources.snapshots.sandboxed([place]));
+
+    return sources.snapshots.run(mine, (view) =>
+        view.from(
+            loadSkills({
+                cwd: mine.length > 0 ? view.to(cwd) : cwd,
+                agentDir: sources.agentDir,
+                skillPaths: places.map((place) => (mine.includes(place) ? view.to(place) : place)),
+                includeDefaults: false,
+            }),
+        ),
+    ).skills;
 }
 
 /** Whether Pi trusts the project a session in `cwd` works in, and the project skills that wait for it. */
 export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTrust {
-    const folder = canonical(cwd);
+    const folder = canonical(sources.host, cwd);
     const parent = dirname(folder);
     const saved = savedDecision(cwd, sources.agentDir);
-    const folders = projectAgentsFolders(resolve(cwd), sources.home);
+    const folders = projectAgentsFolders(sources.host, resolve(cwd), sources.home);
     const own = join(resolve(cwd), CONFIG_DIR_NAME, "skills");
     const skillsIn = (paths: string[]) =>
         paths.length === 0
             ? []
-            : loadSkills({
-                  cwd,
-                  agentDir: sources.agentDir,
-                  skillPaths: paths,
-                  includeDefaults: false,
-              }).skills.map(({ name, description }) => ({ name, description }));
+            : loadSkillsAt(cwd, paths, sources).map(({ name, description }) => ({
+                  name,
+                  description,
+              }));
     const skills = skillsIn(folders);
-    const ownSkills = skillsIn(existsSync(own) ? [own] : []);
-    const settings = existsSync(join(folder, CONFIG_DIR_NAME, "settings.json"));
+    const ownSkills = skillsIn(sources.host.has(own) ? [own] : []);
+    // Whether the file is there, never what is in it: a sandboxed folder's project settings are not read.
+    const settings = sources.host.has(join(folder, CONFIG_DIR_NAME, "settings.json"));
 
     return {
         folder,
@@ -327,8 +346,13 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
 }
 
 /** Save an answer to "trust this project?" for a session in `cwd` in Pi's trust store, as Pi's `/trust` saves it. */
-export function saveProjectTrust(cwd: string, agentDir: string, choice: TrustChoice): void {
-    const folder = canonical(cwd);
+export function saveProjectTrust(
+    host: Hostfs,
+    cwd: string,
+    agentDir: string,
+    choice: TrustChoice,
+): void {
+    const folder = canonical(host, cwd);
     const parent = dirname(folder);
     const store = new ProjectTrustStore(agentDir);
 

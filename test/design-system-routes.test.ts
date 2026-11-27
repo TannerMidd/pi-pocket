@@ -1,4 +1,4 @@
-import { cleanUp, newSession, openApp, owner, root, scriptedModel } from "./helpers.ts";
+import { cleanUp, hostFolder, newSession, openApp, owner, root, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -56,7 +56,7 @@ before(async () => {
     await publishDesign(app, session, {
         id: "ferry",
         title: "Ferry booking",
-        content: ferryPage(loadDesignSystem(folder)!.compiled.css),
+        content: ferryPage(loadDesignSystem(hostFolder(folder))!.compiled.css),
     });
 
     for (const [name, role, sessions] of [
@@ -506,7 +506,7 @@ test("one tap fixes the exact matches: a new version with var() for each literal
         return t.skip("no Chromium-based browser on this machine");
     }
 
-    const system = loadDesignSystem(folder)!;
+    const system = loadDesignSystem(hostFolder(folder))!;
     const hexOf = (name: string) =>
         system.tokens.find((each) => each.name === name)!.modes.light!.hex as string;
     // The page writes the text color and a border as the tokens' own values: exact matches. The blue is off the system.
@@ -586,7 +586,7 @@ test("a fix gives the new version the system's ds/ files as they are now, not th
         return t.skip("no Chromium-based browser on this machine");
     }
 
-    const system = loadDesignSystem(folder)!;
+    const system = loadDesignSystem(hostFolder(folder))!;
     const hex = system.tokens.find((each) => each.name === "color.text.primary")!.modes.light!.hex;
     const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Stale</title><link rel="stylesheet" href="ds/tokens.css"><style>h1 { color: ${hex}; }</style></head><body><main data-pid="m"><h1 data-pid="t">Stale</h1></main></body></html>`;
     // Published when the system had none of its tokens yet: its ds/tokens.css is an empty snapshot.
@@ -754,14 +754,14 @@ test("a system with an error is not published or exported, and a revision is a s
     assert.equal((await call("owner", "system/docs", { key: "key-broken-01" }, id)).status, 409);
     assert.equal((await call("owner", "system/export", {}, id)).status, 409);
 
-    const system = loadDesignSystem(folder)!;
+    const system = loadDesignSystem(hostFolder(folder))!;
     const hex = system.tokens.find((each) => each.name === "color.text.primary")!.modes.light!.hex;
     const content = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>K</title><style>h1 { color: ${hex}; }</style></head><body><main data-pid="m"><h1 data-pid="t">K</h1></main></body></html>`;
     const fix = { id: "k", mode: "light", viewport: "mobile", key: "fix-key-broken" };
 
     await publishDesign(app, id, { id: "k", title: "K", content });
     assert.equal((await call("owner", "system/fix", fix, id)).status, 409);
-    assert.equal(revisionOf(system), revisionOf(loadDesignSystem(folder)!));
+    assert.equal(revisionOf(system), revisionOf(loadDesignSystem(hostFolder(folder))!));
     assert.match(revisionOf(system), /^[0-9a-f]{16}$/);
 });
 

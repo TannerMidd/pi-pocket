@@ -1,4 +1,5 @@
 // End-to-end tests of the server core with a scripted model: no network, no API keys, no Pi config.
+import { Hostfs, type Place } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -158,7 +159,7 @@ test("the artifact tool publishes versions, edits the latest, and serves the bod
 /** Real document commits, with a fixed tool-call identity so the test can replay the same call. */
 async function artifactCall() {
     const id = await newSession();
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
     const api = {
         conversationId: id,
         taskId: 987_654,
@@ -3315,7 +3316,7 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
         writeFileSync(join(work, "inside.png"), png);
         writeFileSync(join(root, "outside.png"), png);
         assert.equal(
-            app.workspace.conversationFile(vee, id, "inside.png"),
+            (app.workspace.conversationFile(vee, id, "inside.png") as Place).display.text,
             realpathSync(join(work, "inside.png")),
         );
         assert.throws(
@@ -3324,7 +3325,8 @@ test("access holds: a refused tab hears nothing, narrowed access evicts, removal
         );
         assert.throws(() => app.workspace.conversationFile(vee, id, "../outside.png"), /not found/);
         assert.equal(
-            app.workspace.conversationFile(owner(), id, join(root, "outside.png")),
+            (app.workspace.conversationFile(owner(), id, join(root, "outside.png")) as Place)
+                .display.text,
             join(root, "outside.png"),
         );
 

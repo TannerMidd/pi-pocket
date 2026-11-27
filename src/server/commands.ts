@@ -5,7 +5,6 @@
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { copyJson, type JsonValue } from "@earendil-works/chord/json";
@@ -77,6 +76,7 @@ import {
 import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
 import { forModel, issuedModelImage, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
+import { exists, isFile, own, Place as HostPlace, stat } from "./hostfs.ts";
 import {
     type ReadableFile,
     sameContent,
@@ -195,7 +195,7 @@ async function editableInput(
         }
 
         for (const [index, file] of originals.entries()) {
-            const { image } = await modelImage(file.path, file.mime).catch(() => {
+            const { image } = await modelImage(own(file.path), file.mime).catch(() => {
                 throw unsafe();
             });
 
@@ -662,20 +662,25 @@ export class Commands {
         }
 
         const storage = this.#app.managedStorage;
-        const made = await createWorktree(cwd, join(this.#app.dataDir, "worktrees"), label, {
-            root: () => storage.root("worktrees"),
-            created: (worktree) => storage.recordWorktree(basename(worktree.path)),
-            check: (worktree) => this.#checkWorktree(worktree),
-        });
+        const made = await createWorktree(
+            this.#app.hostfs,
+            cwd,
+            join(this.#app.dataDir, "worktrees"),
+            label,
+            {
+                root: () => storage.root("worktrees"),
+                created: (worktree) => storage.recordWorktree(basename(worktree.path)),
+                check: (worktree) => this.#checkWorktree(worktree),
+            },
+        );
 
         try {
             return await create(made);
         } catch (error) {
-            await discardWorktree(made.worktree, () => this.#checkWorktree(made.worktree)).catch(
-                (cleanup: unknown) =>
-                    this.#app.log(
-                        `worktree ${made.worktree.path} left behind: ${describe(cleanup)}`,
-                    ),
+            await discardWorktree(this.#app.hostfs, made.worktree, () =>
+                this.#checkWorktree(made.worktree),
+            ).catch((cleanup: unknown) =>
+                this.#app.log(`worktree ${made.worktree.path} left behind: ${describe(cleanup)}`),
             );
 
             throw error;
@@ -698,7 +703,7 @@ export class Commands {
             throw new HttpError(404, "This session has no worktree");
         }
 
-        const inside = (cwd: string) => inWorktree(worktree, cwd);
+        const inside = (cwd: string) => inWorktree(this.#app.hostfs, worktree, cwd);
 
         // Anything at work there would lose its folder: this session's runs, its subagents', or another session's.
         if (app.busyConversations().some((busy) => inside(app.cwdOf(busy)))) {
@@ -721,13 +726,15 @@ export class Commands {
             );
         }
 
-        const back = await sourceFolders(worktree);
+        const back = await sourceFolders(this.#app.hostfs, worktree);
         const moves = app
             .conversationsOf(id)
             .filter((each) => inside(app.cwdOf(each)))
             .map((each) => ({ id: each, cwd: back(app.cwdOf(each)) }));
 
-        await removeWorktree(worktree, force === true, () => this.#checkWorktree(worktree));
+        await removeWorktree(this.#app.hostfs, worktree, force === true, () =>
+            this.#checkWorktree(worktree),
+        );
 
         // The session and its subagents go back to the folders the worktree came from.
         for (const move of moves) {
@@ -792,7 +799,7 @@ export class Commands {
             chosen === undefined && cwd !== undefined ? globalModelSettings(cwd) : settings;
         const project =
             chosen === undefined && cwd !== undefined
-                ? projectModelDefault(cwd, defaults, models)
+                ? projectModelDefault(this.#app.hostfs, cwd, defaults, models)
                 : undefined;
         const lastPicked =
             chosen === undefined && project === undefined
@@ -930,7 +937,7 @@ export class Commands {
         const typed = request.text.trim();
         // `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.
         const expanded = typed.startsWith("/skill:")
-            ? (expandSkillCommand(typed, app.skillCommands(id)) ?? typed)
+            ? (expandSkillCommand(app.hostfs, typed, app.skillCommands(id)) ?? typed)
             : typed.startsWith("/")
               ? (expandPromptTemplate(typed, app.promptTemplates(id)) ?? typed)
               : typed;
@@ -1370,7 +1377,7 @@ export class Commands {
                 try {
                     const resolved = app.workspace.readableFile(user, id, candidate);
 
-                    if (typeof resolved !== "string" || statSync(resolved).isFile()) {
+                    if (!(resolved instanceof HostPlace) || isFile(resolved)) {
                         file = resolved;
                         break;
                     }
@@ -1384,17 +1391,17 @@ export class Commands {
             }
 
             try {
-                const path = typeof file === "string" ? file : file.path;
+                const path = file instanceof HostPlace ? file.display.text : file.path;
                 const mime = IMAGE_MIME[extname(path).toLowerCase()];
 
                 if (mime !== undefined) {
                     if (
                         images &&
-                        (typeof file === "string" ? statSync(file).size : file.content.size) <=
+                        (file instanceof HostPlace ? stat(file).size : file.content.size) <=
                             MAX_INLINE_IMAGE
                     ) {
                         parts.push(
-                            (typeof file === "string"
+                            (file instanceof HostPlace
                                 ? await modelImage(file, mime)
                                 : await withUploadBytes(file, (bytes) => modelImage(bytes, mime))
                             ).image,
@@ -3113,7 +3120,7 @@ export class Commands {
 
         if (
             at !== undefined &&
-            (inherited?.length || existsSync(join(app.dataDir, "uploads", String(id))))
+            (inherited?.length || exists(own(join(app.dataDir, "uploads", String(id)))))
         ) {
             const source = await app.conversation(id);
             let cursor: Cursor | undefined;

@@ -7,6 +7,7 @@ import { scanTokens, type TokenScan } from "../src/server/design/scan.ts";
 import type { DesignSystem } from "../src/server/design/system-types.ts";
 import { buildSystem } from "../src/server/design/tokens-model.ts";
 import { loadDesignSystem } from "../src/server/design/tokens.ts";
+import { hostFolder, hostPlace } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -141,15 +142,17 @@ const THEMES = [
 
 test("one file, the older form: every set is read, the themes make the modes, and a reference crosses sets", () => {
     const scan = scanTokens(
-        project({
-            "tokens.json": {
-                global: GLOBAL,
-                light: LIGHT,
-                dark: DARK,
-                $themes: THEMES,
-                $metadata: { tokenSetOrder: ["global", "light", "dark"] },
-            },
-        }),
+        hostPlace(
+            project({
+                "tokens.json": {
+                    global: GLOBAL,
+                    light: LIGHT,
+                    dark: DARK,
+                    $themes: THEMES,
+                    $metadata: { tokenSetOrder: ["global", "light", "dark"] },
+                },
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -186,13 +189,15 @@ test("one file, the older form: every set is read, the themes make the modes, an
 test("math is evaluated, with units and references: {a} * 2, {a}*4, {a} + {b}", () => {
     const system = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: GLOBAL,
-                    $themes: [],
-                    $metadata: { tokenSetOrder: ["global"] },
-                },
-            }),
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: GLOBAL,
+                        $themes: [],
+                        $metadata: { tokenSetOrder: ["global"] },
+                    },
+                }),
+            ),
         ),
     );
 
@@ -206,39 +211,45 @@ test("math is evaluated, with units and references: {a} * 2, {a}*4, {a} + {b}", 
 test("a color: rgba() of a reference; a token with a modifier is left out, not drafted wrong", () => {
     const system = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: GLOBAL,
-                    light: {
-                        color: {
-                            ...LIGHT.color,
-                            lighter: old("#2563eb", "color", {
-                                $extensions: {
-                                    "studio.tokens": { modify: { type: "lighten", value: "0.5" } },
-                                },
-                            }),
-                            darker: old("#2563eb", "color", {
-                                $extensions: {
-                                    "studio.tokens": { modify: { type: "darken", value: "0.5" } },
-                                },
-                            }),
-                            mixed: old("#ff0000", "color", {
-                                $extensions: {
-                                    "studio.tokens": {
-                                        modify: {
-                                            type: "mix",
-                                            value: "0.5",
-                                            color: "{color.white}",
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: GLOBAL,
+                        light: {
+                            color: {
+                                ...LIGHT.color,
+                                lighter: old("#2563eb", "color", {
+                                    $extensions: {
+                                        "studio.tokens": {
+                                            modify: { type: "lighten", value: "0.5" },
                                         },
                                     },
-                                },
-                            }),
+                                }),
+                                darker: old("#2563eb", "color", {
+                                    $extensions: {
+                                        "studio.tokens": {
+                                            modify: { type: "darken", value: "0.5" },
+                                        },
+                                    },
+                                }),
+                                mixed: old("#ff0000", "color", {
+                                    $extensions: {
+                                        "studio.tokens": {
+                                            modify: {
+                                                type: "mix",
+                                                value: "0.5",
+                                                color: "{color.white}",
+                                            },
+                                        },
+                                    },
+                                }),
+                            },
                         },
+                        $themes: [],
+                        $metadata: { tokenSetOrder: ["global", "light"] },
                     },
-                    $themes: [],
-                    $metadata: { tokenSetOrder: ["global", "light"] },
-                },
-            }),
+                }),
+            ),
         ),
     );
 
@@ -251,35 +262,37 @@ test("a color: rgba() of a reference; a token with a modifier is left out, not d
 
 test("a folder of Tokens Studio files: $metadata.json, $themes.json, and a file for each set, in folders", () => {
     const scan = scanTokens(
-        project({
-            "tokens/$metadata.json": {
-                tokenSetOrder: ["global", "semantic/light", "semantic/dark", "brand/b2c"],
-            },
-            "tokens/$themes.json": [
-                {
-                    id: "x1",
-                    name: "light",
-                    selectedTokenSets: {
-                        global: "source",
-                        "semantic/light": "enabled",
-                        "brand/b2c": "enabled",
-                    },
+        hostPlace(
+            project({
+                "tokens/$metadata.json": {
+                    tokenSetOrder: ["global", "semantic/light", "semantic/dark", "brand/b2c"],
                 },
-                {
-                    id: "x2",
-                    name: "dark",
-                    selectedTokenSets: {
-                        global: "source",
-                        "semantic/dark": "enabled",
-                        "brand/b2c": "enabled",
+                "tokens/$themes.json": [
+                    {
+                        id: "x1",
+                        name: "light",
+                        selectedTokenSets: {
+                            global: "source",
+                            "semantic/light": "enabled",
+                            "brand/b2c": "enabled",
+                        },
                     },
-                },
-            ],
-            "tokens/global.json": GLOBAL,
-            "tokens/semantic/light.json": LIGHT,
-            "tokens/semantic/dark.json": DARK,
-            "tokens/brand/b2c.json": { color: { brand: old("{color.indigo.600}", "color") } },
-        }),
+                    {
+                        id: "x2",
+                        name: "dark",
+                        selectedTokenSets: {
+                            global: "source",
+                            "semantic/dark": "enabled",
+                            "brand/b2c": "enabled",
+                        },
+                    },
+                ],
+                "tokens/global.json": GLOBAL,
+                "tokens/semantic/light.json": LIGHT,
+                "tokens/semantic/dark.json": DARK,
+                "tokens/brand/b2c.json": { color: { brand: old("{color.indigo.600}", "color") } },
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -294,24 +307,26 @@ test("a folder of Tokens Studio files: $metadata.json, $themes.json, and a file 
 test("a folder whose name is not tokens: the files beside $themes.json are the sets", () => {
     const system = load(
         scanTokens(
-            project({
-                "figma/$themes.json": [
-                    {
-                        id: "1",
-                        name: "Light",
-                        selectedTokenSets: { base: "source", day: "enabled" },
-                    },
-                    {
-                        id: "2",
-                        name: "Dark",
-                        selectedTokenSets: { base: "source", night: "enabled" },
-                    },
-                ],
-                "figma/$metadata.json": { tokenSetOrder: ["base", "day", "night"] },
-                "figma/base.json": GLOBAL,
-                "figma/day.json": LIGHT,
-                "figma/night.json": DARK,
-            }),
+            hostPlace(
+                project({
+                    "figma/$themes.json": [
+                        {
+                            id: "1",
+                            name: "Light",
+                            selectedTokenSets: { base: "source", day: "enabled" },
+                        },
+                        {
+                            id: "2",
+                            name: "Dark",
+                            selectedTokenSets: { base: "source", night: "enabled" },
+                        },
+                    ],
+                    "figma/$metadata.json": { tokenSetOrder: ["base", "day", "night"] },
+                    "figma/base.json": GLOBAL,
+                    "figma/day.json": LIGHT,
+                    "figma/night.json": DARK,
+                }),
+            ),
         ),
     );
 
@@ -328,9 +343,11 @@ test("no themes: sets named for dark are the dark mode, the others are the defau
     ] as const) {
         const system = load(
             scanTokens(
-                project({
-                    "tokens.json": { [base]: GLOBAL, [lightName]: LIGHT, [darkName]: DARK },
-                }),
+                hostPlace(
+                    project({
+                        "tokens.json": { [base]: GLOBAL, [lightName]: LIGHT, [darkName]: DARK },
+                    }),
+                ),
             ),
         );
         const label = [base, lightName, darkName].join(", ");
@@ -344,56 +361,58 @@ test("no themes: sets named for dark are the dark mode, the others are the defau
 
 test("themes in groups apply together: a mode group and a brand group; extra themes of the mode group are modes", () => {
     const scan = scanTokens(
-        project({
-            "tokens.json": {
-                core: GLOBAL,
-                light: LIGHT,
-                dark: DARK,
-                contrast: {
-                    color: {
-                        bg: { page: old("#000000", "color") },
-                        text: { primary: old("#ffffff", "color") },
+        hostPlace(
+            project({
+                "tokens.json": {
+                    core: GLOBAL,
+                    light: LIGHT,
+                    dark: DARK,
+                    contrast: {
+                        color: {
+                            bg: { page: old("#000000", "color") },
+                            text: { primary: old("#ffffff", "color") },
+                        },
+                    },
+                    "brand-a": { color: { brand: old("{color.indigo.600}", "color") } },
+                    "brand-b": { color: { brand: old("{color.red.500}", "color") } },
+                    $themes: [
+                        {
+                            id: "1",
+                            name: "Light",
+                            group: "Mode",
+                            selectedTokenSets: { core: "source", light: "enabled" },
+                        },
+                        {
+                            id: "2",
+                            name: "Dark",
+                            group: "Mode",
+                            selectedTokenSets: { core: "source", dark: "enabled" },
+                        },
+                        {
+                            id: "3",
+                            name: "High contrast",
+                            group: "Mode",
+                            selectedTokenSets: { core: "source", contrast: "enabled" },
+                        },
+                        {
+                            id: "4",
+                            name: "Brand A",
+                            group: "Brand",
+                            selectedTokenSets: { "brand-a": "enabled" },
+                        },
+                        {
+                            id: "5",
+                            name: "Brand B",
+                            group: "Brand",
+                            selectedTokenSets: { "brand-b": "enabled" },
+                        },
+                    ],
+                    $metadata: {
+                        tokenSetOrder: ["core", "light", "dark", "contrast", "brand-a", "brand-b"],
                     },
                 },
-                "brand-a": { color: { brand: old("{color.indigo.600}", "color") } },
-                "brand-b": { color: { brand: old("{color.red.500}", "color") } },
-                $themes: [
-                    {
-                        id: "1",
-                        name: "Light",
-                        group: "Mode",
-                        selectedTokenSets: { core: "source", light: "enabled" },
-                    },
-                    {
-                        id: "2",
-                        name: "Dark",
-                        group: "Mode",
-                        selectedTokenSets: { core: "source", dark: "enabled" },
-                    },
-                    {
-                        id: "3",
-                        name: "High contrast",
-                        group: "Mode",
-                        selectedTokenSets: { core: "source", contrast: "enabled" },
-                    },
-                    {
-                        id: "4",
-                        name: "Brand A",
-                        group: "Brand",
-                        selectedTokenSets: { "brand-a": "enabled" },
-                    },
-                    {
-                        id: "5",
-                        name: "Brand B",
-                        group: "Brand",
-                        selectedTokenSets: { "brand-b": "enabled" },
-                    },
-                ],
-                $metadata: {
-                    tokenSetOrder: ["core", "light", "dark", "contrast", "brand-a", "brand-b"],
-                },
-            },
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -408,20 +427,22 @@ test("themes in groups apply together: a mode group and a brand group; extra the
 test("a theme that is only dark is the default mode; a theme that is not dark and has no dark set has one mode", () => {
     const onlyDark = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: GLOBAL,
-                    dark: DARK,
-                    $themes: [
-                        {
-                            id: "1",
-                            name: "Dark",
-                            selectedTokenSets: { global: "source", dark: "enabled" },
-                        },
-                    ],
-                    $metadata: { tokenSetOrder: ["global", "dark"] },
-                },
-            }),
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: GLOBAL,
+                        dark: DARK,
+                        $themes: [
+                            {
+                                id: "1",
+                                name: "Dark",
+                                selectedTokenSets: { global: "source", dark: "enabled" },
+                            },
+                        ],
+                        $metadata: { tokenSetOrder: ["global", "dark"] },
+                    },
+                }),
+            ),
         ),
     );
 
@@ -430,20 +451,22 @@ test("a theme that is only dark is the default mode; a theme that is not dark an
 
     const one = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: GLOBAL,
-                    light: LIGHT,
-                    $themes: [
-                        {
-                            id: "1",
-                            name: "Default",
-                            selectedTokenSets: { global: "enabled", light: "enabled" },
-                        },
-                    ],
-                    $metadata: { tokenSetOrder: ["global", "light"] },
-                },
-            }),
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: GLOBAL,
+                        light: LIGHT,
+                        $themes: [
+                            {
+                                id: "1",
+                                name: "Default",
+                                selectedTokenSets: { global: "enabled", light: "enabled" },
+                            },
+                        ],
+                        $metadata: { tokenSetOrder: ["global", "light"] },
+                    },
+                }),
+            ),
         ),
     );
 
@@ -454,30 +477,32 @@ test("a theme that is only dark is the default mode; a theme that is not dark an
 test("a reference that loops or points nowhere drops that token, not the scan; set names that are unsafe are only names", () => {
     const system = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: {
-                        color: {
-                            a: old("{color.b}", "color"),
-                            b: old("{color.a}", "color"),
-                            c: old("{color.nowhere}", "color"),
-                            fine: old("#123456", "color"),
-                            d: old("#abcdef", "color"),
-                            e: old("#fedcba", "color"),
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: {
+                            color: {
+                                a: old("{color.b}", "color"),
+                                b: old("{color.a}", "color"),
+                                c: old("{color.nowhere}", "color"),
+                                fine: old("#123456", "color"),
+                                d: old("#abcdef", "color"),
+                                e: old("#fedcba", "color"),
+                            },
+                            space: {
+                                1: old("1", "spacing"),
+                                2: old("2", "spacing"),
+                                3: old("3 * ", "spacing"),
+                                4: old("1 / 0", "spacing"),
+                            },
                         },
-                        space: {
-                            1: old("1", "spacing"),
-                            2: old("2", "spacing"),
-                            3: old("3 * ", "spacing"),
-                            4: old("1 / 0", "spacing"),
-                        },
+                        __proto__: { color: { x: old("#000000", "color") } },
+                        constructor: { color: { y: old("#000000", "color") } },
+                        $themes: [],
+                        $metadata: { tokenSetOrder: ["global", "__proto__"] },
                     },
-                    __proto__: { color: { x: old("#000000", "color") } },
-                    constructor: { color: { y: old("#000000", "color") } },
-                    $themes: [],
-                    $metadata: { tokenSetOrder: ["global", "__proto__"] },
-                },
-            }),
+                }),
+            ),
         ),
     );
 
@@ -490,9 +515,9 @@ test("a reference that loops or points nowhere drops that token, not the scan; s
 
 test("a round trip: the Tokens Studio file that Pi Pocket exports reads back as the same system, in every mode", () => {
     const flagship = join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket");
-    const original = loadDesignSystem(flagship)!;
+    const original = loadDesignSystem(hostFolder(flagship))!;
     const dir = project({ "tokens.json": original.compiled.studio! });
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
     const back = load(scan);
 
     assert.deepEqual(back.modes, original.modes);
@@ -542,7 +567,7 @@ test("a large file is read whole: a system with thousands of tokens is more than
 
     assert.ok(text.length > 300_000, String(text.length));
 
-    const scan = scanTokens(project({ "tokens.json": text }));
+    const scan = scanTokens(hostPlace(project({ "tokens.json": text })));
 
     assert.ok(scan.inferred.imported > 2900, `${scan.inferred.imported} tokens`);
 });
@@ -550,48 +575,50 @@ test("a large file is read whole: a system with thousands of tokens is more than
 test("Figma's own forms: AUTO line heights, textCase members that point nowhere, and paragraph spacing", () => {
     const system = load(
         scanTokens(
-            project({
-                "tokens.json": {
-                    global: {
-                        colors: {
-                            red: old("#ff0000", "color"),
-                            blue: old("#0000ff", "color"),
-                            ink: old("#111111", "color"),
-                        },
-                        fontFamilies: { roboto: old("Roboto", "fontFamilies") },
-                        fontWeights: {
-                            "roboto-0": old("Regular", "fontWeights"),
-                            "roboto-1": old("Bold", "fontWeights"),
-                        },
-                        lineHeights: {
-                            0: old("AUTO", "lineHeights"),
-                            1: old("125%", "lineHeights"),
-                        },
-                        fontSizes: { 0: old("12", "fontSizes"), 7: old("32", "fontSizes") },
-                        letterSpacing: { 0: old("0%", "letterSpacing") },
-                        paragraphSpacing: { 0: old("0", "paragraphSpacing") },
-                        typography: {
-                            heading: {
-                                h1: old(
-                                    {
-                                        fontFamily: "{fontFamilies.roboto}",
-                                        fontWeight: "{fontWeights.roboto-1}",
-                                        lineHeight: "{lineHeights.0}",
-                                        fontSize: "{fontSizes.7}",
-                                        letterSpacing: "{letterSpacing.0}",
-                                        paragraphSpacing: "{paragraphSpacing.0}",
-                                        textCase: "{textCase.none}",
-                                        textDecoration: "{textDecoration.none}",
-                                    },
-                                    "typography",
-                                ),
+            hostPlace(
+                project({
+                    "tokens.json": {
+                        global: {
+                            colors: {
+                                red: old("#ff0000", "color"),
+                                blue: old("#0000ff", "color"),
+                                ink: old("#111111", "color"),
+                            },
+                            fontFamilies: { roboto: old("Roboto", "fontFamilies") },
+                            fontWeights: {
+                                "roboto-0": old("Regular", "fontWeights"),
+                                "roboto-1": old("Bold", "fontWeights"),
+                            },
+                            lineHeights: {
+                                0: old("AUTO", "lineHeights"),
+                                1: old("125%", "lineHeights"),
+                            },
+                            fontSizes: { 0: old("12", "fontSizes"), 7: old("32", "fontSizes") },
+                            letterSpacing: { 0: old("0%", "letterSpacing") },
+                            paragraphSpacing: { 0: old("0", "paragraphSpacing") },
+                            typography: {
+                                heading: {
+                                    h1: old(
+                                        {
+                                            fontFamily: "{fontFamilies.roboto}",
+                                            fontWeight: "{fontWeights.roboto-1}",
+                                            lineHeight: "{lineHeights.0}",
+                                            fontSize: "{fontSizes.7}",
+                                            letterSpacing: "{letterSpacing.0}",
+                                            paragraphSpacing: "{paragraphSpacing.0}",
+                                            textCase: "{textCase.none}",
+                                            textDecoration: "{textDecoration.none}",
+                                        },
+                                        "typography",
+                                    ),
+                                },
                             },
                         },
+                        $themes: [],
+                        $metadata: { tokenSetOrder: ["global"] },
                     },
-                    $themes: [],
-                    $metadata: { tokenSetOrder: ["global"] },
-                },
-            }),
+                }),
+            ),
         ),
     );
     const h1 = token(system, "typography.heading.h1")!;

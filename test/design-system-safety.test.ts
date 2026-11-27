@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readDesignSystemText, writeDesignSystemText } from "../src/server/design/system.ts";
+import { hostFolder } from "./helpers.ts";
 
 test("design-system reads and writes refuse a linked .pi parent", () => {
     const root = mkdtempSync(join(tmpdir(), "design-system-parent-"));
@@ -15,8 +16,8 @@ test("design-system reads and writes refuse a linked .pi parent", () => {
 
         writeFileSync(path, "outside");
         symlinkSync(outside, join(root, ".pi"));
-        assert.throws(() => readDesignSystemText(root), /symlink/);
-        assert.throws(() => writeDesignSystemText(root, "changed"), /symlink/);
+        assert.throws(() => readDesignSystemText(hostFolder(root)), /symlink/);
+        assert.throws(() => writeDesignSystemText(hostFolder(root), "changed"), /symlink/);
         assert.equal(readFileSync(path, "utf8"), "outside");
     } finally {
         rmSync(root, { recursive: true, force: true });
@@ -33,7 +34,7 @@ test(
         try {
             mkdirSync(join(root, ".pi"));
             execFileSync("mkfifo", [join(root, ".pi", "design-system.md")]);
-            assert.throws(() => readDesignSystemText(root), /regular file/);
+            assert.throws(() => readDesignSystemText(hostFolder(root)), /regular file/);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }

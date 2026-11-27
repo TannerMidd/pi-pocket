@@ -4,12 +4,12 @@
  * Windows has no groups, signals, or readable environments: a task is its first process, its descendants, and a job
  * object, and a PowerShell helper ends a process only through a handle whose start time it checked.
  */
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, type SpawnOptions, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { win32 } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { append, exists, type FolderRef, folderPath, own, readdir, readText } from "./hostfs.ts";
 
 export const BACKGROUND_MARKER = "PI_POCKET_BACKGROUND";
 
@@ -32,7 +32,7 @@ export interface TaskProcesses {
     shell(): string | undefined;
     spawn(
         script: string,
-        cwd: string,
+        cwd: FolderRef,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
         authorize?: () => void,
@@ -68,14 +68,43 @@ function kill(pid: number, name: Signal | 0): boolean | undefined {
     }
 }
 
+/**
+ * The named spawn wrapper for a process that runs in a session's folder: the one place that starts a host process there.
+ * A folder that a sandboxed session uses never has one: its work runs in the VM, and a host process in it would run the
+ * guest's files with the owner's rights.
+ */
+export function spawnIn(
+    folder: FolderRef,
+    command: string,
+    args: string[],
+    options: Omit<SpawnOptions, "cwd">,
+): ChildProcess {
+    if (folder.sandboxed) {
+        throw new Error(
+            "A sandboxed session's work runs in its VM: a process on the host is not started in its folder.",
+        );
+    }
+
+    return spawn(command, args, { ...options, cwd: folderPath(folder) });
+}
+
+/** Whether `split`, which writes the logs of a background task, is on this machine, as `shell` finds it. */
+export function hasSplit(shell: string): boolean {
+    return (
+        spawnSync(shell, ["-p", "-c", "command -v split"], {
+            stdio: "ignore",
+            windowsHide: true,
+        }).status === 0
+    );
+}
+
 function spawnDetached(
     shell: string,
     script: string,
-    cwd: string,
+    cwd: FolderRef,
     env: NodeJS.ProcessEnv,
 ): ChildProcess {
-    const child = spawn(shell, ["-c", script], {
-        cwd,
+    const child = spawnIn(cwd, shell, ["-c", script], {
         detached: true,
         stdio: "ignore",
         env,
@@ -117,7 +146,7 @@ interface ProcTable {
 
 /** A filtered process directory can silently omit a live member, even when every stat succeeds. */
 function unrestrictedProc(proc: string): boolean {
-    const status = readFileSync(`${proc}/self/status`, "utf8");
+    const status = readText(own(`${proc}/self/status`));
 
     if (status.match(/^NSpid:([^\n]*)$/m)?.[1]?.trim() !== String(process.pid)) {
         return false;
@@ -125,7 +154,7 @@ function unrestrictedProc(proc: string): boolean {
 
     let found = false;
 
-    for (const line of readFileSync(`${proc}/self/mountinfo`, "utf8").split("\n")) {
+    for (const line of readText(own(`${proc}/self/mountinfo`)).split("\n")) {
         const [, , , root, path] = line.split(" ");
 
         if (path === "/proc") {
@@ -154,7 +183,7 @@ export class LinuxTable implements ProcTable {
         this.#now = now;
 
         try {
-            this.boot = readFileSync(`${proc}/sys/kernel/random/boot_id`, "utf8").trim();
+            this.boot = readText(own(`${proc}/sys/kernel/random/boot_id`)).trim();
         } catch {
             this.boot = undefined;
         }
@@ -163,7 +192,7 @@ export class LinuxTable implements ProcTable {
     #scan: { at: number; all: Proc[] } | undefined;
 
     unsupported(): string | undefined {
-        return existsSync(`${this.#proc}/self/stat`)
+        return exists(own(`${this.#proc}/self/stat`))
             ? undefined
             : "Background tasks need Linux with /proc, macOS, or Windows: they follow their processes through /proc here.";
     }
@@ -172,7 +201,7 @@ export class LinuxTable implements ProcTable {
 
     stat(pid: number): (Proc & { sid: number; threads: number }) | undefined {
         try {
-            const text = readFileSync(`${this.#proc}/${pid}/stat`, "utf8");
+            const text = readText(own(`${this.#proc}/${pid}/stat`));
             // After the name, which can hold spaces and parentheses: state (3), ppid (4), pgrp (5), …, starttime (22).
             const rest = text.slice(text.lastIndexOf(")") + 2).split(" ");
 
@@ -211,7 +240,7 @@ export class LinuxTable implements ProcTable {
 
         const all: Proc[] = [];
 
-        for (const name of readdirSync(this.#proc)) {
+        for (const name of readdir(own(this.#proc))) {
             if (/^\d+$/.test(name)) {
                 const info = this.stat(Number(name));
 
@@ -263,8 +292,7 @@ export class LinuxTable implements ProcTable {
             return false;
         }
 
-        const forks = () =>
-            readFileSync(`${this.#proc}/stat`, "utf8").match(/^processes (\d+)$/m)?.[1];
+        const forks = () => readText(own(`${this.#proc}/stat`)).match(/^processes (\d+)$/m)?.[1];
 
         try {
             if (!unrestrictedProc(this.#proc)) {
@@ -278,7 +306,7 @@ export class LinuxTable implements ProcTable {
                 return false;
             }
 
-            for (const name of readdirSync(this.#proc)) {
+            for (const name of readdir(own(this.#proc))) {
                 if (!/^\d+$/.test(name)) {
                     continue;
                 }
@@ -334,7 +362,7 @@ export class LinuxTable implements ProcTable {
 
     marked(pid: number, marker: string): boolean {
         try {
-            return readFileSync(`${this.#proc}/${pid}/environ`, "utf8")
+            return readText(own(`${this.#proc}/${pid}/environ`))
                 .split("\0")
                 .includes(`${BACKGROUND_MARKER}=${marker}`);
         } catch {
@@ -762,7 +790,7 @@ export class PosixProcesses implements TaskProcesses {
 
     async spawn(
         script: string,
-        cwd: string,
+        cwd: FolderRef,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
     ): Promise<{ pid: number; start?: number }> {
@@ -1385,7 +1413,7 @@ function findGitBash(): string | undefined {
         .map((folder) => win32.join(folder!, "Git", "bin", "bash.exe"));
 
     for (const candidate of candidates) {
-        if (existsSync(candidate)) {
+        if (exists(own(candidate))) {
             return candidate;
         }
     }
@@ -1490,7 +1518,7 @@ export class WindowsProcesses implements TaskProcesses {
                 const key = this.#key(task);
                 const saved = new Map<number, number>();
 
-                for (const line of readFileSync(`${task.files}.pids`, "utf8")
+                for (const line of readText(own(`${task.files}.pids`))
                     .split("\n")
                     .slice(0, -1)) {
                     if (line === `job ${key}` || line === `empty ${key}`) {
@@ -1573,7 +1601,7 @@ export class WindowsProcesses implements TaskProcesses {
 
         if (found.length > 0) {
             try {
-                appendFileSync(`${task.files}.pids`, found.join(""));
+                append(own(`${task.files}.pids`), found.join(""));
             } catch {
                 // Its folder is gone: the task's files went with it.
             }
@@ -1619,7 +1647,7 @@ export class WindowsProcesses implements TaskProcesses {
 
     async spawn(
         script: string,
-        cwd: string,
+        cwd: FolderRef,
         env: NodeJS.ProcessEnv,
         task: TaskRef,
         authorize?: () => void,
@@ -1631,8 +1659,7 @@ export class WindowsProcesses implements TaskProcesses {
         }
 
         // Do not run environment startup hooks before job assignment. The command gets its own bash after the gate.
-        const child = spawn(shell, ["-p", "-c", WINDOWS_GATE + script], {
-            cwd,
+        const child = spawnIn(cwd, shell, ["-p", "-c", WINDOWS_GATE + script], {
             detached: true,
             windowsHide: true,
             stdio: ["pipe", "pipe", "ignore"],
@@ -1717,7 +1744,7 @@ export class WindowsProcesses implements TaskProcesses {
     }
 
     #recordCoverage(task: TaskRef, state: "job" | "empty"): void {
-        appendFileSync(`${task.files}.pids`, `\n${state} ${this.#key(task)}\n`, { flush: true });
+        append(own(`${task.files}.pids`), `\n${state} ${this.#key(task)}\n`, { flush: true });
         this.#coverage.set(task.marker, state);
     }
 

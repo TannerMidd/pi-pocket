@@ -1,4 +1,5 @@
 // The artifacts overview: every artifact in every session a person can see, with its current version.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -26,7 +27,7 @@ let app: App;
 let server: Server;
 let base: string;
 let calls = 0;
-const tools = createArtifacts({} as PocketHost).tools!;
+const tools = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools!;
 
 async function publish(session: ConversationId, args: Record<string, unknown>) {
     // A version's time is the real one: wait, so that each has a time of its own and "newest first" has one answer.

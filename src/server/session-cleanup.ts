@@ -3,8 +3,6 @@
  * conversation yet. `pocket.deleted` keeps each removed session, the queue for such a purge. A removal is one commit,
  * then the files: after a restart, `resume` goes on with the files.
  */
-import type { BigIntStats } from "node:fs";
-import { lstat, opendir, rmdir, unlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
@@ -23,6 +21,16 @@ import {
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { git } from "./git.ts";
+import {
+    type BigIntStats,
+    type FolderRef,
+    lstatAsync,
+    opendir,
+    own,
+    type Place,
+    rmdirAsync,
+    unlinkAsync,
+} from "./hostfs.ts";
 import type { ManagedFolderProof } from "./managed-storage.ts";
 import { sessionKey } from "./memory.ts";
 import { isEnvFile } from "./secrets.ts";
@@ -75,11 +83,11 @@ function noUploads(): UploadEstimate {
 export type CleanupOutcome = { id: number; done: boolean; why?: string; bytes?: number };
 
 /** Links not followed; 0 when it is not there. */
-async function sizeOf(path: string): Promise<number> {
+async function sizeOf(path: Place): Promise<number> {
     let bytes = 0;
     let counted = 0;
 
-    const walk = async (folder: string): Promise<void> => {
+    const walk = async (folder: Place): Promise<void> => {
         let dir;
 
         try {
@@ -93,17 +101,17 @@ async function sizeOf(path: string): Promise<number> {
                 return;
             }
 
-            const full = join(folder, entry.name);
+            const full = folder.child(entry.name);
 
             if (entry.isDirectory()) {
                 await walk(full);
             } else {
-                bytes += (await lstat(full).catch(() => undefined))?.size ?? 0;
+                bytes += (await lstatAsync(full).catch(() => undefined))?.size ?? 0;
             }
         }
     };
 
-    const top = await lstat(path).catch(() => undefined);
+    const top = await lstatAsync(path).catch(() => undefined);
 
     if (top === undefined) {
         return 0;
@@ -123,11 +131,11 @@ async function sizeOf(path: string): Promise<number> {
  * `git worktree remove` deletes such files with no word. Other ignored files (`dist`) do not count, and `node_modules`
  * folders are not read. A worktree with more ignored files than `MAX_COUNTED` counts as having one.
  */
-async function hasIgnoredEnv(path: string): Promise<boolean> {
+async function hasIgnoredEnv(path: FolderRef): Promise<boolean> {
     const listed = await git(path, ["status", "--porcelain", "-z", "--ignored"]);
     let counted = 0;
 
-    const walk = async (folder: string): Promise<boolean> => {
+    const walk = async (folder: Place): Promise<boolean> => {
         let dir;
 
         try {
@@ -149,7 +157,7 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
             if (
                 entry.isDirectory() &&
                 entry.name !== "node_modules" &&
-                (await walk(join(folder, entry.name)))
+                (await walk(folder.child(entry.name)))
             ) {
                 return true;
             }
@@ -170,7 +178,7 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
             continue;
         }
 
-        if (name.endsWith("/") ? await walk(join(path, name)) : isEnvFile(basename(name))) {
+        if (name.endsWith("/") ? await walk(path.at(name)) : isEnvFile(basename(name))) {
             return true;
         }
     }
@@ -331,7 +339,7 @@ export class SessionCleanup {
             result.kept = true;
 
             if (sweep === undefined) {
-                result.bytes = result.retainedBytes = await sizeOf(folder);
+                result.bytes = result.retainedBytes = await sizeOf(own(folder));
             }
 
             return result;
@@ -342,14 +350,14 @@ export class SessionCleanup {
         }
 
         const entries = new Map<string, Pick<BigIntStats, "size" | "dev" | "ino" | "ctimeNs">>();
-        const dir = await opendir(folder);
+        const dir = await opendir(own(folder));
 
         for await (const entry of dir) {
             if (!entry.isFile() || entries.size >= MAX_COUNTED) {
                 return keepAll();
             }
 
-            const stat = await lstat(join(folder, entry.name), { bigint: true });
+            const stat = await lstatAsync(own(join(folder, entry.name)), { bigint: true });
 
             if (!stat.isFile() || !stat.ino || stat.nlink !== 1n) {
                 return keepAll();
@@ -378,7 +386,7 @@ export class SessionCleanup {
 
                 if (sweep !== undefined) {
                     const path = join(folder, name);
-                    const current = await lstat(path, { bigint: true });
+                    const current = await lstatAsync(own(path), { bigint: true });
 
                     if (
                         checkedFolder() !== folder ||
@@ -389,7 +397,7 @@ export class SessionCleanup {
                         throw new Error("The file changed during cleanup.");
                     }
 
-                    await unlink(path);
+                    await unlinkAsync(own(path));
                     sweep.removed(size);
                 }
             }
@@ -400,7 +408,7 @@ export class SessionCleanup {
                 throw new Error("The managed folder changed.");
             }
 
-            await rmdir(folder);
+            await rmdirAsync(own(folder));
         }
 
         return result;
@@ -431,7 +439,7 @@ export class SessionCleanup {
         }
 
         const app = this.#app;
-        const inside = (cwd: string) => inWorktree(worktree, cwd);
+        const inside = (cwd: string) => inWorktree(app.hostfs, worktree, cwd);
         const mine = new Set(app.conversationsOf(id).map(Number));
         let state: WorktreeState = "clean";
 
@@ -448,11 +456,11 @@ export class SessionCleanup {
         ) {
             state = "shared";
         } else {
-            const status = await git(worktree.path, ["status", "--porcelain"]);
+            const status = await git(app.hostfs.folder(worktree.path), ["status", "--porcelain"]);
 
             if (status.trim() !== "") {
                 state = "changes";
-            } else if (await hasIgnoredEnv(worktree.path).catch(() => true)) {
+            } else if (await hasIgnoredEnv(app.hostfs.folder(worktree.path)).catch(() => true)) {
                 state = "env";
             }
         }
@@ -460,7 +468,7 @@ export class SessionCleanup {
         return {
             path: worktree.path,
             branch: worktree.branch,
-            bytes: await sizeOf(worktree.path),
+            bytes: await sizeOf(app.hostfs.folder(worktree.path).at()),
             state,
         };
     }
@@ -630,12 +638,16 @@ export class SessionCleanup {
                 continue;
             }
 
-            if (folder !== undefined && (await hasIgnoredEnv(folder).catch(() => true))) {
+            if (
+                folder !== undefined &&
+                (await hasIgnoredEnv(this.#app.hostfs.folder(folder)).catch(() => true))
+            ) {
                 outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
                 continue;
             }
 
-            const bytes = folder === undefined ? 0 : await sizeOf(folder);
+            const bytes =
+                folder === undefined ? 0 : await sizeOf(this.#app.hostfs.folder(folder).at());
 
             try {
                 if (this.#worktreeFolder(meta.worktree) !== folder) {
@@ -876,13 +888,13 @@ export class SessionCleanup {
                     return;
                 }
 
-                if (await hasIgnoredEnv(folder).catch(() => true)) {
+                if (await hasIgnoredEnv(this.#app.hostfs.folder(folder)).catch(() => true)) {
                     throw new Error(ENV_STAYS);
                 }
 
-                const size = await sizeOf(folder);
+                const size = await sizeOf(this.#app.hostfs.folder(folder).at());
 
-                await removeWorktree(tree, false, () => {
+                await removeWorktree(this.#app.hostfs, tree, false, () => {
                     if (checkedFolder() !== folder) {
                         throw new Error("The worktree changed during cleanup.");
                     }

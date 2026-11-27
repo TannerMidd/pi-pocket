@@ -1,0 +1,485 @@
+{
+    "base": "690ebd74",
+    "note": "docs/design/sandbox-v2-census.md. own: only Pocket's own data, install, config, or system paths. wrapper: a named spawn wrapper. hostfs: the one module for host files. convert and split: no direct fs or child_process import; their session-folder access goes through hostfs.",
+    "files": {
+        "avatars.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "avatar store in the data dir"
+        },
+        "background.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "task records (own); process cwd and `/proc` (folder, work)"
+        },
+        "branches.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.git` of the session folder"
+        },
+        "browser/cdp.ts": {
+            "verdict": "own",
+            "primitives": ["child_process", "fs"],
+            "source": "browser binary and profile under the data dir"
+        },
+        "browser/discovery.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "system browser locations"
+        },
+        "browser/local-servers.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "`/proc` listeners"
+        },
+        "build.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "install folder"
+        },
+        "changes.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "session folder: status, undo, diffs"
+        },
+        "commands.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "session folder, uploads, worktrees"
+        },
+        "config.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "config file in the data dir"
+        },
+        "custom-providers.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "config in the data dir"
+        },
+        "design/files.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "exports into the session folder"
+        },
+        "design/render.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "artifact bundles in the data dir"
+        },
+        "design/scan-fig-container.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "scans the session folder"
+        },
+        "design/scan-files.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "scans the session folder"
+        },
+        "design/scan-render-pages.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "scans the session folder"
+        },
+        "design/scan.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`realpathSync(cwd)` of the session folder"
+        },
+        "design/system.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.pi/design/` in the session folder"
+        },
+        "design/tokens-cache.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.pi/design/` in the session folder"
+        },
+        "design/tokens-io.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.pi/design/` in the session folder"
+        },
+        "design/tokens.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.pi/design/` in the session folder"
+        },
+        "dropin-config.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "drop-in config in the data dir"
+        },
+        "extension-web.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "extension files"
+        },
+        "extensions/codemode.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "script file in the data dir"
+        },
+        "extensions/design/system-routes.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "design system of the session folder"
+        },
+        "extensions/pip.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "`<data>/pip.md`"
+        },
+        "extensions/pocket-relay.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "`folderOf(cwd)` for file fetch; relay folder (own)"
+        },
+        "extensions/pocket-relay/files.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`realpath(cwd)` and writes into the session folder"
+        },
+        "extensions/pocket-relay/recovery.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "relay state in the data dir"
+        },
+        "extensions/pocket-relay/runtime.ts": {
+            "verdict": "own",
+            "primitives": ["fs", "fs/promises"],
+            "source": "relay folder in the data dir"
+        },
+        "extensions/prompt.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "`trust.json` in the agent dir"
+        },
+        "file-policy.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`realpath` and `stat` of requested paths"
+        },
+        "files.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "session folder; `git check-ignore`"
+        },
+        "gallery.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "gallery in the data dir"
+        },
+        "gallery/files.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "gallery in the data dir"
+        },
+        "gallery/reach.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "gallery in the data dir"
+        },
+        "gallery/share.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "gallery in the data dir"
+        },
+        "gallery/themes.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "gallery in the data dir"
+        },
+        "git-own.ts": {
+            "verdict": "wrapper",
+            "primitives": ["child_process"],
+            "source": "Git in Pocket's own folders: the install and its update state"
+        },
+        "git.ts": {
+            "verdict": "wrapper",
+            "primitives": ["child_process"],
+            "source": "becomes the named wrapper `runGit` (hardened Git runner)"
+        },
+        "github.ts": {
+            "verdict": "wrapper",
+            "primitives": ["child_process"],
+            "source": "becomes `runGh`; `gh` runs Git itself, so it is hardened like Git"
+        },
+        "hostfs.ts": {
+            "verdict": "hostfs",
+            "primitives": ["fs", "fs/promises"],
+            "source": "the one module that touches the file system for host code (`/proc/self/fd` walk)"
+        },
+        "http.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "web files and sockets"
+        },
+        "http/api.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "uploads and file routes"
+        },
+        "http/assets.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "web assets (own); artifact and session files (folder)"
+        },
+        "http/conversation-routes.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "file, image, and download routes"
+        },
+        "http/io.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "web files"
+        },
+        "icon-store.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "icons in the data dir"
+        },
+        "lancet.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "guard model and settings"
+        },
+        "limit-gate.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "data dir"
+        },
+        "lock.ts": {
+            "verdict": "own",
+            "primitives": ["child_process", "fs"],
+            "source": "data-dir lock; `ps`"
+        },
+        "main.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "data dir at start"
+        },
+        "managed-storage.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "managed folders in the data dir"
+        },
+        "memory.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`realpath(cwd)` as the project key (identity only)"
+        },
+        "model-images.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "image path given by a tool or message"
+        },
+        "npm-install.ts": {
+            "verdict": "own",
+            "primitives": ["child_process", "fs", "fs/promises"],
+            "source": "extension installs in the data dir"
+        },
+        "npm-update.ts": {
+            "verdict": "own",
+            "primitives": ["child_process", "fs/promises"],
+            "source": "install folder"
+        },
+        "omarchy.ts": {
+            "verdict": "own",
+            "primitives": ["fs/promises"],
+            "source": "desktop config"
+        },
+        "pi-sessions.ts": {
+            "verdict": "own",
+            "primitives": ["fs", "fs/promises"],
+            "source": "Pi's session files in `~/.pi`"
+        },
+        "pip.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "PiP clones (own); a source folder"
+        },
+        "processes.ts": {
+            "verdict": "wrapper",
+            "primitives": ["child_process"],
+            "source": "named wrapper `spawnIn(folderRef)` (folder, work); `/proc` (own)"
+        },
+        "project-model.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "`.pi/settings.json` of the session folder"
+        },
+        "prompts.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "project prompts, `paths` against the folder"
+        },
+        "push.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "push state in the data dir"
+        },
+        "reload.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "extension files"
+        },
+        "reveal.ts": {
+            "verdict": "wrapper",
+            "primitives": ["child_process"],
+            "source": "becomes the named wrapper `reveal(folderRef, name)`"
+        },
+        "secrets.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "`.env` files of the session folder (folder); other secrets (own)"
+        },
+        "session-cleanup.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "data dir (own); worktree folders (managed)"
+        },
+        "skills.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "project skills; `existsSync` and `realpathSync` of the folder"
+        },
+        "socket-path.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "socket path"
+        },
+        "themes.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "themes"
+        },
+        "themes/reserved.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "themes"
+        },
+        "update-state.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "update state"
+        },
+        "updates.ts": {
+            "verdict": "own",
+            "primitives": ["child_process", "fs", "fs/promises"],
+            "source": "install folder"
+        },
+        "upload-references.ts": {
+            "verdict": "own",
+            "primitives": ["fs", "fs/promises"],
+            "source": "uploads in the data dir; hard links are made between own files"
+        },
+        "versions.ts": {
+            "verdict": "own",
+            "primitives": ["fs"],
+            "source": "install folder"
+        },
+        "workspace.ts": {
+            "verdict": "convert",
+            "primitives": [],
+            "source": "the session folder: files, git dir, `makeFolder`"
+        },
+        "worktrees.ts": {
+            "verdict": "split",
+            "primitives": [],
+            "source": "managed worktrees (own); source folder, `copyNewFiles`, Git"
+        }
+    },
+    "indirect": {
+        "design/guide.ts": {
+            "verdict": "convert",
+            "reaches": "`readDesignSystemText`, `loadDesignSystem` (the guest's `.pi/design/` goes into the prompt): they take a `FolderRef` now"
+        },
+        "heic.ts": {
+            "verdict": "convert",
+            "reaches": "`model-images.ts` places: it takes bytes only"
+        },
+        "heic-worker.ts": {
+            "verdict": "convert",
+            "reaches": "bytes only"
+        },
+        "repo-watches.ts": {
+            "verdict": "hardened runner",
+            "reaches": "`gh` through `runGh`, which has `runGit`'s environment and gate"
+        },
+        "browser.ts": {
+            "verdict": "own",
+            "reaches": "the host browser: refused for sandboxed trees, so it is `own` in every row"
+        },
+        "browser/page.ts": {
+            "verdict": "own",
+            "reaches": "the host browser: refused for sandboxed trees"
+        },
+        "extension-request.ts": {
+            "verdict": "hostfs-backed",
+            "reaches": "`host.folderOf`, `host.hostfs`"
+        },
+        "extension-sessions.ts": {
+            "verdict": "hostfs-backed",
+            "reaches": "`host.folderOf`, `host.hostfs`"
+        },
+        "prompts.ts": {
+            "verdict": "convert",
+            "reaches": "templates through `hostfs`"
+        },
+        "skills.ts": {
+            "verdict": "convert",
+            "reaches": "Pi's `loadSkills` and `loadSkillsFromDir` on a snapshot (`snapshots.ts`)"
+        },
+        "extensions/prompt.ts": {
+            "verdict": "own",
+            "reaches": "`trust.json` in the agent dir (own); the project's `AGENTS.md` files come through `Snapshots.contextFiles`"
+        }
+    },
+    "escapes": {
+        "createRequire": {
+            "lancet.ts": "resolves a package of the guard module (`resolve` only)",
+            "extension-document-imports.ts": "resolves the packages that drop-ins import (`resolve` only)",
+            "app.ts": "resolves a package's asset path (`resolve` only)"
+        },
+        "getBuiltinModule": {},
+        "binding": {},
+        "dlopen": {
+            "gallery/reach.ts": "a pattern that detects it in a gallery extension; it loads nothing"
+        }
+    },
+    "loaders": {
+        "pattern": "loadProjectContextFiles|loadSkills|loadSkillsFromDir",
+        "note": "Pi's loaders read the paths they are given, so only these files call them: on a snapshot for a sandboxed folder.",
+        "allowed": ["skills.ts", "snapshots.ts"]
+    },
+    "packages": {
+        "banned": [
+            "execa",
+            "cross-spawn",
+            "fs-extra",
+            "graceful-fs",
+            "shelljs",
+            "glob",
+            "fast-glob",
+            "tinyglobby",
+            "globby",
+            "rimraf",
+            "chokidar",
+            "node-pty",
+            "simple-git",
+            "adm-zip",
+            "extract-zip",
+            "tar"
+        ],
+        "capable": {
+            "jiti": ["lancet.ts"],
+            "@earendil-works/pi-codemode": ["extensions/codemode.ts"],
+            "@earendil-works/pi-mcp": [],
+            "heic-convert": ["heic-worker.ts"]
+        }
+    }
+}

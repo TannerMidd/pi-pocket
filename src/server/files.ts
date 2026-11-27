@@ -5,19 +5,24 @@
  * has the newest one hears only that, and is compressed on demand. Browsers match the list
  * themselves as people type: typing never waits on the network.
  */
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { lstat, open, opendir, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
 import { git } from "./git.ts";
+import {
+    type Dirent,
+    type FolderRef,
+    lstatAsync,
+    open,
+    opendir,
+    Place,
+    statAsync,
+} from "./hostfs.ts";
 import { type ReadableFile, withUploadBytes } from "./upload-content.ts";
 
 const gzip = promisify(gzipCallback);
-const exec = promisify(execFile);
 
 /** The most files a list holds. Past it, the files nearest the folder's top are kept. */
 export const MAX_FILES = 100_000;
@@ -68,12 +73,12 @@ export type FileListing = FileList & { json: string; gzipped(): Promise<Buffer> 
 
 type Entry = { at: number; freshFor: number; listing: Promise<FileListing> };
 
-/** The files git lists in `cwd`, or undefined when it is not in a repository (or git is not installed, or failed). */
-async function gitFiles(cwd: string, timeoutMs = 10_000): Promise<string | undefined> {
+/** The files git lists in a folder, or undefined when it is not in a repository (or git is not installed, or failed). */
+async function gitFiles(folder: FolderRef, timeoutMs = 10_000): Promise<string | undefined> {
     try {
         // Past this much, a walk (which stops at its own limits) does instead.
         const out = await git(
-            cwd,
+            folder,
             ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             { timeoutMs, maxBuffer: 32 * 1024 * 1024 },
         );
@@ -93,13 +98,13 @@ const DIR_EXTRA = 1000;
  * `more` says some were left. Stops early, with `more`, past `deadline`.
  */
 async function readSome(
-    path: string,
+    place: Place,
     limit: number,
     deadline = Number.POSITIVE_INFINITY,
     allow?: FileFilter["allow"],
 ): Promise<{ entries: Dirent[]; more: boolean }> {
     const entries: Dirent[] = [];
-    const dir = await opendir(path, { bufferSize: 256 });
+    const dir = await opendir(place, { bufferSize: 256 });
     let scanned = 0;
 
     // Leaving the loop early closes the folder.
@@ -108,7 +113,7 @@ async function readSome(
             return { entries, more: true };
         }
 
-        if (allow !== undefined && !(await allow(join(path, entry.name)))) {
+        if (allow !== undefined && !(await allow(join(place.display.text, entry.name)))) {
             continue;
         }
 
@@ -124,7 +129,7 @@ async function readSome(
 
 /** The files under `cwd`, nearest first, without hidden folders or `SKIP`: at most `max`, found within `ms`. */
 async function walkFiles(
-    cwd: string,
+    folder: FolderRef,
     max: number,
     ms: number,
 ): Promise<{ files: string[]; truncated: boolean }> {
@@ -142,11 +147,7 @@ async function walkFiles(
         let read;
 
         try {
-            read = await readSome(
-                dir === "" ? cwd : `${cwd}/${dir}`,
-                max - files.length + DIR_EXTRA,
-                deadline,
-            );
+            read = await readSome(folder.at(dir), max - files.length + DIR_EXTRA, deadline);
         } catch {
             continue;
         }
@@ -210,7 +211,7 @@ type WalkEntry = { name: string; dir: boolean };
 
 /** A partial directory is never opened. Even a missing candidate consumes one unit of scan work. */
 async function* candidates(
-    dir: string,
+    dir: Place,
     known: readonly string[] | undefined,
 ): AsyncGenerator<WalkEntry | undefined> {
     if (known === undefined) {
@@ -235,7 +236,7 @@ async function* candidates(
             }
 
             seen.add(name);
-            const info = await lstat(join(dir, name)).catch(() => undefined);
+            const info = await lstatAsync(dir.child(name)).catch(() => undefined);
 
             yield info && { name, dir: info.isDirectory() };
         }
@@ -243,27 +244,21 @@ async function* candidates(
 }
 
 /** Check only these candidates, without asking git to discover any files. NULs preserve every filename. */
-async function ignoredFiles(dir: string, names: string[], deadline: number): Promise<Set<string>> {
-    const command = exec(
-        "git",
-        ["--no-literal-pathspecs", "-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
-        {
-            cwd: dir,
-            timeout: Math.max(1, deadline - Date.now()),
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
-        },
-    );
-
-    // Git may exit before consuming stdin; the command promise reports its error.
-    command.child.stdin!.on("error", () => {});
-    command.child.stdin!.end(names.map((name) => `./${name}\0`).join(""));
-
+async function ignoredFiles(
+    dir: FolderRef,
+    names: string[],
+    deadline: number,
+): Promise<Set<string>> {
     try {
-        const { stdout } = await command;
+        const stdout = await git(dir, ["check-ignore", "-z", "--stdin"], {
+            timeoutMs: Math.max(1, deadline - Date.now()),
+            literalPaths: false,
+            input: names.map((name) => `./${name}\0`).join(""),
+        });
 
         return new Set(stdout.split("\0").map((path) => path.slice(2)));
     } catch (error) {
-        if ((error as { code?: number }).code === 1) {
+        if ((error as { exitCode?: number }).exitCode === 1) {
             return new Set();
         }
 
@@ -272,10 +267,10 @@ async function ignoredFiles(dir: string, names: string[], deadline: number): Pro
 }
 
 /** A bounded breadth-first walk. A denied name spends scan work, never a result slot. */
-async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
+async function filteredFiles(folder: FolderRef, max: number, filter: FileFilter) {
     const files: string[] = [];
     const deadline = Date.now() + WALK_MS;
-    const root = resolve(cwd);
+    const root = folder.display.text;
 
     if (filter.children(root)?.length === 0) {
         return { files, truncated: false };
@@ -283,7 +278,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
 
     const repository =
         (
-            await git(root, ["rev-parse", "--is-inside-work-tree"], { timeoutMs: WALK_MS }).catch(
+            await git(folder, ["rev-parse", "--is-inside-work-tree"], { timeoutMs: WALK_MS }).catch(
                 () => "",
             )
         ).trim() === "true";
@@ -298,6 +293,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
 
         const prefix = queue[i]!;
         const dir = join(root, prefix);
+        const here = folder.at(prefix);
         const known = filter.children(dir);
 
         if (known?.length === 0) {
@@ -309,7 +305,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
             repository &&
             prefix !== "" &&
             known === undefined &&
-            (await lstat(join(dir, ".git")).catch(() => undefined))
+            (await lstatAsync(here.child(".git")).catch(() => undefined))
         ) {
             continue;
         }
@@ -322,7 +318,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
             const ignored =
                 repository && batch.length !== 0
                     ? await ignoredFiles(
-                          dir,
+                          folder.host.folder(dir),
                           batch.map((entry) => entry.name),
                           deadline,
                       )
@@ -350,7 +346,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
         };
 
         try {
-            for await (const entry of candidates(dir, known)) {
+            for await (const entry of candidates(here, known)) {
                 if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
                     await flush();
 
@@ -457,20 +453,20 @@ function sortFrom(paths: string[], start: number): void {
 
 /** The files in `cwd`, filtered before computing the version of a restricted listing. */
 export async function listFiles(
-    cwd: string,
+    folder: FolderRef,
     max = MAX_FILES,
     filter?: FileFilter,
 ): Promise<FileList> {
-    const root = resolve(cwd);
+    const root = folder.display.text;
     const ordinary =
         filter === undefined || (filter.ordinaryTree && filter.children(root) === undefined);
-    const listed = ordinary ? await gitFiles(root, filter && WALK_MS) : undefined;
+    const listed = ordinary ? await gitFiles(folder, filter && WALK_MS) : undefined;
     const { files, truncated } =
         listed !== undefined
             ? await fromGit(listed, root, max, filter)
             : filter !== undefined
-              ? await filteredFiles(root, ordinary ? Math.min(max, WALK_FILES) : max, filter)
-              : await walkFiles(root, Math.min(max, WALK_FILES), WALK_MS);
+              ? await filteredFiles(folder, ordinary ? Math.min(max, WALK_FILES) : max, filter)
+              : await walkFiles(folder, Math.min(max, WALK_FILES), WALK_MS);
 
     const version = createHash("sha1")
         .update(files.join("\0"))
@@ -491,11 +487,12 @@ export class FileLists {
     }
 
     /** Only unrestricted callers share an in-flight or cached list. */
-    get(cwd: string, filter?: FileFilter): Promise<FileListing> {
+    get(folder: FolderRef, filter?: FileFilter): Promise<FileListing> {
         if (filter !== undefined) {
-            return this.#make(cwd, filter);
+            return this.#make(folder, filter);
         }
 
+        const cwd = folder.display.text;
         const kept = this.#lists.get(cwd);
         const now = this.#now();
 
@@ -506,7 +503,7 @@ export class FileLists {
         const entry: Entry = {
             at: now,
             freshFor: Number.POSITIVE_INFINITY,
-            listing: this.#make(cwd),
+            listing: this.#make(folder),
         };
 
         this.#lists.delete(cwd);
@@ -535,8 +532,8 @@ export class FileLists {
         return entry.listing;
     }
 
-    async #make(cwd: string, filter?: FileFilter): Promise<FileListing> {
-        const list = await listFiles(cwd, MAX_FILES, filter);
+    async #make(folder: FolderRef, filter?: FileFilter): Promise<FileListing> {
+        const list = await listFiles(folder, MAX_FILES, filter);
         const json = JSON.stringify(list);
         let compressed: Promise<Buffer> | undefined;
 
@@ -571,15 +568,16 @@ function viewBytes(file: string, buffer: Buffer, size = buffer.length): FileView
 
 /** What the viewer shows of `file`. Throws when it is not there. */
 export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]): Promise<FileView> {
-    if (typeof file !== "string") {
+    if (!(file instanceof Place)) {
         return withUploadBytes(file, async (bytes) => viewBytes(file.path, bytes));
     }
 
-    const info = await stat(file);
+    const name = file.display.text;
+    const info = await statAsync(file);
 
     if (info.isDirectory()) {
         const { entries, more } = await readSome(
-            resolve(file),
+            file,
             VIEW_ENTRIES,
             allow && Date.now() + WALK_MS,
             allow,
@@ -596,7 +594,7 @@ export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]):
         return { kind: "other", size: info.size };
     }
 
-    if (IMAGE_EXTENSIONS.test(file)) {
+    if (IMAGE_EXTENSIONS.test(name)) {
         return { kind: "image", size: info.size };
     }
 
@@ -606,7 +604,7 @@ export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]):
         const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 
-        return viewBytes(file, buffer.subarray(0, bytesRead), info.size);
+        return viewBytes(name, buffer.subarray(0, bytesRead), info.size);
     } finally {
         await handle.close();
     }

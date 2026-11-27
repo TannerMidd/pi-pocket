@@ -1,7 +1,7 @@
 // It writes nothing. The walk is bounded and never follows a symlink, so a project cannot lead it out of the folder. Everything it reads is untrusted data and reaches Pi fenced.
-import { lstatSync, realpathSync, statSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { type FolderRef, isFile, lstat, type Place, realpath, sendPlace } from "../hostfs.ts";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
 import {
     type Have,
@@ -44,19 +44,20 @@ export interface TokenScan {
 export const isFigFile = (path: string): boolean => /\.fig$/i.test(path);
 
 // A folder named `x.fig` is a folder, walked and rendered as one.
-export function isOneFigFile(path: string): boolean {
-    return isFigFile(path) && statSync(path).isFile();
+export function isOneFigFile(path: Place): boolean {
+    return isFigFile(path.name) && isFile(path);
 }
 
 // `..` itself or a `../` start, not a folder named `..x`.
 const leaves = (inside: string) =>
     inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
 
-export function scanRoot(cwd: string, path: string | undefined): string {
-    const base = realpathSync(cwd);
+export function scanRoot(cwd: FolderRef, path: string | undefined): Place {
+    const base = realpath(cwd.at());
+    const place = (real: string): Place => cwd.host.at(real);
 
     if (path === undefined || path === "" || path === ".") {
-        return base;
+        return place(base);
     }
 
     if (isAbsolute(path)) {
@@ -72,7 +73,7 @@ export function scanRoot(cwd: string, path: string | undefined): string {
     let info;
 
     try {
-        info = lstatSync(target);
+        info = lstat(cwd.host.at(target));
     } catch {
         throw new Error("path does not exist in the session's folder.");
     }
@@ -83,14 +84,14 @@ export function scanRoot(cwd: string, path: string | undefined): string {
         );
     }
 
-    const real = realpathSync(target);
+    const real = realpath(cwd.host.at(target));
 
     // A link in the middle of the path can lead out of the folder even when the written path does not.
     if (leaves(relative(base, real))) {
         throw new Error("path must stay inside the session's folder.");
     }
 
-    return real;
+    return place(real);
 }
 
 const isMinified = (text: string) =>
@@ -111,13 +112,13 @@ function skip(facts: Facts, path: string, why: string): void {
 
 // `figUntil` is the deadline of all the Figma files: a test sets it to reach the limit.
 export function readFacts(
-    root: string,
+    root: Place,
     rendered?: Rendered,
     figUntil: number = Date.now() + FIG_TIME_MS,
 ): Facts {
     const facts = newFacts();
 
-    const one = isOneFigFile(root) ? basename(root) : undefined;
+    const one = isOneFigFile(root) ? root.name : undefined;
     const { files, partial, skipped } =
         one === undefined
             ? collectFiles(root)
@@ -131,9 +132,7 @@ export function readFacts(
     const found = one === undefined ? files.filter((rel) => isFigFile(rel)) : [];
     const figs =
         one === undefined
-            ? found
-                  .slice(0, LIMITS.figs)
-                  .map((rel) => ({ rel, path: join(root, ...rel.split("/")) }))
+            ? found.slice(0, LIMITS.figs).map((rel) => ({ rel, path: root.child(rel) }))
             : [{ rel: one, path: root }];
 
     for (const fig of figs) {
@@ -174,7 +173,7 @@ export function readFacts(
         }
 
         let text: string;
-        const full = join(root, ...rel.split("/"));
+        const full = root.child(rel);
         const limit = rel.endsWith(".json") ? LIMITS.jsonBytes : LIMITS.fileBytes;
 
         try {
@@ -185,7 +184,7 @@ export function readFacts(
 
         // The size on disk, not the text's length: a file of multibyte text is cut with fewer characters than bytes.
         try {
-            const size = lstatSync(full).size;
+            const size = lstat(full).size;
 
             if (size > limit) {
                 // The rest of the file is not read, so a token after the cut may be in the code still.
@@ -257,9 +256,12 @@ function counted(facts: Facts): Map<string, number> {
     return counts;
 }
 
-export function scanTokens(root: string, rendered?: Rendered): TokenScan {
+export function scanTokens(root: Place, rendered?: Rendered): TokenScan {
     const facts = readFacts(root, rendered);
-    const folder = (root.split(sep).filter(Boolean).at(-1) ?? "project").replace(/\.fig$/i, "");
+    const folder = (root.display.text.split(sep).filter(Boolean).at(-1) ?? "project").replace(
+        /\.fig$/i,
+        "",
+    );
     const inferred = infer(facts, folder);
     const roots = new Map<string, string>();
 
@@ -294,14 +296,10 @@ const WORKER = { ms: 20_000, heapMb: 256 };
 const STOPPED =
     "The scan stopped: it used too much time or memory. Scan a smaller folder with path.";
 
-function scanInWorker(
-    root: string,
-    rendered: Rendered | undefined,
-    ms: number,
-): Promise<TokenScan> {
+function scanInWorker(root: Place, rendered: Rendered | undefined, ms: number): Promise<TokenScan> {
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL("./scan-worker.ts", import.meta.url), {
-            workerData: { root, rendered },
+            workerData: { root: sendPlace(root), rendered },
             resourceLimits: { maxOldGenerationSizeMb: WORKER.heapMb },
         });
         const timer = setTimeout(
@@ -325,7 +323,7 @@ function scanInWorker(
 }
 
 export async function scanProject(
-    root: string,
+    root: Place,
     options: { render?: boolean; signal?: AbortSignal } = {},
 ): Promise<TokenScan> {
     // Both static passes share one time limit (PI_SCAN_TIME_MS sets it, for the tests); the browser is not counted.
@@ -372,7 +370,7 @@ export async function scanProject(
     return second;
 }
 
-export async function scanDesignSystem(root: string): Promise<Draft> {
+export async function scanDesignSystem(root: Place): Promise<Draft> {
     return (await scanProject(root)).draft;
 }
 

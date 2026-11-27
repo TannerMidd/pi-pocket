@@ -1,4 +1,5 @@
 // Agent tools use the same committed artifact versions as the viewer, scoped to the calling conversation.
+import { Hostfs } from "../src/server/hostfs.ts";
 import { cleanUp, context, newSession, openApp, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -13,7 +14,7 @@ import { createPublicFetch } from "../src/server/public-fetch.ts";
 
 let app: Awaited<ReturnType<typeof openApp>>;
 let conversation: ConversationId;
-const host = { fetchPublic: createPublicFetch() } as PocketHost;
+const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 const content =
     '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><h1 data-pid="title">Design</h1>';
 

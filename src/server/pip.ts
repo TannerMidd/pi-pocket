@@ -14,7 +14,6 @@
  * one, or names one in what it sends, only when its person named that model in their own words to it.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { Context } from "@earendil-works/chord/context";
@@ -41,6 +40,7 @@ import { NOTE_ENTRY } from "./entry-format.ts";
 import { describe, HttpError } from "./errors.ts";
 import { clip, defang, quoted } from "./fence.ts";
 import { git } from "./git.ts";
+import { exists, mkdir, own, readdir, rename, rm, stat } from "./hostfs.ts";
 import { originRepo, parseRepo, requirePush, sameRepo } from "./github.ts";
 import { indexed, modelsNamed, personNamed, sharePhrase, words } from "./model-names.ts";
 import { findModel } from "./models.ts";
@@ -1150,11 +1150,13 @@ export class Pip {
         for (const folder of [clone, ...[...folders].slice(0, 200)]) {
             if (
                 app.workspaceScheme(folder) === undefined &&
-                existsSync(folder) &&
+                app.hostfs.has(folder) &&
                 sameRepo(await this.#origin(folder), info.repo)
             ) {
                 return (
-                    await git(folder, ["rev-parse", "--show-toplevel"]).catch(() => folder)
+                    await git(app.hostfs.folder(folder), ["rev-parse", "--show-toplevel"]).catch(
+                        () => folder,
+                    )
                 ).trim();
             }
         }
@@ -1163,13 +1165,13 @@ export class Pip {
 
         if (cloning === undefined) {
             // Not the repository's checkout, or the loop above had taken it: never clone into it.
-            if (existsSync(clone)) {
+            if (exists(own(clone))) {
                 throw new Error(
                     `${clone} is there but is not a checkout of ${info.repo}: move it away, then ask again.`,
                 );
             }
 
-            mkdirSync(dirname(clone), { recursive: true });
+            mkdir(own(dirname(clone)), { recursive: true });
             this.#clearParts(clone);
             // `~` is in no GitHub repository's name: no clone of another repository is ever taken for a part.
             const part = `${clone}~part-${randomUUID().slice(0, 8)}`;
@@ -1177,14 +1179,14 @@ export class Pip {
             cloning = app.watches
                 .gh(["repo", "clone", info.repo, part], undefined, CLONE_TIMEOUT_MS)
                 .then(() => {
-                    renameSync(part, clone);
+                    rename(own(part), own(clone));
                     this.#origins.delete(clone);
 
                     return clone;
                 })
                 .catch((error: unknown) => {
                     // A git still writing there after a timeout fails once the folder is gone: harmless.
-                    rmSync(part, { recursive: true, force: true });
+                    rm(own(part), { recursive: true, force: true });
 
                     throw error;
                 })
@@ -1208,12 +1210,12 @@ export class Pip {
         const prefix = `${basename(clone)}~part-`;
         const before = Date.now() - CLONE_TIMEOUT_MS;
 
-        for (const name of readdirSync(folder)) {
+        for (const name of readdir(own(folder))) {
             const part = join(folder, name);
 
             try {
-                if (name.startsWith(prefix) && statSync(part).mtimeMs < before) {
-                    rmSync(part, { recursive: true, force: true });
+                if (name.startsWith(prefix) && stat(own(part)).mtimeMs < before) {
+                    rm(own(part), { recursive: true, force: true });
                 }
             } catch (error) {
                 this.#app.log(`could not remove ${part}: ${describe(error)}`);
@@ -1230,7 +1232,7 @@ export class Pip {
             return known.repo;
         }
 
-        const repo = await originRepo(folder);
+        const repo = await originRepo(this.#app.hostfs.folder(folder));
 
         this.#origins.set(folder, { repo, at: now });
 

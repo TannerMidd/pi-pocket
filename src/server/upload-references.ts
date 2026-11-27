@@ -9,7 +9,7 @@ import type { PocketApp } from "./app.ts";
 import { IssuedUploadsDoc } from "./docs.ts";
 import { UPLOAD_INPUT } from "./entry-format.ts";
 import { HttpError } from "./errors.ts";
-import { openNoFollow } from "./no-follow.ts";
+import { openNoFollow, own } from "./hostfs.ts";
 import type { BoundUpload } from "./upload-content.ts";
 
 export type Attachment = { path: string; name: string; mime: string; size: number };
@@ -207,7 +207,7 @@ async function fileDigest(path: string, target: string, size: number): Promise<s
             throw notIssued();
         }
 
-        const file = await openNoFollow(target);
+        const file = await openNoFollow(own(target));
 
         try {
             const stat = await file.stat();

@@ -1,4 +1,4 @@
-import { cleanUp, context, newSession, openApp, scriptedModel } from "./helpers.ts";
+import { cleanUp, context, hostFolder, newSession, openApp, scriptedModel } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -512,7 +512,7 @@ test("a deck's PNG is the requested slide, or every slide in a zip", browser, as
 });
 
 test("saving every slide gives a zip by default, a PNG otherwise", browser, async () => {
-    const options = { id: "pitch", format: "png" as const, cwd };
+    const options = { id: "pitch", format: "png" as const, cwd: hostFolder(cwd) };
     const zipped = await saveDesignExport(mk(colorDeck()), { ...options, slide: "all" }, host);
     const one = await saveDesignExport(mk(colorDeck()), { ...options, slide: 2 }, host);
 
@@ -695,7 +695,7 @@ async function realpath(path: string): Promise<string> {
 
 test("design_preview and design_export take a mode of the system", browser, async () => {
     const flagship = loadDesignSystem(
-        join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket"),
+        hostFolder(join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket")),
     )!;
 
     await publish({

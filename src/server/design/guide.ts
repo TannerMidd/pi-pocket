@@ -42,7 +42,8 @@ export function designGuide(host: PocketHost): PromptSection {
         let broken = false;
 
         try {
-            const system = loadDesignSystem(cwd);
+            const folder = host.hostfs.folder(cwd);
+            const system = loadDesignSystem(folder);
 
             if (system !== undefined) {
                 const summary = systemSummary(system, SUMMARY_BYTES);
@@ -57,7 +58,7 @@ export function designGuide(host: PocketHost): PromptSection {
         let legacy: { text: string; truncated: boolean } | undefined;
 
         try {
-            legacy = readDesignSystemText(cwd);
+            legacy = readDesignSystemText(host.hostfs.folder(cwd));
         } catch (error) {
             fail(SYSTEM_FILE, error);
         }

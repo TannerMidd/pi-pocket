@@ -1,8 +1,7 @@
 // A loaded system is kept while the revision of its folder stays the same. The revision is read on every call, so an edit by any program shows at once.
 // A file changed in the last 3 seconds is not trusted: two writes in one tick of the file system's clock (2 s on FAT) get the same time.
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { type FolderRef, lstat, type Place, readdir } from "../hostfs.ts";
 import { LIMITS } from "./tokens-base.ts";
 import type { DesignSystem } from "./system-types.ts";
 
@@ -22,9 +21,9 @@ const memos = new WeakMap<DesignSystem, Map<string, string>>();
 
 const TOKEN_FILE = /^tokens(?:\..+)?\.json$/;
 
-function statOf(path: string) {
+function statOf(path: Place) {
     try {
-        return lstatSync(path, { bigint: true });
+        return lstat(path, { bigint: true });
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return undefined;
@@ -35,12 +34,12 @@ function statOf(path: string) {
 }
 
 /** The revision of `.pi/design` as the read sees it, or undefined when it cannot be trusted (or there is no folder). */
-function folderRevision(cwd: string): string | undefined {
+function folderRevision(cwd: FolderRef): string | undefined {
     const hash = createHash("sha256");
     const now = BigInt(Date.now()) * 1_000_000n;
     let racy = false;
 
-    const add = (label: string, path: string, directory: boolean) => {
+    const add = (label: string, path: Place, directory: boolean) => {
         const stat = statOf(path);
 
         if (stat === undefined) {
@@ -60,13 +59,13 @@ function folderRevision(cwd: string): string | undefined {
         return stat.isDirectory();
     };
 
-    const root = join(cwd, ".pi", "design");
+    const root = cwd.at(".pi/design");
 
-    if (!add(".pi", join(cwd, ".pi"), true) || !add("design", root, true)) {
+    if (!add(".pi", cwd.at(".pi"), true) || !add("design", root, true)) {
         return undefined;
     }
 
-    const names = readdirSync(root);
+    const names = readdir(root);
 
     hash.update(`${names.join("\0")}\n`);
 
@@ -76,9 +75,9 @@ function folderRevision(cwd: string): string | undefined {
         }
 
         if (TOKEN_FILE.test(name) || name === "guidelines.md") {
-            add(name, join(root, name), false);
-        } else if (name === "components" && add(name, join(root, name), true)) {
-            const files = readdirSync(join(root, name));
+            add(name, root.child(name), false);
+        } else if (name === "components" && add(name, root.child(name), true)) {
+            const files = readdir(root.child(name));
 
             hash.update(`${files.join("\0")}\n`);
 
@@ -86,7 +85,7 @@ function folderRevision(cwd: string): string | undefined {
                 .filter((each) => each.endsWith(".html") && !each.startsWith("."))
                 .sort()
                 .slice(0, LIMITS.components + 1)) {
-                add(`components/${file}`, join(root, name, file), false);
+                add(`components/${file}`, root.child(name).child(file), false);
             }
         }
     }
@@ -117,13 +116,14 @@ function weightOf(system: DesignSystem): number {
 
 /** The system of `cwd`, frozen: callers share one object, so none may change it. */
 export function cachedSystem(
-    cwd: string,
+    folder: FolderRef,
     load: () => DesignSystem | undefined,
 ): DesignSystem | undefined {
     let revision: string | undefined;
+    const cwd = folder.display.text;
 
     try {
-        revision = folderRevision(cwd);
+        revision = folderRevision(folder);
     } catch {
         revision = undefined;
     }
@@ -172,8 +172,8 @@ export function cachedSystem(
     return system;
 }
 
-export function forgetSystem(cwd: string): void {
-    kept.delete(cwd);
+export function forgetSystem(folder: FolderRef): void {
+    kept.delete(folder.display.text);
 }
 
 export function derived(system: DesignSystem, key: string, make: () => string): string {

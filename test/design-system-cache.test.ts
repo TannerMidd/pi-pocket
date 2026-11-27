@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadDesignSystem, systemSummary } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const COMPONENT = (name: string) =>
     `<script type="application/json" id="pocket-component">{"name":"${name}","states":["default"]}</script><template data-state="default"><b>${name}</b></template>`;
@@ -24,7 +25,9 @@ const tokens = (accent: string) =>
     JSON.stringify({ color: { $type: "color", accent: { $value: accent } } });
 const mode = (accent: string) => JSON.stringify({ color: { accent: { $value: accent } } });
 const accent = (cwd: string, name = "light") =>
-    loadDesignSystem(cwd)!.tokens.find((token) => token.name === "color.accent")!.modes[name]!.css;
+    loadDesignSystem(hostFolder(cwd))!.tokens.find((token) => token.name === "color.accent")!.modes[
+        name
+    ]!.css;
 
 // The cache trusts a file only 3 seconds after its last change, so each edit is made, then read after that time.
 test("a kept system is the same object until a file changes; each kind of edit shows on the next load", async () => {
@@ -47,7 +50,7 @@ test("a kept system is the same object until a file changes; each kind of edit s
         [
             "a mode file removed",
             (cwd) => rmSync(join(cwd, ".pi/design/tokens.dark.json")),
-            (cwd) => assert.deepEqual(loadDesignSystem(cwd)!.modes, ["light"]),
+            (cwd) => assert.deepEqual(loadDesignSystem(hostFolder(cwd))!.modes, ["light"]),
         ],
         [
             "a component added",
@@ -55,14 +58,14 @@ test("a kept system is the same object until a file changes; each kind of edit s
                 writeFileSync(join(cwd, ".pi/design/components/badge.html"), COMPONENT("Badge")),
             (cwd) =>
                 assert.deepEqual(
-                    loadDesignSystem(cwd)!.components.map((each) => each.slug),
+                    loadDesignSystem(hostFolder(cwd))!.components.map((each) => each.slug),
                     ["badge", "card"],
                 ),
         ],
         [
             "a component removed",
             (cwd) => rmSync(join(cwd, ".pi/design/components/card.html")),
-            (cwd) => assert.deepEqual(loadDesignSystem(cwd)!.components, []),
+            (cwd) => assert.deepEqual(loadDesignSystem(hostFolder(cwd))!.components, []),
         ],
     ];
     const folders = edits.map(() => project(base));
@@ -71,7 +74,11 @@ test("a kept system is the same object until a file changes; each kind of edit s
         await sleep(3100);
 
         for (const cwd of folders) {
-            assert.equal(loadDesignSystem(cwd), loadDesignSystem(cwd), "kept while unchanged");
+            assert.equal(
+                loadDesignSystem(hostFolder(cwd)),
+                loadDesignSystem(hostFolder(cwd)),
+                "kept while unchanged",
+            );
         }
 
         edits.forEach(([, edit], index) => edit(folders[index]!));
@@ -90,7 +97,7 @@ test("an edit shows at once: a file changed in the last 3 seconds is read again 
     const cwd = project({ "tokens.json": tokens("#111111") });
 
     try {
-        assert.notEqual(loadDesignSystem(cwd), loadDesignSystem(cwd));
+        assert.notEqual(loadDesignSystem(hostFolder(cwd)), loadDesignSystem(hostFolder(cwd)));
         assert.equal(accent(cwd), "#111111");
         writeFileSync(join(cwd, ".pi/design/tokens.json"), tokens("#999999"));
         assert.equal(accent(cwd), "#999999");
@@ -103,7 +110,7 @@ test("a loaded system is frozen, so that no caller changes the one that others g
     const cwd = project({ "tokens.json": tokens("#111111") });
 
     try {
-        const system = loadDesignSystem(cwd)!;
+        const system = loadDesignSystem(hostFolder(cwd))!;
 
         assert.throws(() => system.tokens.push(system.tokens[0]!), TypeError);
         assert.throws(() => {
@@ -137,10 +144,10 @@ test("at the limits (5,000 tokens, 16 modes), a repeated load and summary take a
 
     try {
         await sleep(3100);
-        systemSummary(loadDesignSystem(cwd)!, 12_000);
+        systemSummary(loadDesignSystem(hostFolder(cwd))!, 12_000);
 
         const start = performance.now();
-        const system = loadDesignSystem(cwd)!;
+        const system = loadDesignSystem(hostFolder(cwd))!;
 
         systemSummary(system, 12_000);
         assert.equal(system.modes.length, 16);

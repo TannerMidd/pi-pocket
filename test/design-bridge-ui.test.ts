@@ -3,6 +3,7 @@
 // text edit makes text editable and reports a change; tweaks go in as custom properties and events and the manifest
 // comes out; pins show and clear; a deck shows one slide at a time with keys and swipes; each mode leaves the page as it
 // was; and what the page sends is checked, and cannot be forged by the page itself.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -179,7 +180,7 @@ async function inPage<T>(script: string): Promise<T> {
 }
 
 async function publish(id: string, content: string) {
-    await createArtifacts({} as PocketHost).tools![0]!.execute(
+    await createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!.execute(
         { id, title: id, content } as never,
         {
             conversationId: session,

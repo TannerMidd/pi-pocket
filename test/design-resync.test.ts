@@ -1,4 +1,5 @@
 // design_system resync: a second scan of the code updates a saved system without losing what people wrote.
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ import {
 import type { ResyncPlan } from "../src/server/design/tokens-resync.ts";
 import { planResync, resyncChange, resyncReport } from "../src/server/design/tokens-resync.ts";
 import type { Draft } from "../src/server/design/scan-scales.ts";
+import { hostFolder } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -31,7 +33,7 @@ function project(files: Record<string, string> = {}): string {
     return dir;
 }
 
-const tool = designSystemTool();
+const tool = designSystemTool(new Hostfs());
 const run = (dir: string, args: Record<string, unknown>) =>
     tool.execute(args as never, { agent: async () => ({ cwd: dir }) } as never, undefined as never);
 const say = async (call: ReturnType<typeof run>) =>
@@ -100,7 +102,7 @@ function system(tokens: object, modes: Record<string, object> = {}): string {
 }
 
 function load(dir: string) {
-    const loaded = loadDesignSystemWithRaw(dir);
+    const loaded = loadDesignSystemWithRaw(hostFolder(dir));
 
     assert.ok(loaded !== undefined, "the system loaded");
 
@@ -117,7 +119,7 @@ const reportOf = (plan: ResyncPlan, name = "Test") =>
     resyncReport({ name, path: ".", files: 1, partial: false, saved: false, plan });
 const applyPlan = (dir: string, plan: ResyncPlan) =>
     writeDesignSystem(
-        dir,
+        hostFolder(dir),
         resyncChange(plan, {
             path: ".",
             scannedAt: new Date().toISOString(),
@@ -177,14 +179,18 @@ test("apply adds only what is new, keeps what people wrote, and a second apply a
     assert.equal(readFileSync(join(dir, ".pi/design/guidelines.md"), "utf8"), "# Voice\n");
     assert.equal(readFileSync(join(dir, ".pi/design/components/button.html"), "utf8"), specimen);
 
-    const count = loadDesignSystem(dir)?.tokens.length;
+    const count = loadDesignSystem(hostFolder(dir))?.tokens.length;
     const css = readFileSync(join(dir, ".pi/design/dist/tokens.css"), "utf8");
 
     assert.match(
         await say(run(dir, { action: "resync", apply: true })),
         /0 added, 11 kept as they are, 0 differ from the code, 0 not in the code now/,
     );
-    assert.equal(loadDesignSystem(dir)?.tokens.length, count, "no token is added twice");
+    assert.equal(
+        loadDesignSystem(hostFolder(dir))?.tokens.length,
+        count,
+        "no token is added twice",
+    );
     assert.equal(readFileSync(join(dir, ".pi/design/dist/tokens.css"), "utf8"), css);
 
     // A later change to the system keeps the provenance.
@@ -413,7 +419,11 @@ test("a token whose reference is broken is kept, not written over by the scan's 
         "src/styles.css": ":root{--bg:#ffffff;--accent:#3b82f6}",
     });
 
-    assert.equal(loadDesignSystem(dir)?.tokens.length, 1, "the engine drops the broken token");
+    assert.equal(
+        loadDesignSystem(hostFolder(dir))?.tokens.length,
+        1,
+        "the engine drops the broken token",
+    );
     assert.match(await say(run(dir, { action: "resync", apply: true })), /3 added, 2 kept/);
 
     const accent = file(dir, "tokens.json").color.accent.default;
@@ -433,7 +443,7 @@ test("a system edited while the scan ran is read again, so the plan does not wri
         }),
     );
 
-    const { plan } = resyncPlan(dir, draft);
+    const { plan } = resyncPlan(hostFolder(dir), draft);
 
     assert.deepEqual(plan.added, []);
     assert.equal(plan.kept, 1);
@@ -513,7 +523,9 @@ test("when the default modes differ, a new token takes the code's default node, 
     applyPlan(dir, plan);
     assert.equal(file(dir, "tokens.high-contrast.json").color?.brand?.$value, "#ffffff");
 
-    const brand = loadDesignSystem(dir)?.tokens.find((token) => token.name === "color.brand");
+    const brand = loadDesignSystem(hostFolder(dir))?.tokens.find(
+        (token) => token.name === "color.brand",
+    );
 
     assert.equal(brand?.modes["high-contrast"]?.hex, "#ffffff");
 

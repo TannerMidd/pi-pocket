@@ -3,8 +3,6 @@
  * it, check a design against it, publish its documentation page as an artifact, and export it for code.
  */
 import { createHash } from "node:crypto";
-import { lstatSync } from "node:fs";
-import { join } from "node:path";
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { keepAssets, nextVersion } from "../../artifacts.ts";
 import { readBundle } from "../../design/bundle.ts";
@@ -31,6 +29,7 @@ import {
     DesignCommentsDoc,
 } from "../../docs.ts";
 import type { ConversationWebRequest, ExtensionWeb, PocketHost } from "../../host.ts";
+import { type FolderRef, lstat } from "../../hostfs.ts";
 import { MAX_ASSET_BYTES, MAX_ASSETS, MAX_ASSETS_BYTES, MAX_BYTES } from "../artifacts.ts";
 import {
     type CheckOptions,
@@ -499,11 +498,11 @@ function cleanFinding(each: CheckFinding): CheckFinding | undefined {
     };
 }
 
-function legacySize(cwd: string): number | null {
+function legacySize(cwd: FolderRef): number | null {
     try {
         // Links are refused: only a plain folder and file count.
-        const info = lstatSync(join(cwd, ".pi")).isDirectory()
-            ? lstatSync(join(cwd, ".pi", "design-system.md"))
+        const info = lstat(cwd.at(".pi")).isDirectory()
+            ? lstat(cwd.at(".pi/design-system.md"))
             : undefined;
 
         return info?.isFile() ? info.size : null;
@@ -565,7 +564,8 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
     // One save at a time for each folder: a save reads the revision and writes, and no other may come between.
     const queues = new Map<string, Promise<unknown>>();
 
-    const exclusive = async <T>(cwd: string, work: () => Promise<T> | T): Promise<T> => {
+    const exclusive = async <T>(folder: FolderRef, work: () => Promise<T> | T): Promise<T> => {
+        const cwd = folder.display.text;
         const before = queues.get(cwd) ?? Promise.resolve();
         const run = before.then(work, work);
         const tail = run.catch(() => undefined);
@@ -576,7 +576,7 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
         return run;
     };
 
-    const folderOf = (request: ConversationWebRequest): string => {
+    const folderOf = (request: ConversationWebRequest): FolderRef => {
         const cwd = request.conversation.cwd;
 
         if (!cwd) {
@@ -587,10 +587,10 @@ export function systemRoutes(web: ExtensionWeb, host: PocketHost): void {
             throw web.error(400, REMOTE_DESIGN);
         }
 
-        return cwd;
+        return host.hostfs.folder(cwd);
     };
 
-    const load = async (cwd: string): Promise<DesignSystem | undefined> => {
+    const load = async (cwd: FolderRef): Promise<DesignSystem | undefined> => {
         try {
             return await loadDesignSystem(cwd);
         } catch (error) {

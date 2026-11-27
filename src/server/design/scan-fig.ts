@@ -1,5 +1,6 @@
 // Everything read from a `.fig` is untrusted: it reaches the report only through the scan's fence.
 import { quoted } from "../fence.ts";
+import type { Place } from "../hostfs.ts";
 import { type Facts } from "./scan-facts.ts";
 import { type FigDecoded, decodeFig, readFigBytes } from "./scan-fig-container.ts";
 import { FIG_LIMITS, FigError } from "./scan-fig-kiwi.ts";
@@ -476,7 +477,7 @@ function notRead(facts: Facts, file: string, why: string): void {
 export function readFigInto(
     facts: Facts,
     file: string,
-    path: string,
+    path: Place,
     until: number = Date.now() + FIG_TIME_MS,
 ): void {
     if (Date.now() >= until) {

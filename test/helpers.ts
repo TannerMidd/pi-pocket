@@ -8,6 +8,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
 import type { Attachment } from "../src/server/commands.ts";
+import { type FolderRef, Hostfs, type Place, type SandboxView } from "../src/server/hostfs.ts";
 import type { User } from "../src/server/config.ts";
 import type { LimitTuning } from "../src/server/limit-gate.ts";
 import type { Client } from "../src/server/room.ts";
@@ -89,6 +90,7 @@ export function openApp(
     dataDir = join(root, "data"),
     now?: () => number,
     limits?: Partial<LimitTuning>,
+    sandboxView?: SandboxView,
 ): Promise<App> {
     return PocketApp.open({
         dataDir,
@@ -99,6 +101,7 @@ export function openApp(
         home,
         ...(now === undefined ? {} : { now }),
         ...(limits === undefined ? {} : { limits }),
+        ...(sandboxView === undefined ? {} : { sandboxView }),
     });
 }
 
@@ -233,3 +236,9 @@ export function cleanUp(): void {
         console.warn(`Could not remove ${root}: ${(error as Error).message}`);
     }
 }
+
+/** A folder as host code takes it, with every folder plain (no sandboxed tree): the plain calls, as before. */
+export const hostFolder = (path: string): FolderRef => new Hostfs().folder(path);
+
+/** A path as a place in plain folders. */
+export const hostPlace = (path: string): Place => new Hostfs().at(path);

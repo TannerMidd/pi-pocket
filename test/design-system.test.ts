@@ -1,4 +1,5 @@
 // The design_system tool and its file core: bounded UTF-8 text, no symlink followed at the file, and an atomic write.
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import {
     lstatSync,
@@ -21,6 +22,7 @@ import {
     readDesignSystemText,
     utf8Cut,
 } from "../src/server/design/system.ts";
+import { hostFolder } from "./helpers.ts";
 
 const folders = new Set<string>();
 
@@ -40,7 +42,7 @@ function folder(): string {
     return dir;
 }
 
-const tool = designSystemTool();
+const tool = designSystemTool(new Hostfs());
 
 /** A execute call with just what the tool asks for: `api.agent` gives the session's folder, `context` is unused. */
 const run = (dir: string, args: { action: "read" | "write"; content?: string }) =>
@@ -114,7 +116,7 @@ test("an empty write is fine, leaves no temporary file, and reads as an empty de
 
     await text(run(dir, { action: "write", content: "" }));
 
-    assert.deepEqual(readDesignSystemText(dir), { text: "", truncated: false });
+    assert.deepEqual(readDesignSystemText(hostFolder(dir)), { text: "", truncated: false });
     assert.deepEqual(readdirSync(join(dir, ".pi")), ["design-system.md"], "only the file is there");
 });
 
@@ -126,7 +128,7 @@ test("a read past the limit is cut before a character's middle, not after", asyn
 
     writeFileSync(join(dir, SYSTEM_FILE), across, "utf8");
 
-    const cut = readDesignSystemText(dir)!;
+    const cut = readDesignSystemText(hostFolder(dir))!;
 
     assert.ok(cut.truncated);
     assert.ok(!cut.text.includes("�"));
@@ -136,7 +138,7 @@ test("a read past the limit is cut before a character's middle, not after", asyn
     const whole = "y".repeat(MAX_BYTES);
 
     writeFileSync(join(dir, SYSTEM_FILE), whole, "utf8");
-    assert.deepEqual(readDesignSystemText(dir), { text: whole, truncated: false });
+    assert.deepEqual(readDesignSystemText(hostFolder(dir)), { text: whole, truncated: false });
 });
 
 test("boundedText and utf8Cut cut without a replacement character", () => {
@@ -159,7 +161,7 @@ test("a read never follows a symlink at the file, and a write replaces the symli
     writeFileSync(aside, "kept text\n", "utf8");
     symlinkSync(aside, join(dir, SYSTEM_FILE));
 
-    assert.throws(() => readDesignSystemText(dir), /symlink/);
+    assert.throws(() => readDesignSystemText(hostFolder(dir)), /symlink/);
     await assert.rejects(run(dir, { action: "read" }), /symlink/);
     assert.equal(readFileSync(aside, "utf8"), "kept text\n", "the link target keeps its bytes");
 
@@ -170,5 +172,5 @@ test("a read never follows a symlink at the file, and a write replaces the symli
         "the write replaced the symlink",
     );
     assert.equal(readFileSync(aside, "utf8"), "kept text\n", "the write goes past the link");
-    assert.equal(readDesignSystemText(dir)!.text, "# real\n");
+    assert.equal(readDesignSystemText(hostFolder(dir))!.text, "# real\n");
 });

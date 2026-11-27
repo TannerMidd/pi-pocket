@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadDesignSystem } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const FLAGSHIP = fileURLToPath(new URL("../docs/examples/design-system/pocket", import.meta.url));
 
@@ -21,7 +22,7 @@ const EXPECTED: Record<string, string> = {
 };
 
 function compiled(): Map<string, string> {
-    const system = loadDesignSystem(FLAGSHIP)!;
+    const system = loadDesignSystem(hostFolder(FLAGSHIP))!;
     const files = new Map<string, string>([
         ["tokens.css", system.compiled.css],
         ["tailwind.css", system.compiled.tailwind],

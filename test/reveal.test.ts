@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type Command, hasDesktop, reveal, revealCommands } from "../src/server/reveal.ts";
+import { hostPlace } from "./helpers.ts";
 
 test("each system's file manager shows a file selected, and a folder itself", () => {
     assert.deepEqual(revealCommands("/a/b.txt", false, "darwin"), [["open", ["-R", "/a/b.txt"]]]);
@@ -56,13 +57,15 @@ test("the first command that works wins; a path that is not there is a 404", asy
     };
 
     if (hasDesktop()) {
-        await reveal(file, failFirst);
+        await reveal(hostPlace(file), failFirst);
         assert.equal(ran.length, fallback ? 2 : 1);
         await assert.rejects(
-            reveal(file, async () => false),
+            reveal(hostPlace(file), async () => false),
             { status: 409 },
         );
     }
 
-    await assert.rejects(reveal(join(folder, "missing.txt"), failFirst), { status: 404 });
+    await assert.rejects(reveal(hostPlace(join(folder, "missing.txt")), failFirst), {
+        status: 404,
+    });
 });

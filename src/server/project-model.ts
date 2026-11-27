@@ -1,5 +1,4 @@
 /** Trusted project model defaults for new sessions only; resource paths and run policy stay app-wide. */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clampThinkingLevel, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
@@ -9,6 +8,8 @@ import {
     SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { HttpError } from "./errors.ts";
+import type { Hostfs } from "./hostfs.ts";
+import { readText } from "./hostfs.ts";
 import { isThinkingLevel } from "./models.ts";
 
 /** Fresh global defaults and trust policy for this creation only. Never reload or replace the shared app reader. */
@@ -52,9 +53,18 @@ export function projectModelTrusted(cwd: string, settings: SettingsManager): boo
     }
 }
 
-/** Read at creation, without a cache. Errors contain no file contents and never lead to another paid model. */
-export function projectModelDefault(cwd: string, settings: SettingsManager, models: ModelRuntime) {
-    if (!projectModelTrusted(cwd, settings)) {
+/**
+ * Read at creation, without a cache. Errors contain no file contents and never lead to another paid model. A folder
+ * that a sandboxed tree uses is never read: the guest writes its `.pi/settings.json` (a link, a pipe, a model it
+ * picked), so the owner's defaults apply there.
+ */
+export function projectModelDefault(
+    host: Hostfs,
+    cwd: string,
+    settings: SettingsManager,
+    models: ModelRuntime,
+) {
+    if (host.folder(cwd).sandboxed || !projectModelTrusted(cwd, settings)) {
         return undefined;
     }
 
@@ -65,7 +75,7 @@ export function projectModelDefault(cwd: string, settings: SettingsManager, mode
     let text: string;
 
     try {
-        text = readFileSync(join(cwd, ".pi", "settings.json"), "utf8");
+        text = readText(host.at(join(cwd, ".pi", "settings.json")));
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return undefined;

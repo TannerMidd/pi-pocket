@@ -17,7 +17,12 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { after, test } from "node:test";
 import { issueUpload } from "../src/server/upload-references.ts";
+import { Place } from "../src/server/hostfs.ts";
 import type { App } from "./helpers.ts";
+
+/** The path a readable file names: a place in a folder, or a bound upload. */
+const shown = (file: Place | { path: string }): string =>
+    file instanceof Place ? file.display.text : file.path;
 
 const dataDir = join(root, "file-list-data");
 
@@ -75,7 +80,10 @@ test("in a folder that holds the store, a guest lists just the uploads conversat
                 `uploads/${String(main)}/nested/deep.txt`,
             ]) {
                 assert.ok(listed.has(path), `${path} is missing`);
-                assert.equal(app.workspace.readableFile(guest, main, path), join(dataDir, path));
+                assert.equal(
+                    shown(app.workspace.readableFile(guest, main, path)),
+                    join(dataDir, path),
+                );
             }
 
             for (const path of [
@@ -93,7 +101,7 @@ test("in a folder that holds the store, a guest lists just the uploads conversat
         const guest = app.config.addUser("Gale", "guest", [String(main)]).user;
 
         assert.equal(
-            app.workspace.conversationFile(guest, main, `uploads/${String(main)}/own.txt`),
+            shown(app.workspace.conversationFile(guest, main, `uploads/${String(main)}/own.txt`)),
             join(dataDir, "uploads", String(main), "own.txt"),
         );
         assert.ok(
@@ -216,7 +224,7 @@ test("a folder view returns only children that the person can read", async () =>
         assert.equal(page.truncated, false);
         assert.throws(() => app.workspace.readableFile(guest, id, "records"), { status: 404 });
         assert.equal(
-            app.workspace.readableFile(guest, id, "notes.txt"),
+            shown(app.workspace.readableFile(guest, id, "notes.txt")),
             join(project, "notes.txt"),
         );
     } finally {

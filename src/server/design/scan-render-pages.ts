@@ -1,7 +1,7 @@
 // The walk is bounded and follows no link. It enters `dist` and `build`, which the style scan
 // skips, because a built page is what the browser can show.
-import { lstatSync, readdirSync } from "node:fs";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
+import { lstat, type Place, readdir } from "../hostfs.ts";
 import { readHead } from "./scan-files.ts";
 
 interface PageAsset {
@@ -266,7 +266,7 @@ function togglesIn(texts: string[]): DarkToggle[] {
     return toggles.slice(0, 12);
 }
 
-export function planRender(root: string): RenderPlan | undefined {
+export function planRender(root: Place): RenderPlan | undefined {
     const files: { rel: string; size: number }[] = [];
     let seen = 0;
 
@@ -274,7 +274,7 @@ export function planRender(root: string): RenderPlan | undefined {
         let entries;
 
         try {
-            entries = readdirSync(join(root, dir), { withFileTypes: true });
+            entries = readdir(root.child(dir), { withFileTypes: true });
         } catch {
             return;
         }
@@ -296,7 +296,7 @@ export function planRender(root: string): RenderPlan | undefined {
                 }
             } else if (entry.isFile() && TYPES[extensionOf(entry.name)] !== undefined) {
                 try {
-                    files.push({ rel, size: lstatSync(join(root, rel)).size });
+                    files.push({ rel, size: lstat(root.child(rel)).size });
                 } catch {}
             }
         }
@@ -312,7 +312,7 @@ export function planRender(root: string): RenderPlan | undefined {
     const read = (rel: string, limit: number) => {
         if (!texts.has(rel)) {
             try {
-                texts.set(rel, readHead(join(root, ...rel.split("/")), limit));
+                texts.set(rel, readHead(root.child(rel), limit));
             } catch {
                 texts.set(rel, "");
             }

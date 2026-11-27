@@ -1,12 +1,13 @@
 /** A fork can read the bytes of an attachment, not the current occupant of its name. */
 import { createHash } from "node:crypto";
 import { HttpError } from "./errors.ts";
-import { openNoFollow } from "./no-follow.ts";
+import { openNoFollow, own, type Place } from "./hostfs.ts";
 
 export const MAX_UPLOAD = 50 * 1024 * 1024;
 export type UploadContent = { size: number; sha256: string };
 export type BoundUpload = { path: string; content: UploadContent };
-export type ReadableFile = string | BoundUpload;
+/** A file the viewer or a route may read: a place in a folder (confined where a sandboxed tree works), or a bound upload. */
+export type ReadableFile = Place | BoundUpload;
 
 export function uploadContent(value: unknown): UploadContent | undefined {
     const c = value as Partial<UploadContent> | undefined;
@@ -37,7 +38,7 @@ async function readMatching(file: BoundUpload, keep: boolean): Promise<Buffer | 
         return undefined;
     }
 
-    const handle = await openNoFollow(file.path);
+    const handle = await openNoFollow(own(file.path));
 
     try {
         const info = await handle.stat();

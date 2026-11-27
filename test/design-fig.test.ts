@@ -1,5 +1,6 @@
 // `minimal.fig` and `variables.fig` are real exports (both MIT, see `fixtures/design/SOURCES.md`).
 // Every other file is built here, by an encoder of the format.
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +25,7 @@ import {
 import { designSystemTool } from "../src/server/design/system.ts";
 import type { DesignSystem } from "../src/server/design/system-types.ts";
 import { buildSystem } from "../src/server/design/tokens-model.ts";
+import { hostFolder, hostPlace } from "./helpers.ts";
 
 const fixture = (name: string) =>
     fileURLToPath(new URL(`./fixtures/design/${name}`, import.meta.url));
@@ -471,7 +473,7 @@ const refused = (bytes: Buffer, reason: RegExp) =>
     );
 
 test("the fixture decodes: a ZIP container, its nodes, and a float", () => {
-    const fig = decodeFig(readFigBytes(MINIMAL));
+    const fig = decodeFig(readFigBytes(hostPlace(MINIMAL)));
 
     assert.equal(fig.container, "zip");
     assert.deepEqual(fig.entries, ["canvas.fig", "meta.json"]);
@@ -495,7 +497,7 @@ test("a folder with a .fig of no variables and a stylesheet reads both", () => {
 body{background:var(--bg);color:var(--ink);font-family:Inter, sans-serif}
 a{color:var(--brand);border-radius:var(--radius);padding:var(--gap)}`,
     });
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
     const system = load(scan);
 
     assert.deepEqual(scan.files, ["minimal.fig", "theme.css"]);
@@ -508,7 +510,7 @@ a{color:var(--brand);border-radius:var(--radius);padding:var(--gap)}`,
 });
 
 test("its variables and styles become tokens: collections, modes, an alias, and styles", () => {
-    const scan = scanTokens(project({ "design.fig": designFile() }));
+    const scan = scanTokens(hostPlace(project({ "design.fig": designFile() })));
     const system = load(scan);
     const type = scan.draft.tokens.type as Record<string, Record<string, Record<string, unknown>>>;
 
@@ -543,7 +545,7 @@ test("a .fig with variables is a token source of its own, over the stylesheets",
         "design.fig": designFile(),
         "theme.css": ":root{--brand:#ff5500;--gap:12px}body{background:#ffffff}",
     });
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
 
     assert.deepEqual(scan.files, ["design.fig", "theme.css"]);
     assert.match(scanReport(scan), /Used the 7 tokens from design\.fig as they are/);
@@ -563,7 +565,7 @@ test("a mode named for dark first makes the file dark first", () => {
             ]),
         ],
     });
-    const scan = scanTokens(project({ "night.fig": night }));
+    const scan = scanTokens(hostPlace(project({ "night.fig": night })));
     const system = load(scan);
 
     assert.deepEqual((scan.draft.tokens.$extensions as Record<string, unknown>)["com.pi-pocket"], {
@@ -589,7 +591,7 @@ test("a dark first color collection stays dark first beside a one-mode collectio
             variable(guid(2, 1), "Spacing/Base", "FLOAT", [[CONTRAST, { floatValue: 4 }]], spacing),
         ],
     });
-    const system = load(scanTokens(project({ "night.fig": night })));
+    const system = load(scanTokens(hostPlace(project({ "night.fig": night }))));
 
     assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
     assert.equal(token(system, "color.paper")?.modes.light?.hex, "#ffffff");
@@ -617,7 +619,7 @@ test("a mode keeps its values when another collection's first mode has its name"
             ),
         ],
     });
-    const system = load(scanTokens(project({ "sizes.fig": file })));
+    const system = load(scanTokens(hostPlace(project({ "sizes.fig": file }))));
 
     assert.equal(token(system, "space.base")?.modes.mobile?.literal, "4px");
 });
@@ -642,7 +644,7 @@ test("a second mode named dark is a mode of its own, in a light first or a dark 
         // The plain Dark is the dark mode, wherever it is in the list.
         file([LIGHT, "Light"], high, [DARK, "Dark"]),
         file(high, [DARK, "Dark"], [LIGHT, "Light"]),
-    ].map((fig) => load(scanTokens(project({ "colors.fig": fig }))));
+    ].map((fig) => load(scanTokens(hostPlace(project({ "colors.fig": fig })))));
 
     for (const system of systems) {
         assert.equal(token(system, "color.paper")?.modes.dark?.hex, "#1a1b26");
@@ -674,7 +676,7 @@ test("a collection's light mode is the default and its dark mode is dark, in any
             ),
         ],
     });
-    const ink = token(load(scanTokens(project({ "mixed.fig": file }))), "color.ink");
+    const ink = token(load(scanTokens(hostPlace(project({ "mixed.fig": file })))), "color.ink");
 
     assert.equal(ink?.modes.light?.hex, "#111111");
     assert.equal(ink?.modes.dark?.hex, "#eeeeee");
@@ -698,7 +700,7 @@ test("a mode name is cut whole, and two modes of one name stay two modes", () =>
             ]),
         ],
     });
-    const ink = token(load(scanTokens(project({ "names.fig": file }))), "color.ink");
+    const ink = token(load(scanTokens(hostPlace(project({ "names.fig": file })))), "color.ink");
 
     assert.equal(ink?.modes.mobile?.hex, "#222222");
     assert.equal(ink?.modes["mobile-2"]?.hex, "#333333");
@@ -708,19 +710,21 @@ test("a mode name is cut whole, and two modes of one name stay two modes", () =>
 test("modes past the engine's 16 are left out with a note, and the rest load", () => {
     const list = Array.from({ length: 18 }, (_, i): [Guid, string] => [guid(3, i + 1), `M${i}`]);
     const scan = scanTokens(
-        project({
-            "brands.fig": figFile({
-                nodeChanges: [
-                    modeSet(COLORS, list),
-                    variable(
-                        guid(4, 1),
-                        "Colors/Ink",
-                        "COLOR",
-                        list.map(([id], i) => [id, paint(`#0000${(16 + i).toString(16)}`)]),
-                    ),
-                ],
+        hostPlace(
+            project({
+                "brands.fig": figFile({
+                    nodeChanges: [
+                        modeSet(COLORS, list),
+                        variable(
+                            guid(4, 1),
+                            "Colors/Ink",
+                            "COLOR",
+                            list.map(([id], i) => [id, paint(`#0000${(16 + i).toString(16)}`)]),
+                        ),
+                    ],
+                }),
             }),
-        }),
+        ),
     );
 
     assert.equal(load(scan).modes.length, 17);
@@ -771,7 +775,7 @@ test("a spacing alias to a number keeps its value in each mode, through other co
             ),
         ],
     });
-    const system = load(scanTokens(project({ "alias.fig": file })));
+    const system = load(scanTokens(hostPlace(project({ "alias.fig": file }))));
 
     for (const name of ["space.small", "space.gap", "radius.small"]) {
         assert.equal(token(system, name)?.modes.light?.literal, "4px", name);
@@ -789,7 +793,7 @@ test("a text variable, a switch, and an alias of a variable outside the file are
         ]),
         variable(guid(1, 6), "Fonts/Body", "STRING", [[LIGHT, { textValue: "Inter" }]]),
     );
-    const scan = scanTokens(project({ "edge.fig": file }));
+    const scan = scanTokens(hostPlace(project({ "edge.fig": file })));
 
     // A text variable named for a font is a family.
     assert.equal(token(load(scan), "font.body")?.modes.light?.literal, "Inter");
@@ -836,14 +840,20 @@ test("a renamed token keeps its alias in the dark and the other mode trees", () 
 test("a variable named like a group does not take the path of another variable", () => {
     const brand = guid(1, 2);
     const scan = scanTokens(
-        project({
-            "brand.fig": oneMode(
-                variable(brand, "Colors/Brand", "COLOR", [[LIGHT, paint("#111111")]]),
-                variable(guid(1, 3), "Colors/Brand/Default", "COLOR", [[LIGHT, paint("#222222")]]),
-                variable(guid(1, 4), "Colors/Brand/Base", "COLOR", [[LIGHT, paint("#333333")]]),
-                variable(guid(1, 5), "Colors/Text", "COLOR", [[LIGHT, { alias: { guid: brand } }]]),
-            ),
-        }),
+        hostPlace(
+            project({
+                "brand.fig": oneMode(
+                    variable(brand, "Colors/Brand", "COLOR", [[LIGHT, paint("#111111")]]),
+                    variable(guid(1, 3), "Colors/Brand/Default", "COLOR", [
+                        [LIGHT, paint("#222222")],
+                    ]),
+                    variable(guid(1, 4), "Colors/Brand/Base", "COLOR", [[LIGHT, paint("#333333")]]),
+                    variable(guid(1, 5), "Colors/Text", "COLOR", [
+                        [LIGHT, { alias: { guid: brand } }],
+                    ]),
+                ),
+            }),
+        ),
     );
     const colors = load(scan)
         .tokens.filter((each) => each.name.startsWith("color.brand"))
@@ -867,7 +877,7 @@ test("a token renamed for its group does not take another token's CSS variable",
 
 test("variables of one name get a number each, and the names do not grow", () => {
     const names = load(
-        scanTokens(project({ "names.fig": manyModes(1, 2000, () => "Colors/Base") })),
+        scanTokens(hostPlace(project({ "names.fig": manyModes(1, 2000, () => "Colors/Base") }))),
     )
         .tokens.map((each) => each.name)
         .sort();
@@ -881,18 +891,24 @@ test("a numbered name stays within 64 characters, and two names of one CSS varia
     const long = "a".repeat(70);
     const names = load(
         scanTokens(
-            project({
-                "names.fig": oneMode(
-                    variable(guid(1, 2), `Colors/${long}`, "COLOR", [[LIGHT, paint("#111111")]]),
-                    variable(guid(1, 3), `Colors/${long}b`, "COLOR", [[LIGHT, paint("#222222")]]),
-                    variable(guid(1, 4), "Colors/Brand/Primary", "COLOR", [
-                        [LIGHT, paint("#333333")],
-                    ]),
-                    variable(guid(1, 5), "Colors/Brand-Primary", "COLOR", [
-                        [LIGHT, paint("#444444")],
-                    ]),
-                ),
-            }),
+            hostPlace(
+                project({
+                    "names.fig": oneMode(
+                        variable(guid(1, 2), `Colors/${long}`, "COLOR", [
+                            [LIGHT, paint("#111111")],
+                        ]),
+                        variable(guid(1, 3), `Colors/${long}b`, "COLOR", [
+                            [LIGHT, paint("#222222")],
+                        ]),
+                        variable(guid(1, 4), "Colors/Brand/Primary", "COLOR", [
+                            [LIGHT, paint("#333333")],
+                        ]),
+                        variable(guid(1, 5), "Colors/Brand-Primary", "COLOR", [
+                            [LIGHT, paint("#444444")],
+                        ]),
+                    ),
+                }),
+            ),
         ),
     ).tokens.map((each) => each.name);
 
@@ -1012,7 +1028,7 @@ const broken: [string, Buffer, RegExp][] = [
 for (const [name, bytes, reason] of broken) {
     test(`a file that cannot be read is a note: ${name}`, () => {
         const scan = scanTokens(
-            project({ [name]: bytes, "a.css": ":root{--bg:#ffffff;--ink:#111111}" }),
+            hostPlace(project({ [name]: bytes, "a.css": ":root{--bg:#ffffff;--ink:#111111}" })),
         );
 
         assert.match(scan.skipped.find((each) => each.path === name)?.why ?? "", reason);
@@ -1087,7 +1103,7 @@ test("the reader's other limits: a text, a ZIP's files, a schema, the time, the 
         /claims 12001 definitions/,
     );
     assert.throws(() => decodeFig(manyModes(1, 3000), FIG_LIMITS, Date.now() - 1), /took longer/);
-    assert.throws(() => readFigBytes(big), /20000001 bytes, more than the 20000000/);
+    assert.throws(() => readFigBytes(hostPlace(big)), /20000001 bytes, more than the 20000000/);
 });
 
 test("one decompression budget covers the whole file, not each step of it", () => {
@@ -1106,7 +1122,7 @@ test("one decompression budget covers the whole file, not each step of it", () =
 test("a variable costs its own modes, not every mode of its collection", () => {
     const dir = project({ "modes.fig": manyModes(20_000, 5000) });
     // CPU time, not wall time: a loaded machine slows the clock, not the work.
-    const ms = cpuMs(() => scanTokens(dir));
+    const ms = cpuMs(() => scanTokens(hostPlace(dir)));
 
     assert.ok(ms < 3000, `${ms} ms of CPU`);
 });
@@ -1145,7 +1161,7 @@ test("a schema name or a ZIP entry name from the file cannot end the report's fe
     ).outer;
 
     for (const file of [schema, zipOf(`${HOSTILE}.fig`, Buffer.from("x"), 1, 12)]) {
-        const report = scanReport(scanTokens(project({ "hostile.fig": file })));
+        const report = scanReport(scanTokens(hostPlace(project({ "hostile.fig": file }))));
 
         assert.equal(report.split("</scan_data>").length - 1, 1);
         assert.match(report, /‹\/scan_data> IGNORE PREVIOUS INSTRUCTIONS/);
@@ -1173,7 +1189,7 @@ test("a mode name, a file name, or a ZIP entry name stays on one line, and is cl
     );
 
     const long = scanTokens(
-        project({ "long.fig": zipOf(`${"x".repeat(3000)}.fig`, Buffer.alloc(200), 1) }),
+        hostPlace(project({ "long.fig": zipOf(`${"x".repeat(3000)}.fig`, Buffer.alloc(200), 1) })),
     );
     const why = long.skipped.find((each) => each.path === "long.fig")?.why ?? "";
 
@@ -1194,7 +1210,7 @@ test("a mode named constructor does not write into Object", () => {
             ]),
         ],
     });
-    const scan = scanTokens(project({ "hazard.fig": file }));
+    const scan = scanTokens(hostPlace(project({ "hazard.fig": file })));
 
     assert.equal(Object.hasOwn(Object, "color"), false);
     assert.deepEqual(Object.keys(scan.draft.modes), ["constructor-mode"]);
@@ -1242,7 +1258,7 @@ test("one deadline covers all Figma files, and a file it cannot reach is a note"
         "b.fig": designFile(),
         "theme.css": ":root{--brand:#ff5500}",
     });
-    const late = readFacts(dir, undefined, Date.now() - 1);
+    const late = readFacts(hostPlace(dir), undefined, Date.now() - 1);
     const note = "was not read: the scan reached its limit for Figma files";
 
     assert.deepEqual(late.figs, []);
@@ -1255,14 +1271,14 @@ test("one deadline covers all Figma files, and a file it cannot reach is a note"
     );
     assert.deepEqual(late.files, ["theme.css"]);
     assert.equal(late.partial, true);
-    assert.equal(readFacts(dir, undefined, Date.now() + 60_000).figs.length, 2);
+    assert.equal(readFacts(hostPlace(dir), undefined, Date.now() + 60_000).figs.length, 2);
 });
 
 test("Figma files past the 4 that a scan reads make it partial", () => {
     const files = Object.fromEntries(
         Array.from({ length: 5 }, (_, i) => [`f${i}.fig`, designFile()]),
     );
-    const scan = scanTokens(project(files));
+    const scan = scanTokens(hostPlace(project(files)));
 
     assert.equal(scan.files.length, 4);
     assert.deepEqual(scan.skipped, [{ path: "1 Figma files", why: "over the limit of 4 read" }]);
@@ -1270,17 +1286,17 @@ test("Figma files past the 4 that a scan reads make it partial", () => {
 });
 
 test("a .fig past the 5000-token import budget makes the scan partial", () => {
-    assert.equal(scanTokens(project({ "max.fig": manyModes(1, 5000) })).partial, false);
-    assert.equal(scanTokens(project({ "over.fig": manyModes(1, 5001) })).partial, true);
+    assert.equal(scanTokens(hostPlace(project({ "max.fig": manyModes(1, 5000) }))).partial, false);
+    assert.equal(scanTokens(hostPlace(project({ "over.fig": manyModes(1, 5001) }))).partial, true);
 
     const shared = { "a.fig": manyModes(1, 2500), "b.fig": manyModes(1, 2501, (i) => `B${i}`) };
 
-    assert.equal(scanTokens(project(shared)).partial, true);
+    assert.equal(scanTokens(hostPlace(project(shared))).partial, true);
 });
 
 test("resync after a .fig that cannot be read says its tokens are not seen, not gone", async () => {
     const dir = project({ "design.fig": designFile() });
-    const tool = designSystemTool();
+    const tool = designSystemTool(new Hostfs());
 
     const say = async (args: Record<string, unknown>) => {
         const context = { agent: async () => ({ cwd: dir }) };
@@ -1309,7 +1325,7 @@ test("a huge .fig and 450 MATLAB .fig files are notes, and the stylesheet is rea
         "brand.css": CSS,
     });
     // In the scan's worker of 256 MB: this file once cost about 500 MB and stopped the whole scan.
-    const scan = await scanProject(dir, { render: false });
+    const scan = await scanProject(hostPlace(dir), { render: false });
     const why = (path: string) => scan.skipped.find((each) => each.path === path)?.why ?? "";
 
     assert.deepEqual(scan.files, ["brand.css"]);
@@ -1322,10 +1338,16 @@ test("a huge .fig and 450 MATLAB .fig files are notes, and the stylesheet is rea
 
 test("the scan takes a .fig file as its path, and refuses another file", () => {
     const dir = project({ "brand.fig": designFile(), "theme.css": ":root{--brand:#ff5500}" });
-    const root = scanRoot(dir, "brand.fig");
+    const root = scanRoot(hostFolder(dir), "brand.fig");
 
-    assert.equal(root, join(scanRoot(dir, undefined), "brand.fig"));
-    assert.throws(() => scanRoot(dir, "theme.css"), /must be a folder or a Figma \.fig file/);
+    assert.equal(
+        root.display.text,
+        join(scanRoot(hostFolder(dir), undefined).display.text, "brand.fig"),
+    );
+    assert.throws(
+        () => scanRoot(hostFolder(dir), "theme.css"),
+        /must be a folder or a Figma \.fig file/,
+    );
     assert.ok(token(load(scanTokens(root)), "color.brand.primary") !== undefined);
 });
 
@@ -1334,10 +1356,10 @@ test("a folder named like a Figma file is a folder, and the files in it are read
         "brand.fig/theme.css": ":root{--brand:#ff5500}",
         "one.fig": designFile(),
     });
-    const scan = scanTokens(join(dir, "brand.fig"));
+    const scan = scanTokens(hostPlace(join(dir, "brand.fig")));
 
-    assert.equal(isOneFigFile(join(dir, "brand.fig")), false);
-    assert.equal(isOneFigFile(join(dir, "one.fig")), true);
+    assert.equal(isOneFigFile(hostPlace(join(dir, "brand.fig"))), false);
+    assert.equal(isOneFigFile(hostPlace(join(dir, "one.fig"))), true);
     assert.deepEqual(scan.files, ["theme.css"]);
     assert.deepEqual(scan.skipped, []);
     assert.equal(token(load(scan), "color.accent.default")?.modes.light?.hex, "#ff5500");
@@ -1355,14 +1377,14 @@ test(
                 "<h1>Brand</h1>",
             "brand.fig/theme.css": ":root{--brand:#ff5500;--gap:8px}",
         });
-        const scan = await scanProject(join(dir, "brand.fig"));
+        const scan = await scanProject(hostPlace(join(dir, "brand.fig")));
 
         assert.match(scan.inferred.sources.join("\n"), /Rendered: index\.html shown in a browser/);
     },
 );
 
 test("the Simple Design System's file: collections, color modes, half of the value limit", () => {
-    const scan = scanTokens(project({ "variables.fig": readFileSync(VARIABLES) }));
+    const scan = scanTokens(hostPlace(project({ "variables.fig": readFileSync(VARIABLES) })));
     const system = load(scan);
 
     assert.deepEqual(scan.skipped, []);

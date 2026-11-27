@@ -1,6 +1,7 @@
 import {
     cleanUp,
     context,
+    hostFolder,
     newSession,
     openApp,
     owner,
@@ -136,7 +137,7 @@ test("rollback signals the verified launcher group, not a reused group", { skip 
         assert.ok(!recorder.mock.calls.some(({ arguments: [, signal] }) => signal === "SIGKILL"));
         assert.equal(stat(pid)?.start, start);
 
-        const launched = await backend.spawn("exec sleep 30", root, env, task);
+        const launched = await backend.spawn("exec sleep 30", hostFolder(root), env, task);
         const original = { ...task, pid: launched.pid, startTicks: launched.start };
 
         assert.ok(original.startTicks);

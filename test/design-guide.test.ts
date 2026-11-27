@@ -1,5 +1,6 @@
 // The design prompt section: the stream D instructions, and the project's design system as bounded, untrusted text.
 import assert from "node:assert/strict";
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     cpSync,
     mkdtempSync,
@@ -45,6 +46,7 @@ function folder(): string {
 async function render(dir: string, envCwd?: string): Promise<{ text: string; notices: string[] }> {
     const notices: string[] = [];
     const guide = designGuide({
+        hostfs: new Hostfs(),
         notice: (_level: "info" | "warning" | "error", message: string) => notices.push(message),
     } as never);
     const text =
@@ -436,6 +438,7 @@ test(
         for (const colorScheme of ["light", "dark"] as const) {
             const report = await checkDesign(bundle, system, { colorScheme, viewport: "mobile" }, {
                 fetchPublic: createPublicFetch(),
+                hostfs: new Hostfs(),
             } as PocketHost);
             const bad = report.findings.filter(
                 (finding) => finding.level === "error" || finding.rule === "tap-target",

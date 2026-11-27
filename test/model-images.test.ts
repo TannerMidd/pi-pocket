@@ -12,6 +12,7 @@ import {
     prepareModelImage,
 } from "../src/server/model-images.ts";
 import { heicToJpeg } from "../src/server/heic.ts";
+import { hostPlace } from "./helpers.ts";
 
 // A 1×1 PNG, and a 2×2 blue one.
 const PNG = Buffer.from(
@@ -116,7 +117,7 @@ test("a HEIC photo goes to the model as a JPEG with a note, and the file stays",
         const original = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
 
         writeFileSync(path, original);
-        const made = await modelImage(path, "image/heic");
+        const made = await modelImage(hostPlace(path), "image/heic");
 
         assert.equal(made.image.mimeType, "image/jpeg");
         assert.equal(
@@ -156,7 +157,10 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
         free.writeUInt32BE(40000, 16);
         free.writeUInt32BE(40000, 20);
         writeFileSync(path, Buffer.concat([photo, free]));
-        assert.equal((await modelImage(path, "image/heic")).image.mimeType, "image/jpeg");
+        assert.equal(
+            (await modelImage(hostPlace(path), "image/heic")).image.mimeType,
+            "image/jpeg",
+        );
 
         for (const [bytes, message] of [
             [Buffer.from("....ftypheic not a photo at all"), /./],
@@ -165,7 +169,7 @@ test("a broken HEIC file, or one that names too many pixels, fails without a han
             [unsized, /size cannot be read/],
         ] as const) {
             writeFileSync(path, bytes);
-            await assert.rejects(modelImage(path, "image/heic"), message);
+            await assert.rejects(modelImage(hostPlace(path), "image/heic"), message);
         }
     } finally {
         rmSync(folder, { recursive: true, force: true });

@@ -1,11 +1,12 @@
 import {
-    type App,
     cleanUp,
+    hostFolder,
     newSession,
     openApp,
     owner,
     root,
     scriptedModel,
+    type App,
     until,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
@@ -226,7 +227,7 @@ test("Windows absence requires coverage of the gated command, not just an empty 
             job = "members";
             writeFileSync(`${task.files}.pid`, "42\n");
 
-            const launched = processes.spawn("", root, {}, task, () => {
+            const launched = processes.spawn("", hostFolder(root), {}, task, () => {
                 assert.equal(released, false);
                 const key = readFileSync(`${task.files}.pids`, "utf8").match(/^job (\w+)$/m)![1];
                 const receipt = Buffer.from(`${task.files}.pids`).toString("base64");
@@ -497,7 +498,7 @@ test(
 
         try {
             await assert.rejects(
-                backend.spawn("", root, process.env, task),
+                backend.spawn("", hostFolder(root), process.env, task),
                 /process identity could not be verified/,
             );
             assert.equal(existsSync(`${task.files}.pids`), false);
@@ -650,7 +651,7 @@ test(
         try {
             const started = await first.spawn(
                 waitForFile("release-takeover"),
-                root,
+                hostFolder(root),
                 process.env,
                 task,
             );

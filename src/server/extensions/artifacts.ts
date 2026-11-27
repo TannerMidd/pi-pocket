@@ -29,8 +29,8 @@ import {
 } from "../docs.ts";
 import { keepAssets, nextVersion } from "../artifacts.ts";
 import { APP_ROOT } from "../config.ts";
-import { openNoFollow } from "../no-follow.ts";
 import type { PocketHost } from "../host.ts";
+import { type FolderRef, openNoFollow } from "../hostfs.ts";
 import { localFolder } from "../design/files.ts";
 import { loadDesignSystem } from "../design/tokens.ts";
 import { assetName, assetType } from "../http/artifact-assets.ts";
@@ -51,8 +51,8 @@ export function slugify(value: string): string {
 }
 
 /** Agent-local files, not browser file access: parent links are allowed, the final file must not be a link. */
-async function readFileBytes(path: string, limit: number): Promise<Buffer> {
-    const handle = await openNoFollow(path);
+async function readFileBytes(host: PocketHost, path: string, limit: number): Promise<Buffer> {
+    const handle = await openNoFollow(host.hostfs.at(path));
 
     try {
         const info = await handle.stat();
@@ -90,8 +90,8 @@ async function readFileBytes(path: string, limit: number): Promise<Buffer> {
     }
 }
 
-async function readArtifact(path: string): Promise<string> {
-    const bytes = await readFileBytes(path, MAX_BYTES);
+async function readArtifact(host: PocketHost, path: string): Promise<string> {
+    const bytes = await readFileBytes(host, path, MAX_BYTES);
 
     try {
         if (bytes.includes(0)) {
@@ -118,7 +118,7 @@ async function attachDesignSystem(
     content: string,
     prepared: Map<string, { asset: ArtifactAsset; bytes: Buffer }>,
     removed: readonly string[],
-    cwd: string | undefined,
+    cwd: FolderRef | undefined,
 ): Promise<string[]> {
     const wanted = (Object.keys(DESIGN_FILES) as (keyof typeof DESIGN_FILES)[]).filter(
         (name) => content.includes(name) && !prepared.has(name) && !removed.includes(name),
@@ -240,6 +240,7 @@ type PublishArgs = {
  * Publish a version (`inline`: HTML only, and the result says the page shows as a card in the reply). The commit is idempotent per call, so a rerun after a crash is harmless.
  */
 async function publish(
+    host: PocketHost,
     args: PublishArgs,
     api: Parameters<Exec>[1],
     context: Parameters<Exec>[2],
@@ -321,7 +322,7 @@ async function publish(
 
             const path = resolve(agent.cwd ?? process.cwd(), expandHome(args.path));
 
-            content = await readArtifact(path);
+            content = await readArtifact(host, path);
         } else if (args.content !== undefined) {
             content = args.content;
         } else if (args.edits !== undefined && args.edits.length > 0) {
@@ -399,7 +400,7 @@ async function publish(
 
                 const path = resolve(agent.cwd ?? process.cwd(), expandHome(entry.path));
 
-                bytes = await readFileBytes(path, MAX_ASSET_BYTES);
+                bytes = await readFileBytes(host, path, MAX_ASSET_BYTES);
             } else {
                 if (Buffer.byteLength(entry.content!, "utf8") > MAX_ASSET_BYTES) {
                     throw new Error(`Assets are limited to ${MAX_ASSET_BYTES} bytes each.`);
@@ -437,7 +438,12 @@ async function publish(
                 // No session folder to look in: the page keeps its link.
             }
 
-            notes = await attachDesignSystem(content, prepared, args.removeAssets ?? [], cwd);
+            notes = await attachDesignSystem(
+                content,
+                prepared,
+                args.removeAssets ?? [],
+                cwd === undefined ? undefined : host.hostfs.folder(cwd),
+            );
             preparedSize = [...prepared.values()].reduce(
                 (total, each) => total + each.bytes.length,
                 0,
@@ -687,7 +693,7 @@ export function withoutInline(tool: ToolRegistration): ToolRegistration {
     } as ToolRegistration;
 }
 
-export default function createArtifacts(_host: PocketHost) {
+export default function createArtifacts(host: PocketHost) {
     const artifact = defineTool({
         name: "artifact",
         description:
@@ -714,7 +720,7 @@ export default function createArtifacts(_host: PocketHost) {
         ),
         // The commit in publish() is idempotent per call, so a rerun after a crash is harmless.
         replay: "safe",
-        execute: (args, api, context) => publish(args, api, context, args.inline === true),
+        execute: (args, api, context) => publish(host, args, api, context, args.inline === true),
     });
 
     return defineExtension({

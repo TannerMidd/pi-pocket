@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +23,7 @@ function project(files: Record<string, string> = {}): string {
     return dir;
 }
 
-const tool = designSystemTool();
+const tool = designSystemTool(new Hostfs());
 const run = (dir: string, args: Record<string, unknown>) =>
     tool.execute(args as never, { agent: async () => ({ cwd: dir }) } as never, undefined as never);
 const say = async (call: ReturnType<typeof run>) =>

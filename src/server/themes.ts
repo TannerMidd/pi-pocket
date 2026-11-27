@@ -26,7 +26,7 @@ import { pathToFileURL } from "node:url";
 import { APP_ROOT } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import { opened } from "./http/io.ts";
-import { openNoFollowSync } from "./no-follow.ts";
+import { openNoFollowSync, own } from "./hostfs.ts";
 import { desktopTheme } from "./omarchy.ts";
 import { watchTree } from "./reload.ts";
 import { cssReferences, themeFile, tokenize } from "./themes/css.ts";
@@ -655,12 +655,12 @@ export class Themes {
         let css = "";
 
         if (hasCss) {
-            const fd = openNoFollowSync(main);
+            const file = openNoFollowSync(own(main));
 
             try {
-                css = readFileSync(fd, "utf8");
+                css = file.readAll().toString("utf8");
             } finally {
-                closeSync(fd);
+                file.close();
             }
         } else if (!hasManifest) {
             // A theme of colors alone gets a stylesheet now, which needs a theme.json: its name as it is listed.

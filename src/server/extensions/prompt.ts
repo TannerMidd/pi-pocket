@@ -7,7 +7,7 @@
  */
 import { statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-works/pi-coding-agent";
+import { getDocsPath, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
 import type { PocketHost } from "../host.ts";
@@ -115,7 +115,7 @@ export default function createPrompt(host: PocketHost) {
         let skills: string | undefined;
 
         try {
-            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir });
+            const files = host.snapshots.contextFiles(cwd, host.agentDir);
 
             if (files.length > 0) {
                 context = files

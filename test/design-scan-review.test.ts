@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { scanReport, scanTokens } from "../src/server/design/scan.ts";
+import { hostPlace } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -22,7 +23,7 @@ function project(files: Record<string, string>): string {
     return dir;
 }
 
-const report = (dir: string) => scanReport(scanTokens(dir));
+const report = (dir: string) => scanReport(scanTokens(hostPlace(dir)));
 
 const review = (text: string) => {
     const at = text.indexOf("Review these");
@@ -95,7 +96,7 @@ test("what the walk left out is named with its reason: vendored code, build outp
 
     symlinkSync(join(dir, "src"), join(dir, "linked"));
 
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
     const text = scanReport(scan);
     const left = review(text).find((line) => /^  - left out: /.test(line))!;
 
@@ -115,20 +116,24 @@ test("what the walk left out is named with its reason: vendored code, build outp
 
 test("a minified file is read when it is all the project has, and text with no line breaks is not read as styles", () => {
     const only = scanTokens(
-        project({
-            "app.min.css":
-                ":root{--bg:#ffffff;--fg:#111111}body{background:var(--bg);color:var(--fg)}",
-        }),
+        hostPlace(
+            project({
+                "app.min.css":
+                    ":root{--bg:#ffffff;--fg:#111111}body{background:var(--bg);color:var(--fg)}",
+            }),
+        ),
     );
 
     assert.deepEqual(only.files, ["app.min.css"]);
     assert.equal(only.skipped.length, 0);
 
     const built = scanTokens(
-        project({
-            "a.css": ":root { --bg: #fff; --text: #111 }\nbody { background: var(--bg) }",
-            "bundle.css": `${"a{color:#ff00ff;margin:3px}".repeat(300)}`,
-        }),
+        hostPlace(
+            project({
+                "a.css": ":root { --bg: #fff; --text: #111 }\nbody { background: var(--bg) }",
+                "bundle.css": `${"a{color:#ff00ff;margin:3px}".repeat(300)}`,
+            }),
+        ),
     );
 
     assert.ok(built.skipped.some((item) => item.path === "bundle.css" && item.why === "minified"));

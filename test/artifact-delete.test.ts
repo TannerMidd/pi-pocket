@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import { type App, cleanUp, context, openApp, owner, say, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -49,7 +50,7 @@ after(async () => {
 });
 
 async function publish(id: ConversationId, content: string, more: object = {}): Promise<number> {
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
     const result = await tool.execute(
         { id: "demo", title: "Demo", content, ...more } as never,
         {

@@ -1,4 +1,13 @@
-import { type App, cleanUp, openApp, owner, root, scriptedModel, until } from "./helpers.ts";
+import {
+    cleanUp,
+    hostFolder,
+    openApp,
+    owner,
+    root,
+    scriptedModel,
+    type App,
+    until,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -322,11 +331,11 @@ before(async () => {
     await publishDesign(app, session, {
         id: "ferry",
         title: "Ferry booking",
-        content: ferryPage(loadDesignSystem(folder)!.compiled.css, true),
+        content: ferryPage(loadDesignSystem(hostFolder(folder))!.compiled.css, true),
     });
 
     {
-        const made = loadDesignSystem(folder)!;
+        const made = loadDesignSystem(hostFolder(folder))!;
         const hex = (name: string) =>
             made.tokens.find((each) => each.name === name)!.modes.light!.hex as string;
 
@@ -366,7 +375,7 @@ body { margin: 0; padding: 24px; background: ${hex("color.bg.canvas")}; font: 16
     await publishDesign(app, threeSession, {
         id: "ferry",
         title: "Ferry booking",
-        content: ferryPage(loadDesignSystem(three)!.compiled.css, true),
+        content: ferryPage(loadDesignSystem(hostFolder(three))!.compiled.css, true),
     });
 
     const rich = mkdtempSync(join(root, "rich-"));
@@ -965,7 +974,7 @@ test(
             readFileSync(join(folder, ".pi", "design", "tokens.json"), "utf8"),
         );
         const darkFile = join(folder, ".pi", "design", "tokens.dark.json");
-        const lightHex = loadDesignSystem(folder)!.tokens.find(
+        const lightHex = loadDesignSystem(hostFolder(folder))!.tokens.find(
             (each) => each.name === "color.border.strong",
         )!.modes.light!.hex;
 
@@ -1416,7 +1425,7 @@ test("components show their states in frames that run nothing and load nothing",
         frames.map((each) => each.states.join()),
         ["success,danger", "default,hover,focus,disabled", "default,focus,error"],
     );
-    const accent = loadDesignSystem(folder)!.tokens.find(
+    const accent = loadDesignSystem(hostFolder(folder))!.tokens.find(
         (each) => each.name === "color.accent.default",
     )!.modes.light!.value as string;
 

@@ -13,6 +13,7 @@ import {
 import { checkDesign } from "../src/server/design/lint.ts";
 import { loadDesignSystem } from "../src/server/design/tokens.ts";
 import { bundleOf, host } from "./design-lint-fixtures.ts";
+import { hostFolder } from "./helpers.ts";
 
 const browser = { skip: findBrowser() === undefined, timeout: 120_000 };
 const rgb = (hex: string, alpha = 1): RgbaTuple => [
@@ -209,7 +210,9 @@ test(
     browser,
     async () => {
         const system = loadDesignSystem(
-            join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket"),
+            hostFolder(
+                join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket"),
+            ),
         )!;
         const assets = [
             { name: "ds/tokens.css", type: "text/css", bytes: Buffer.from(system.compiled.css) },

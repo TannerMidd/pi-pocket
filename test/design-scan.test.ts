@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { after, test } from "node:test";
 import { LIMITS, checkTokensBlock, scanRoot, scanTokens } from "../src/server/design/scan.ts";
 import { planRender } from "../src/server/design/scan-render-pages.ts";
 import { designSystemTool } from "../src/server/design/system.ts";
+import { hostFolder, hostPlace } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -31,7 +33,7 @@ a{color:#ff5500;background:#FFF;border-radius:8px;font-family:Inter, sans-serif}
 b{color:#f50;border-radius:8px;font-family:Inter,  sans-serif}`,
         "node_modules/x/skip.css": "a{color:#123456}",
     });
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
 
     assert.deepEqual(scan.files, ["src/app.css"]);
     assert.deepEqual(scan.variables, { "--brand": "#FF5500", "--gap": "8px" });
@@ -46,7 +48,7 @@ test("a 5-digit hex is not a color", () => {
     const dir = project({ "a.css": "a{color:#12345;x:#abcd}" });
 
     assert.deepEqual(
-        scanTokens(dir).colors.map((c) => c.value),
+        scanTokens(hostPlace(dir)).colors.map((c) => c.value),
         ["#aabbccdd"],
     );
 });
@@ -58,7 +60,7 @@ test("entities, links, ids, and selectors are not colors", () => {
     });
 
     assert.deepEqual(
-        scanTokens(dir).colors.map((c) => c.value),
+        scanTokens(hostPlace(dir)).colors.map((c) => c.value),
         ["#0a0a0a"],
     );
 });
@@ -71,7 +73,7 @@ test("issue numbers in comments and ids in a selector list are not colors", () =
     });
 
     assert.deepEqual(
-        scanTokens(dir)
+        scanTokens(hostPlace(dir))
             .colors.map((c) => c.value)
             .sort(),
         ["#0a0a0a", "#111111", "#222222", "#fefefe", "#ff0000"],
@@ -85,7 +87,7 @@ test("a glob in a config is not a comment, and an address keeps its colors", () 
     });
 
     assert.deepEqual(
-        scanTokens(dir)
+        scanTokens(hostPlace(dir))
             .colors.map((c) => c.value)
             .sort(),
         ["#123456", "#654321"],
@@ -97,7 +99,7 @@ test("hostile comments and colors scan in linear time", () => {
         const dir = project({ "a.css": body });
         const started = Date.now();
 
-        scanTokens(dir);
+        scanTokens(hostPlace(dir));
         assert.ok(Date.now() - started < 2000);
     }
 });
@@ -106,7 +108,7 @@ test("a hostile file of dashes scans in linear time", () => {
     const dir = project({ "a.css": "-".repeat(LIMITS.fileBytes) });
     const started = Date.now();
 
-    scanTokens(dir);
+    scanTokens(hostPlace(dir));
     // Before the fix, 40 KB of dashes took 9 s; the limit here is generous for a slow machine.
     assert.ok(Date.now() - started < 2000);
 });
@@ -117,7 +119,7 @@ test("a file past the byte limit is read only to the limit", () => {
     });
 
     assert.deepEqual(
-        scanTokens(dir).colors.map((c) => c.value),
+        scanTokens(hostPlace(dir)).colors.map((c) => c.value),
         ["#111111"],
     );
 });
@@ -127,7 +129,7 @@ test("a token after a limit is left out, and the scan says it is partial", () =>
     const cut = project({ "a.css": `a{color:#111}${" ".repeat(LIMITS.fileBytes)}b{color:#222}` });
 
     assert.equal(
-        scanTokens(cut).partial,
+        scanTokens(hostPlace(cut)).partial,
         true,
         "the file is cut, so the scan read part of the project",
     );
@@ -139,7 +141,7 @@ test("a token after a limit is left out, and the scan says it is partial", () =>
         many[`g${at}`] = { $value: "#111" };
     }
 
-    const scan = scanTokens(project({ "design/tokens.json": JSON.stringify(many) }));
+    const scan = scanTokens(hostPlace(project({ "design/tokens.json": JSON.stringify(many) })));
 
     assert.equal(
         scan.partial,
@@ -158,7 +160,7 @@ test("a token file of exactly the token limit drops nothing, so the scan is whol
         many[`g${at}`] = { $value: "#111" };
     }
 
-    const scan = scanTokens(project({ "design/tokens.json": JSON.stringify(many) }));
+    const scan = scanTokens(hostPlace(project({ "design/tokens.json": JSON.stringify(many) })));
 
     assert.equal(scan.partial, false, "the last token is read, so the scan read the whole file");
     assert.ok(scan.draft.tokens.g4999 !== undefined, "the last token is in the draft");
@@ -171,7 +173,7 @@ test("a tree without style files stops at the entry limit", () => {
         files[`x${i}.bin`] = "";
     }
 
-    const scan = scanTokens(project(files));
+    const scan = scanTokens(hostPlace(project(files)));
 
     assert.deepEqual(scan.files, []);
     assert.equal(scan.partial, true);
@@ -180,13 +182,13 @@ test("a tree without style files stops at the entry limit", () => {
 test("scanRoot: a missing path, a folder named ..x, and a deep tree", () => {
     const dir = project({ "..x/a.css": "a{color:#111}" });
 
-    assert.throws(() => scanRoot(dir, "nope"), /does not exist/);
-    assert.doesNotThrow(() => scanRoot(dir, "..x"));
+    assert.throws(() => scanRoot(hostFolder(dir), "nope"), /does not exist/);
+    assert.doesNotThrow(() => scanRoot(hostFolder(dir), "..x"));
 
     const deep = project({ "a/b/c/d/e/f/g/h/i/j/k.css": "a{color:#111}" });
 
-    assert.deepEqual(scanTokens(deep).files, []);
-    assert.equal(scanTokens(deep).partial, true);
+    assert.deepEqual(scanTokens(hostPlace(deep)).files, []);
+    assert.equal(scanTokens(hostPlace(deep)).partial, true);
 });
 
 test("scan never follows a symlink out of the folder", () => {
@@ -196,10 +198,10 @@ test("scan never follows a symlink out of the folder", () => {
     symlinkSync(outside, join(dir, "link"));
     symlinkSync(join(outside, "secret.css"), join(dir, "file.css"));
 
-    assert.deepEqual(scanTokens(dir).files, ["ok.css"]);
-    assert.throws(() => scanRoot(dir, "link"), /folder|inside/);
-    assert.throws(() => scanRoot(dir, "../x"), /inside/);
-    assert.throws(() => scanRoot(dir, "/etc"), /relative/);
+    assert.deepEqual(scanTokens(hostPlace(dir)).files, ["ok.css"]);
+    assert.throws(() => scanRoot(hostFolder(dir), "link"), /folder|inside/);
+    assert.throws(() => scanRoot(hostFolder(dir), "../x"), /inside/);
+    assert.throws(() => scanRoot(hostFolder(dir), "/etc"), /relative/);
 });
 
 test("the file limit ends the walk and says so", () => {
@@ -209,7 +211,7 @@ test("the file limit ends the walk and says so", () => {
         files[`f${i}.css`] = "a{color:#111}";
     }
 
-    const scan = scanTokens(project(files));
+    const scan = scanTokens(hostPlace(project(files)));
 
     assert.equal(scan.files.length, LIMITS.files);
     assert.equal(scan.partial, true);
@@ -221,7 +223,7 @@ test("the rendered scan picks its pages in linear time, also from openers with n
     });
     const start = performance.now();
 
-    planRender(dir);
+    planRender(hostPlace(dir));
     assert.ok(performance.now() - start < 1_000);
 });
 
@@ -237,7 +239,7 @@ test("checkTokensBlock: none is false, broken or non-object throws", () => {
 
 test("the tool: scan returns a draft and writes nothing; write refuses broken tokens", async () => {
     const dir = project({ "a.css": "a{color:#abc}" });
-    const tool = designSystemTool();
+    const tool = designSystemTool(new Hostfs());
     const run = (args: object) =>
         tool.execute(
             args as never,

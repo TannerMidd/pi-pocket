@@ -89,7 +89,10 @@ type Internal =
     | "stopToolCall"
     | "waitsForLimit"
     | "alertOwner"
-    | "classifyRunOutcome";
+    | "classifyRunOutcome"
+    | "folderOf"
+    | "hostfs"
+    | "snapshots";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 

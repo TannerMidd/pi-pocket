@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -452,7 +453,7 @@ test("the Markdown renderer escapes text first and keeps only safe links", () =>
     assert.ok(renderMarkdown("x".repeat(50_000), 100).length < 200, "bounded");
 });
 
-const host = { fetchPublic: createPublicFetch() } as PocketHost;
+const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 
 test(
     "in Chromium the page loads with no error, draws every state in place, switches mode, and runs no component script",

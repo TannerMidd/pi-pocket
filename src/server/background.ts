@@ -17,18 +17,7 @@
  * politely, then by force. A sweep, apart from the watches, keeps each log under its limit. The background extension
  * (`extensions/background.ts`) installs the task and gives Pi its tool; while it is off, the watches wait.
  */
-import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-    closeSync,
-    existsSync,
-    openSync,
-    readdirSync,
-    readFileSync,
-    readSync,
-    rmSync,
-    statSync,
-} from "node:fs";
 import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -51,7 +40,14 @@ import {
 } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { defang, quoted } from "./fence.ts";
-import { BACKGROUND_MARKER, type TaskProcesses, type TaskRef, taskProcesses } from "./processes.ts";
+import { own, openSync, readdir, readText, rm, stat } from "./hostfs.ts";
+import {
+    BACKGROUND_MARKER,
+    hasSplit,
+    type TaskProcesses,
+    type TaskRef,
+    taskProcesses,
+} from "./processes.ts";
 import { requestFor } from "./requests.ts";
 
 export type { BackgroundJobSummary, BackgroundTask } from "./docs.ts";
@@ -327,27 +323,27 @@ function readBytes(path: string, from: number, to: number): Buffer {
         return Buffer.alloc(0);
     }
 
-    let fd: number;
+    let file;
 
     try {
-        fd = openSync(path, "r");
+        file = openSync(own(path), "r");
     } catch {
         return Buffer.alloc(0);
     }
 
     try {
         const buffer = Buffer.alloc(to - from);
-        const read = readSync(fd, buffer, 0, buffer.length, from);
+        const read = file.read(buffer, 0, buffer.length, from);
 
         return buffer.subarray(0, read);
     } finally {
-        closeSync(fd);
+        file.close();
     }
 }
 
 function sizeOf(path: string): number {
     try {
-        return statSync(path).size;
+        return stat(own(path)).size;
     } catch {
         return 0;
     }
@@ -500,7 +496,7 @@ export class BackgroundTasks {
 
         try {
             folder = this.#dir(conversationId);
-            names = readdirSync(folder);
+            names = readdir(own(folder));
         } catch {
             return [];
         }
@@ -529,7 +525,7 @@ export class BackgroundTasks {
         }
 
         try {
-            const file = statSync(last.path);
+            const file = stat(own(last.path));
 
             return {
                 outputBytes: last.start + file.size,
@@ -959,7 +955,7 @@ export class BackgroundTasks {
     ): { code: number; log: number; at: number } | undefined {
         try {
             const path = this.#exitFile(conversationId, id);
-            const text = readFileSync(path, "utf8").trim();
+            const text = readText(own(path)).trim();
             const codes = /^(\d+)(?: (\d+))?$/.exec(text);
 
             return codes === null
@@ -967,7 +963,7 @@ export class BackgroundTasks {
                 : {
                       code: Number(codes[1]),
                       log: Number(codes[2] ?? 0),
-                      at: statSync(path).mtimeMs,
+                      at: stat(own(path)).mtimeMs,
                   };
         } catch {
             return undefined;
@@ -1281,7 +1277,7 @@ export class BackgroundTasks {
         let folders: string[];
 
         try {
-            folders = readdirSync(this.#app.managedStorage.root("background"));
+            folders = readdir(own(this.#app.managedStorage.root("background")));
         } catch {
             return;
         }
@@ -1295,7 +1291,7 @@ export class BackgroundTasks {
             let names: string[] = [];
 
             try {
-                names = readdirSync(this.#dir(conversationId));
+                names = readdir(own(this.#dir(conversationId)));
             } catch {
                 continue;
             }
@@ -1326,8 +1322,8 @@ export class BackgroundTasks {
                     try {
                         const path = join(this.#dir(conversationId), name);
 
-                        if (Date.now() - statSync(path).mtimeMs > 60_000) {
-                            rmSync(path, { force: true });
+                        if (Date.now() - stat(own(path)).mtimeMs > 60_000) {
+                            rm(own(path), { force: true });
                         }
                     } catch {
                         // Gone already.
@@ -1465,7 +1461,7 @@ export class BackgroundTasks {
             return;
         }
 
-        rmSync(join(folder, name), { force: true });
+        rm(own(join(folder, name)), { force: true });
     }
 
     #removeFiles(conversationId: ConversationId, ids: readonly string[] | undefined): void {
@@ -1631,7 +1627,7 @@ export class BackgroundTasks {
             throw new HttpError(501, unsupported);
         }
 
-        if (!existsSync(cwd)) {
+        if (!app.hostfs.has(cwd)) {
             throw new HttpError(400, `The session's folder is not there: ${cwd}`);
         }
 
@@ -1842,7 +1838,7 @@ export class BackgroundTasks {
             // The adapter can throw after it creates a process but before it returns a PID.
             spawnAttempted = true;
             const { pid: spawned, start } = await this.#procs
-                .spawn(WRAPPER, item.cwd, env, ref, authorize)
+                .spawn(WRAPPER, this.#app.hostfs.folder(item.cwd), env, ref, authorize)
                 .catch((error: Error) => {
                     authorize?.();
 
@@ -1897,12 +1893,7 @@ export class BackgroundTasks {
     #needsSplit(): void {
         const shell = this.#procs.shell();
 
-        this.#split ||=
-            shell !== undefined &&
-            spawnSync(shell, ["-p", "-c", "command -v split"], {
-                stdio: "ignore",
-                windowsHide: true,
-            }).status === 0;
+        this.#split ||= shell !== undefined && hasSplit(shell);
 
         if (!this.#split) {
             throw new HttpError(

@@ -1,6 +1,7 @@
 /** Portable bundle, screenshot, print, and image-slide presentation exports. */
 import { basename } from "node:path";
 import type { PocketHost } from "../host.ts";
+import type { FolderRef } from "../hostfs.ts";
 import { writeExport } from "./files.ts";
 import type { DesignBundle } from "./bundle.ts";
 import { pptx } from "./pptx.ts";
@@ -27,7 +28,7 @@ export const EXPORT_TYPES = {
 type SaveDesignOptions = {
     id: string;
     format: ExportFormat;
-    cwd: string;
+    cwd: FolderRef;
     viewport?: string | DesignViewport;
     path?: string;
     tweaks?: TweakValues;

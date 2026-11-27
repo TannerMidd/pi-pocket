@@ -4,7 +4,6 @@
  * operations people call directly check who may do them; `conversationPath` and `uploadDirectory` leave seeing the
  * conversation to their callers.
  */
-import { lstatSync, mkdirSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -28,6 +27,7 @@ import { uploadDirectory } from "./upload-references.ts";
 import { filePolicy } from "./file-policy.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { displayPath, expandHome } from "./paths.ts";
+import { lstat, mkdir, Place, stat } from "./hostfs.ts";
 import type { ClientEntry } from "./projection.ts";
 
 /** How many sessions' Pi edits are kept between looks at Changes (`#edits`). */
@@ -71,9 +71,9 @@ export class Workspace {
      * Where each folder's repository keeps its files, for a minute: views ask on every update. A folder in none is
      * asked about again after a few seconds, so one Pi has just run `git init` in shows its branch soon.
      */
-    readonly #gitDirs = new Map<string, { gitDir: string | undefined; at: number }>();
+    readonly #gitDirs = new Map<string, { gitDir: Place | undefined; at: number }>();
 
-    #gitDir(cwd: string): string | undefined {
+    #gitDir(cwd: string): Place | undefined {
         if (this.#app.workspaceScheme(cwd) !== undefined) {
             // View metadata has no local repository; explicit local Git actions stay guarded.
             return undefined;
@@ -88,7 +88,7 @@ export class Workspace {
             return known.gitDir;
         }
 
-        const gitDir = gitDirOf(cwd);
+        const gitDir = gitDirOf(this.#app.hostfs.folder(cwd));
 
         this.#gitDirs.set(cwd, { gitDir, at: Date.now() });
 
@@ -119,7 +119,7 @@ export class Workspace {
             throw new HttpError(404, "This session's folder is not in a git repository.");
         }
 
-        return branchesIn(cwd).catch((error: unknown) => {
+        return branchesIn(this.#app.folderOf(id)).catch((error: unknown) => {
             throw new HttpError(409, describe(error));
         });
     }
@@ -148,13 +148,13 @@ export class Workspace {
         const track = typeof request.track === "string" ? request.track : undefined;
         const name =
             typeof request.name === "string" ? request.name.trim() : track && localName(track);
-        const cwd = this.#app.cwdOf(id);
+        const folder = this.#app.folderOf(id);
 
-        if (track !== undefined && !(await isRemoteBranch(cwd, track))) {
+        if (track !== undefined && !(await isRemoteBranch(folder, track))) {
             throw new HttpError(400, `${track} is not a remote branch here.`);
         }
 
-        if (!name || !(await validBranchName(cwd, name))) {
+        if (!name || !(await validBranchName(folder, name))) {
             throw new HttpError(400, `${name ? `“${name}”` : "That"} cannot be a branch name.`);
         }
 
@@ -167,7 +167,7 @@ export class Workspace {
 
         const before = this.head(id);
 
-        await switchBranch(cwd, {
+        await switchBranch(folder, {
             name,
             create: request.create === true,
             ...(track ? { track } : {}),
@@ -199,7 +199,7 @@ export class Workspace {
         let found;
 
         try {
-            found = statSync(absolute);
+            found = stat(this.#app.hostfs.at(absolute));
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
 
@@ -216,7 +216,7 @@ export class Workspace {
             }
 
             // Not there, unless it is a link to nowhere: that cannot be made a folder either.
-            throw lstatSync(absolute, { throwIfNoEntry: false }) === undefined
+            throw lstat(this.#app.hostfs.at(absolute), { throwIfNoEntry: false }) === undefined
                 ? new HttpError(404, `${absolute} isn't there.`)
                 : new HttpError(400, `${absolute} is a link to nothing.`);
         }
@@ -255,7 +255,7 @@ export class Workspace {
         const absolute = resolve(expanded);
 
         try {
-            mkdirSync(absolute, { recursive: true });
+            mkdir(this.#app.hostfs.at(absolute), { recursive: true });
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
 
@@ -285,6 +285,7 @@ export class Workspace {
         const inherited = this.#app.sessionMeta(id)?.inheritedUploads;
 
         return filePolicy({
+            host: this.#app.hostfs,
             dataDir: this.#app.dataDir,
             canonicalDataDir: this.#app.canonicalDataDir,
             managedStorage: this.#app.managedStorage,
@@ -342,7 +343,12 @@ export class Workspace {
             throw new HttpError(404, "Image not found");
         }
 
-        return result;
+        // A path into a sandboxed folder is read through the confined walk; one through a link into it is refused.
+        try {
+            return typeof result === "string" ? this.#app.hostfs.at(result) : result;
+        } catch {
+            throw new HttpError(404, "Image not found");
+        }
     }
 
     readableFile(user: User, id: ConversationId, path: string): ReadableFile {
@@ -379,7 +385,7 @@ export class Workspace {
         this.#app.requireSteer(user);
         await this.#app.conversation(id);
 
-        return this.#files.get(this.#app.cwdOf(id), this.#requestPolicy(user, id));
+        return this.#files.get(this.#app.folderOf(id), this.#requestPolicy(user, id));
     }
 
     /**
@@ -398,7 +404,7 @@ export class Workspace {
         try {
             const policy = this.#requestPolicy(user, id);
             const file = this.#file(id, path, policy);
-            const name = typeof file === "string" ? file : file.path;
+            const name = file instanceof Place ? file.display.text : file.path;
 
             return {
                 path: name,
@@ -434,11 +440,13 @@ export class Workspace {
             );
         }
 
-        const kind = await revertFile(this.#app.cwdOf(id), path, user.sessions !== undefined).catch(
-            (error: unknown) => {
-                throw new HttpError(409, describe(error));
-            },
-        );
+        const kind = await revertFile(
+            this.#app.folderOf(id),
+            path,
+            user.sessions !== undefined,
+        ).catch((error: unknown) => {
+            throw new HttpError(409, describe(error));
+        });
         const what =
             kind === "new" || kind === "added"
                 ? `deleted ${path}, which was new since the last commit`
@@ -465,11 +473,13 @@ export class Workspace {
         }
 
         const pending = (async () =>
-            changesIn(this.#app.cwdOf(id), await this.#editEntries(id), onlyHere))().finally(() => {
-            if (this.#changesUnderWay.get(key) === pending) {
-                this.#changesUnderWay.delete(key);
-            }
-        });
+            changesIn(this.#app.folderOf(id), await this.#editEntries(id), onlyHere))().finally(
+            () => {
+                if (this.#changesUnderWay.get(key) === pending) {
+                    this.#changesUnderWay.delete(key);
+                }
+            },
+        );
 
         this.#changesUnderWay.set(key, pending);
 
@@ -518,7 +528,7 @@ export class Workspace {
         this.#app.requireSteer(user);
 
         try {
-            return await diffOf(this.#app.cwdOf(id), path, user.sessions !== undefined);
+            return await diffOf(this.#app.folderOf(id), path, user.sessions !== undefined);
         } catch (error) {
             throw new HttpError(404, describe(error));
         }

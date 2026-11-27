@@ -3,10 +3,10 @@
  * it on every update, and the branches it could switch to, for the branch sheet. Switching is `git switch`: changes
  * not yet committed go along to the other branch, and git refuses when the switch would overwrite them.
  */
-import { readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseStatus } from "./changes.ts";
 import { git as runGit, GitError } from "./git.ts";
+import { above, type FolderRef, type Place, readText, stat } from "./hostfs.ts";
 
 /** What a folder has checked out: a branch (one with no commits yet included), or a commit with no branch. */
 export type Head = { branch: string } | { detached: string };
@@ -40,45 +40,46 @@ export type Branches = {
 /** The most branches each list has, newest first: the picker searches what it has. */
 const MAX_BRANCHES = 1000;
 const GIT_TIMEOUT_MS = 15_000;
-const git = (cwd: string, args: string[]) => runGit(cwd, args, { timeoutMs: GIT_TIMEOUT_MS });
+const git = (folder: FolderRef, args: string[]) =>
+    runGit(folder, args, { timeoutMs: GIT_TIMEOUT_MS });
 
 /**
  * Where a folder's repository keeps its files: `.git` in it or a folder above, or where a worktree's `.git` file says.
  * Never throws: views ask on every update, and a folder that cannot be read (no permission, a link in a loop, a lost
  * mount) is in no repository as far as they can tell.
  */
-export function gitDirOf(cwd: string): string | undefined {
-    for (let folder = cwd; ; folder = dirname(folder)) {
-        const dotGit = join(folder, ".git");
+export function gitDirOf(folder: FolderRef): Place | undefined {
+    for (let at: Place | undefined = folder.at(""); at !== undefined; at = above(at, folder.host)) {
+        const dotGit = at.child(".git");
 
         try {
-            const found = statSync(dotGit, { throwIfNoEntry: false });
+            const found = stat(dotGit, { throwIfNoEntry: false });
 
             if (found?.isDirectory()) {
                 return dotGit;
             }
 
             if (found?.isFile()) {
-                const pointer = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, "utf8"));
+                const pointer = /^gitdir: (.+)$/m.exec(readText(dotGit));
 
-                return pointer ? resolve(folder, pointer[1]!.trim()) : undefined;
+                return pointer
+                    ? folder.host.at(resolve(at.display.text, pointer[1]!.trim()))
+                    : undefined;
             }
         } catch {
             return undefined;
         }
-
-        if (dirname(folder) === folder) {
-            return undefined;
-        }
     }
+
+    return undefined;
 }
 
 /** What a repository has checked out, from its HEAD file, without running git. */
-export function headOf(gitDir: string): Head | undefined {
+export function headOf(gitDir: Place): Head | undefined {
     let head: string;
 
     try {
-        head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
+        head = readText(gitDir.child("HEAD")).trim();
     } catch {
         return undefined;
     }
@@ -101,9 +102,9 @@ function readTrack(track: string): { ahead: number; behind: number; gone: boolea
     };
 }
 
-/** The branches of the repository `cwd` is in, for the branch sheet. */
-export async function branchesIn(cwd: string): Promise<Branches> {
-    const gitDir = gitDirOf(cwd);
+/** The branches of the repository `folder` is in, for the branch sheet. */
+export async function branchesIn(folder: FolderRef): Promise<Branches> {
+    const gitDir = gitDirOf(folder);
     const head = gitDir === undefined ? undefined : headOf(gitDir);
     const checkedOut = head !== undefined && "branch" in head ? head.branch : undefined;
     const fields = [
@@ -115,7 +116,7 @@ export async function branchesIn(cwd: string): Promise<Branches> {
         "%(worktreepath)",
     ];
     const [refs, status] = await Promise.all([
-        git(cwd, [
+        git(folder, [
             "for-each-ref",
             "--sort=-committerdate",
             // Every field ends in NUL, so a newline in one (a worktree's folder can have one) is just text.
@@ -123,7 +124,7 @@ export async function branchesIn(cwd: string): Promise<Branches> {
             "refs/heads",
             "refs/remotes",
         ]),
-        git(cwd, ["status", "--porcelain=v1", "-z"]),
+        git(folder, ["status", "--porcelain=v1", "-z"]),
     ]);
     const local: LocalBranch[] = [];
     const remote: RemoteBranch[] = [];
@@ -182,36 +183,36 @@ export async function branchesIn(cwd: string): Promise<Branches> {
 export const localName = (remote: string) => remote.slice(remote.indexOf("/") + 1);
 
 /** Whether git takes a name for a branch: no spaces, no `..`, not starting with `-`, and the rest of git's rules. */
-export async function validBranchName(cwd: string, name: string): Promise<boolean> {
+export async function validBranchName(folder: FolderRef, name: string): Promise<boolean> {
     if (name === "" || name.startsWith("-")) {
         return false;
     }
 
-    return git(cwd, ["check-ref-format", "--branch", name]).then(
+    return git(folder, ["check-ref-format", "--branch", name]).then(
         () => true,
         () => false,
     );
 }
 
 /** Whether `name` (such as `origin/fix`) is one of the repository's remote branches. */
-export async function isRemoteBranch(cwd: string, name: string): Promise<boolean> {
+export async function isRemoteBranch(folder: FolderRef, name: string): Promise<boolean> {
     if (name === "" || name.startsWith("-")) {
         return false;
     }
 
-    return git(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${name}^{commit}`]).then(
+    return git(folder, ["rev-parse", "--verify", "--quiet", `refs/remotes/${name}^{commit}`]).then(
         () => true,
         () => false,
     );
 }
 
 /**
- * Switch the folder `cwd` to a branch: one there already, a new one made from what is checked out (`create`), or a
+ * Switch the folder to a branch: one there already, a new one made from what is checked out (`create`), or a
  * new one following a remote branch (`track`, such as `origin/fix`, which `isRemoteBranch` has checked). Git's own
  * words say why it could not.
  */
 export async function switchBranch(
-    cwd: string,
+    folder: FolderRef,
     target: { name: string; create?: boolean; track?: string },
 ): Promise<void> {
     const args =
@@ -223,7 +224,7 @@ export async function switchBranch(
               : ["switch", "--no-guess", target.name];
 
     try {
-        await git(cwd, args);
+        await git(folder, args);
     } catch (error) {
         throw new GitError(
             error instanceof Error ? cleanMessage(error.message) : String(error),

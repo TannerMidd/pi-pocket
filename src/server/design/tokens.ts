@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { type FolderRef, readdir } from "../hostfs.ts";
 import { join } from "node:path";
 import { defang } from "../fence.ts";
 import type { DesignSystem, SystemChange, SystemProblem } from "./system-types.ts";
@@ -43,7 +43,7 @@ export function problemLine(problem: SystemProblem): string {
 }
 
 /** The system is frozen and shared: a caller that needs to change it must copy it. */
-export function loadDesignSystem(cwd: string): DesignSystem | undefined {
+export function loadDesignSystem(cwd: FolderRef): DesignSystem | undefined {
     return cachedSystem(cwd, () => {
         const folder = readFolder(cwd);
 
@@ -58,7 +58,7 @@ export function loadDesignSystem(cwd: string): DesignSystem | undefined {
  * compares the code with the files a write would keep, and reads them again after its scan. Writes nothing.
  */
 export function loadDesignSystemWithRaw(
-    cwd: string,
+    cwd: FolderRef,
 ): { system: DesignSystem; raw: RawSystem } | undefined {
     const folder = readFolder(cwd);
 
@@ -449,9 +449,9 @@ function applyChange(
     return { raw, dirty, removed };
 }
 
-function staleResolved(cwd: string, modes: string[]): string[] {
+function staleResolved(cwd: FolderRef, modes: string[]): string[] {
     try {
-        return readdirSync(join(cwd, DESIGN_DIR, "dist"))
+        return readdir(cwd.at(join(DESIGN_DIR, "dist")))
             .map((name) => /^tokens\.([a-z0-9]+(?:-[a-z0-9]+)*)\.resolved\.json$/.exec(name))
             .filter(
                 (found): found is RegExpExecArray => found !== null && !modes.includes(found[1]!),
@@ -479,7 +479,7 @@ const keyOf = (problem: SystemProblem) => {
 };
 
 // Errors that were already there do not stop a write, so a project with one broken token can still be repaired step by step.
-export function writeDesignSystem(cwd: string, change: SystemChange): DesignSystem {
+export function writeDesignSystem(cwd: FolderRef, change: SystemChange): DesignSystem {
     const folder = readFolder(cwd) ?? emptyFolder(cwd);
     const before = new Set(
         buildSystem(folder.raw)

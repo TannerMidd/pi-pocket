@@ -1,6 +1,7 @@
 // The static scan wins where it is sure; the rendered values fill what it could not find.
 import { parseColor, toHex } from "./color.ts";
 import type { PocketHost } from "../host.ts";
+import type { Place } from "../hostfs.ts";
 import type { DesignBundle } from "./bundle.ts";
 import { VIEWPORTS, withRender, type DesignPage } from "./render.ts";
 import { type Decl, type Scope } from "./scan-parse.ts";
@@ -408,7 +409,7 @@ export function renderedDecls(
 }
 
 export async function renderProject(
-    root: string,
+    root: Place,
     signal?: AbortSignal,
 ): Promise<RenderedEvidence | undefined> {
     const plan = planRender(root);

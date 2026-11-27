@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { after, test } from "node:test";
 import { FileLists, listFiles, viewFile, type FileFilter } from "../src/server/files.ts";
+import { hostFolder, hostPlace } from "./helpers.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pocket-list-"));
 
@@ -36,7 +37,7 @@ test("in a repository, the list is git's: tracked and untracked files, not ignor
 
     git("init", "-q");
     git("add", ".gitignore", "README.md", "src");
-    const list = await listFiles(repo);
+    const list = await listFiles(hostFolder(repo));
 
     assert.deepEqual(list.files.sort(), [
         ".gitignore",
@@ -47,7 +48,10 @@ test("in a repository, the list is git's: tracked and untracked files, not ignor
     ]);
     assert.equal(list.truncated, false);
     // From a folder inside the repository: its own files, relative to it.
-    assert.deepEqual((await listFiles(join(repo, "src"))).files.sort(), ["app.ts", "deep/util.ts"]);
+    assert.deepEqual((await listFiles(hostFolder(join(repo, "src")))).files.sort(), [
+        "app.ts",
+        "deep/util.ts",
+    ]);
 });
 
 for (const repository of [false, true]) {
@@ -95,20 +99,20 @@ for (const repository of [false, true]) {
             expected.unshift("shared/ignored.txt");
         }
 
-        const list = await listFiles(dir, expected.length, filter);
+        const list = await listFiles(hostFolder(dir), expected.length, filter);
 
         assert.deepEqual(list.files, expected);
         assert.equal(list.truncated, false);
         files(dir, ["closed/new", "unseen-too"]);
-        assert.deepEqual(await listFiles(dir, expected.length, filter), list);
-        const shorter = await listFiles(dir, 1, filter);
+        assert.deepEqual(await listFiles(hostFolder(dir), expected.length, filter), list);
+        const shorter = await listFiles(hostFolder(dir), 1, filter);
 
         assert.equal(shorter.files.length, 1);
         assert.ok(expected.includes(shorter.files[0]!));
         assert.equal(shorter.truncated, true);
         doors.set(dir, []);
-        assert.deepEqual((await listFiles(dir, 0, filter)).files, []);
-        assert.equal((await listFiles(dir, 0, filter)).truncated, false);
+        assert.deepEqual((await listFiles(hostFolder(dir), 0, filter)).files, []);
+        assert.equal((await listFiles(hostFolder(dir), 0, filter)).truncated, false);
     });
 }
 
@@ -128,8 +132,11 @@ for (const repository of [false, true]) {
             execFileSync("git", ["add", "a"], { cwd: dir });
         }
 
-        assert.deepEqual(await listFiles(dir, 20, all), await listFiles(dir, 20));
-        const visible = await listFiles(dir, 1, {
+        assert.deepEqual(
+            await listFiles(hostFolder(dir), 20, all),
+            await listFiles(hostFolder(dir), 20),
+        );
+        const visible = await listFiles(hostFolder(dir), 1, {
             ...all,
             allow: (path) => path === join(dir, "a", "src"),
         });
@@ -156,8 +163,8 @@ test("non-Git walks apply the same visible cap without creating a large fixture"
     syncBuiltinESMExports();
 
     try {
-        const owner = await listFiles(dir);
-        const restricted = await listFiles(dir, undefined, {
+        const owner = await listFiles(hostFolder(dir));
+        const restricted = await listFiles(hostFolder(dir), undefined, {
             children: () => undefined,
             allow: () => true,
         });
@@ -179,7 +186,7 @@ test("ordinary Git still stops checking names when its evaluation budget expires
     execFileSync("git", ["init", "-q"], { cwd: dir });
     t.mock.method(Date, "now", () => now);
     let examined = 0;
-    const list = await listFiles(dir, 10, {
+    const list = await listFiles(hostFolder(dir), 10, {
         ordinaryTree: true,
         children: () => undefined,
         allow: () => {
@@ -207,7 +214,7 @@ test("a folder view counts only visible children, including when more than 1000 
         return !basename(path).startsWith("private-");
     };
 
-    assert.deepEqual(await viewFile(dir, allow), {
+    assert.deepEqual(await viewFile(hostPlace(dir), allow), {
         kind: "folder",
         entries: [
             { name: "project", dir: true },
@@ -215,16 +222,16 @@ test("a folder view counts only visible children, including when more than 1000 
         ],
         truncated: false,
     });
-    assert.deepEqual(await viewFile(dir, () => false), {
+    assert.deepEqual(await viewFile(hostPlace(dir), () => false), {
         kind: "folder",
         entries: [],
         truncated: false,
     });
-    const list = await listFiles(dir, 2, { allow, children: () => undefined });
+    const list = await listFiles(hostFolder(dir), 2, { allow, children: () => undefined });
 
     assert.deepEqual(list.files, ["one.txt", "project/source"]);
     assert.equal(list.truncated, false);
-    const full = await viewFile(dir, () => true);
+    const full = await viewFile(hostPlace(dir), () => true);
 
     assert.ok(full.kind === "folder" && full.entries.length === 1000 && full.truncated);
 });
@@ -236,16 +243,16 @@ test("restricted requests use fresh grants and filesystem state; unrestricted re
     const filter: FileFilter = { allow: () => grant, children: () => undefined };
 
     files(dir, ["one"]);
-    const owner = cache.get(dir);
+    const owner = cache.get(hostFolder(dir));
 
-    assert.equal(cache.get(dir), owner);
+    assert.equal(cache.get(hostFolder(dir)), owner);
     assert.deepEqual((await owner).files, ["one"]);
-    assert.deepEqual((await cache.get(dir, filter)).files, ["one"]);
+    assert.deepEqual((await cache.get(hostFolder(dir), filter)).files, ["one"]);
     grant = false;
-    assert.deepEqual((await cache.get(dir, filter)).files, []);
+    assert.deepEqual((await cache.get(hostFolder(dir), filter)).files, []);
     files(dir, ["two"]);
     grant = true;
-    assert.deepEqual((await cache.get(dir, filter)).files, ["one", "two"]);
-    assert.equal(cache.get(dir), owner);
+    assert.deepEqual((await cache.get(hostFolder(dir), filter)).files, ["one", "two"]);
+    assert.equal(cache.get(hostFolder(dir)), owner);
     assert.deepEqual((await owner).files, ["one"]);
 });

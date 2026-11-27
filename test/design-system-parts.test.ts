@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { loadDesignSystem } from "../src/server/extensions/design/system-api.ts";
 import { ferryPage, writeSystemFixture } from "./design-system-fixtures.ts";
+import { hostFolder } from "./helpers.ts";
 
 const load = (name: string) =>
     import(new URL(`../src/server/extensions/design/${name}.js`, import.meta.url).href);
@@ -16,7 +17,7 @@ const folder = mkdtempSync(join(tmpdir(), "pi-pocket-system-"));
 
 writeSystemFixture(folder);
 
-const system = loadDesignSystem(folder)!;
+const system = loadDesignSystem(hostFolder(folder))!;
 
 after(() => rmSync(folder, { recursive: true, force: true }));
 
@@ -864,7 +865,7 @@ test("the Ferry page's image has a real source (a small picture, not a broken ic
 const FLAGSHIP = new URL("../docs/examples/design-system/pocket", import.meta.url).pathname;
 
 test("spacing is grouped as the documentation page groups it: steps, roles, sizes, then a component's own", async () => {
-    const flagship = loadDesignSystem(FLAGSHIP)!;
+    const flagship = loadDesignSystem(hostFolder(FLAGSHIP))!;
     const { renderSystemDoc } = await import("../src/server/design/docsite.ts");
     const groups = sys.groupsOf(flagship.tokens, "spacing");
     const names = (kind: string) =>
@@ -913,7 +914,7 @@ test("spacing is grouped as the documentation page groups it: steps, roles, size
 });
 
 test("radii: the scale first, then the roles that point at it, then a component's own", () => {
-    const flagship = loadDesignSystem(FLAGSHIP)!;
+    const flagship = loadDesignSystem(hostFolder(FLAGSHIP))!;
     const groups = sys.groupsOf(flagship.tokens, "radii");
 
     assert.deepEqual(

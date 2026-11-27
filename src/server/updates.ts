@@ -18,7 +18,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { npmCommand, npmInstallKind, npmWritable, type InstallKind } from "./npm-install.ts";
 import { describe, HttpError } from "./errors.ts";
 import { stageNpmUpdate } from "./npm-update.ts";
-import { git, GitError } from "./git.ts";
+import { gitOwn as git, GitError } from "./git-own.ts";
 import {
     clearPending,
     finishPending,

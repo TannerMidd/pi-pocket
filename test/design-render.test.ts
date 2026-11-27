@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { createServer, request as httpRequest } from "node:http";
@@ -19,6 +20,7 @@ import {
 } from "../src/server/design/render.ts";
 import type { ExtensionWeb, PocketHost } from "../src/server/host.ts";
 import { createPublicFetch } from "../src/server/public-fetch.ts";
+import { hostFolder } from "./helpers.ts";
 
 const bundle: DesignBundle = {
     meta: { title: "Test design", type: "html", versions: [] },
@@ -35,7 +37,7 @@ const bundle: DesignBundle = {
         },
     ],
 };
-const host = { fetchPublic: createPublicFetch() } as PocketHost;
+const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 const browser = findBrowser();
 
 test("design viewport validation is bounded", () => {
@@ -92,14 +94,20 @@ test("exports stay in the session and cannot follow directory links", async () =
     const outside = await mkdtemp(join(tmpdir(), "design-outside-test-"));
 
     try {
-        const path = await writeExport(folder, "exports/test.html", Buffer.from("one"));
+        const path = await writeExport(hostFolder(folder), "exports/test.html", Buffer.from("one"));
 
         assert.equal(await readFile(path, "utf8"), "one");
-        await writeExport(folder, "exports/test.html", Buffer.from("two"));
+        await writeExport(hostFolder(folder), "exports/test.html", Buffer.from("two"));
         assert.equal(await readFile(path, "utf8"), "two");
-        await assert.rejects(writeExport(folder, "../escape", Buffer.from("x")), /inside/);
+        await assert.rejects(
+            writeExport(hostFolder(folder), "../escape", Buffer.from("x")),
+            /inside/,
+        );
         await symlink(outside, join(folder, "linked"));
-        await assert.rejects(writeExport(folder, "linked/escape", Buffer.from("x")), /symbolic/);
+        await assert.rejects(
+            writeExport(hostFolder(folder), "linked/escape", Buffer.from("x")),
+            /symbolic/,
+        );
     } finally {
         await rm(folder, { recursive: true, force: true });
         await rm(outside, { recursive: true, force: true });

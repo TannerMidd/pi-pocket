@@ -1,7 +1,6 @@
-import { closeSync, fstatSync, readSync } from "node:fs";
 import { inflateRawSync, inflateSync, zstdDecompressSync } from "node:zlib";
 import { quoted } from "../fence.ts";
-import { openNoFollowSync } from "../no-follow.ts";
+import { openNoFollowSync, type Place } from "../hostfs.ts";
 import {
     type Budget,
     type FigLimits,
@@ -351,11 +350,11 @@ export function decodeFig(
 }
 
 // Never through a link, never a folder or a pipe, and never more than the limit.
-export function readFigBytes(path: string, limit: number = FIG_LIMITS.file): Buffer {
+export function readFigBytes(path: Place, limit: number = FIG_LIMITS.file): Buffer {
     const fd = openNoFollowSync(path);
 
     try {
-        const info = fstatSync(fd);
+        const info = fd.stat();
 
         if (!info.isFile()) {
             return fail(
@@ -375,7 +374,7 @@ export function readFigBytes(path: string, limit: number = FIG_LIMITS.file): Buf
         let read = 0;
 
         while (read < size) {
-            const got = readSync(fd, buffer, read, size - read, null);
+            const got = fd.read(buffer, read, size - read, null);
 
             if (got <= 0) {
                 break;
@@ -386,6 +385,6 @@ export function readFigBytes(path: string, limit: number = FIG_LIMITS.file): Buf
 
         return buffer.subarray(0, read);
     } finally {
-        closeSync(fd);
+        fd.close();
     }
 }

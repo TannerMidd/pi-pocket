@@ -1,21 +1,20 @@
 // The design-system.md file is bounded UTF-8 text. A write never follows a symlink to the file itself and replaces it atomically:
 // the new bytes go to a temporary file next to it, and a rename puts them in place. A read never follows a symlink either.
 import { randomUUID } from "node:crypto";
-import {
-    closeSync,
-    fstatSync,
-    lstatSync,
-    mkdirSync,
-    readSync,
-    renameSync,
-    rmSync,
-    writeFileSync,
-} from "node:fs";
 import { join } from "node:path";
+import {
+    type FolderRef,
+    type Hostfs,
+    lstat,
+    mkdir,
+    openNoFollowSync,
+    rename,
+    rm,
+    writeFile,
+} from "../hostfs.ts";
 import { arr, bool, obj, opt, str, union, unknown } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { INVISIBLE_CLASS, defang } from "../fence.ts";
-import { openNoFollowSync } from "../no-follow.ts";
 import { TOKEN_TYPES, boundedText } from "./tokens-base.ts";
 import { checkTokensBlock, scanProject, scanReport, scanRoot } from "./scan.ts";
 import type { Draft } from "./scan-scales.ts";
@@ -47,11 +46,11 @@ export const SYSTEM_FILE = join(".pi", "design-system.md");
 /** The file's size limit, in bytes: tokens and rules stay short enough to sit in a prompt. */
 export const MAX_BYTES = 16_384;
 
-const file = (cwd: string) => join(cwd, SYSTEM_FILE);
+const file = (cwd: FolderRef) => cwd.at(SYSTEM_FILE);
 
-function systemDirectory(cwd: string): boolean {
+function systemDirectory(cwd: FolderRef): boolean {
     try {
-        const info = lstatSync(join(cwd, ".pi"));
+        const info = lstat(cwd.at(".pi"));
 
         if (!info.isDirectory() || info.isSymbolicLink()) {
             throw new Error("The project's .pi folder must be a directory, not a symlink.");
@@ -69,7 +68,7 @@ function systemDirectory(cwd: string): boolean {
 
 /** The file's text, bounded, or undefined when there is no file. It never follows a symlink to the file. */
 export function readDesignSystemText(
-    cwd: string,
+    cwd: FolderRef,
 ): { text: string; truncated: boolean } | undefined {
     if (!systemDirectory(cwd)) {
         return undefined;
@@ -79,7 +78,7 @@ export function readDesignSystemText(
     let stats;
 
     try {
-        stats = lstatSync(path);
+        stats = lstat(path);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             return undefined;
@@ -98,7 +97,7 @@ export function readDesignSystemText(
     const fd = openNoFollowSync(path);
 
     try {
-        if (!fstatSync(fd).isFile()) {
+        if (!fd.stat().isFile()) {
             throw new Error(`${SYSTEM_FILE} must be a regular file.`);
         }
 
@@ -107,7 +106,7 @@ export function readDesignSystemText(
         let size = 0;
 
         while (size < head.length) {
-            const read = readSync(fd, head, size, head.length - size, null);
+            const read = fd.read(head, size, head.length - size, null);
 
             if (read <= 0) {
                 break;
@@ -122,12 +121,12 @@ export function readDesignSystemText(
 
         return boundedText(head.subarray(0, size), MAX_BYTES);
     } finally {
-        closeSync(fd);
+        fd.close();
     }
 }
 
 /** Replaces the file with `content`, atomically, and returns its size in bytes. */
-export function writeDesignSystemText(cwd: string, content: string): number {
+export function writeDesignSystemText(cwd: FolderRef, content: string): number {
     const bytes = Buffer.from(content, "utf8");
 
     if (bytes.length > MAX_BYTES) {
@@ -137,21 +136,21 @@ export function writeDesignSystemText(cwd: string, content: string): number {
     }
 
     if (!systemDirectory(cwd)) {
-        mkdirSync(join(cwd, ".pi"), { recursive: true });
+        mkdir(cwd.at(".pi"), { recursive: true });
     }
 
     systemDirectory(cwd);
     // A fresh name each time: only this write's temporary file, and none of an earlier one under the same name.
-    const temp = join(cwd, ".pi", `.${randomUUID()}.tmp`);
+    const temp = cwd.at(".pi").child(`.${randomUUID()}.tmp`);
 
     try {
-        writeFileSync(temp, bytes, { flag: "wx" });
+        writeFile(temp, bytes, { flag: "wx" });
         // A rename replaces the final name whole on one file system: if the target was a symlink, the file takes its
         // place and no write ever follows the link.
-        renameSync(temp, file(cwd));
+        rename(temp, file(cwd));
     } finally {
         // The rename already removed it; a failed call may have left it there.
-        rmSync(temp, { force: true });
+        rm(temp, { force: true });
     }
 
     return bytes.length;
@@ -281,7 +280,10 @@ function checkParameters(action: string, args: Record<string, unknown>): void {
  * the scan runs in between and the folder can change while it does: an edit made in that time is in the plan, so a write
  * keeps it instead of writing the scan's token over it.
  */
-export function resyncPlan(cwd: string, draft: Draft): { system: DesignSystem; plan: ResyncPlan } {
+export function resyncPlan(
+    cwd: FolderRef,
+    draft: Draft,
+): { system: DesignSystem; plan: ResyncPlan } {
     const loaded = loadDesignSystemWithRaw(cwd);
 
     if (loaded === undefined || loaded.system.tokens.length === 0) {
@@ -293,7 +295,7 @@ export function resyncPlan(cwd: string, draft: Draft): { system: DesignSystem; p
     return { system: loaded.system, plan: planResync(loaded.system, draft, loaded.raw) };
 }
 
-export function designSystemTool(): ToolRegistration {
+export function designSystemTool(hostfs: Hostfs): ToolRegistration {
     return defineTool({
         name: "design_system",
         description: [
@@ -406,8 +408,10 @@ export function designSystemTool(): ToolRegistration {
                 throw new Error(REMOTE_DESIGN);
             }
 
+            const folder = hostfs.folder(cwd);
+
             const change = (value: SystemChange, headline: string) =>
-                text(afterWrite(writeDesignSystem(cwd, value), headline));
+                text(afterWrite(writeDesignSystem(folder, value), headline));
             const toSet = (defaultMode: string): SystemChange["set"] =>
                 (args.changes ?? []).map((entry) => ({
                     mode: entry.mode ?? defaultMode,
@@ -420,7 +424,7 @@ export function designSystemTool(): ToolRegistration {
             switch (args.action) {
                 case "scan": {
                     const draft = scanReport(
-                        await scanProject(scanRoot(cwd, args.path)),
+                        await scanProject(scanRoot(folder, args.path)),
                         args.path,
                     );
 
@@ -432,14 +436,14 @@ export function designSystemTool(): ToolRegistration {
                         throw new Error("write needs the new design system in content.");
                     }
 
-                    if (loadDesignSystem(cwd) !== undefined) {
+                    if (loadDesignSystem(folder) !== undefined) {
                         throw new Error(
                             "This project has a design system folder (.pi/design/), which replaces .pi/design-system.md. Change it with set, component, guidelines, or init (replace: true).",
                         );
                     }
 
                     const hasTokens = checkTokensBlock(args.content);
-                    const size = writeDesignSystemText(cwd, args.content);
+                    const size = writeDesignSystemText(folder, args.content);
 
                     return text(
                         `Wrote ${SYSTEM_FILE} (${size} bytes). The next design request reads it.${hasTokens ? "" : " It has no fenced JSON tokens block; add one so designs can read the tokens."} For a design system that compiles to CSS, Tailwind, and JSON, and that designs can link, use init instead.`,
@@ -447,7 +451,7 @@ export function designSystemTool(): ToolRegistration {
                 }
 
                 case "init": {
-                    const existing = readFolderTokens(cwd);
+                    const existing = readFolderTokens(folder);
 
                     if (existing && args.replace !== true) {
                         throw new Error(
@@ -463,7 +467,7 @@ export function designSystemTool(): ToolRegistration {
                             throw new Error("Give fromScan or tokens, not both.");
                         }
 
-                        const scan = await scanProject(scanRoot(cwd, args.path));
+                        const scan = await scanProject(scanRoot(folder, args.path));
 
                         if (Object.keys(scan.draft.tokens).every((key) => key.startsWith("$"))) {
                             throw new Error(
@@ -481,7 +485,7 @@ export function designSystemTool(): ToolRegistration {
                         );
                     }
 
-                    const system = writeDesignSystem(cwd, {
+                    const system = writeDesignSystem(folder, {
                         tokens,
                         modes,
                         ...(args.name === undefined ? {} : { name: args.name }),
@@ -498,7 +502,7 @@ export function designSystemTool(): ToolRegistration {
                 }
 
                 case "resync": {
-                    const system = loadDesignSystem(cwd);
+                    const system = loadDesignSystem(folder);
 
                     if (system === undefined) {
                         throw new Error(
@@ -519,10 +523,10 @@ export function designSystemTool(): ToolRegistration {
                         );
                     }
 
-                    const scan = await scanProject(scanRoot(cwd, args.path));
+                    const scan = await scanProject(scanRoot(folder, args.path));
                     // The scan runs between the two loads, and the folder can change while it does: resyncPlan reads
                     // the system again, so an edit made in that time is in the plan and the write keeps it.
-                    const { system: current, plan } = resyncPlan(cwd, scan.draft);
+                    const { system: current, plan } = resyncPlan(folder, scan.draft);
                     const path = scanPathLabel(args.path);
                     const report = resyncReport({
                         name: current.name,
@@ -560,7 +564,7 @@ export function designSystemTool(): ToolRegistration {
                     }
 
                     const written = writeDesignSystem(
-                        cwd,
+                        folder,
                         resyncChange(plan, {
                             path,
                             scannedAt: new Date().toISOString(),
@@ -580,7 +584,7 @@ export function designSystemTool(): ToolRegistration {
                         );
                     }
 
-                    const system = loadDesignSystem(cwd);
+                    const system = loadDesignSystem(folder);
 
                     return change(
                         {
@@ -627,7 +631,7 @@ export function designSystemTool(): ToolRegistration {
                 }
 
                 case "validate": {
-                    const system = loadDesignSystem(cwd);
+                    const system = loadDesignSystem(folder);
 
                     if (system === undefined) {
                         return text(noSystem());
@@ -641,7 +645,7 @@ export function designSystemTool(): ToolRegistration {
                 }
 
                 case "compile": {
-                    if (loadDesignSystem(cwd) === undefined) {
+                    if (loadDesignSystem(folder) === undefined) {
                         return text(noSystem());
                     }
 
@@ -650,7 +654,7 @@ export function designSystemTool(): ToolRegistration {
 
                 default: {
                     if (args.file !== undefined) {
-                        const file = readDesignFile(cwd, args.file);
+                        const file = readDesignFile(folder, args.file);
 
                         if (file === undefined) {
                             throw new Error(`${args.file} does not exist in .pi/design/.`);
@@ -663,7 +667,7 @@ export function designSystemTool(): ToolRegistration {
                         );
                     }
 
-                    const system = loadDesignSystem(cwd);
+                    const system = loadDesignSystem(folder);
 
                     if (system !== undefined) {
                         const problems = problemsText(system);
@@ -673,7 +677,7 @@ export function designSystemTool(): ToolRegistration {
                         );
                     }
 
-                    const read = readDesignSystemText(cwd);
+                    const read = readDesignSystemText(folder);
 
                     if (read === undefined) {
                         return text(noSystem());
@@ -694,6 +698,6 @@ function noSystem(): string {
     return `There is no design system in this session yet (no .pi/design/ and no ${SYSTEM_FILE}). Run design_system scan for a draft from the project's styles, then init with fromScan: true (or your own tokens); or init with tokens when there is no code to scan.`;
 }
 
-function readFolderTokens(cwd: string): boolean {
+function readFolderTokens(cwd: FolderRef): boolean {
     return readDesignFile(cwd, "tokens.json") !== undefined;
 }

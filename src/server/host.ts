@@ -1,4 +1,6 @@
 import type { Context } from "@earendil-works/chord/context";
+import type { FolderRef, Hostfs } from "./hostfs.ts";
+import type { Snapshots } from "./snapshots.ts";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type { Api, ClassifierAnswer, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -700,6 +702,12 @@ export interface PocketHost {
     readonly sessions: SessionsApi;
     /** The conversation's current working folder or workspace URI. @experimental @since 0.28.0 */
     cwdOf(conversationId: ConversationId): string;
+    /** The conversation's working folder for host code that reads, writes, or runs something there (`hostfs.ts`). */
+    folderOf(conversationId: ConversationId): FolderRef;
+    /** How host code touches files: a sandboxed tree's folder is confined. */
+    readonly hostfs: Hostfs;
+    /** Copies that Pi's path-taking loaders run on for a sandboxed folder (`snapshots.ts`). */
+    readonly snapshots: Snapshots;
     /** Messages to Pi for later: the schedule tool sets up Pi's own. */
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
     /** Archived sessions cleaned up and removed from the app. */

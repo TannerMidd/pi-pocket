@@ -1,4 +1,13 @@
-import { cleanUp, context, newSession, openApp, scriptedModel, work } from "./helpers.ts";
+import { Hostfs } from "../src/server/hostfs.ts";
+import {
+    cleanUp,
+    context,
+    hostFolder,
+    newSession,
+    openApp,
+    scriptedModel,
+    work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,9 +27,9 @@ import { createPublicFetch } from "../src/server/public-fetch.ts";
 
 let app: Awaited<ReturnType<typeof openApp>>;
 let conversation: ConversationId;
-const host = { fetchPublic: createPublicFetch() } as PocketHost;
+const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 const [artifact] = createArtifacts(host).tools!;
-const system = designSystemTool();
+const system = designSystemTool(new Hostfs());
 const transcript: string[] = [];
 
 before(async () => {
@@ -105,7 +114,7 @@ test(
 
         assert.match(report, /Color roles \(\d of 9 found\)/);
         assert.match(report, /design_system init fromScan: true|init fromScan/);
-        assert.equal(loadDesignSystem(work), undefined, "a scan saves nothing");
+        assert.equal(loadDesignSystem(hostFolder(work)), undefined, "a scan saves nothing");
 
         const made = await call({
             action: "init",
@@ -120,7 +129,7 @@ test(
 
         assert.doesNotMatch(checked, /\b[1-9]\d* error/);
 
-        const loaded = loadDesignSystem(work)!;
+        const loaded = loadDesignSystem(hostFolder(work))!;
 
         assert.equal(loaded.problems.filter((problem) => problem.level === "error").length, 0);
 

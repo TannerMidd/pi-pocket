@@ -10,9 +10,9 @@
  * Skills are commands too, as `/skill:name [what to do]`: the skill's instructions go to Pi with the request, as
  * `_expandSkillCommand` in `dist/core/agent-session.js` writes them.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { type Hostfs, isFile, readdir, readText } from "./hostfs.ts";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = {
@@ -26,12 +26,12 @@ export type PromptTemplate = {
 /** How much of a template's first line serves as its description, when it has none. */
 const DESCRIPTION_LENGTH = 60;
 
-function readTemplate(path: string): PromptTemplate | undefined {
+function readTemplate(host: Hostfs, path: string): PromptTemplate | undefined {
     let frontmatter: Record<string, unknown>;
     let body: string;
 
     try {
-        ({ frontmatter, body } = parseFrontmatter(readFileSync(path, "utf8")) as {
+        ({ frontmatter, body } = parseFrontmatter(readText(host.at(path))) as {
             frontmatter: Record<string, unknown>;
             body: string;
         });
@@ -59,20 +59,20 @@ function readTemplate(path: string): PromptTemplate | undefined {
     };
 }
 
-function isFile(path: string): boolean {
+function fileAt(host: Hostfs, path: string): boolean {
     try {
-        return statSync(path).isFile();
+        return isFile(host.at(path));
     } catch {
         return false;
     }
 }
 
 /** The `.md` files of a folder, not its subfolders; a missing or unreadable folder has none. */
-function templatesIn(directory: string): PromptTemplate[] {
+function templatesIn(host: Hostfs, directory: string): PromptTemplate[] {
     let names: string[];
 
     try {
-        names = readdirSync(directory)
+        names = readdir(host.at(directory))
             .filter((name) => name.endsWith(".md"))
             .sort();
     } catch {
@@ -81,7 +81,7 @@ function templatesIn(directory: string): PromptTemplate[] {
 
     return names.flatMap((name) => {
         const path = join(directory, name);
-        const template = isFile(path) ? readTemplate(path) : undefined;
+        const template = fileAt(host, path) ? readTemplate(host, path) : undefined;
 
         return template === undefined ? [] : [template];
     });
@@ -92,31 +92,32 @@ function templatesIn(directory: string): PromptTemplate[] {
  * false leaves out the project's own `.pi/prompts`, for a project Pi was told not to trust.
  */
 export function loadPromptTemplates(
+    host: Hostfs,
     cwd: string,
     agentDir: string,
     paths: readonly string[],
     { project = true }: { project?: boolean } = {},
 ): PromptTemplate[] {
     const found = [
-        ...templatesIn(join(agentDir, "prompts")),
-        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
+        ...templatesIn(host, join(agentDir, "prompts")),
+        ...(project ? templatesIn(host, resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
     ];
 
     for (const raw of paths) {
         const path = resolve(cwd, expandHome(raw.trim()));
 
-        if (!existsSync(path)) {
+        if (!host.has(path)) {
             continue;
         }
 
-        if (isFile(path)) {
-            const template = path.endsWith(".md") ? readTemplate(path) : undefined;
+        if (fileAt(host, path)) {
+            const template = path.endsWith(".md") ? readTemplate(host, path) : undefined;
 
             if (template !== undefined) {
                 found.push(template);
             }
         } else {
-            found.push(...templatesIn(path));
+            found.push(...templatesIn(host, path));
         }
     }
 
@@ -227,6 +228,7 @@ export type SkillCommand = { name: string; description: string; path: string; ba
 
 /** `/skill:name request` with the skill's instructions, as Pi sends it; undefined when the text is not one. */
 export function expandSkillCommand(
+    host: Hostfs,
     text: string,
     skills: readonly SkillCommand[],
 ): string | undefined {
@@ -240,7 +242,7 @@ export function expandSkillCommand(
     let body: string;
 
     try {
-        body = (parseFrontmatter(readFileSync(skill.path, "utf8")) as { body: string }).body.trim();
+        body = (parseFrontmatter(readText(host.at(skill.path))) as { body: string }).body.trim();
     } catch {
         return undefined;
     }

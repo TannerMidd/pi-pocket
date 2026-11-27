@@ -5,7 +5,7 @@
  * an update stops before it is ready, and goes back to the version before (`rollBackUpdate`). It imports only Node's
  * own modules and runs no server code, so the launcher can import it: keep it so.
  */
-import { spawnSync } from "node:child_process";
+import { gitOwnSync } from "./git-own.ts";
 import {
     existsSync,
     lstatSync,
@@ -567,14 +567,9 @@ function blobs(appRoot: string, commit: string): Map<string, string> {
 
 /** What git prints, as bytes. */
 function gitBytes(cwd: string, args: string[]): Buffer | undefined {
-    const result = spawnSync("git", ["-c", "core.fsmonitor=false", ...args], {
-        cwd,
-        timeout: 60_000,
-        maxBuffer: 512 * 1024 * 1024,
-        env: { ...process.env, LC_ALL: "C" },
-    });
+    const result = gitOwnSync(cwd, args, { encoding: "buffer", maxBuffer: 512 * 1024 * 1024 });
 
-    return result.status === 0 ? result.stdout : undefined;
+    return result.status === 0 ? (result.stdout as Buffer) : undefined;
 }
 
 /**
@@ -784,12 +779,9 @@ export function keptNote(appRoot: string, kept: Kept): string {
 }
 
 function gitSync(cwd: string, args: string[], input?: string): { ok: boolean; out: string } {
-    const result = spawnSync("git", ["-c", "core.fsmonitor=false", ...args], {
-        cwd,
+    const result = gitOwnSync(cwd, args, {
         ...(input === undefined ? {} : { input }),
-        encoding: "utf8",
-        timeout: 60_000,
-        env: { ...process.env, LC_ALL: "C", GIT_LITERAL_PATHSPECS: "1" },
+        env: { GIT_LITERAL_PATHSPECS: "1" },
     });
 
     return {

@@ -4,9 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadDesignSystem, tailwindNames } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const FLAGSHIP = join(import.meta.dirname, "..", "docs", "examples", "design-system", "pocket");
-const system = loadDesignSystem(FLAGSHIP)!;
+const system = loadDesignSystem(hostFolder(FLAGSHIP))!;
 
 const KINDS: [string, string[]][] = [
     ["font-weight", ["fontWeight"]],
@@ -55,7 +56,7 @@ test("a token is in a namespace of Tailwind's theme only when it is of that kind
 });
 
 test("a name that Tailwind would read wrongly is kept out of its namespaces: --ds- in front", () => {
-    const made = loadDesignSystem(FLAGSHIP)!;
+    const made = loadDesignSystem(hostFolder(FLAGSHIP))!;
     const other = {
         ...made,
         tokens: [

@@ -1,6 +1,7 @@
 // The artifact tool's `inline: true` (#87, one tool since #223): HTML published into the artifact store as a card in the reply. Each result records the
 // version its call made, so an earlier card keeps its version after an update; the store is the artifact tool's, so
 // versions, edits, limits, replays, forks, and who may read a page all work as they do for it.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -156,7 +157,9 @@ async function page(token: string | undefined, id: ConversationId, path: string)
 
 /** A direct inline call of the artifact tool, as Pi Durable makes it, with a fixed identity so it can be replayed. */
 function inlineCall(id: ConversationId, taskId: number, callId: string) {
-    const tool = createArtifacts({} as PocketHost).tools!.find((each) => each.name === "artifact")!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools!.find(
+        (each) => each.name === "artifact",
+    )!;
 
     return (args: Record<string, unknown>) =>
         tool.execute(
@@ -174,7 +177,7 @@ function inlineCall(id: ConversationId, taskId: number, callId: string) {
 }
 
 test("the module has one tool, with inline in its schema once, and the guide says when to use it", async () => {
-    const extension = createArtifacts({} as PocketHost);
+    const extension = createArtifacts({ hostfs: new Hostfs() } as PocketHost);
     const section = extension.sections![0]!;
 
     assert.deepEqual(
@@ -207,7 +210,7 @@ test("the module has one tool, with inline in its schema once, and the guide say
 });
 
 test("the tool list sends the schema once: no second tool, and about 1,400 characters fewer", () => {
-    const tools = createArtifacts({} as PocketHost).tools!;
+    const tools = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools!;
     const sent = JSON.stringify(
         tools.map((tool) => ({
             name: tool.name,
@@ -592,7 +595,7 @@ test("an artifact with inline versions stays HTML, so an old card keeps showing 
     const task = 860_000 + (calls += 1);
     const me = app.config.ownerToken;
     const first = await inlineCall(id, task, "card")({ content: PAGE });
-    const artifact = createArtifacts({} as PocketHost).tools![0]!;
+    const artifact = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
     const direct = (taskId: number, args: Record<string, unknown>) =>
         artifact.execute(
             { id: "loan-calc", title: "Loan", ...args } as never,

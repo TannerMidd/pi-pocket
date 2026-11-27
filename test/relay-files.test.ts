@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,7 +51,7 @@ test("files go only from the session's folder: no escape, no link out, no hidden
     writeFileSync(join(root, "data", "auth.json"), TOKEN);
     writeFileSync(join(root, "big.bin"), "x".repeat(101));
 
-    const [sent] = await readFiles(root, join(root, "data"), ["a.png"], caps);
+    const [sent] = await readFiles(new Hostfs(), root, join(root, "data"), ["a.png"], caps);
 
     assert.equal(sent!.name, "a.png");
     assert.equal(sent!.type, "image/png");
@@ -65,14 +66,14 @@ test("files go only from the session's folder: no escape, no link out, no hidden
         "missing.png",
     ]) {
         await assert.rejects(
-            readFiles(root, join(root, "data"), [path], caps),
+            readFiles(new Hostfs(), root, join(root, "data"), [path], caps),
             /Nothing was sent|nothing was sent/,
             path,
         );
     }
 
     await assert.rejects(
-        readFiles(root, outside, ["a.png", "a.png", "a.png"], caps),
+        readFiles(new Hostfs(), root, outside, ["a.png", "a.png", "a.png"], caps),
         /2 files at most/,
     );
 
@@ -80,7 +81,10 @@ test("files go only from the session's folder: no escape, no link out, no hidden
     writeFileSync(join(root, "half.bin"), "");
     truncateSync(join(root, "half.bin"), 60 * 1048576);
     await assert.rejects(
-        readFiles(root, outside, ["half.bin", "half.bin"], { max: 2, maxBytes: 70 * 1048576 }),
+        readFiles(new Hostfs(), root, outside, ["half.bin", "half.bin"], {
+            max: 2,
+            maxBytes: 70 * 1048576,
+        }),
         /100 MB in all/,
     );
 });
@@ -95,13 +99,19 @@ test("a file of variables is not sent, wherever it is and whatever its name says
 
     for (const path of ["prod.env", "config/staging.env"]) {
         await assert.rejects(
-            readFiles(root, join(root, "data"), [path], caps),
+            readFiles(new Hostfs(), root, join(root, "data"), [path], caps),
             /can hold secrets.*Nothing was sent/,
             path,
         );
     }
 
-    const [sent] = await readFiles(root, join(root, "data"), ["env.example.txt"], caps);
+    const [sent] = await readFiles(
+        new Hostfs(),
+        root,
+        join(root, "data"),
+        ["env.example.txt"],
+        caps,
+    );
 
     assert.equal(sent!.name, "env.example.txt");
 });

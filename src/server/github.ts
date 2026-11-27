@@ -7,32 +7,98 @@
  */
 import { execFile } from "node:child_process";
 import { describe, HttpError } from "./errors.ts";
-import { git } from "./git.ts";
+import { delimiter, dirname } from "node:path";
+import {
+    absolutePath,
+    findRepository,
+    gitBinary,
+    git,
+    hardenedConfigEnv,
+    hardenedEnv,
+    EMPTY_TREE,
+    MIN_GIT,
+    versionOk,
+} from "./git.ts";
+import { type FolderRef, folderPath } from "./hostfs.ts";
 import { snippet } from "./projection.ts";
 
 /** Runs `gh` with arguments, in a folder; resolves to what it printed, or rejects with what it said went wrong. */
-export type Gh = (args: string[], cwd?: string, timeoutMs?: number) => Promise<string>;
+export type Gh = (args: string[], folder?: FolderRef, timeoutMs?: number) => Promise<string>;
 
 const GH_TIMEOUT_MS = 60_000;
 
+/**
+ * What `gh` runs with in a folder. `gh` runs Git itself, so in a sandboxed folder it takes what `runGit` takes: the
+ * server's `GIT_*` removed, the repository pinned, hooks and attributes off, an absolute `git` first on `PATH`, and the
+ * same version gate (it fails closed). In any other folder it runs as it always did.
+ */
+export function ghEnvironment(folder: FolderRef | undefined): {
+    env: NodeJS.ProcessEnv;
+    cwd?: string;
+} {
+    const plain = {
+        ...process.env,
+        GH_PROMPT_DISABLED: "1",
+        GH_NO_UPDATE_NOTIFIER: "1",
+        GIT_TERMINAL_PROMPT: "0",
+        NO_COLOR: "1",
+        CLICOLOR: "0",
+    };
+
+    if (folder === undefined || !folder.sandboxed) {
+        return { env: plain, ...(folder === undefined ? {} : { cwd: folderPath(folder) }) };
+    }
+
+    const git = gitBinary();
+
+    if (!versionOk(git.version)) {
+        throw new Error(
+            `Git ${git.version.join(".")} is older than ${MIN_GIT.join(".")}, which Pocket needs to run gh in a sandboxed folder. Update Git, or turn the sandbox off.`,
+        );
+    }
+
+    const repository = findRepository(folder);
+
+    if (repository === undefined) {
+        throw new Error("This sandboxed folder is not in a git repository.");
+    }
+
+    return {
+        cwd: folderPath(folder),
+        env: {
+            ...hardenedEnv(),
+            ...hardenedConfigEnv(),
+            GH_PROMPT_DISABLED: "1",
+            GH_NO_UPDATE_NOTIFIER: "1",
+            NO_COLOR: "1",
+            CLICOLOR: "0",
+            GIT_DIR: repository.gitDir,
+            GIT_WORK_TREE: repository.workTree,
+            GIT_ATTR_SOURCE: EMPTY_TREE,
+            PATH: [dirname(git.path), ...absolutePath()].join(delimiter),
+        },
+    };
+}
+
 /** The `gh` on this machine, never asking anything: watches run with nobody there to answer. */
-export const runGh: Gh = (args, cwd, timeoutMs = GH_TIMEOUT_MS) =>
+export const runGh: Gh = (args, folder, timeoutMs = GH_TIMEOUT_MS) =>
     new Promise((resolve, reject) => {
+        let where: ReturnType<typeof ghEnvironment>;
+
+        try {
+            where = ghEnvironment(folder);
+        } catch (error) {
+            return reject(error instanceof Error ? error : new Error(String(error)));
+        }
+
         execFile(
             "gh",
             args,
             {
-                ...(cwd === undefined ? {} : { cwd }),
+                ...(where.cwd === undefined ? {} : { cwd: where.cwd }),
                 timeout: timeoutMs,
                 maxBuffer: 64 * 1024 * 1024,
-                env: {
-                    ...process.env,
-                    GH_PROMPT_DISABLED: "1",
-                    GH_NO_UPDATE_NOTIFIER: "1",
-                    GIT_TERMINAL_PROMPT: "0",
-                    NO_COLOR: "1",
-                    CLICOLOR: "0",
-                },
+                env: where.env,
             },
             (error, stdout, stderr) => {
                 if (error === null) {
@@ -276,7 +342,7 @@ export async function requirePush(gh: Gh, repo: string): Promise<RepoInfo> {
 }
 
 /** The GitHub repository a folder's `origin` remote points at; undefined outside one, or for another kind of remote. */
-export async function originRepo(folder: string): Promise<string | undefined> {
+export async function originRepo(folder: FolderRef): Promise<string | undefined> {
     const url = await git(folder, ["remote", "get-url", "origin"]).then(
         (out) => out.trim(),
         () => "",

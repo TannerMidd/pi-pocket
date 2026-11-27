@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,6 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { designSystemTool } from "../src/server/design/system.ts";
 import { loadDesignSystem, writeDesignSystem } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -19,7 +21,7 @@ function project(): string {
 }
 
 const system = (tokens: unknown, modes?: Record<string, unknown>) =>
-    writeDesignSystem(project(), { tokens, ...(modes === undefined ? {} : { modes }) });
+    writeDesignSystem(hostFolder(project()), { tokens, ...(modes === undefined ? {} : { modes }) });
 const warnings = (made: ReturnType<typeof system>) =>
     made.problems.filter((problem) => problem.level === "warning");
 
@@ -239,7 +241,7 @@ test("a mode lists the tokens its file sets, so a view can show the rest as inhe
     assert.deepEqual(system({ n: { $type: "number", one: { $value: 1 } } }).overrides, {});
 });
 
-const tool = designSystemTool();
+const tool = designSystemTool(new Hostfs());
 const run = (dir: string, args: Record<string, unknown>) =>
     tool.execute(args as never, { agent: async () => ({ cwd: dir }) } as never, undefined as never);
 
@@ -254,7 +256,7 @@ test("mode files past twice the mode limit are not read", () => {
         writeFileSync(join(folder, `tokens.m${i}.json`), "{}");
     }
 
-    const unread = loadDesignSystem(dir)!.problems.filter((problem) =>
+    const unread = loadDesignSystem(hostFolder(dir))!.problems.filter((problem) =>
         problem.message.includes("is not read"),
     );
 
@@ -310,7 +312,7 @@ test("the 0.26 write still works and is not in the description", async () => {
     });
 
     assert.match((reply.output as { text: string }[])[0]!.text, /Wrote \.pi\/design-system\.md/);
-    assert.equal(loadDesignSystem(dir), undefined);
+    assert.equal(loadDesignSystem(hostFolder(dir)), undefined);
 });
 
 test("validate lists the notes apart from the problems", async () => {

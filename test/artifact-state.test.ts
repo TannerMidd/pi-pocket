@@ -1,5 +1,6 @@
 // What an artifact's page saves for the person using it (#89): one JSON value per artifact, person, and session, over
 // HTTP as the viewer's bridge asks for it; a schema label, limits, forks, and who may read and save.
+import { Hostfs } from "../src/server/hostfs.ts";
 import { type App, cleanUp, context, openApp, owner, say, scriptedModel, work } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -36,7 +37,7 @@ after(async () => {
 async function sessionWithArtifact(): Promise<ConversationId> {
     app.config.lastModel ??= { provider: "faux", modelId: "faux-1", thinkingLevel: "off" };
     const { id } = await app.commands.createSession(owner(app), { cwd: work });
-    const tool = createArtifacts({} as PocketHost).tools![0]!;
+    const tool = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools![0]!;
 
     await tool.execute(
         { id: "calc", title: "Calculator", content: "<h1>calc</h1>" } as never,

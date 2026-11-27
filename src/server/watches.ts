@@ -359,7 +359,9 @@ export class Watches {
 
             // Off github.com, only on the folder's own host: another host could answer as GitHub.
             const host = repoArgs(named.repo).host?.toLowerCase();
-            const home = repoArgs((await originRepo(app.cwdOf(asking))) ?? "").host?.toLowerCase();
+            const home = repoArgs(
+                (await originRepo(app.folderOf(asking))) ?? "",
+            ).host?.toLowerCase();
 
             if (host !== undefined && host !== home) {
                 throw new HttpError(
@@ -414,7 +416,7 @@ export class Watches {
                         // What follows is the PR, never an option, whatever it starts with.
                         ...(asked === "" ? [] : ["--", asked.replace(/^#/, "")]),
                     ],
-                    app.cwdOf(asking),
+                    app.folderOf(asking),
                 ),
             ) as typeof found;
         } catch (error) {
@@ -460,7 +462,7 @@ export class Watches {
             found.isCrossRepository === true && owner && name
                 ? `${host === undefined ? "" : `${host}/`}${owner}/${name}`
                 : repo;
-        const origin = await originRepo(app.cwdOf(asking));
+        const origin = await originRepo(app.folderOf(asking));
         // A PR of another repository than the folder's: Pi has to work in a checkout of it to push a fix.
         const elsewhere = !sameRepo(origin, repo) && !sameRepo(origin, head);
         // GitHub tells who can write to a repository only to an account that can push to it: elsewhere (a fork's PR

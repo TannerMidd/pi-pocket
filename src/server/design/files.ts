@@ -1,8 +1,16 @@
 /** Export paths stay inside the session folder; directory links cannot redirect a write. */
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
-import { constants } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+    constants,
+    type FolderRef,
+    lstatAsync,
+    mkdirAsync,
+    open,
+    realpathAsync,
+    renameAsync,
+    rmAsync,
+} from "../hostfs.ts";
 import { workspaceScheme } from "../paths.ts";
 
 /** What the design system and design exports say in a session on a workspace URI: its files are not here. */
@@ -14,8 +22,8 @@ export function localFolder(cwd: string | undefined): string | undefined {
     return cwd === undefined || workspaceScheme(cwd) !== undefined ? undefined : cwd;
 }
 
-export async function writeExport(cwd: string, path: string, bytes: Buffer): Promise<string> {
-    const root = await realpath(cwd);
+export async function writeExport(cwd: FolderRef, path: string, bytes: Buffer): Promise<string> {
+    const root = await realpathAsync(cwd.at());
     const target = resolve(root, path);
     const local = relative(root, target);
 
@@ -23,23 +31,23 @@ export async function writeExport(cwd: string, path: string, bytes: Buffer): Pro
         throw new Error("Export paths must stay inside the session folder.");
     }
 
-    let parent = root;
+    let parent = cwd.host.at(root);
 
     for (const part of relative(root, dirname(target)).split(sep).filter(Boolean)) {
-        parent = join(parent, part);
-        await mkdir(parent).catch((error: NodeJS.ErrnoException) => {
+        parent = parent.child(part);
+        await mkdirAsync(parent).catch((error: NodeJS.ErrnoException) => {
             if (error.code !== "EEXIST") {
                 throw error;
             }
         });
-        const info = await lstat(parent);
+        const info = await lstatAsync(parent);
 
         if (info.isSymbolicLink() || !info.isDirectory()) {
             throw new Error("Export directories must not be symbolic links.");
         }
     }
 
-    const temporary = join(parent, `.pocket-export-${randomBytes(12).toString("hex")}`);
+    const temporary = parent.child(`.pocket-export-${randomBytes(12).toString("hex")}`);
     const handle = await open(
         temporary,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
@@ -49,10 +57,10 @@ export async function writeExport(cwd: string, path: string, bytes: Buffer): Pro
     try {
         await handle.writeFile(bytes);
         await handle.close();
-        await rename(temporary, target);
+        await renameAsync(temporary, cwd.host.at(target));
     } finally {
         await handle.close();
-        await rm(temporary, { force: true });
+        await rmAsync(temporary, { force: true });
     }
 
     return target;

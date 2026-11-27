@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { closeSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { openNoFollow, openNoFollowSync } from "../src/server/no-follow.ts";
+import { openNoFollow, openNoFollowSync, own } from "../src/server/hostfs.ts";
 
 test("a file opens, and a link to one is refused", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "pocket-no-follow-"));
@@ -14,11 +14,12 @@ test("a file opens, and a link to one is refused", async (t) => {
     writeFileSync(file, "inside");
     symlinkSync(file, link);
 
-    const fd = openNoFollowSync(file);
+    const opened = openNoFollowSync(own(file));
 
-    assert.equal(readFileSync(fd, "utf8"), "inside");
-    closeSync(fd);
-    await (await openNoFollow(file)).close();
-    assert.throws(() => openNoFollowSync(link), { code: "ELOOP" });
-    await assert.rejects(openNoFollow(link), { code: "ELOOP" });
+    assert.equal(opened.readAll().toString("utf8"), "inside");
+    opened.close();
+    await (await openNoFollow(own(file))).close();
+    assert.throws(() => openNoFollowSync(own(link)), { code: "ELOOP" });
+    await assert.rejects(openNoFollow(own(link)), { code: "ELOOP" });
+    assert.equal(readFileSync(file, "utf8"), "inside");
 });

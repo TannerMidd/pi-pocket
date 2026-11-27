@@ -14,12 +14,12 @@
  * names, or a symbolic link, and not one a command computes, nor a folder searched as a whole. Neither is a boundary
  * between Pi and the files of the user it runs as.
  */
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ConfigStore } from "./config.ts";
 import type { SettingField } from "./extension-settings.ts";
 import { type HiddenValues, MAX_HIDDEN, MIN_HIDDEN } from "./hidden.ts";
+import { Hostfs, own, readdir, readText, stat } from "./hostfs.ts";
 
 /** One secret found: its value, and what shows in its place. */
 export interface FoundSecret {
@@ -38,6 +38,8 @@ export interface CoreSecretsOptions {
     config: ConfigStore;
     dataDir: string;
     agentDir: string;
+    /** How paths in a session's folder are looked at: links in a sandboxed folder are not followed. Default: all plain. */
+    host?: Hostfs;
     /** The settings a module that is on declares (`ExtensionWebs.settingsOf`). */
     settingsOf: (module: string) => readonly SettingField[] | undefined;
     log: (line: string) => void;
@@ -76,41 +78,26 @@ function isEnvWord(name: string): boolean {
     return isEnvFile(name) && name.startsWith(".");
 }
 
-function real(path: string): string {
-    try {
-        return realpathSync(path);
-    } catch {
-        // Not there (yet): its folder may still be a link.
-        try {
-            return join(realpathSync(dirname(path)), basename(path));
-        } catch {
-            return path;
-        }
-    }
+function real(host: Hostfs, path: string): string {
+    // Not there (yet): its folder may still be a link.
+    return (
+        host.real(path) ??
+        (host.real(dirname(path)) === undefined
+            ? path
+            : join(host.real(dirname(path))!, basename(path)))
+    );
 }
 
 /**
  * Where a path that is there leads, links followed; undefined when it cannot be read (not there, no access, not a path
  * at all): then no link of it leads to a secret.
  */
-function linked(path: string): string | undefined {
-    try {
-        if (lstatSync(path, { throwIfNoEntry: false }) === undefined) {
-            return undefined;
-        }
-
-        return realpathSync(path);
-    } catch {
-        return undefined;
-    }
+function linked(host: Hostfs, path: string): string | undefined {
+    return host.has(path) ? host.real(path) : undefined;
 }
 
-function isFolder(path: string): boolean {
-    try {
-        return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
-    } catch {
-        return false;
-    }
+function isFolder(host: Hostfs, path: string): boolean {
+    return host.isFolder(path);
 }
 
 const GLOB = /[*?[]/;
@@ -118,7 +105,7 @@ const GLOB = /[*?[]/;
 /** The drop-ins' data folders in a data folder: `x.*`. */
 function drops(data: string): string[] {
     try {
-        return readdirSync(data).filter((name) => name.startsWith("x."));
+        return readdir(own(data)).filter((name) => name.startsWith("x."));
     } catch {
         return [];
     }
@@ -284,8 +271,11 @@ export class CoreSecrets {
     readonly #read = new Map<string, { stamp: string; found: FoundSecret[] }>();
     #syncing = false;
 
+    readonly #host: Hostfs;
+
     constructor(options: CoreSecretsOptions) {
         this.#options = options;
+        this.#host = options.host ?? new Hostfs();
         this.watchFile({
             path: join(options.dataDir, "push.json"),
             read: (text) => {
@@ -407,9 +397,9 @@ export class CoreSecrets {
         let stamp: string;
 
         try {
-            const stat = statSync(path);
+            const info = stat(own(path));
 
-            stamp = `${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+            stamp = `${info.size}:${info.mtimeMs}:${info.ino}`;
         } catch {
             this.#read.delete(path);
 
@@ -425,7 +415,7 @@ export class CoreSecrets {
         let found: FoundSecret[];
 
         try {
-            found = file.read(readFileSync(path, "utf8"));
+            found = file.read(readText(own(path)));
         } catch {
             // Half written, or not what it should be: what it held before stays hidden, and the next sync reads it again.
             return known?.found ?? [];
@@ -478,7 +468,7 @@ export class CoreSecrets {
 
     /** Why a path is off limits, or undefined: the path as given, and where its links lead. */
     #path(path: string, roots: Roots): string | undefined {
-        for (const each of new Set([path, real(path)])) {
+        for (const each of new Set([path, real(this.#host, path)])) {
             const why = this.#protected(each, isEnvFile, roots);
 
             if (why !== undefined) {
@@ -490,7 +480,7 @@ export class CoreSecrets {
     }
 
     #roots(): Roots {
-        const both = (path: string) => [...new Set([resolve(path), real(path)])];
+        const both = (path: string) => [...new Set([resolve(path), real(this.#host, path)])];
         const files = this.files().flatMap(both);
         const data = both(this.#options.dataDir);
 
@@ -533,11 +523,11 @@ export class CoreSecrets {
         const { all, read: words } = commandWords(this.#home(command));
         const roots = this.#roots();
         // A word may be relative to the folder the command runs in, or a folder the command names, and where they lead.
-        const bases = new Set([cwd, real(cwd)]);
+        const bases = new Set([cwd, real(this.#host, cwd)]);
 
         for (const word of new Set(all)) {
-            if (isAbsolute(word) && !GLOB.test(word) && isFolder(word)) {
-                bases.add(word).add(real(word));
+            if (isAbsolute(word) && !GLOB.test(word) && isFolder(this.#host, word)) {
+                bases.add(word).add(real(this.#host, word));
             }
         }
 
@@ -620,7 +610,7 @@ export class CoreSecrets {
                     return why;
                 }
 
-                const target = follow ? linked(path) : undefined;
+                const target = follow ? linked(this.#host, path) : undefined;
                 const led =
                     target === undefined ? undefined : this.#protected(target, isEnvWord, roots);
 

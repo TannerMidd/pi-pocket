@@ -14,6 +14,7 @@ import {
 import { scanReport, scanTokens, type TokenScan } from "../src/server/design/scan.ts";
 import type { DesignSystem } from "../src/server/design/system-types.ts";
 import { buildSystem } from "../src/server/design/tokens-model.ts";
+import { hostPlace } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -207,7 +208,7 @@ h1 { font-size: 32px; font-weight: 700 } h2 { font-size: 24px; font-weight: 600 
 };
 
 test("a plain stylesheet: the nine roles by name, in light and dark, and the project's own scales", () => {
-    const scan = scanTokens(project(PLAIN));
+    const scan = scanTokens(hostPlace(project(PLAIN)));
     const system = load(scan);
     const roles = scan.inferred.roles;
 
@@ -262,7 +263,7 @@ test("a plain stylesheet: the nine roles by name, in light and dark, and the pro
 });
 
 test("the report lists the roles, the scales, and the draft, fenced", () => {
-    const report = scanReport(scanTokens(project(PLAIN)));
+    const report = scanReport(scanTokens(hostPlace(project(PLAIN))));
 
     assert.match(report, /^<scan_data>\nScanned 1 files\./);
     assert.match(report, /Color roles \(9 of 9 found\):/);
@@ -300,7 +301,7 @@ const TAILWIND = {
 };
 
 test("Tailwind v4: @theme namespaces keep their names, the dark class is the dark mode, and utility classes fill the scales", () => {
-    const scan = scanTokens(project(TAILWIND));
+    const scan = scanTokens(hostPlace(project(TAILWIND)));
     const system = load(scan);
 
     assert.equal(scan.tailwind, true);
@@ -336,8 +337,9 @@ test("Tailwind v4: @theme namespaces keep their names, the dark class is the dar
 
 test("Tailwind v3: a config's theme.extend is read without running it", () => {
     const scan = scanTokens(
-        project({
-            "tailwind.config.js": `const colors = require('tailwindcss/colors')
+        hostPlace(
+            project({
+                "tailwind.config.js": `const colors = require('tailwindcss/colors')
 module.exports = {
   content: ['./src/**/*.{js,jsx}', './pages/*.html'],
   theme: { extend: {
@@ -349,7 +351,8 @@ module.exports = {
     spacing: { 18: '4.5rem' },
   } },
 }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -368,29 +371,31 @@ module.exports = {
 
 test("a project that keeps tokens in a DTCG file gets them back as they are, with a dark file for the dark mode", () => {
     const scan = scanTokens(
-        project({
-            "tokens/base.tokens.json": JSON.stringify({
-                color: {
-                    $type: "color",
-                    gray: { 50: { $value: "#fafafa" }, 900: { $value: "#18181b" } },
-                    bg: { page: { $value: "{color.gray.50}" } },
-                    text: { primary: { $value: "{color.gray.900}" } },
-                    accent: { default: { $value: "#3b82f6" } },
-                },
-                space: {
-                    $type: "dimension",
-                    1: { $value: "4px" },
-                    2: { $value: "8px" },
-                    4: { $value: "16px" },
-                },
-                radius: { $type: "dimension", md: { $value: "8px" } },
+        hostPlace(
+            project({
+                "tokens/base.tokens.json": JSON.stringify({
+                    color: {
+                        $type: "color",
+                        gray: { 50: { $value: "#fafafa" }, 900: { $value: "#18181b" } },
+                        bg: { page: { $value: "{color.gray.50}" } },
+                        text: { primary: { $value: "{color.gray.900}" } },
+                        accent: { default: { $value: "#3b82f6" } },
+                    },
+                    space: {
+                        $type: "dimension",
+                        1: { $value: "4px" },
+                        2: { $value: "8px" },
+                        4: { $value: "16px" },
+                    },
+                    radius: { $type: "dimension", md: { $value: "8px" } },
+                }),
+                "tokens/base.dark.tokens.json": JSON.stringify({
+                    color: { bg: { page: { $value: "{color.gray.900}" } } },
+                }),
+                "package.json": JSON.stringify({ name: "x", dependencies: { a: "1" } }),
+                "styles.css": ":root { --ignored: #123456 }",
             }),
-            "tokens/base.dark.tokens.json": JSON.stringify({
-                color: { bg: { page: { $value: "{color.gray.900}" } } },
-            }),
-            "package.json": JSON.stringify({ name: "x", dependencies: { a: "1" } }),
-            "styles.css": ":root { --ignored: #123456 }",
-        }),
+        ),
     );
     const system = load(scan);
 
@@ -407,8 +412,9 @@ test("a project that keeps tokens in a DTCG file gets them back as they are, wit
 
 test("a messy page: near-duplicate colors are one, roles come from use, and the draft says what is off the grid", () => {
     const scan = scanTokens(
-        project({
-            "index.html": `<style>
+        hostPlace(
+            project({
+                "index.html": `<style>
 body { margin:0; font-family: Georgia, "Times New Roman", serif; color:#222; background:#fffdf8 }
 h1 { font-family: 'Playfair Display', serif; font-size: 42px; color:#1b1b1b }
 .nav { background:#2a2a2a; color:#fff; padding:14px 22px } .nav a { color:#f5f5f5; font-size:15px }
@@ -420,7 +426,8 @@ h1 { font-family: 'Playfair Display', serif; font-size: 42px; color:#1b1b1b }
 .muted { color:#777; font-size:13px } .muted2 { color:#767676; font-size:13px }
 .err { color:#b91c1c } .ok { color:#15803d } .warn { color:#b45309 }
 </style><div style="color:#444; font-size:18px"></div><button style="background:#da4a10">x</button>`,
-        }),
+            }),
+        ),
     );
     const roles = scan.inferred.roles;
 
@@ -452,16 +459,18 @@ test("a dark value follows its token when a group renames the token", () => {
         ":root{--bg:#ffffff;--ink:#111111;--blue:#0000ff;--blue-brand:#0000aa}" +
         "@media (prefers-color-scheme: dark){:root{--blue:#000088}}" +
         "a{color:var(--blue);border-color:var(--blue-brand)}";
-    const system = load(scanTokens(project({ "theme.css": css })));
+    const system = load(scanTokens(hostPlace(project({ "theme.css": css }))));
 
     assert.equal(hex(system, "color.blue.default", "dark"), "#000088");
 });
 
 test("the draft always loads: a token the engine refuses is dropped, not saved", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --font-evil: "Inter; } body { background: red"; --color-ok: #123456; --radius-x: 99999999999999999999px; --shadow-bad: 0 0 0 ; --ease-x: cubic-bezier(9, 9, 9, 9) }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `:root { --font-evil: "Inter; } body { background: red"; --color-ok: #123456; --radius-x: 99999999999999999999px; --shadow-bad: 0 0 0 ; --ease-x: cubic-bezier(9, 9, 9, 9) }`,
+            }),
+        ),
     );
 
     load(scan);
@@ -470,12 +479,14 @@ test("the draft always loads: a token the engine refuses is dropped, not saved",
 
 test("the scan reads dot folders for styles (Storybook, VitePress) but not caches, and skips the .pi folder", () => {
     const scan = scanTokens(
-        project({
-            ".storybook/preview.css": ":root { --bg: #111 }",
-            ".cache/x.css": ":root { --cache: #222 }",
-            ".pi/design/dist/tokens.css": ":root { --generated: #333 }",
-            "node_modules/pkg/a.css": ":root { --dep: #444 }",
-        }),
+        hostPlace(
+            project({
+                ".storybook/preview.css": ":root { --bg: #111 }",
+                ".cache/x.css": ":root { --cache: #222 }",
+                ".pi/design/dist/tokens.css": ":root { --generated: #333 }",
+                "node_modules/pkg/a.css": ":root { --dep: #444 }",
+            }),
+        ),
     );
 
     assert.deepEqual(scan.files, [".storybook/preview.css"]);
@@ -488,7 +499,7 @@ test("files are read best first: a theme before a deep component file, and the f
         files[`src/components/deep/a/b/c${i}.css`] = ".x { color: #111 }";
     }
 
-    const scan = scanTokens(project(files));
+    const scan = scanTokens(hostPlace(project(files)));
 
     assert.equal(scan.files.length, 400);
     assert.equal(scan.files[0], "src/theme.css");
@@ -507,7 +518,7 @@ test("a symlinked token file, style file, or folder is never read", () => {
     symlinkSync(join(outside, "secret.tokens.json"), join(dir, "linked.tokens.json"));
     symlinkSync(outside, join(dir, "folder"));
 
-    const scan = scanTokens(dir);
+    const scan = scanTokens(hostPlace(dir));
 
     assert.deepEqual(scan.files, ["ok.css"]);
     assert.ok(
@@ -533,7 +544,7 @@ test("hostile inputs scan in bounded time: thousands of braces, variables, and c
     // CPU time of this process, not wall time: the scan is synchronous, and a full parallel test run slows the clock, not the work.
     const before = process.cpuUsage();
 
-    scanTokens(dir);
+    scanTokens(hostPlace(dir));
 
     const used = process.cpuUsage(before);
     const ms = Math.round((used.user + used.system) / 1000);
@@ -554,7 +565,7 @@ body { background: var(--bg); color: var(--text); }`,
 };
 
 test("a dark-first project: dark is the default mode, light is the file, color-mix() is computed, and short names are roles", () => {
-    const scan = scanTokens(project(DARK_FIRST));
+    const scan = scanTokens(hostPlace(project(DARK_FIRST)));
     const system = load(scan);
     const roles = scan.inferred.roles;
 
@@ -595,7 +606,11 @@ test("a dark-first project: dark is the default mode, light is the file, color-m
 
 test("a lone --body is the text, and --body-bg is the page", () => {
     const text = scanTokens(
-        project({ "a.css": ":root { --body: #333333; --bg-body: #ffffff; --accent: #3366ff }" }),
+        hostPlace(
+            project({
+                "a.css": ":root { --body: #333333; --bg-body: #ffffff; --accent: #3366ff }",
+            }),
+        ),
     );
     const roles = text.inferred.roles;
 
@@ -605,10 +620,12 @@ test("a lone --body is the text, and --body-bg is the page", () => {
 
 test("SCSS arithmetic is computed", () => {
     const scan = scanTokens(
-        project({
-            "a.scss":
-                "$space-1: 4px; $space-2: 8px; $space-3: $space-1 * 3; $space-5: ($space-2 + 4px) / 2 + 10px;",
-        }),
+        hostPlace(
+            project({
+                "a.scss":
+                    "$space-1: 4px; $space-2: 8px; $space-3: $space-1 * 3; $space-5: ($space-2 + 4px) / 2 + 10px;",
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -618,13 +635,15 @@ test("SCSS arithmetic is computed", () => {
 
 test("scales: sizes a pixel apart merge, a percent radius is not a size, a pill keeps its value, and shadows merge", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --radius: 6px }
+        hostPlace(
+            project({
+                "a.css": `:root { --radius: 6px }
 .a { font-size: 12px; padding: 15px; margin: 4px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,.2) }
 .b { font-size: 12px; padding: 16px; margin: 5px; border-radius: 3px; box-shadow: 0 2px 5px rgba(0,0,0,.2) }
 .c { font-size: 11px; padding: 16px; border-radius: 50%; box-shadow: inset 0 1px 0 rgba(255,255,255,.5) }
 .d { font-size: 16px; padding: 10px; border-radius: 999px; box-shadow: 0 0 0 3px rgba(51,102,204,.4) }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -653,10 +672,12 @@ test("scales: sizes a pixel apart merge, a percent radius is not a size, a pill 
 
 test("the surface is the background of cards and panels, and Tailwind's arbitrary colors count", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `body { background: #faf3e9 } .card { background: #fff } .panel { background: #fff } .row:nth-child(odd) { background: #f5f5f5 } .row2 { background: #f5f5f5 }`,
-            "App.tsx": `export const A = () => <p className="bg-[#fff4d6] text-[#b00020] p-3">x</p>;`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `body { background: #faf3e9 } .card { background: #fff } .panel { background: #fff } .row:nth-child(odd) { background: #f5f5f5 } .row2 { background: #f5f5f5 }`,
+                "App.tsx": `export const A = () => <p className="bg-[#fff4d6] text-[#b00020] p-3">x</p>;`,
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.roles.surface!.value, "#ffffff");
@@ -668,19 +689,21 @@ test("scanDesignSystem is the draft alone, as the bench calls it", async () => {
     const dir = project({
         "a.css": ":root { --bg: #fff; --text: #111 } .dark { --bg: #000; --text: #eee }",
     });
-    const draft = await scanDesignSystem(dir);
+    const draft = await scanDesignSystem(hostPlace(dir));
 
     assert.deepEqual(Object.keys(draft.modes), ["dark"]);
     assert.ok((draft.tokens.color as Record<string, unknown>).bg);
-    assert.deepEqual(draft, scanTokens(dir).draft);
+    assert.deepEqual(draft, scanTokens(hostPlace(dir)).draft);
 });
 
 test("a library's variable prefix is not part of the name: --bs-body-bg is the page, --bs-border-color the border", () => {
     const scan = scanTokens(
-        project({
-            "theme.css": `:root, [data-bs-theme=light] { --bs-body-color: #212529; --bs-body-bg: #fff; --bs-secondary-bg: #e9ecef; --bs-border-color: #dee2e6; --bs-primary: #0d6efd; --bs-link-color: #0d6efd }
+        hostPlace(
+            project({
+                "theme.css": `:root, [data-bs-theme=light] { --bs-body-color: #212529; --bs-body-bg: #fff; --bs-secondary-bg: #e9ecef; --bs-border-color: #dee2e6; --bs-primary: #0d6efd; --bs-link-color: #0d6efd }
 [data-bs-theme=dark] { --bs-body-color: #dee2e6; --bs-body-bg: #212529; --bs-secondary-bg: #343a40; --bs-border-color: #495057 }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -694,10 +717,12 @@ test("a library's variable prefix is not part of the name: --bs-body-bg is the p
 
 test("a size computed from variables is a use of that size: calc(var(--gap) * 2) is 24px", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --gap: 12px; --radius: 10px }
+        hostPlace(
+            project({
+                "a.css": `:root { --gap: 12px; --radius: 10px }
 .card { padding: calc(var(--gap) * 2); border-radius: calc(var(--radius) - 4px); display: grid; gap: var(--gap) }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -710,10 +735,12 @@ test("a size computed from variables is a use of that size: calc(var(--gap) * 2)
 
 test("a name does not fix the role when the use says otherwise: a text variable used as a background is no text", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --text-light: #f4f1ea; --ink: #1c1c1c; --paper: #fbfaf7 }
+        hostPlace(
+            project({
+                "a.css": `:root { --text-light: #f4f1ea; --ink: #1c1c1c; --paper: #fbfaf7 }
 body { background: var(--paper); color: var(--ink) } .band { background: var(--text-light) } p { color: var(--ink) }`,
-        }),
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.roles.text!.value, "#1c1c1c");
@@ -722,10 +749,12 @@ body { background: var(--paper); color: var(--ink) } .band { background: var(--t
 
 test("sizes the project names and sizes it uses are one scale", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --text-sm: 14px; --text-lg: 20px }
+        hostPlace(
+            project({
+                "a.css": `:root { --text-sm: 14px; --text-lg: 20px }
 .a { font-size: var(--text-sm) } .b { font-size: 16px } .c { font-size: 20px } .d { font-size: 28px }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -738,10 +767,12 @@ test("sizes the project names and sizes it uses are one scale", () => {
 
 test("Tailwind's default colors by class are colors the project uses: bg-slate-200 is #e2e8f0", () => {
     const scan = scanTokens(
-        project({
-            "tailwind.config.js": `module.exports = { theme: { extend: { colors: { brand: "#0284c7" } } } }`,
-            "App.tsx": `export const A = () => <div className="bg-white text-slate-900 border border-slate-200 rounded-xl p-4"><a className="text-brand">x</a></div>;`,
-        }),
+        hostPlace(
+            project({
+                "tailwind.config.js": `module.exports = { theme: { extend: { colors: { brand: "#0284c7" } } } }`,
+                "App.tsx": `export const A = () => <div className="bg-white text-slate-900 border border-slate-200 rounded-xl p-4"><a className="text-brand">x</a></div>;`,
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -752,10 +783,12 @@ test("Tailwind's default colors by class are colors the project uses: bg-slate-2
 
 test("a project's own blue-500 is its own: Tailwind's default does not replace it", () => {
     const scan = scanTokens(
-        project({
-            "tailwind.config.js": `module.exports = { theme: { extend: { colors: { slate: { 200: "#101010" } } } } }`,
-            "App.tsx": `export const A = () => <div className="border border-slate-200">x</div>;`,
-        }),
+        hostPlace(
+            project({
+                "tailwind.config.js": `module.exports = { theme: { extend: { colors: { slate: { 200: "#101010" } } } } }`,
+                "App.tsx": `export const A = () => <div className="border border-slate-200">x</div>;`,
+            }),
+        ),
     );
 
     assert.ok(!scan.colors.some((color) => color.value === "#e2e8f0"));
@@ -763,12 +796,14 @@ test("a project's own blue-500 is its own: Tailwind's default does not replace i
 
 test("nested CSS and a theme switch on :root: both modes are read, and the card is the surface", () => {
     const scan = scanTokens(
-        project({
-            "theme.css": `:root { --surface-1: #ffffff; --surface-2: #f4f4f5; --ink-1: #18181b; --brand: #7c3aed }
+        hostPlace(
+            project({
+                "theme.css": `:root { --surface-1: #ffffff; --surface-2: #f4f4f5; --ink-1: #18181b; --brand: #7c3aed }
 :root[data-theme="dark"] { --surface-1: #0a0a0b; --surface-2: #18181b; --ink-1: #fafafa; --brand: #a78bfa }
 body { background: var(--surface-1); color: var(--ink-1) }
 .card { background: var(--surface-2); & p { color: var(--ink-1) } & .btn { background: var(--brand) } }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -780,9 +815,11 @@ body { background: var(--surface-1); color: var(--ink-1) }
 
 test("grays a shade apart are one color, but white stays white", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `.a { color: #dddddd } .b { color: #e0e0e0 } .c { background: #ffffff } .d { background: #fbfbfa } .e { background: #fbfbfa }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `.a { color: #dddddd } .b { color: #e0e0e0 } .c { background: #ffffff } .d { background: #fbfbfa } .e { background: #fbfbfa }`,
+            }),
+        ),
     );
     const values = load(scan)
         .tokens.filter((each) => each.type === "color")
@@ -797,9 +834,11 @@ test("grays a shade apart are one color, but white stays white", () => {
 
 test("a bare --radius takes a name after the named ones: --radius-md is not lost", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --radius: 0.5rem; --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-sm: calc(var(--radius) - 4px) }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `:root { --radius: 0.5rem; --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-sm: calc(var(--radius) - 4px) }`,
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -809,12 +848,14 @@ test("a bare --radius takes a name after the named ones: --radius-md is not lost
 
 test("a dark mode that recolors only the links does not change the accent: the light blue is the link blue's dark value", () => {
     const scan = scanTokens(
-        project({
-            "a.html": `<style>
+        hostPlace(
+            project({
+                "a.html": `<style>
 body { background: #faf3e9; color: #333 } a { color: #3366cc } .btn { background: #b5651d; color: #fff } .btn2 { background: #b5651d }
 @media (prefers-color-scheme: dark) { body { background: #1c1411; color: #f0e6da } a { color: #8ab4f8 } }
 </style>`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
     const accent = token(system, "color.accent.default");
@@ -835,9 +876,11 @@ const modesOf = (scan: TokenScan) => Object.keys(scan.draft.modes);
 
 test("a shade (--primary-dark beside --primary-light) is not the dark mode's value", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --primary: #2255aa; --primary-light: #4477cc; --primary-dark: #113377; --danger: #cc2222; --danger-dark: #881111 }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `:root { --primary: #2255aa; --primary-light: #4477cc; --primary-dark: #113377; --danger: #cc2222; --danger-dark: #881111 }`,
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.roles.accent!.dark, undefined);
@@ -846,10 +889,12 @@ test("a shade (--primary-dark beside --primary-light) is not the dark mode's val
 
 test("a file named for a mode sets that mode's values: dark.less beside variables.less", () => {
     const scan = scanTokens(
-        project({
-            "variables.less": `@primary-color: #1677ff; @body-background: #f5f5f5; @component-background: #ffffff; @text-color: #222222; @border-color-base: #d9d9d9; @error-color: #ff4d4f;`,
-            "dark.less": `@primary-color: #1668dc; @body-background: #111318; @component-background: #1a1d23; @text-color: #ffffffd9; @border-color-base: #33363d; @error-color: #dc4446;`,
-        }),
+        hostPlace(
+            project({
+                "variables.less": `@primary-color: #1677ff; @body-background: #f5f5f5; @component-background: #ffffff; @text-color: #222222; @border-color-base: #d9d9d9; @error-color: #ff4d4f;`,
+                "dark.less": `@primary-color: #1668dc; @body-background: #111318; @component-background: #1a1d23; @text-color: #ffffffd9; @border-color-base: #33363d; @error-color: #dc4446;`,
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -863,12 +908,14 @@ test("a file named for a mode sets that mode's values: dark.less beside variable
 
 test("Sass color functions and arithmetic over variables, in variables and in rules", () => {
     const scan = scanTokens(
-        project({
-            "_vars.scss": `$black: #000; $white: #fff; $unit: 8px;
+        hostPlace(
+            project({
+                "_vars.scss": `$black: #000; $white: #fff; $unit: 8px;
 $text: rgba($black, 0.87); $muted: rgba($black, 0.6); $line: rgba($black, 0.12); $brand: #1976d2; $brand-dark: darken($brand, 10%);
 $bg: #f5f5f5; $surface: $white;`,
-            "card.scss": `.card { background: $surface; border-radius: $unit * 2; padding: $unit * 2 $unit * 3; box-shadow: 0 2px 4px rgba($black, 0.2); border: 1px solid tint-color(#1976d2, 80%) }`,
-        }),
+                "card.scss": `.card { background: $surface; border-radius: $unit * 2; padding: $unit * 2 $unit * 3; box-shadow: 0 2px 4px rgba($black, 0.2); border: 1px solid tint-color(#1976d2, 80%) }`,
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -894,11 +941,13 @@ $bg: #f5f5f5; $surface: $white;`,
 
 test("a custom media query that names the dark scheme (PostCSS) is the dark mode", () => {
     const scan = scanTokens(
-        project({
-            "vars.css": `@custom-media --dark (prefers-color-scheme: dark);
+        hostPlace(
+            project({
+                "vars.css": `@custom-media --dark (prefers-color-scheme: dark);
 :root { --clr-page: #f2f3f6; --clr-card: #fff; --clr-ink: #1b1f24; --clr-ink-2: #5b6470; --clr-line: #d8dde4; --clr-cta: #2f5bd7 }
 @media (--dark) { :root { --clr-page: #14161a; --clr-card: #1d2026; --clr-ink: #e7e9ec; --clr-ink-2: #9aa3ad; --clr-line: #2e333b; --clr-cta: #7c9bff } }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -911,10 +960,12 @@ test("a custom media query that names the dark scheme (PostCSS) is the dark mode
 
 test("Svelte and CSS Modules wrap selectors: :global(:root) holds the tokens and :global(.dark) the dark ones", () => {
     const scan = scanTokens(
-        project({
-            "app.css": `:global(:root) { --bg: #f7f6f3; --fg: #22252a; --muted: #70767e; --line: #e2ded6; --accent: #0d7a5f; --space-1: 4px; --space-2: 8px; --space-3: 12px; --radius: 6px; --radius-lg: 12px }
+        hostPlace(
+            project({
+                "app.css": `:global(:root) { --bg: #f7f6f3; --fg: #22252a; --muted: #70767e; --line: #e2ded6; --accent: #0d7a5f; --space-1: 4px; --space-2: 8px; --space-3: 12px; --radius: 6px; --radius-lg: 12px }
 :global(.dark) { --bg: #121417; --fg: #eceff2; --muted: #9aa1a9; --line: #2a2f35; --accent: #3ecf9a }`,
-        }),
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.roles.background!.dark, "#121417");
@@ -925,12 +976,14 @@ test("Svelte and CSS Modules wrap selectors: :global(:root) holds the tokens and
 
 test("fluid type sizes (clamp) are steps at their smallest value, and a numbered length family is what its properties say", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --step-0: clamp(1rem, 0.95rem + 0.25vw, 1.125rem); --step-1: clamp(1.25rem, 1.15rem + 0.5vw, 1.5rem);
+        hostPlace(
+            project({
+                "a.css": `:root { --step-0: clamp(1rem, 0.95rem + 0.25vw, 1.125rem); --step-1: clamp(1.25rem, 1.15rem + 0.5vw, 1.5rem);
   --size-1: .25rem; --size-2: .5rem; --size-3: 1rem; --size-4: 1.5rem; --size-5: 2rem }
 .a { padding: var(--size-3) var(--size-4); margin-top: var(--size-2); gap: var(--size-1) } .b { padding: var(--size-5) }
 h1 { font-size: var(--step-1) } p { font-size: var(--step-0) }`,
-        }),
+            }),
+        ),
     );
 
     assert.deepEqual(
@@ -946,12 +999,14 @@ h1 { font-size: var(--step-1) } p { font-size: var(--step-0) }`,
 
 test("class rules count by how often markup uses the class, and a class in the dark mode pairs with its light color", () => {
     const scan = scanTokens(
-        project({
-            "style.css": `.page { background: #ffffff } .bg-gray-100 { background: #f3f4f6 } .bg-gray-900 { background: #111827 }
+        hostPlace(
+            project({
+                "style.css": `.page { background: #ffffff } .bg-gray-100 { background: #f3f4f6 } .bg-gray-900 { background: #111827 }
 .text-gray-900 { color: #111827 } .text-gray-600 { color: #4b5563 } .border-gray-300 { border: 1px solid #d1d5db } .bg-brand { background: #7c3aed }`,
-            "dark.css": `.dark .page { background: #111827 } .dark .bg-gray-100 { background: #1f2937 } .dark .text-gray-900 { color: #f9fafb } .dark .text-gray-600 { color: #9ca3af } .dark .border-gray-300 { border-color: #374151 }`,
-            "index.html": `<body class="page text-gray-900"><div class="bg-gray-100"></div><div class="bg-gray-100"><p class="text-gray-600">x</p></div><p class="text-gray-600 border-gray-300">y</p><a class="bg-brand">z</a></body>`,
-        }),
+                "dark.css": `.dark .page { background: #111827 } .dark .bg-gray-100 { background: #1f2937 } .dark .text-gray-900 { color: #f9fafb } .dark .text-gray-600 { color: #9ca3af } .dark .border-gray-300 { border-color: #374151 }`,
+                "index.html": `<body class="page text-gray-900"><div class="bg-gray-100"></div><div class="bg-gray-100"><p class="text-gray-600">x</p></div><p class="text-gray-600 border-gray-300">y</p><a class="bg-brand">z</a></body>`,
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -969,10 +1024,12 @@ test("class rules count by how often markup uses the class, and a class in the d
 
 test("a custom property set only for the dark mode takes the Sass variable of the same name as its light value", () => {
     const scan = scanTokens(
-        project({
-            "_variables.scss": `$body-bg: #fdfcfa; $body-color: #2a2d31; $border-color: #dcd9d3; $primary: #4b3f9e;`,
-            "custom.scss": `[data-bs-theme="dark"] { --bs-body-bg: #16181d; --bs-body-color: #e8eaed; --bs-border-color: #2e3238; --bs-primary: #9485f2 }`,
-        }),
+        hostPlace(
+            project({
+                "_variables.scss": `$body-bg: #fdfcfa; $body-color: #2a2d31; $border-color: #dcd9d3; $primary: #4b3f9e;`,
+                "custom.scss": `[data-bs-theme="dark"] { --bs-body-bg: #16181d; --bs-body-color: #e8eaed; --bs-border-color: #2e3238; --bs-primary: #9485f2 }`,
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -983,10 +1040,12 @@ test("a custom property set only for the dark mode takes the Sass variable of th
 
 test("a card's own variable (--card-bg on .card) is the surface, in the mode its selector names", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root { --body-bg: #fdfcfa; --body-color: #2a2d31 } [data-theme="dark"] { --body-bg: #16181d; --body-color: #e8eaed }
+        hostPlace(
+            project({
+                "a.css": `:root { --body-bg: #fdfcfa; --body-color: #2a2d31 } [data-theme="dark"] { --body-bg: #16181d; --body-color: #e8eaed }
 .card { --card-bg: #ffffff } [data-theme="dark"] .card { --card-bg: #1f2229 }`,
-        }),
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.roles.surface!.value, "#ffffff");
@@ -995,11 +1054,13 @@ test("a card's own variable (--card-bg on .card) is the surface, in the mode its
 
 test("Material 3 names: on-surface is the text and on-surface-variant the quiet text; typescale sizes are type", () => {
     const scan = scanTokens(
-        project({
-            "tokens.css": `:root { --md-sys-color-surface: #fef7ff; --md-sys-color-on-surface: #1d1b20; --md-sys-color-on-surface-variant: #49454f; --md-sys-color-outline: #79747e; --md-sys-color-primary: #6750a4; --md-sys-color-error: #b3261e;
+        hostPlace(
+            project({
+                "tokens.css": `:root { --md-sys-color-surface: #fef7ff; --md-sys-color-on-surface: #1d1b20; --md-sys-color-on-surface-variant: #49454f; --md-sys-color-outline: #79747e; --md-sys-color-primary: #6750a4; --md-sys-color-error: #b3261e;
   --md-sys-typescale-body-large-size: 1rem; --md-sys-typescale-body-large-line-height: 1.5rem; --md-sys-typescale-title-large-size: 22px; --md-sys-typescale-display-small-size: 36px }
 @media (prefers-color-scheme: dark) { :root { --md-sys-color-surface: #141218; --md-sys-color-on-surface: #e6e0e9; --md-sys-color-on-surface-variant: #cac4d0; --md-sys-color-outline: #938f99; --md-sys-color-primary: #d0bcff } }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -1016,8 +1077,9 @@ test("Material 3 names: on-surface is the text and on-surface-variant the quiet 
 
 test("each role has a confidence and a file:line; comments do not move the lines; the report ends with the next call", () => {
     const scan = scanTokens(
-        project({
-            "src/a.css": `/* a header
+        hostPlace(
+            project({
+                "src/a.css": `/* a header
    that takes two lines */
 :root {
   --bg: #ffffff; // a line comment
@@ -1026,7 +1088,8 @@ test("each role has a confidence and a file:line; comments do not move the lines
 .btn { background: #3b82f6; color: #fff }
 .card { background: #3b82f6 }
 `,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -1065,7 +1128,9 @@ test("each role has a confidence and a file:line; comments do not move the lines
 
 test("a scan of a folder names the folder in the next call, and a project with nothing says how to write tokens", () => {
     const report = scanReport(
-        scanTokens(project({ "a.css": ":root { --bg: #fff; --text: #111; --accent: #36f }" })),
+        scanTokens(
+            hostPlace(project({ "a.css": ":root { --bg: #fff; --text: #111; --accent: #36f }" })),
+        ),
         "src/ui",
     );
 
@@ -1078,22 +1143,24 @@ test("a scan of a folder names the folder in the next call, and a project with n
         /Every role found has a name that says what it is\.|Then set these uncertain roles/,
     );
     assert.match(
-        scanReport(scanTokens(project({ "a.css": "body { margin: 0 }" }))),
+        scanReport(scanTokens(hostPlace(project({ "a.css": "body { margin: 0 }" })))),
         /Next call: design_system with action init and tokens/,
     );
 });
 
 test("SCSS dark mode written as a mixin named for it: @include dark-mode { … }, @include when-night { … }", () => {
     const scan = scanTokens(
-        project({
-            "_mixins.scss": `@mixin dark-mode { .theme-dark & { @content; } }
+        hostPlace(
+            project({
+                "_mixins.scss": `@mixin dark-mode { .theme-dark & { @content; } }
 @mixin when-night { @media (prefers-color-scheme: dark) { @content; } }`,
-            "main.scss": `@import "mixins";
+                "main.scss": `@import "mixins";
 body { background: #f7f7f5; color: #1b1c1f; @include dark-mode { background: #101114; color: #ececf0; } }
 .card { background: #ffffff; border: 1px solid #dcdde0; }
 .meta { color: #6a6e78; @include when-night { color: #9ca0aa; } }
 a { color: #0b6bcb; @include dark-mode { color: #5aa2f0; } }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -1106,12 +1173,14 @@ a { color: #0b6bcb; @include dark-mode { color: #5aa2f0; } }`,
 
 test("a dark-first page with unusual names: the page is read by use, .light and the light media query are the other mode", () => {
     const scan = scanTokens(
-        project({
-            "tokens.css": `:root { --base: #0f1418; --panel: #171e24; --ink: #e7ebee; --faded: #8fa0ab; --rim: #29323a; --glow: #40d787; --glow-deep: #2fa263; --go: #1c7d46; --stop: #e0564f; --wait: #d9a13b; --drop-1: 0 1px 2px rgba(9,14,18,.2) }
+        hostPlace(
+            project({
+                "tokens.css": `:root { --base: #0f1418; --panel: #171e24; --ink: #e7ebee; --faded: #8fa0ab; --rim: #29323a; --glow: #40d787; --glow-deep: #2fa263; --go: #1c7d46; --stop: #e0564f; --wait: #d9a13b; --drop-1: 0 1px 2px rgba(9,14,18,.2) }
 .light { --base: #f5f6f4; --panel: #ffffff; --ink: #1e252b; --faded: #5b6b76; --rim: #d7dcd8; --glow: #0d8a4e; --go: #14603a; --stop: #c23b35; --wait: #a06a10 }
 body { background: var(--base); color: var(--ink) } .card { background: var(--panel); border: 1px solid var(--rim) } a { color: var(--glow) }
 .hero { background: linear-gradient(135deg, #1e1b4b, #312e81) } .chart { fill: #22d3ee } .chart2 { fill: #a78bfa } .badge { background: #fde68a }`,
-        }),
+            }),
+        ),
     );
     const { roles } = scan.inferred;
 
@@ -1148,11 +1217,13 @@ body { background: var(--base); color: var(--ink) } .card { background: var(--pa
 
 test("SCSS variables a custom property is set from are that property; prefers-color-scheme: light is the other mode", () => {
     const scan = scanTokens(
-        project({
-            "_tokens.scss": `$dark-bg: #131015; $dark-surface: #1d1822; $dark-ink: #ece7f1; $dark-brand: #f0717f;
+        hostPlace(
+            project({
+                "_tokens.scss": `$dark-bg: #131015; $dark-surface: #1d1822; $dark-ink: #ece7f1; $dark-brand: #f0717f;
 :root { --bg: #{$dark-bg}; --surface: #{$dark-surface}; --ink: #{$dark-ink}; --brand: #{$dark-brand}; }
 @media (prefers-color-scheme: light) { :root:not(.dark-theme) { --bg: #faf7f5; --surface: #ffffff; --ink: #221c28; --brand: #d8394d; } }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
     const { roles } = scan.inferred;
@@ -1168,9 +1239,11 @@ test("SCSS variables a custom property is set from are that property; prefers-co
 
 test("a one-off used once is left out of a large palette, kept in a small one; a spacing used once off the grid is no step", () => {
     const small = scanTokens(
-        project({
-            "a.css": `body { background: #fff; color: #111 } .a { color: #36f } .b { border: 1px solid #ddd } .c { background: #fde68a }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `body { background: #fff; color: #111 } .a { color: #36f } .b { border: 1px solid #ddd } .c { background: #fde68a }`,
+            }),
+        ),
     );
     const many = Array.from(
         { length: 20 },
@@ -1178,9 +1251,11 @@ test("a one-off used once is left out of a large palette, kept in a small one; a
             `.x${at} { color: #${(0x112233 + at * 0x050607).toString(16)}; padding: ${at === 0 ? "6px" : "8px"} }`,
     ).join("\n");
     const big = scanTokens(
-        project({
-            "a.css": `${many}\nbody { background: #fff; color: #111 } .a { color: #36f } .a2 { color: #36f }`,
-        }),
+        hostPlace(
+            project({
+                "a.css": `${many}\nbody { background: #fff; color: #111 } .a { color: #36f } .a2 { color: #36f }`,
+            }),
+        ),
     );
     const count = (scan: ReturnType<typeof scanTokens>) =>
         Object.values(scan.inferred.palette).reduce((sum, each) => sum + each, 0);
@@ -1192,8 +1267,9 @@ test("a one-off used once is left out of a large palette, kept in a small one; a
 
 test("a shadow is found by its value, whatever the name: elev, elevation, depth, lift, z1, raise, with layers, inset, a variable color, a color first", () => {
     const scan = scanTokens(
-        project({
-            "a.css": `:root {
+        hostPlace(
+            project({
+                "a.css": `:root {
   --elev-1: 0 1px 2px rgba(0,0,0,.2);
   --elevation-2: 0 4px 8px -2px rgba(0,0,0,.25), 0 2px 4px rgba(0,0,0,.1);
   --depth-3: inset 0 1px 0 rgba(255,255,255,.1), 0 12px 24px rgba(0,0,0,.3);
@@ -1209,7 +1285,8 @@ test("a shadow is found by its value, whatever the name: elev, elevation, depth,
   --curve-out: cubic-bezier(0.2, 0, 0, 1); --ease-x: ease-in-out;
   --voice: "Inter", system-ui, sans-serif;
 }`,
-        }),
+            }),
+        ),
     );
     const system = load(scan);
     const shadows = system.tokens.filter((each) => each.type === "shadow");
@@ -1241,11 +1318,13 @@ test("status words: good ok positive pass valid are success; bad error critical 
 
     for (const [good, bad, warn, note] of forms) {
         const scan = scanTokens(
-            project({
-                "a.css": `:root { --bg: #fff; --text: #111; --${good}: #16a34a; --${bad}: #dc2626; --${warn}: #d97706; --${note}: #2563eb }
+            hostPlace(
+                project({
+                    "a.css": `:root { --bg: #fff; --text: #111; --${good}: #16a34a; --${bad}: #dc2626; --${warn}: #d97706; --${note}: #2563eb }
 [data-bs-theme="dark"] { --bg: #0b0c10; --text: #eee; --${good}: #4ade80; --${bad}: #f87171; --${warn}: #fbbf24; --${note}: #60a5fa }
 .x { color: var(--${good}) }`,
-            }),
+                }),
+            ),
         );
         const { roles } = scan.inferred;
 
@@ -1284,7 +1363,7 @@ body { background: var(--bg-light); color: var(--ink-light) } .ok { color: var(-
     };
 
     for (const [form, files] of Object.entries(forms)) {
-        const scan = scanTokens(project(files));
+        const scan = scanTokens(hostPlace(project(files)));
         const system = load(scan);
         const { roles } = scan.inferred;
 
@@ -1332,15 +1411,19 @@ test("a vendor's theme attribute or class marks the dark mode, with plain litera
 
     for (const selector of selectors) {
         const literal = scanTokens(
-            project({
-                "a.css": `:root { --bg: #f6f7fa; --text: #14161c } ${selector} { --bg: #0b0c10; --text: #e8e9ee }`,
-            }),
+            hostPlace(
+                project({
+                    "a.css": `:root { --bg: #f6f7fa; --text: #14161c } ${selector} { --bg: #0b0c10; --text: #e8e9ee }`,
+                }),
+            ),
         );
         const sass = scanTokens(
-            project({
-                "a.scss": `$bg-l: #f6f7fa; $bg-d: #0b0c10; $t-l: #14161c; $t-d: #e8e9ee;
+            hostPlace(
+                project({
+                    "a.scss": `$bg-l: #f6f7fa; $bg-d: #0b0c10; $t-l: #14161c; $t-d: #e8e9ee;
 :root { --bg: #{$bg-l}; --text: #{$t-l}; } ${selector} { --bg: #{$bg-d}; --text: #{$t-d}; }`,
-            }),
+                }),
+            ),
         );
 
         for (const scan of [literal, sass]) {
@@ -1353,11 +1436,13 @@ test("a vendor's theme attribute or class marks the dark mode, with plain litera
 
 test("interpolation inside a value or with arithmetic is resolved through the Sass variables", () => {
     const scan = scanTokens(
-        project({
-            "_v.scss": `$ink: rgba(20, 22, 28, .2); $space: 8px; $radius: 6px;
+        hostPlace(
+            project({
+                "_v.scss": `$ink: rgba(20, 22, 28, .2); $space: 8px; $radius: 6px;
 :root { --shadow-1: 0 1px 2px #{$ink}; --gap: #{$space * 2}; --round: #{$radius}; }
 .card { box-shadow: var(--shadow-1); padding: var(--gap); border-radius: var(--round) }`,
-        }),
+            }),
+        ),
     );
 
     assert.equal(scan.inferred.shadows, 1);
@@ -1381,7 +1466,7 @@ test("10,000 custom properties are read in linear time (13 s before)", () => {
     const css = `:root {\n${Array.from({ length: 10_000 }, (_, i) => `--a${i}: ${i}px;`).join("\n")}\n}`;
     const started = Date.now();
 
-    scanTokens(project({ "a.css": css }));
+    scanTokens(hostPlace(project({ "a.css": css })));
     assert.ok(Date.now() - started < 5000, `${Date.now() - started} ms`);
 });
 
@@ -1402,7 +1487,7 @@ test("odd inputs end in well under a second, with no throw (R4-4 to R4-7: they t
     ]) {
         const started = Date.now();
 
-        scanTokens(project({ [file!]: text! }));
+        scanTokens(hostPlace(project({ [file!]: text! })));
         assert.ok(Date.now() - started < 1500, `${file}: ${Date.now() - started} ms`);
     }
 });
@@ -1410,14 +1495,15 @@ test("odd inputs end in well under a second, with no throw (R4-4 to R4-7: they t
 test("a Sass variable that points at itself (`$a: $a * 2`) does not stop the scan", () => {
     const dir = project({ "a.scss": "$a: 4px;\n$a: $a * 2;\n.x { color: red; width: $a; }" });
 
-    assert.doesNotThrow(() => scanTokens(dir));
+    assert.doesNotThrow(() => scanTokens(hostPlace(dir)));
 });
 
 test("a chain of 25 Sass variables that each use the last one twice is read fast (minutes before)", () => {
     const sass = Array.from({ length: 25 }, (_, i) => `$v${i + 1}: $v${i} + $v${i};`).join("\n");
     const dir = project({ "a.scss": `$v0: 1px;\n${sass}\n.x { width: $v25; }` });
     const scan = new URL("../src/server/design/scan.ts", import.meta.url).href;
-    const input = `import { scanTokens } from "${scan}"; scanTokens(${JSON.stringify(dir)});`;
+    const hostfs = new URL("../src/server/hostfs.ts", import.meta.url).href;
+    const input = `import { scanTokens } from "${scan}"; import { Hostfs } from "${hostfs}"; scanTokens(new Hostfs().at(${JSON.stringify(dir)}));`;
     const child = spawnSync(process.execPath, ["--input-type=module"], { input, timeout: 9e3 });
 
     assert.equal(child.status, 0, "the scan ends in 9 s");

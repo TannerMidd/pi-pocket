@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { changesIn } from "../src/server/changes.ts";
+import { hostFolder } from "./helpers.ts";
 
 function fixture(firstCommit = true) {
     const root = mkdtempSync(join(tmpdir(), "pocket-counts-"));
@@ -43,9 +44,9 @@ test("new text and binary counts stay correct after staging, even with a large d
         { path: "tracked.txt", added: 1, removed: 1 },
     ];
 
-    assert.deepEqual(counts((await changesIn(root, [])).files), expected);
+    assert.deepEqual(counts((await changesIn(hostFolder(root), [])).files), expected);
     git("add", "-A");
-    assert.deepEqual(counts((await changesIn(root, [])).files), expected);
+    assert.deepEqual(counts((await changesIn(hostFolder(root), [])).files), expected);
 });
 
 test("before the first commit, staged and untracked files both have counts", async (t) => {
@@ -55,7 +56,7 @@ test("before the first commit, staged and untracked files both have counts", asy
     writeFileSync(join(root, "staged.txt"), "one\ntwo\n");
     git("add", "staged.txt");
     writeFileSync(join(root, "fresh.txt"), "three");
-    const changes = await changesIn(root, []);
+    const changes = await changesIn(hostFolder(root), []);
 
     assert.deepEqual(counts(changes.files), [
         { path: "fresh.txt", added: 1, removed: 0 },

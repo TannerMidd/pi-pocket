@@ -1,4 +1,6 @@
 // Pi's skills: the places a session finds them, which of a name wins, project trust, and that it matches Pi's CLI.
+import { Hostfs } from "../src/server/hostfs.ts";
+import { Snapshots } from "../src/server/snapshots.ts";
 import {
     type App,
     cleanUp,
@@ -99,7 +101,10 @@ function fixture() {
     skill(join(agentDir, "skills"), "pi-user");
     skill(join(own, ".agents", "skills"), "everywhere");
 
+    const host = new Hostfs();
     const sources: SkillSources = {
+        host,
+        snapshots: new Snapshots(host, join(own, "snapshots")),
         agentDir,
         home: own,
         settingsPaths: [extra],
@@ -321,7 +326,7 @@ test("each answer saves what Pi's /trust saves, and decides which skills load", 
 
         new ProjectTrustStore(ours).setMany(before);
         new ProjectTrustStore(pis).setMany(before);
-        saveProjectTrust(cwd, ours, choice);
+        saveProjectTrust(new Hostfs(), cwd, ours, choice);
         new ProjectTrustStore(pis).setMany(
             options.find((option) => piLabel[choice](option.label))!.updates,
         );
@@ -341,12 +346,12 @@ test("a folder reached through a link is trusted as the folder it is", () => {
 
     symlinkSync(cwd, link);
     assert.equal(readProjectTrust(link, sources).folder, cwd);
-    saveProjectTrust(link, agentDir, "trust");
+    saveProjectTrust(new Hostfs(), link, agentDir, "trust");
     assert.deepEqual(readProjectTrust(cwd, sources).saved, { path: cwd, trusted: true });
     assert.ok(names(link, sources).includes("here"));
     // The folder above is the real one's, not the link's.
     assert.equal(readProjectTrust(link, sources).parent, repo);
-    saveProjectTrust(link, agentDir, "trust-parent");
+    saveProjectTrust(new Hostfs(), link, agentDir, "trust-parent");
     assert.deepEqual(readProjectTrust(cwd, sources).saved, { path: repo, trusted: true });
 });
 

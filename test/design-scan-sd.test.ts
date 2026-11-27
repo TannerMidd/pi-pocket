@@ -7,6 +7,7 @@ import { scanReport, scanTokens, type TokenScan } from "../src/server/design/sca
 import { type Entry, Mode, flatten } from "../src/server/design/scan-import-eval.ts";
 import type { DesignSystem } from "../src/server/design/system-types.ts";
 import { buildSystem } from "../src/server/design/tokens-model.ts";
+import { hostPlace } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -120,10 +121,12 @@ const SOURCE = {
 
 test("the classic format in several folders: files merge, references with and without .value, types from the categories", () => {
     const scan = scanTokens(
-        project({
-            ...SOURCE,
-            "package.json": { name: "x", scripts: { build: "style-dictionary build" } },
-        }),
+        hostPlace(
+            project({
+                ...SOURCE,
+                "package.json": { name: "x", scripts: { build: "style-dictionary build" } },
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -156,20 +159,22 @@ test("the classic format in several folders: files merge, references with and wi
 
 test("brands and themes are modes: the same paths with other values; a theme named for dark is the dark mode", () => {
     const scan = scanTokens(
-        project({
-            ...SOURCE,
-            "brands/acme/color.json": { color: { accent: { default: classic("#ea580c") } } },
-            "brands/globex/color.json": { color: { accent: { default: classic("#7c3aed") } } },
-            "themes/dark/color.json": {
-                color: {
-                    bg: {
-                        page: classic("{color.base.gray.900.value}"),
-                        surface: classic("{color.base.gray.800.value}"),
+        hostPlace(
+            project({
+                ...SOURCE,
+                "brands/acme/color.json": { color: { accent: { default: classic("#ea580c") } } },
+                "brands/globex/color.json": { color: { accent: { default: classic("#7c3aed") } } },
+                "themes/dark/color.json": {
+                    color: {
+                        bg: {
+                            page: classic("{color.base.gray.900.value}"),
+                            surface: classic("{color.base.gray.800.value}"),
+                        },
+                        text: { primary: classic("{color.base.gray.50.value}") },
                     },
-                    text: { primary: classic("{color.base.gray.50.value}") },
                 },
-            },
-        }),
+            }),
+        ),
     );
     const system = load(scan);
 
@@ -189,38 +194,40 @@ test("brands and themes are modes: the same paths with other values; a theme nam
 test("the usual folders, the old `properties/` layout, attributes and comments", () => {
     const system = load(
         scanTokens(
-            project({
-                "properties/color/base.json": {
-                    color: {
-                        base: {
-                            gray: {
-                                light: classic("#f5f5f5", { comment: "light gray" }),
-                                dark: classic("#222222"),
+            hostPlace(
+                project({
+                    "properties/color/base.json": {
+                        color: {
+                            base: {
+                                gray: {
+                                    light: classic("#f5f5f5", { comment: "light gray" }),
+                                    dark: classic("#222222"),
+                                },
+                                red: classic("#e11d48", {
+                                    attributes: { category: "color", type: "base" },
+                                }),
                             },
-                            red: classic("#e11d48", {
-                                attributes: { category: "color", type: "base" },
-                            }),
                         },
                     },
-                },
-                "properties/color/font.json": {
-                    color: {
-                        font: { base: classic("{color.base.gray.dark.value}") },
-                        background: { base: classic("{color.base.gray.light.value}") },
-                        danger: classic("{color.base.red.value}"),
+                    "properties/color/font.json": {
+                        color: {
+                            font: { base: classic("{color.base.gray.dark.value}") },
+                            background: { base: classic("{color.base.gray.light.value}") },
+                            danger: classic("{color.base.red.value}"),
+                        },
                     },
-                },
-                "properties/size/size.json": {
-                    size: {
-                        font: { small: classic("0.75rem"), base: classic("1rem") },
-                        padding: { tiny: classic("0.25rem"), small: classic("0.5rem") },
-                        radius: { base: classic("4") },
+                    "properties/size/size.json": {
+                        size: {
+                            font: { small: classic("0.75rem"), base: classic("1rem") },
+                            padding: { tiny: classic("0.25rem"), small: classic("0.5rem") },
+                            radius: { base: classic("4") },
+                        },
                     },
-                },
-                "properties/time.json": {
-                    time: { duration: { fast: classic("150"), slow: classic("400") } },
-                },
-            }),
+                    "properties/time.json": {
+                        time: { duration: { fast: classic("150"), slow: classic("400") } },
+                    },
+                }),
+            ),
         ),
     );
 
@@ -233,7 +240,7 @@ test("the usual folders, the old `properties/` layout, attributes and comments",
 });
 
 test("the report names the files the tokens came from", () => {
-    const text = scanReport(scanTokens(project(SOURCE)));
+    const text = scanReport(scanTokens(hostPlace(project(SOURCE))));
 
     assert.match(text, /Used the \d+ tokens from tokens\/color\/base\.json/);
 });

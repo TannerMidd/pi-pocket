@@ -1,16 +1,17 @@
 /** One non-owner file request. Resolve protected roots and the fork's grants once, before looking at candidates. */
-import { realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { type Hostfs, isFile, realpath } from "./hostfs.ts";
 import {
+    type BoundUpload,
     matchesUpload,
     uploadContent,
-    type ReadableFile,
     type UploadContent,
 } from "./upload-content.ts";
 
-function real(path: string): string | undefined {
+/** The path as it really is, through the folder's confinement: a link into a sandboxed folder is refused. */
+function realOf(host: Hostfs, path: string): string | undefined {
     try {
-        return realpathSync.native(path);
+        return realpath(host.at(path), { native: true });
     } catch {
         return undefined;
     }
@@ -37,20 +38,23 @@ function ambiguousWindowsPath(path: string): boolean {
     );
 }
 
-function regular(path: string): boolean {
+const regularIn = (host: Hostfs, path: string): boolean => {
     try {
-        return statSync(path).isFile();
+        return isFile(host.at(path));
     } catch {
         return false;
     }
-}
+};
 
 const reference = /^([1-9]\d*)\/([^/\\\x00-\x1f]+)$/u;
 
-type Decision = { file?: ReadableFile; children?: readonly string[] };
+/** A path that may be read (a name in a folder, or a bound upload), or the names a folder lists. */
+type Decision = { file?: string | BoundUpload; children?: readonly string[] };
 const denied: Decision = { children: [] };
 
 export function filePolicy(options: {
+    /** How raw paths are classified: a path into a sandboxed folder is confined, and a link into one is refused. */
+    host: Hostfs;
     dataDir: string;
     canonicalDataDir: string;
     managedStorage: {
@@ -66,16 +70,16 @@ export function filePolicy(options: {
     content?: Record<string, UploadContent>;
 }) {
     const namedData = resolve(options.dataDir);
-    const data = real(namedData);
+    const data = realOf(options.host, namedData);
     const uploads = data === undefined ? undefined : join(data, "uploads");
-    const actualUploads = uploads === undefined ? undefined : real(uploads);
+    const actualUploads = uploads === undefined ? undefined : realOf(options.host, uploads);
     const storeIntact =
         data === options.canonicalDataDir && uploads !== undefined && uploads === actualUploads;
     const dataNames = rootNames(namedData, data);
-    const agentNames = rootNames(resolve(options.agentDir), real(options.agentDir));
+    const agentNames = rootNames(resolve(options.agentDir), realOf(options.host, options.agentDir));
     const namedUploads = join(namedData, "uploads");
     const uploadNames = rootNames(namedUploads, uploads, actualUploads);
-    const project = real(options.cwd);
+    const project = realOf(options.host, options.cwd);
     const inherited = new Map<string, Map<string, UploadContent>>();
 
     for (const ref of Array.isArray(options.inherited) ? options.inherited : []) {
@@ -118,7 +122,7 @@ export function filePolicy(options: {
         options.unrestrictedWorkspace || (project !== undefined && inside(project, path));
 
     const decide = (path: string): Decision => {
-        const target = real(path);
+        const target = realOf(options.host, path);
 
         if (
             data === undefined ||
@@ -178,7 +182,7 @@ export function filePolicy(options: {
 
                 const content = names.get(parts[1]!);
 
-                if (parts.length === 2 && content && regular(target)) {
+                if (parts.length === 2 && content && regularIn(options.host, target)) {
                     return { file: { path: target, content } };
                 }
             }

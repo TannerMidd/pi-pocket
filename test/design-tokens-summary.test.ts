@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { systemSummary, writeDesignSystem } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -101,7 +102,7 @@ function big() {
 }
 
 test("a cut summary still holds every semantic color role and every component", () => {
-    const system = writeDesignSystem(project(), big());
+    const system = writeDesignSystem(hostFolder(project()), big());
     const roles = system.tokens.filter(
         (token) => token.type === "color" && token.tier === "semantic",
     );
@@ -133,7 +134,7 @@ test("a cut summary still holds every semantic color role and every component", 
 });
 
 test("the order is the roles, the components, the scales, the palette, and last the tokens of one component", () => {
-    const system = writeDesignSystem(project(), big());
+    const system = writeDesignSystem(hostFolder(project()), big());
     const text = systemSummary(system, 1_000_000);
     const at = (needle: string) => text.indexOf(needle);
 
@@ -154,7 +155,7 @@ test("the order is the roles, the components, the scales, the palette, and last 
 });
 
 test("inside a group, a token that components use comes first; unused tokens keep their order", () => {
-    const system = writeDesignSystem(project(), big());
+    const system = writeDesignSystem(hostFolder(project()), big());
     const text = systemSummary(system, 1_000_000);
     const at = (needle: string) => text.indexOf(needle);
 
@@ -167,7 +168,7 @@ test("inside a group, a token that components use comes first; unused tokens kee
 });
 
 test("a cut drops descriptions from the last token first, not a role", () => {
-    const system = writeDesignSystem(project(), big());
+    const system = writeDesignSystem(hostFolder(project()), big());
     const cut = systemSummary(system, 4000);
     const line = (name: string) => cut.split("\n").find((each) => each.includes(`${name} `)) ?? "";
 
@@ -177,7 +178,7 @@ test("a cut drops descriptions from the last token first, not a role", () => {
 });
 
 test("a system with no components or no roles still summarizes: raw colors are listed when nothing names them", () => {
-    const system = writeDesignSystem(project(), {
+    const system = writeDesignSystem(hostFolder(project()), {
         tokens: {
             color: {
                 $type: "color",
@@ -201,7 +202,7 @@ test("the summary lists each component with its slug, the classes of its root el
 <style>.x{color:var(--color-text-primary)}</style>
 <template data-state="default">${markup}</template>
 <template data-state="hover">${extra || markup}</template>`;
-    const system = writeDesignSystem(dir, {
+    const system = writeDesignSystem(hostFolder(dir), {
         tokens: {
             color: { $type: "color", text: { primary: { $value: "#111111" } } },
         },

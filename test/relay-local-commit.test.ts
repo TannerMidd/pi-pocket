@@ -1,3 +1,4 @@
+import { Hostfs } from "../src/server/hostfs.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { readdirSync, statSync } from "node:fs";
@@ -150,7 +151,7 @@ for (const cancelled of [false, true]) {
 
         await writeFile(path, "previous");
         let checkedStaged = false;
-        const publish = publishFetchedFile(path, data, () => {
+        const publish = publishFetchedFile(new Hostfs(), path, data, () => {
             const staged = readdirSync(folder).find((name) => name.endsWith(".tmp"));
 
             if (staged !== undefined && statSync(join(folder, staged)).size === data.length) {

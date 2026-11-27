@@ -3,10 +3,10 @@
  * folder; a folder opens itself. For the owner at that machine: a Ctrl+click on a path (`web/ui.js`).
  */
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HttpError } from "./errors.ts";
+import { type Place, stat } from "./hostfs.ts";
 
 /** A command to run, and the arguments: never through a shell. */
 export type Command = [string, string[]];
@@ -75,19 +75,28 @@ export function hasDesktop(env = process.env, platform: NodeJS.Platform = proces
 }
 
 /**
- * Show an absolute path in the file manager. Throws 404 when it is not there, 409 when nothing can show it. `runner`
- * runs each command: tests give their own, so no window opens.
+ * Show a place in the file manager (the named wrapper that starts it). Throws 404 when it is not there, 409 when nothing
+ * can show it. `runner` runs each command: tests give their own, so no window opens. A place in a folder that a
+ * sandboxed session uses is not shown: the guest wrote its names, and the file manager would follow its links.
  */
 export async function reveal(
-    path: string,
+    place: Place,
     runner: (command: Command) => Promise<boolean> = run,
 ): Promise<void> {
+    const path = place.display.text;
     let folder: boolean;
 
     try {
-        folder = statSync(path).isDirectory();
+        folder = stat(place).isDirectory();
     } catch {
         throw new HttpError(404, `${path} is not there`);
+    }
+
+    if (place.sandboxed) {
+        throw new HttpError(
+            409,
+            "The files of a sandboxed session are not shown by the host's file manager",
+        );
     }
 
     if (!hasDesktop()) {

@@ -3,6 +3,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { arr, bool, int, num, obj, opt, str, union } from "@earendil-works/pi-schema";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
+import type { FolderRef } from "../hostfs.ts";
 import { readBundle } from "./bundle.ts";
 import { EXPORT_TYPES, type ExportFormat, saveDesignExport } from "./export.ts";
 import { localFolder, REMOTE_DESIGN } from "./files.ts";
@@ -35,7 +36,7 @@ const preset = StringEnum(["mobile", "tablet", "desktop"] as const);
 const formatSchema = StringEnum(["png", "pdf", "pptx", "html"] as const);
 
 interface DesignToolDeps {
-    loadSystem?: (cwd: string) => DesignSystem | undefined;
+    loadSystem?: (cwd: FolderRef) => DesignSystem | undefined;
 }
 
 const tweakSchema = record(union([str({ maxLength: 200 }), num(), bool()]), {
@@ -248,7 +249,10 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
                     const folder = localFolder(cwd);
 
                     try {
-                        system = folder === undefined ? undefined : loadSystem(folder);
+                        system =
+                            folder === undefined
+                                ? undefined
+                                : loadSystem(host.hostfs.folder(folder));
                     } catch (error) {
                         notes.push(
                             `The design system could not be read: ${error instanceof Error ? error.message : String(error)}`,
@@ -440,12 +444,12 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
                 {
                     id: args.id,
                     format: args.format,
-                    cwd,
+                    cwd: host.hostfs.folder(cwd),
                     viewport: args.viewport,
                     path: args.path,
                     tweaks: tweakValues(args.tweaks),
                     slide: args.slide,
-                    ...exportMode(loadSystem, cwd, args.mode),
+                    ...exportMode(loadSystem, host.hostfs.folder(cwd), args.mode),
                     signal: context.abortSignal,
                 },
                 host,
@@ -469,12 +473,12 @@ export function designTools(host: PocketHost, deps: DesignToolDeps = {}): ToolRe
         },
     });
 
-    return [preview, exportTool, designSystemTool()];
+    return [preview, exportTool, designSystemTool(host.hostfs)];
 }
 
 function exportMode(
-    loadSystem: (cwd: string) => DesignSystem | undefined,
-    cwd: string,
+    loadSystem: (cwd: FolderRef) => DesignSystem | undefined,
+    cwd: FolderRef,
     mode: unknown,
 ): { colorScheme?: "light" | "dark"; theme?: string } {
     if (mode === undefined || mode === null) {
@@ -567,11 +571,11 @@ export function designRoutes(web: ExtensionWeb, host: PocketHost, deps: DesignTo
                     {
                         id,
                         format: format as ExportFormat,
-                        cwd,
+                        cwd: host.hostfs.folder(cwd),
                         viewport,
                         tweaks,
                         slide,
-                        ...exportMode(loadSystem, cwd, body.mode),
+                        ...exportMode(loadSystem, host.hostfs.folder(cwd), body.mode),
                         signal: request.signal,
                     },
                     host,

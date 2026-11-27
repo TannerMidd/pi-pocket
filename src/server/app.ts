@@ -115,6 +115,8 @@ import { presentedBuild } from "./entry-presentation.ts";
 import { compactionReader } from "./compaction.ts";
 import { configureHttp } from "./net.ts";
 import { expandHome, workspaceScheme } from "./paths.ts";
+import { type FolderRef, Hostfs, type SandboxView } from "./hostfs.ts";
+import { Snapshots } from "./snapshots.ts";
 import { createPublicFetch } from "./public-fetch.ts";
 import { PiSessions } from "./pi-sessions.ts";
 import { Hooks } from "./hooks.ts";
@@ -401,6 +403,8 @@ export interface OpenOptions {
     restart?: () => void;
     /** Where Pi Pocket's own code is, for its updates; tests give a checkout of their own. */
     appRoot?: string;
+    /** Which folders sandboxed trees use (`hostfs.ts`). Core state gives it; the default says none: every folder is plain. */
+    sandboxView?: SandboxView;
 }
 
 export class PocketApp {
@@ -571,6 +575,8 @@ export class PocketApp {
 
     private constructor(options: OpenOptions) {
         this.#configureModels = options.configureModels;
+        this.hostfs = new Hostfs(options.sandboxView);
+        this.snapshots = new Snapshots(this.hostfs, join(options.dataDir, "snapshots"));
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
@@ -728,6 +734,7 @@ export class PocketApp {
             config: this.config,
             dataDir: this.dataDir,
             agentDir: getAgentDir(),
+            host: this.hostfs,
             settingsOf: (module) => this.webs.settingsOf(module),
             log: (line) => this.#log(line),
         });
@@ -1067,6 +1074,9 @@ export class PocketApp {
             linkedSessions: this.linkedSessions,
             sessions: this.extensionSessions,
             cwdOf: (conversationId) => this.cwdOf(conversationId),
+            folderOf: (conversationId) => this.folderOf(conversationId),
+            hostfs: this.hostfs,
+            snapshots: this.snapshots,
             schedules: this.schedules,
             sessionCleanup: this.sessionCleanup,
             background: this.background,
@@ -3968,7 +3978,20 @@ export class PocketApp {
         return { ...found, assets };
     }
 
-    /** The folder a conversation works in. */
+    /** How host code touches files: the folders that sandboxed trees use are confined (`hostfs.ts`). */
+    readonly hostfs: Hostfs;
+    /** Copies that Pi's path-taking loaders run on for a sandboxed folder (`snapshots.ts`). */
+    readonly snapshots: Snapshots;
+
+    /**
+     * The folder a conversation works in, for host code that reads, writes, or runs something there. A `FolderRef` is no
+     * path: it goes to `hostfs`, the Git runner, or a named spawn wrapper. A workspace URI (`ssh://`) has no folder here.
+     */
+    folderOf(id: ConversationId): FolderRef {
+        return this.hostfs.folder(this.cwdOf(id));
+    }
+
+    /** The folder a conversation works in, as text: a label, a key, or a URI. Not for opening files (`folderOf`). */
     cwdOf(id: ConversationId): string {
         return this.#agents.get(id)?.cwd ?? this.#sessions[String(id)]?.cwd ?? this.defaultCwd;
     }
@@ -3999,7 +4022,14 @@ export class PocketApp {
             // Unreadable settings: the default folders still count, and no project is trusted unasked.
         }
 
-        return { agentDir: getAgentDir(), home: this.#home, settingsPaths, defaultProjectTrust };
+        return {
+            host: this.hostfs,
+            snapshots: this.snapshots,
+            agentDir: getAgentDir(),
+            home: this.#home,
+            settingsPaths,
+            defaultProjectTrust,
+        };
     }
 
     /** Pi's skills for a session working in `cwd`, from the places Pi looks (`skills.ts`). */
@@ -4045,7 +4075,7 @@ export class PocketApp {
             throw new HttpError(400, "This folder has no folder above it.");
         }
 
-        saveProjectTrust(this.cwdOf(id), getAgentDir(), choice);
+        saveProjectTrust(this.hostfs, this.cwdOf(id), getAgentDir(), choice);
 
         return this.projectTrust(id, user);
     }
@@ -4079,6 +4109,7 @@ export class PocketApp {
         // A remote workspace has no project folder here: only Pi's own templates and whole paths.
         if (this.workspaceScheme(cwd) !== undefined) {
             return loadPromptTemplates(
+                this.hostfs,
                 this.#home,
                 getAgentDir(),
                 paths.filter((path) => isAbsolute(expandHome(path.trim()))),
@@ -4087,7 +4118,7 @@ export class PocketApp {
         }
 
         // A project told "Don't trust" offers none of its own, as its .pi/skills.
-        return loadPromptTemplates(cwd, getAgentDir(), paths, {
+        return loadPromptTemplates(this.hostfs, cwd, getAgentDir(), paths, {
             project: !projectDistrusted(cwd, this.#skillSources()),
         });
     }

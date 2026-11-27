@@ -1,4 +1,5 @@
 // Artifact bundles: immutable bytes, inherited manifests, replay, safe serving, and sandbox access.
+import { Hostfs } from "../src/server/hostfs.ts";
 import {
     type App,
     cleanUp,
@@ -35,7 +36,7 @@ let base: string;
 let session: ConversationId;
 let calls = 0;
 let clock = Date.now();
-const tools = createArtifacts({} as PocketHost).tools!;
+const tools = createArtifacts({ hostfs: new Hostfs() } as PocketHost).tools!;
 const PAGE =
     '<!doctype html><html><head><link rel="stylesheet" href="assets/style.css"></head><body><img src="assets/pixel.png"><a href="nested/about.html">About</a></body></html>';
 

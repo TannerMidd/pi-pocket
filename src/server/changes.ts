@@ -3,11 +3,17 @@
  * its tool calls, so nothing new is stored), and, when the folder is in a git repository, every uncommitted change
  * there, with each file's diff on request.
  */
-import { realpathSync } from "node:fs";
-import { lstat, rm } from "node:fs/promises";
 import { devNull } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { type GitOptions, git as runGit } from "./git.ts";
+import {
+    type FolderRef,
+    type Hostfs,
+    lstatAsync,
+    type Place,
+    realpath,
+    rmAsync,
+} from "./hostfs.ts";
 import type { ClientEntry } from "./projection.ts";
 
 /** How a file changed, as git sees it: `new` is a file git does not track yet. */
@@ -51,8 +57,8 @@ const COUNTS_AT_ONCE = 8;
 const GIT_TIMEOUT_MS = 15_000;
 
 /** Git for Changes: quick, with room for a long diff. */
-const git = (cwd: string, args: string[], options: GitOptions = {}) =>
-    runGit(cwd, args, { timeoutMs: GIT_TIMEOUT_MS, maxBuffer: MAX_DIFF * 4, ...options });
+const git = (folder: FolderRef, args: string[], options: GitOptions = {}) =>
+    runGit(folder, args, { timeoutMs: GIT_TIMEOUT_MS, maxBuffer: MAX_DIFF * 4, ...options });
 /**
  * Diffs as the viewer reads them, whatever a person's git config says: no external diff program or text conversion, no
  * colors, and git's usual `a/` and `b/` before the paths (`diff.mnemonicPrefix` and `diff.noprefix` change them).
@@ -71,13 +77,13 @@ const EDITORS = new Set(["write", "edit"]);
 const CODEMODE = "codemode";
 
 /** Resolve a possibly missing path through its nearest existing ancestor. */
-function realpathWithMissingTail(path: string): string {
+function realpathWithMissingTail(host: Hostfs, path: string): string {
     const missing: string[] = [];
     let ancestor = path;
 
     while (true) {
         try {
-            return resolve(realpathSync(ancestor), ...missing);
+            return resolve(realpath(host.at(ancestor)), ...missing);
         } catch (error) {
             const code = (error as NodeJS.ErrnoException).code;
 
@@ -98,14 +104,14 @@ function realpathWithMissingTail(path: string): string {
 }
 
 /** Resolve a recorded tool path lexically, canonicalizing it only for repository-backed sessions. */
-function piEditPath(cwd: string, path: string, canonicalize: boolean): string {
-    const absolute = resolve(cwd, path);
+function piEditPath(folder: FolderRef, path: string, canonicalize: boolean): string {
+    const absolute = resolve(folder.display.text, path);
 
     if (!canonicalize) {
         return absolute;
     }
 
-    return realpathWithMissingTail(absolute);
+    return realpathWithMissingTail(folder.host, absolute);
 }
 
 /**
@@ -114,7 +120,7 @@ function piEditPath(cwd: string, path: string, canonicalize: boolean): string {
  */
 function piEdits(
     entries: readonly ClientEntry[],
-    cwd: string,
+    folder: FolderRef,
     canonicalize = false,
 ): Map<string, number> {
     const edits = new Map<string, number>();
@@ -143,7 +149,7 @@ function piEdits(
                     typeof path === "string" &&
                     path !== ""
                 ) {
-                    edits.set(piEditPath(cwd, path, canonicalize), entry.id);
+                    edits.set(piEditPath(folder, path, canonicalize), entry.id);
                 }
             }
         } else if (entry.kind === "toolResult" && entry.name === CODEMODE) {
@@ -165,7 +171,7 @@ function piEdits(
                 }
 
                 edits.set(
-                    piEditPath(cwd, call.path, canonicalize),
+                    piEditPath(folder, call.path, canonicalize),
                     callers.get(entry.callId) ?? entry.id,
                 );
             }
@@ -286,9 +292,9 @@ export function parseNumstat(output: string): Map<string, { added?: number; remo
 }
 
 /** A file's size and modification time, one of which changes when it does; undefined when it is not there. */
-async function versionOf(file: string): Promise<string | undefined> {
+async function versionOf(file: Place): Promise<string | undefined> {
     try {
-        const info = await lstat(file);
+        const info = await lstatAsync(file);
 
         return `${info.size}:${info.mtimeMs}`;
     } catch {
@@ -297,8 +303,8 @@ async function versionOf(file: string): Promise<string | undefined> {
 }
 
 /** Where a folder is in its repository, as git writes paths: `app/` for the folder app, empty at the top. */
-async function prefixOf(cwd: string): Promise<string> {
-    return (await git(cwd, ["rev-parse", "--show-prefix"])).trim();
+async function prefixOf(folder: FolderRef): Promise<string> {
+    return (await git(folder, ["rev-parse", "--show-prefix"])).trim();
 }
 
 /**
@@ -306,16 +312,16 @@ async function prefixOf(cwd: string): Promise<string> {
  * changes outside the folder: someone invited to one session sees its files only.
  */
 export async function changesIn(
-    cwd: string,
+    folder: FolderRef,
     entries: readonly ClientEntry[],
     onlyHere = false,
 ): Promise<Changes> {
     let root: string;
 
     try {
-        root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+        root = (await git(folder, ["rev-parse", "--show-toplevel"])).trim();
     } catch {
-        const edits = piEdits(entries, cwd);
+        const edits = piEdits(entries, folder);
 
         return {
             files: [],
@@ -324,37 +330,38 @@ export async function changesIn(
         };
     }
 
-    const edits = piEdits(entries, cwd, true);
-    const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
+    const edits = piEdits(entries, folder, true);
+    const top = folder.host.folder(root);
+    const branch = await git(folder, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
         (name) => name.trim(),
         () => undefined,
     );
-    const head = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+    const head = await git(top, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
         (id) => id.trim() || undefined,
         () => undefined,
     );
-    const prefix = onlyHere ? await prefixOf(cwd) : "";
+    const prefix = onlyHere ? await prefixOf(folder) : "";
     const changed = parseStatus(
-        await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+        await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ).filter(({ path }) => path.startsWith(prefix));
     const status = changed.slice(0, MAX_FILES);
     // Without a first commit there is nothing to compare with: every file is new.
     const counts =
         head === undefined
             ? new Map()
-            : parseNumstat(await git(root, ["diff", "HEAD", "--numstat", "-z", ...DIFF_FLAGS]));
+            : parseNumstat(await git(top, ["diff", "HEAD", "--numstat", "-z", ...DIFF_FLAGS]));
 
     // HEAD diffs omit untracked files. Count only the visible, permitted files; Git keeps binary, attributes,
     // symlinks and final-newline handling the same as each file's diff. No index or files are changed.
     const count = async (path: string) => {
         try {
-            if ((await lstat(join(root, path))).size > MAX_COUNTED_BYTES) {
+            if ((await lstatAsync(top.at(path))).size > MAX_COUNTED_BYTES) {
                 return;
             }
 
             const added = parseNumstat(
                 await git(
-                    root,
+                    top,
                     ["diff", "--no-index", "--numstat", "-z", ...DIFF_FLAGS, "--", devNull, path],
                     {
                         allowExit: [1],
@@ -381,7 +388,7 @@ export async function changesIn(
         }),
     );
 
-    const versions = await Promise.all(status.map(({ path }) => versionOf(join(root, path))));
+    const versions = await Promise.all(status.map(({ path }) => versionOf(top.at(path))));
     const files = status.map(({ code, path }, index): ChangedFile => {
         const version = versions[index];
 
@@ -411,21 +418,21 @@ export async function changesIn(
 }
 
 /**
- * The diff of one changed file of the repository `cwd` is in, against the last commit; a new file's whole content.
- * Only files that git lists as changed: the path cannot point anywhere else. With `onlyHere`, only files in `cwd`.
+ * The diff of one changed file of the repository the folder is in, against the last commit; a new file's whole content.
+ * Only files that git lists as changed: the path cannot point anywhere else. With `onlyHere`, only files in the folder.
  */
-export async function diffOf(cwd: string, path: string, onlyHere = false): Promise<string> {
-    const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+export async function diffOf(folder: FolderRef, path: string, onlyHere = false): Promise<string> {
+    const top = folder.host.folder((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
     const change = parseStatus(
-        await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+        await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ).find((each) => each.path === path);
 
     // A file outside the folder is as unknown as one without changes.
-    if (change === undefined || (onlyHere && !path.startsWith(await prefixOf(cwd)))) {
+    if (change === undefined || (onlyHere && !path.startsWith(await prefixOf(folder)))) {
         throw new Error("That file has no uncommitted changes");
     }
 
-    const hasHead = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+    const hasHead = await git(top, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
         () => true,
         () => false,
     );
@@ -434,10 +441,10 @@ export async function diffOf(cwd: string, path: string, onlyHere = false): Promi
     const paths = change.from === undefined ? [path] : [change.from, path];
     const diff =
         change.code === "??" || !hasHead
-            ? await git(root, ["diff", "--no-index", "-U3", ...DIFF_FLAGS, "--", devNull, path], {
+            ? await git(top, ["diff", "--no-index", "-U3", ...DIFF_FLAGS, "--", devNull, path], {
                   allowExit: [1],
               })
-            : await git(root, ["diff", "HEAD", "-M", "-U3", ...DIFF_FLAGS, "--", ...paths]);
+            : await git(top, ["diff", "HEAD", "-M", "-U3", ...DIFF_FLAGS, "--", ...paths]);
 
     return diff.length > MAX_DIFF
         ? `${diff.slice(0, MAX_DIFF)}\n… the rest of the diff is left out …\n`
@@ -449,13 +456,17 @@ export async function diffOf(cwd: string, path: string, onlyHere = false): Promi
  * `diffOf`, only a file git lists as changed, so the path cannot point anywhere else; with `onlyHere`, only one in
  * `cwd`. A renamed file is left alone, as undoing it changes two paths.
  */
-export async function revertFile(cwd: string, path: string, onlyHere = false): Promise<ChangeKind> {
-    const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+export async function revertFile(
+    folder: FolderRef,
+    path: string,
+    onlyHere = false,
+): Promise<ChangeKind> {
+    const top = folder.host.folder((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
     const change = parseStatus(
-        await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+        await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ).find((each) => each.path === path);
 
-    if (change === undefined || (onlyHere && !path.startsWith(await prefixOf(cwd)))) {
+    if (change === undefined || (onlyHere && !path.startsWith(await prefixOf(folder)))) {
         throw new Error("That file has no uncommitted changes");
     }
 
@@ -471,38 +482,38 @@ export async function revertFile(cwd: string, path: string, onlyHere = false): P
     }
 
     if (kind === "new") {
-        await rm(join(root, path), { force: true });
+        await rmAsync(top.at(path), { force: true });
 
         return kind;
     }
 
-    const hasHead = await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
+    const hasHead = await git(top, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
         () => true,
         () => false,
     );
     const inHead =
         hasHead &&
-        (await git(root, ["cat-file", "-e", `HEAD:${path}`]).then(
+        (await git(top, ["cat-file", "-e", `HEAD:${path}`]).then(
             () => true,
             () => false,
         ));
 
     if (kind === "added" && !inHead) {
         // Added since the last commit: out of the index, then gone.
-        await git(root, ["rm", "--cached", "--quiet", "--force", "--", path]);
-        await rm(join(root, path), { force: true });
+        await git(top, ["rm", "--cached", "--quiet", "--force", "--", path]);
+        await rmAsync(top.at(path), { force: true });
 
         return kind;
     }
 
     if (!hasHead) {
-        await git(root, ["rm", "--cached", "--quiet", "--force", "--", path]);
-        await rm(join(root, path), { force: true });
+        await git(top, ["rm", "--cached", "--quiet", "--force", "--", path]);
+        await rmAsync(top.at(path), { force: true });
 
         return kind;
     }
 
-    await git(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path]);
+    await git(top, ["restore", "--source=HEAD", "--staged", "--worktree", "--", path]);
 
     return kind;
 }

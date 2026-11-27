@@ -89,7 +89,7 @@ async function resendFirst(id: ConversationId) {
 async function allows(id: ConversationId, user: User, file: { path: string; name: string }) {
     const handle = app.workspace.conversationFile(user, id, file.path);
 
-    assert.equal(typeof handle === "string" ? handle : handle.path, file.path);
+    assert.equal("path" in handle ? handle.path : handle.display.text, file.path);
     const view = await app.workspace.viewFile(id, user, file.path);
 
     assert.equal(view.kind, "text");

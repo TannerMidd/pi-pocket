@@ -5,11 +5,18 @@
  * are: the last commit, uncommitted changes, and new files. Ignored files, such as node_modules, are not copied.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { copyFile, lstat, mkdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { describe, HttpError } from "./errors.ts";
 import { git, GitError } from "./git.ts";
+import {
+    copyFileAsync,
+    type FolderRef,
+    type Hostfs,
+    lstatAsync,
+    mkdir,
+    mkdirAsync,
+    own,
+} from "./hostfs.ts";
 import { workspaceScheme } from "./paths.ts";
 
 export type Worktree = {
@@ -24,15 +31,15 @@ export type Worktree = {
 const MAX_COPIED_BYTES = 50 * 1024 * 1024;
 
 /** The top folder of the repository `cwd` is in, or undefined when it is in none. */
-async function repositoryOf(cwd: string): Promise<string | undefined> {
-    return git(cwd, ["rev-parse", "--show-toplevel"]).then(
+async function repositoryOf(folder: FolderRef): Promise<string | undefined> {
+    return git(folder, ["rev-parse", "--show-toplevel"]).then(
         (root) => root.trim(),
         () => undefined,
     );
 }
 
 /** Copy the repository's new (untracked, not ignored) files into the worktree. Returns the ones left out for size. */
-async function copyNewFiles(root: string, into: string): Promise<string[]> {
+async function copyNewFiles(root: FolderRef, into: FolderRef): Promise<string[]> {
     const skipped: string[] = [];
     let copied = 0;
 
@@ -43,8 +50,9 @@ async function copyNewFiles(root: string, into: string): Promise<string[]> {
             continue;
         }
 
-        const from = join(root, path);
-        const stats = await lstat(from).catch(() => undefined);
+        // Each file is read from the folder's own descriptor, so a link the guest swapped in is not followed.
+        const from = root.at(path);
+        const stats = await lstatAsync(from).catch(() => undefined);
 
         if (stats === undefined || !stats.isFile()) {
             continue;
@@ -55,8 +63,10 @@ async function copyNewFiles(root: string, into: string): Promise<string[]> {
             continue;
         }
 
-        await mkdir(dirname(join(into, path)), { recursive: true });
-        await copyFile(from, join(into, path));
+        const target = into.at(path);
+
+        await mkdirAsync(target.parent()!, { recursive: true });
+        await copyFileAsync(from, target);
         copied += stats.size;
     }
 
@@ -68,6 +78,7 @@ async function copyNewFiles(root: string, into: string): Promise<string[]> {
  * inside it that matches `cwd`, and the new files too big to copy.
  */
 export async function createWorktree(
+    host: Hostfs,
     cwd: string,
     folder: string,
     label: string,
@@ -77,9 +88,10 @@ export async function createWorktree(
         throw new HttpError(400, "Remote workspaces do not support worktrees.");
     }
 
-    const root = await repositoryOf(cwd);
+    const here = host.folder(cwd);
+    const top = await repositoryOf(here);
 
-    if (root === undefined) {
+    if (top === undefined) {
         throw new HttpError(
             400,
             `${cwd} is not in a git repository, so it cannot have a worktree.`,
@@ -87,7 +99,8 @@ export async function createWorktree(
     }
 
     // Where `cwd` is within the repository, as git sees it: `cwd` may be reached through a symbolic link, `root` not.
-    const within = (await git(cwd, ["rev-parse", "--show-prefix"])).trim();
+    const root = host.folder(top);
+    const within = (await git(here, ["rev-parse", "--show-prefix"])).trim();
 
     if (
         !(await git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]).then(
@@ -108,7 +121,7 @@ export async function createWorktree(
     const worktree: Worktree = { path: join(folder, name), branch: `pocket/${name}`, source: cwd };
 
     if (guard === undefined) {
-        mkdirSync(folder, { recursive: true });
+        mkdir(own(folder), { recursive: true });
     } else {
         guard.root();
     }
@@ -121,14 +134,14 @@ export async function createWorktree(
         const changes = (await git(root, ["stash", "create"])).trim();
 
         if (changes !== "") {
-            await git(worktree.path, ["stash", "apply", changes]);
+            await git(host.folder(worktree.path), ["stash", "apply", changes]);
         }
 
-        const skipped = await copyNewFiles(root, worktree.path);
+        const skipped = await copyNewFiles(root, host.folder(worktree.path));
 
         return { worktree, cwd: resolve(worktree.path, within), skipped };
     } catch (error) {
-        await discardWorktree(worktree, () => guard?.check(worktree)).catch(() => undefined);
+        await discardWorktree(host, worktree, () => guard?.check(worktree)).catch(() => undefined);
 
         throw new HttpError(500, `The worktree could not be set up: ${describe(error)}`);
     }
@@ -139,18 +152,14 @@ export async function createWorktree(
  * that `C:\Users\RUNNER~1` and `C:\Users\runneradmin` (or a path git gives with `/`) compare equal. The path itself
  * when it does not exist.
  */
-function real(path: string): string {
-    try {
-        return realpathSync.native(path);
-    } catch {
-        return resolve(path);
-    }
+function real(host: Hostfs, path: string): string {
+    return host.real(path, { native: true }) ?? resolve(path);
 }
 
 /** Whether a folder is the worktree's or one inside it, also when reached through a symbolic link. */
-export function inWorktree(worktree: Worktree, cwd: string): boolean {
-    const base = real(worktree.path);
-    const folder = real(cwd);
+export function inWorktree(host: Hostfs, worktree: Worktree, cwd: string): boolean {
+    const base = real(host, worktree.path);
+    const folder = real(host, cwd);
 
     return folder === base || folder.startsWith(base + sep);
 }
@@ -159,18 +168,21 @@ export function inWorktree(worktree: Worktree, cwd: string): boolean {
  * Where each folder of a worktree is in the folder it was made from: the same place in the repository, and the
  * session's folder as it was given. A folder that is only in the worktree maps to the session's folder.
  */
-export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) => string> {
-    const root = await repositoryOf(worktree.source);
-    const original = existsSync(worktree.source) ? real(worktree.source) : undefined;
+export async function sourceFolders(
+    host: Hostfs,
+    worktree: Worktree,
+): Promise<(cwd: string) => string> {
+    const root = await repositoryOf(host.folder(worktree.source));
+    const original = host.has(worktree.source) ? real(host, worktree.source) : undefined;
 
     return (cwd) => {
         if (root === undefined) {
             return worktree.source;
         }
 
-        const mapped = resolve(root, relative(real(worktree.path), real(cwd)));
+        const mapped = resolve(root, relative(real(host, worktree.path), real(host, cwd)));
 
-        return !existsSync(mapped) || real(mapped) === original ? worktree.source : mapped;
+        return !host.has(mapped) || real(host, mapped) === original ? worktree.source : mapped;
     };
 }
 
@@ -179,26 +191,32 @@ export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) =
  * kept, unless `force`.
  */
 export async function removeWorktree(
+    host: Hostfs,
     worktree: Worktree,
     force: boolean,
     check?: () => void,
 ): Promise<void> {
     check?.();
 
-    if (!existsSync(worktree.path)) {
+    if (!host.has(worktree.path)) {
         return;
     }
 
-    const root = await repositoryOf(worktree.source);
+    const top = await repositoryOf(host.folder(worktree.source));
 
-    if (root === undefined) {
+    if (top === undefined) {
         throw new HttpError(409, `${worktree.source} is not in a git repository anymore.`);
     }
 
     check?.();
 
     try {
-        await git(root, ["worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
+        await git(host.folder(top), [
+            "worktree",
+            "remove",
+            ...(force ? ["--force"] : []),
+            worktree.path,
+        ]);
     } catch (error) {
         const message = describe(error);
 
@@ -212,11 +230,15 @@ export async function removeWorktree(
 }
 
 /** Undo a worktree that a session never got: its folder and its branch. */
-export async function discardWorktree(worktree: Worktree, check?: () => void): Promise<void> {
-    await removeWorktree(worktree, true, check);
-    const root = await repositoryOf(worktree.source);
+export async function discardWorktree(
+    host: Hostfs,
+    worktree: Worktree,
+    check?: () => void,
+): Promise<void> {
+    await removeWorktree(host, worktree, true, check);
+    const root = await repositoryOf(host.folder(worktree.source));
 
     if (root !== undefined) {
-        await git(root, ["branch", "-D", worktree.branch]);
+        await git(host.folder(root), ["branch", "-D", worktree.branch]);
     }
 }

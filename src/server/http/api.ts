@@ -2,7 +2,6 @@
  * `/api`: the routes the web app calls. Each needs a signed-in person, and each but a GET needs the `X-Pocket` header,
  * which a form on another site cannot send. A conversation's routes are in `conversation-routes.ts`.
  */
-import { readdirSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,6 +23,7 @@ import type { User } from "../config.ts";
 import { MAX_AVATAR, readAvatar } from "../avatars.ts";
 import { HttpError } from "../errors.ts";
 import { desktopTheme, wallpaperFile } from "../omarchy.ts";
+import { own, readdir } from "../hostfs.ts";
 import { runningBoard, runningNow } from "../running.ts";
 import { serveImage } from "./assets.ts";
 import { browserRoutes } from "./browser-routes.ts";
@@ -516,7 +516,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 throw new HttpError(404, "No wallpaper");
             }
 
-            return serveImage(request, response, file);
+            return serveImage(request, response, own(file));
         }
 
         if (first === "running" && second === "board" && method === "GET") {
@@ -675,7 +675,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
             let entries;
 
             try {
-                entries = readdirSync(path, { withFileTypes: true });
+                entries = readdir(app.hostfs.at(path), { withFileTypes: true });
             } catch (error) {
                 const code = (error as NodeJS.ErrnoException).code;
 
@@ -695,7 +695,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
 
                 if (entry.isSymbolicLink()) {
                     try {
-                        isDir = statSync(join(path, entry.name)).isDirectory();
+                        isDir = app.hostfs.isFolder(join(path, entry.name));
                     } catch {
                         isDir = false;
                     }

@@ -1,4 +1,13 @@
-import { cleanUp, context, newSession, openApp, scriptedModel, work } from "./helpers.ts";
+import { Hostfs } from "../src/server/hostfs.ts";
+import {
+    cleanUp,
+    context,
+    hostFolder,
+    newSession,
+    openApp,
+    scriptedModel,
+    work,
+} from "./helpers.ts";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +22,7 @@ import { createPublicFetch } from "../src/server/public-fetch.ts";
 let app: Awaited<ReturnType<typeof openApp>>;
 let conversation: ConversationId;
 let calls = 0;
-const host = { fetchPublic: createPublicFetch() } as PocketHost;
+const host = { fetchPublic: createPublicFetch(), hostfs: new Hostfs() } as PocketHost;
 const [artifact] = createArtifacts(host).tools!;
 
 const page = (links: string) =>
@@ -59,7 +68,7 @@ after(async () => {
 });
 
 test("with no design system, the link gets a note that says how to make one", async () => {
-    assert.equal(loadDesignSystem(work), undefined);
+    assert.equal(loadDesignSystem(hostFolder(work)), undefined);
 
     const reply = await publish(artifact, {
         id: "no-system",
@@ -76,7 +85,7 @@ test("with no design system, the link gets a note that says how to make one", as
 });
 
 test("a page that links the tokens gets the compiled file, byte for byte", async () => {
-    const system = writeDesignSystem(work, {
+    const system = writeDesignSystem(hostFolder(work), {
         tokens: tokens("#3b82f6"),
         components: { button: specimen },
     });
@@ -153,7 +162,7 @@ test("a new version refreshes the snapshot; a version that no longer links keeps
     const first = (await bundle("refresh")).assets[0]!.bytes.toString("utf8");
 
     assert.match(first, /--color-accent-default: #3b82f6;/);
-    writeDesignSystem(work, {
+    writeDesignSystem(hostFolder(work), {
         set: [{ mode: "light", token: "color.accent.default", value: "#ef4444" }],
     });
 
@@ -196,7 +205,7 @@ test("an inline artifact attaches too, and a replayed call finds the version it 
 });
 
 test("a design system with errors is attached, and the note says to validate", async () => {
-    writeDesignSystem(work, {});
+    writeDesignSystem(hostFolder(work), {});
     rmSync(join(work, ".pi", "design", "tokens.json"));
     const { writeFileSync } = await import("node:fs");
 

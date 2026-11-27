@@ -1,10 +1,10 @@
 /** The web app's own files and the modules it imports, its content security policy, and image files it shows. */
 import { createHash } from "node:crypto";
-import { closeSync, createReadStream, openSync, readFileSync, readSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { createReadStream, openSync, own, Place, readFile, stat } from "../hostfs.ts";
 import { type ReadableFile, withUploadBytes } from "../upload-content.ts";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
@@ -166,7 +166,7 @@ const readFiles = new Map<string, ReadFile>();
 
 /** A file as it is now: as last read when its size and times are the same, else read again. Throws when it is not there. */
 function readNow(file: string): ReadFile {
-    const stats = statSync(file, { bigint: true });
+    const stats = stat(own(file), { bigint: true });
     const stamp = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
     const known = readFiles.get(file);
 
@@ -174,7 +174,7 @@ function readNow(file: string): ReadFile {
         return known;
     }
 
-    const body = readFileSync(file);
+    const body = readFile(own(file));
     // A file changed this moment may change again within the file system's clock tick, with the same size and times: it
     // is read again for each request until it has been still for a while.
     const settled = Date.now() - Number(stats.mtimeNs / 1_000_000n) > 2000;
@@ -268,7 +268,7 @@ export function serveApp(
     let body: string;
 
     try {
-        body = readFileSync(join(WEB, "index.html"), "utf8");
+        body = readFile(own(join(WEB, "index.html"))).toString("utf8");
     } catch {
         send(response, 404, "Not found");
 
@@ -401,11 +401,15 @@ export function serveImage(
     response: ServerResponse,
     file: ReadableFile,
 ): void | Promise<void> {
-    if (!IMAGE_EXTENSIONS.has(extname(typeof file === "string" ? file : file.path).toLowerCase())) {
+    if (
+        !IMAGE_EXTENSIONS.has(
+            extname(file instanceof Place ? file.display.text : file.path).toLowerCase(),
+        )
+    ) {
         throw new HttpError(415, "Only image files can be shown");
     }
 
-    if (typeof file !== "string") {
+    if (!(file instanceof Place)) {
         if (file.content.size > MAX_IMAGE_FILE) {
             throw new HttpError(413, "Image too large to show");
         }
@@ -432,7 +436,7 @@ export function serveImage(
     let type: string | undefined;
 
     try {
-        const stats = statSync(file);
+        const stats = stat(file);
 
         if (!stats.isFile()) {
             throw new Error("not a file");
@@ -441,12 +445,12 @@ export function serveImage(
         size = stats.size;
         mtime = stats.mtimeMs;
         const head = Buffer.alloc(1024);
-        const fd = openSync(file, "r");
+        const opened = openSync(file, "r");
 
         try {
-            type = sniffImage(head.subarray(0, readSync(fd, head, 0, head.length, 0)));
+            type = sniffImage(head.subarray(0, opened.read(head, 0, head.length, 0)));
         } finally {
-            closeSync(fd);
+            opened.close();
         }
     } catch {
         throw new HttpError(404, "Image not found");

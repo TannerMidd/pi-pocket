@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { filePolicy } from "../src/server/file-policy.ts";
+import { Hostfs, type Place } from "../src/server/hostfs.ts";
 
 after(() => cleanUp());
 
@@ -30,7 +31,7 @@ test("the same protected-name classification applies to previews and reads", asy
             assert.throws(() => app.workspace.conversationFile(guest, id, file), { status: 404 });
         }
 
-        assert.equal(app.workspace.readableFile(guest, id, note), note);
+        assert.equal((app.workspace.readableFile(guest, id, note) as Place).display.text, note);
     } finally {
         await app.close();
     }
@@ -43,6 +44,7 @@ test("an unexpected data directory grants neither upload paths nor transferable 
     mkdirSync(dirname(sample), { recursive: true });
     writeFileSync(sample, "sample");
     const policy = filePolicy({
+        host: new Hostfs(),
         dataDir,
         canonicalDataDir: join(root, "original-data"),
         managedStorage: {
@@ -72,6 +74,7 @@ test("a file policy checks current folder identity on each use", async () => {
     mkdirSync(folder, { recursive: true });
     writeFileSync(sample, "example");
     const policy = filePolicy({
+        host: new Hostfs(),
         dataDir,
         canonicalDataDir: dataDir,
         managedStorage: { root: () => uploads, uploadFolder: () => (present ? folder : undefined) },

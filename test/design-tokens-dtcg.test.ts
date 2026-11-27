@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { writeDesignSystem } from "../src/server/design/tokens.ts";
+import { hostFolder } from "./helpers.ts";
 
 const dirs: string[] = [];
 
@@ -84,7 +85,7 @@ function stringForms(node: unknown, found: string[] = []): string[] {
 }
 
 test("the default is the string forms of the 2021 drafts, whatever form the tokens were written in, and the header says so", () => {
-    const { compiled } = writeDesignSystem(project(), {
+    const { compiled } = writeDesignSystem(hostFolder(project()), {
         tokens: tokens(),
         modes: { dark: dark() },
     });
@@ -116,7 +117,7 @@ test("the default is the string forms of the 2021 drafts, whatever form the toke
 });
 
 test('format "2025.10": a color is { colorSpace, components, alpha, hex }, a dimension or duration is { value, unit }, also inside a shadow, a type style, and a transition', () => {
-    const { compiled, ...system } = writeDesignSystem(project(), {
+    const { compiled, ...system } = writeDesignSystem(hostFolder(project()), {
         tokens: tokens("2025.10"),
         modes: { dark: dark() },
     });
@@ -174,8 +175,8 @@ test('format "2025.10": a color is { colorSpace, components, alpha, hex }, a dim
 });
 
 test("the other files do not change with the format: tokens.css, tailwind.css, the compact summary", () => {
-    const a = writeDesignSystem(project(), { tokens: tokens() }).compiled;
-    const b = writeDesignSystem(project(), { tokens: tokens("2025.10") }).compiled;
+    const a = writeDesignSystem(hostFolder(project()), { tokens: tokens() }).compiled;
+    const b = writeDesignSystem(hostFolder(project()), { tokens: tokens("2025.10") }).compiled;
 
     assert.equal(a.css, b.css.replace(/2025\.10/g, "2021"));
     assert.equal(a.tailwind, b.tailwind);
@@ -184,7 +185,7 @@ test("the other files do not change with the format: tokens.css, tailwind.css, t
 });
 
 test("an unknown format is a warning, and the default is used", () => {
-    const system = writeDesignSystem(project(), { tokens: tokens("3000") });
+    const system = writeDesignSystem(hostFolder(project()), { tokens: tokens("3000") });
 
     assert.equal(system.dtcgFormat, undefined);
     assert.ok(
@@ -196,7 +197,7 @@ test("an unknown format is a warning, and the default is used", () => {
 });
 
 test("tokens.studio.json: a token set for each mode, a $themes array, the order, and references where a mode has them", () => {
-    const { compiled } = writeDesignSystem(project(), {
+    const { compiled } = writeDesignSystem(hostFolder(project()), {
         tokens: tokens(),
         modes: { dark: dark() },
     });
@@ -233,7 +234,10 @@ test("tokens.studio.json: a token set for each mode, a $themes array, the order,
 
 test("the files on disk: the studio file is written with the others, and the compact summary says it is secondary", () => {
     const dir = project();
-    const { compiled } = writeDesignSystem(dir, { tokens: tokens(), modes: { dark: dark() } });
+    const { compiled } = writeDesignSystem(hostFolder(dir), {
+        tokens: tokens(),
+        modes: { dark: dark() },
+    });
     const compact = JSON.parse(compiled.json);
 
     assert.match(compact.about, /compact summary/);
