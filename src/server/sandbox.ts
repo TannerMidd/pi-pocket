@@ -2839,7 +2839,7 @@ export class Sandboxes {
         const root = this.#rootOfNumber(Number(conversation));
 
         // The common case: no sandbox anywhere, nothing changing.
-        if (this.#on.size === 0 && !this.#phases.has(root) && !this.#toolNeedsLease(tool)) {
+        if (this.#on.size === 0 && !this.#phases.has(root) && !this.#toolNeedsLease(tool, args)) {
             return undefined;
         }
 
@@ -2857,7 +2857,7 @@ export class Sandboxes {
                     return problem;
                 }
 
-                if (this.#toolNeedsLease(tool) && !this.#toolLeases.has(taskId)) {
+                if (this.#toolNeedsLease(tool, args) && !this.#toolLeases.has(taskId)) {
                     this.#toolLeases.set(taskId, {
                         lease: this.#grant(root, Number(conversation), {
                             kind: "host",
@@ -2874,8 +2874,17 @@ export class Sandboxes {
         }
     }
 
-    #toolNeedsLease(tool: string): boolean {
-        return !ROUTED_TOOLS.has(tool) && !INERT_TOOLS.has(tool);
+    /**
+     * Whether a call runs on this machine without the environment, so that it holds a host lease for its whole duration. It
+     * depends on the arguments: an inert tool that names a host path (an artifact made from a file, an asset's path) reads
+     * host files, as any other host tool does.
+     */
+    #toolNeedsLease(tool: string, args: unknown): boolean {
+        if (ROUTED_TOOLS.has(tool)) {
+            return false;
+        }
+
+        return !INERT_TOOLS.has(tool) || (tool === "artifact" && namesPath(args));
     }
 
     /** A call ended (`afterTool`), or the conversation's run did: its lease ends. */
