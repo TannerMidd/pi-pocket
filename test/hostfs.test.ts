@@ -1155,9 +1155,7 @@ test(
         writeFileSync(join(nested, "deep.txt"), "forged");
 
         // The alias reaches the same position: it takes the identity of the owner, it does not make the replacement the root.
-        const viaAlias = host.folder(join(alias, "sub"));
-
-        assert.throws(() => hostfs.readText(viaAlias.at("deep.txt")), { code: "ESTALE" });
+        assert.throws(() => host.folder(join(alias, "sub")), { code: "ESTALE" });
         assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
             code: "ESTALE",
         });
@@ -1310,6 +1308,108 @@ test(
         assert.throws(() => hostfs.readText(host.at(base).child("inner/sub/f.txt")), {
             code: "ESTALE",
         });
+        host.close();
+    },
+);
+
+test(
+    "the walk checks what it opens, by the directory's identity and the name: no alias, spelling, or seed gets around a recorded entry",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+        const base = join(root, "..");
+        const alias = join(base, "alias");
+        const other = join(base, "other");
+
+        symlinkSync(root, alias);
+        symlinkSync(root, other);
+        host.folder(nested);
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+
+        // A folder for a walk, reached by an alias: it makes no pin, and the replacement is not its identity.
+        assert.throws(() => hostfs.readText(host.traverse(join(alias, "sub")).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.traverse(join(other, "sub")).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.traverse(nested).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.traverse(root).at("sub/deep.txt")), {
+            code: "ESTALE",
+        });
+        host.close();
+    },
+);
+
+test(
+    "a listed root reached under another name is still the listed root: the check does not depend on the path's spelling",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+        const chosen = join(root, "..", "chosen");
+
+        symlinkSync(nested, chosen);
+
+        const info = (path: string) => {
+            const found = statSync(path, { bigint: true });
+
+            return { path, dev: found.dev, ino: found.ino };
+        };
+
+        // `/chosen` is listed, and it is `/project/sub`: the outer root's walk to `sub` must find that identity.
+        // The identities the view lists are what they were when the folders were admitted: read once.
+        const listed = [info(root), info(chosen)];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        assert.equal(hostfs.readText(host.at(join(root, "sub", "deep.txt"))), "deep");
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.at(join(root, "sub", "deep.txt"))), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.traverse(root).at("sub/deep.txt")), {
+            code: "ESTALE",
+        });
+        host.close();
+    },
+);
+
+test(
+    "the same folder pinned through two spellings at once is one pin, and a replacement is refused by either",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+        const alias = join(root, "..", "alias");
+
+        symlinkSync(root, alias);
+
+        const direct = host.folder(nested);
+        const spelled = host.folder(join(alias, "sub"));
+
+        assert.equal(hostfs.readText(direct.at("deep.txt")), "deep");
+        assert.equal(hostfs.readText(spelled.at("deep.txt")), "deep");
+        assert.equal(
+            host.heldRoots,
+            2,
+            "the folder and its sandboxed root: one entry, however it was spelled",
+        );
+
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(direct.at("deep.txt")), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(spelled.at("deep.txt")), { code: "ESTALE" });
         host.close();
     },
 );

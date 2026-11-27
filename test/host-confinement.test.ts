@@ -283,8 +283,6 @@ test(
         mkdirSync(inner);
         writeFileSync(join(inner, "a.txt"), "real");
 
-        const original = statSync(inner, { bigint: true });
-
         const replace = () => {
             rmSync(inner, { recursive: true });
             mkdirSync(inner);
@@ -310,14 +308,15 @@ test(
         assert.ok((await first.workspace.viewFile(id, me, "a.txt")) !== undefined);
         replace();
         await assert.rejects(first.workspace.viewFile(id, me, "a.txt"), refused);
-        // The list fails closed too: it names nothing of the replacement.
-        assert.deepEqual((await first.workspace.fileList(id, me)).files, []);
+        // The list fails closed too: the folder is refused, so nothing of the replacement is named.
+        await assert.rejects(first.workspace.fileList(id, me), { code: "ESTALE" });
 
         // Pinned by admission state, through the view: the replacement before the first look is refused too.
         rmSync(inner, { recursive: true });
         mkdirSync(inner);
         writeFileSync(join(inner, "a.txt"), "real");
 
+        const admitted = statSync(inner, { bigint: true });
         const second = await openApp(
             scriptedModel(),
             join(base, "data-second"),
@@ -326,7 +325,7 @@ test(
             {
                 ...view,
                 pinnedRoot: (_conversation, path) =>
-                    path === inner ? { dev: original.dev, ino: original.ino } : undefined,
+                    path === inner ? { dev: admitted.dev, ino: admitted.ino } : undefined,
             },
         );
 
