@@ -1036,6 +1036,32 @@ export function Composer() {
         setBrowsing(null);
         setSearching(false);
     }, [conversationId]);
+    // A box drawn before the person is known (the device's copy of the session shows first on a reload) read nothing:
+    // what the person keeps on this device (draft, pasted text, quotes, files) is theirs only once /api/me says who
+    // they are. Read it then, unless something was typed meanwhile.
+    const personId = store.state.me?.id ?? null;
+    const drawnUnknown = useRef(personId === null);
+
+    useEffect(() => {
+        if (personId === null || !drawnUnknown.current) {
+            return;
+        }
+
+        drawnUnknown.current = false;
+
+        if ((box.current?.value ?? "") !== "") {
+            return;
+        }
+
+        const draft = drafts.get(conversationId);
+
+        setText(draft);
+        setCaret(draft.length);
+        setFiles(loadAttached(conversationId));
+        setPastes(loadPastes(conversationId));
+        keepPieces(loadPieces(conversationId), conversationId, draft);
+        setStrips(loadStrips(conversationId));
+    }, [personId]);
     // A session opens with the caret in its message box, ready to type: not on a touch screen, where the keyboard would
     // come up over the conversation, nor after an Alt shortcut on an Apple keyboard (`openingByAlt`), nor while another
     // text field has the focus (the docked chat a mention opened, the session search): words typed there stay there.
