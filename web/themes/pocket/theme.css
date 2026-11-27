@@ -131,7 +131,7 @@
     }
 }
 
-/* Pocket neutral: the greys this look is drawn for. */
+/* Pocket neutral: the warm greys this look is drawn for. */
 :root[data-colors="pocket-neutral"] {
     --step-rail: 70%;
     --step-list: 30%;

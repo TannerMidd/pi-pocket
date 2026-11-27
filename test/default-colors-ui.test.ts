@@ -139,7 +139,7 @@ test(
         assert.equal(shown.colors, "pocket-neutral");
         assert.equal(shown.mode, "dark");
         assert.equal(shown.look, "pocket");
-        assert.equal(shown.background, "#151515");
+        assert.equal(shown.background, "#1f1c19");
         assert.equal(shown.bold, "70%", "the look's own stylesheet is loaded, for these colors");
         assert.equal(shown.label, "Pocket");
     },
@@ -169,7 +169,7 @@ test(
 
         assert.equal(light.colors, "pocket-neutral-light");
         assert.equal(light.mode, "light");
-        assert.equal(light.background, "#ffffff");
+        assert.equal(light.background, "#fbf8f3");
         assert.equal(light.bold, "5.5%");
     },
 );

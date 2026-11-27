@@ -48,7 +48,7 @@ import {
 /** The app's own look, which every theme builds on. It comes with a stylesheet of its own (`web/themes/pocket/`); other themes load theirs instead. */
 export const BASE_THEME = "pocket";
 
-/** The colors browsers start with until their person chooses: Pocket's own greys, a palette of `web/themes.js`. */
+/** The colors browsers start with until their person chooses: Pocket's own warm greys, a palette of `web/themes.js`. */
 export const DEFAULT_COLORS = "pocket-neutral";
 
 /** A theme as the web app lists it. */
