@@ -184,6 +184,10 @@ async function openOn(id: ConversationId, text: string): Promise<void> {
                 loader: transcript?.querySelector('.loader') != null,
                 boot: document.querySelector('.boot') !== null,
                 probe: globalThis.openProbe ?? null,
+                navigation: performance.getEntriesByType("navigation").map((entry) => entry.name + " " + entry.type),
+                history: history.length + " " + JSON.stringify(history.state),
+                storage: Object.keys(sessionStorage).join(","),
+                ready: document.readyState,
             });
         `).catch((cause) => `the page could not be read: ${cause}`);
 
