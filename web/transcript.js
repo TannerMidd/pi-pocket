@@ -682,7 +682,7 @@ function QuotedText({ text }) {
 const isArtifactCall = (name) => name === "artifact" || name === "artifact_inline";
 
 /** What a step's mark says, by how the call went; a call still running shows a spinner instead. */
-const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!" };
+const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!", running: "●" };
 
 /**
  * The waiting and running calls' statuses as the mark's own look names: `approval` and `running` are also the card
@@ -690,7 +690,10 @@ const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval
  */
 const MARK_LOOKS = { approval: "asking", running: "spinning" };
 
-/** A step's mark: a small circle that says how it went. A thought is ✦, and a subagent's call ⑂ unless it failed. */
+/**
+ * A step's mark: a small circle that says how it went. A call that runs shows a still ●, never a spinner: nothing in a
+ * running step moves. A thought is ✦, and a subagent's call ⑂ unless it failed.
+ */
 function StepMark({ status, kind }) {
     const agent = kind === "agent" && (status === "done" || status === "running");
     const spinning = kind !== "thought" && !agent && status === "running";
@@ -702,7 +705,7 @@ function StepMark({ status, kind }) {
         data-part="step-mark"
         aria-hidden=${spinning ? undefined : "true"}
     >
-        ${spinning ? html`<${Spinner} />` : mark}
+        ${spinning ? html`<span role="img" aria-label="Working">${mark}</span>` : mark}
     </span>`;
 }
 

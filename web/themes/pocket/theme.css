@@ -950,30 +950,6 @@ a,
     font-weight: 600;
 }
 
-.step[data-state="running"] {
-    position: relative;
-}
-
-.step[data-state="running"]::after {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    bottom: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100%
-        no-repeat;
-    animation: bold-sweep 1800ms var(--ease-in-out) infinite;
-}
-
-@keyframes bold-sweep {
-    from {
-        background-position: -40% 0;
-    }
-    to {
-        background-position: 140% 0;
-    }
-}
-
 .step-mark.spinning,
 .step-mark.agent {
     --tint: transparent;
