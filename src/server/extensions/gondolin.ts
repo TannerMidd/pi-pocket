@@ -389,7 +389,12 @@ function createGondolin(
         }),
         release: (conversationId) =>
             manager.release(Number(conversationId), "the session's sandbox was turned off"),
-        changed: (conversationId) => {
+        changed: (conversationId, on) => {
+            // Core stored the setting: only now may calls of the session start a VM again.
+            if (on) {
+                manager.reinstate(Number(conversationId));
+            }
+
             web.send("changed", { c: Number(conversationId) });
         },
     };
@@ -398,14 +403,22 @@ function createGondolin(
     jobs.resume();
     const unregister = host.sandbox.register(sandbox);
 
-    void manager.reapStale().then((count) => {
-        if (count > 0) {
+    void manager
+        .reapStale()
+        .then((count) => {
+            if (count > 0) {
+                host.notice(
+                    "info",
+                    `Gondolin sandbox: ended ${plural(count, "VM")} that an earlier run left behind.`,
+                );
+            }
+        })
+        .catch((error: unknown) =>
             host.notice(
-                "info",
-                `Gondolin sandbox: ended ${plural(count, "VM")} that an earlier run left behind.`,
-            );
-        }
-    });
+                "warning",
+                `Gondolin sandbox: could not look for VMs that an earlier run left behind: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+        );
     void check().catch(() => undefined);
 
     const stops = [
@@ -417,6 +430,7 @@ function createGondolin(
         host.on("session.removed", ({ conversationId }) => {
             manager
                 .release(conversationId, "the session was removed")
+                .then(() => manager.reinstate(Number(conversationId)))
                 .catch((error: unknown) =>
                     host.notice("warning", `Gondolin sandbox: ${String(error)}`),
                 );

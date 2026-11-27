@@ -22,6 +22,7 @@ import type {
     SetupOptions,
     VmSpec,
 } from "../src/server/extensions/gondolin/guest.ts";
+import { VmStartError } from "../src/server/extensions/gondolin/guest.ts";
 
 let current: SandboxDriver | undefined;
 
@@ -65,6 +66,8 @@ export class FakeDriver implements SandboxDriver {
     startDelay = 0;
     /** `start` waits for this before it makes the VM: a test holds a start here, and opens it when it wants. */
     startGate: Promise<void> | undefined;
+    /** The boot fails with this message after the runner exists (a `VmStartError` that holds the VM). */
+    failBoot: string | undefined;
     /** Each VM's `close` waits for this: a test holds a close here. */
     closeGate: Promise<void> | undefined;
     /** Each VM's `close` fails with this message. */
@@ -85,16 +88,20 @@ export class FakeDriver implements SandboxDriver {
 
     async remove(): Promise<void> {}
 
-    async start(spec: VmSpec): Promise<GuestVm> {
+    async start(
+        spec: VmSpec,
+        _signal?: AbortSignal,
+        onRunner?: (vm: GuestVm) => void,
+    ): Promise<GuestVm> {
         this.log.started.push(spec);
 
         if (this.startDelay > 0) {
             await new Promise((resolve) => setTimeout(resolve, this.startDelay));
         }
 
-        await this.startGate;
-
         if (this.failStart !== undefined) {
+            await this.startGate;
+
             throw new Error(this.failStart);
         }
 
@@ -102,8 +109,14 @@ export class FakeDriver implements SandboxDriver {
 
         vm.pid = this.pids ? 4_000_000 + this.#next : null;
         this.#next++;
-
         this.vms.push(vm);
+        // The runner exists: it is reported before the boot, which a test holds at `startGate`.
+        onRunner?.(vm);
+        await this.startGate;
+
+        if (this.failBoot !== undefined) {
+            throw new VmStartError(this.failBoot, vm);
+        }
 
         return vm;
     }

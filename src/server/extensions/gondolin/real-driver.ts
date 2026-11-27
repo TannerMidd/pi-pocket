@@ -43,6 +43,7 @@ import type {
     SetupOptions,
     VmSpec,
 } from "./guest.ts";
+import { VmStartError } from "./guest.ts";
 
 /** The package version Set up installs: pinned, so what runs is what was reviewed. */
 export const GONDOLIN_VERSION = "0.14.0";
@@ -292,31 +293,58 @@ function wrapFs(
     };
 }
 
+/** What is known of a runner process: gone, still there as this one, or not knowable (an unreadable `/proc`). */
+export type Runner =
+    { state: "gone" } | { state: "unknown" } | { state: "alive"; identity: string };
+
 /** What a VM's close needs to know about its runner process. Tests give their own. */
 export interface RunnerControl {
     /**
-     * Who `pid` is right now: its start time and command line, when it is a Gondolin runner or QEMU that still runs.
-     * Undefined when there is no such process, it has ended, or another program has the number.
+     * Who `pid` is right now: its start time and command line when it is a Gondolin runner or QEMU that still runs.
+     * "gone" for no such process, one that has ended, or another program that has the number; "unknown" when that
+     * cannot be told. Unknown is never taken for gone.
      */
-    identity(pid: number): string | undefined;
+    identity(pid: number): Runner;
     /** End the runner and its process group, as hard as there is. */
     kill(pid: number): void;
 }
 
 const hostRunner: RunnerControl = {
     identity(pid) {
-        try {
-            const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-            // `pid (name) state ...`: the name may hold spaces and brackets, so read from its last bracket.
-            const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-            const line = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-
-            return fields[0] !== "Z" && /gondolin-krun-runner|qemu-system/.test(line)
-                ? `${fields[19]}:${line}`
-                : undefined;
-        } catch {
-            return undefined;
+        if (!existsSync("/proc/self/stat")) {
+            return { state: "unknown" };
         }
+
+        const read = (file: string): string | Runner => {
+            try {
+                return readFileSync(`/proc/${pid}/${file}`, "utf8");
+            } catch (error) {
+                return (error as { code?: string }).code === "ENOENT" ||
+                    (error as { code?: string }).code === "ESRCH"
+                    ? { state: "gone" }
+                    : { state: "unknown" };
+            }
+        };
+
+        const stat = read("stat");
+        const line = read("cmdline");
+
+        if (typeof stat !== "string") {
+            return stat;
+        }
+
+        if (typeof line !== "string") {
+            return line;
+        }
+
+        // `pid (name) state ...`: the name may hold spaces and brackets, so read from its last bracket.
+        const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+
+        return fields[0] !== "Z" &&
+            fields[0] !== "X" &&
+            /gondolin-krun-runner|qemu-system/.test(line)
+            ? { state: "alive", identity: `${fields[19]}:${line}` }
+            : { state: "gone" };
     },
     kill(pid) {
         for (const target of [-pid, pid]) {
@@ -337,7 +365,7 @@ export class GondolinVm implements GuestVm {
     readonly #graceMs: number;
     /** The runner, as it was when the VM started: asked once, since the package forgets it while it closes. */
     readonly #pid: number | null;
-    readonly #identity: string | undefined;
+    readonly #started: Runner;
     #closed = false;
     #closing: Promise<void> | undefined;
     readonly #exits: ((reason: string) => void)[] = [];
@@ -348,7 +376,7 @@ export class GondolinVm implements GuestVm {
         this.#runner = runner;
         this.#graceMs = graceMs;
         this.#pid = vm.getHostPid();
-        this.#identity = this.#pid === null ? undefined : runner.identity(this.#pid);
+        this.#started = this.#pid === null ? { state: "gone" } : runner.identity(this.#pid);
         this.id = String(vm.id);
 
         // The runner went away (a crash, a kill): say so, so the manager drops this VM and the next call starts another.
@@ -478,23 +506,37 @@ export class GondolinVm implements GuestVm {
             failure = error;
         }
 
-        // The runner is the one that started, or it is gone: a number that another program has since is not it.
-        const here = () =>
-            this.#pid !== null && this.#runner.identity(this.#pid) === this.#identity;
+        // The runner is the one that started, or it is gone. A number that another program has since is not it, and
+        // what cannot be read is not gone: it is waited for like a runner that still runs, and never killed.
+        const now = (): "alive" | "unknown" | "gone" => {
+            const here =
+                this.#pid === null ? { state: "gone" as const } : this.#runner.identity(this.#pid);
 
-        if (this.#identity !== undefined && here()) {
-            this.#runner.kill(this.#pid!);
-            const until = Date.now() + this.#graceMs;
-
-            while (here()) {
-                if (Date.now() >= until) {
-                    throw new Error(
-                        `the VM's runner (process ${this.#pid}) is still running${failure === undefined ? "" : `: ${String(failure)}`}`,
-                    );
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, 20));
+            if (here.state === "gone") {
+                return "gone";
             }
+
+            return here.state === "unknown" || this.#started.state === "unknown"
+                ? "unknown"
+                : this.#started.state === "alive" && here.identity === this.#started.identity
+                  ? "alive"
+                  : "gone";
+        };
+
+        if (now() === "alive") {
+            this.#runner.kill(this.#pid!);
+        }
+
+        const until = Date.now() + this.#graceMs;
+
+        for (let state = now(); state !== "gone"; state = now()) {
+            if (Date.now() >= until) {
+                throw new Error(
+                    `the VM's runner (process ${this.#pid}) ${state === "alive" ? "is still running" : "cannot be shown gone"}${failure === undefined ? "" : `: ${String(failure)}`}`,
+                );
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 20));
         }
 
         this.#closed = true;
@@ -868,7 +910,11 @@ export class GondolinDriver implements SandboxDriver {
         rmSync(this.#dir, { recursive: true, force: true });
     }
 
-    async start(spec: VmSpec, signal?: AbortSignal): Promise<GuestVm> {
+    async start(
+        spec: VmSpec,
+        signal?: AbortSignal,
+        onRunner?: (vm: GuestVm) => void,
+    ): Promise<GuestVm> {
         const library = await this.#load();
         const check = await this.check({ backend: spec.backend, image: spec.image });
 
@@ -934,13 +980,38 @@ export class GondolinDriver implements SandboxDriver {
         }
 
         // Make the VM boot now, so the first call does not pay for it unseen and a broken VM shows here.
+        // The runner is the VM's own from the moment it exists: it is reported before the boot is over, so that a
+        // crash, or a boot that fails, loses none.
+        let owned: GondolinVm | undefined;
+
+        const own = () => {
+            if (owned === undefined && vm.getHostPid() !== null) {
+                owned = new GondolinVm(vm);
+                onRunner?.(owned);
+            }
+        };
+
+        vm.server?.controller?.on?.("state", (state: string) => {
+            if (state === "running") {
+                own();
+            }
+        });
+
         try {
             await vm.start();
         } catch (error) {
-            await vm.close().catch(() => undefined);
+            own();
 
-            throw error;
+            if (owned === undefined) {
+                await vm.close().catch(() => undefined);
+
+                throw error;
+            }
+
+            throw new VmStartError(error instanceof Error ? error.message : String(error), owned);
         }
+
+        own();
 
         // The guest's own git settings: trust for the mounted folders, an author, and no way to sign in.
         try {
@@ -961,7 +1032,7 @@ export class GondolinDriver implements SandboxDriver {
             // without it a write to a git directory fails with git's own words: it is refused either way
         }
 
-        return new GondolinVm(vm);
+        return owned ?? new GondolinVm(vm);
     }
 }
 

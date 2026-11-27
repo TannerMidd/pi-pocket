@@ -68,6 +68,19 @@ export interface GuestVm {
     close(): Promise<void>;
 }
 
+/**
+ * A VM whose boot failed after its runner process existed. The runner has been reported (`start`'s `onRunner`); the
+ * caller closes `vm`, with proof, so that no runner is lost.
+ */
+export class VmStartError extends Error {
+    readonly vm: GuestVm;
+
+    constructor(message: string, vm: GuestVm) {
+        super(message);
+        this.vm = vm;
+    }
+}
+
 export type NetworkMode = "off" | "allowlist" | "open";
 export type MountMode = "rw" | "ro";
 export type Backend = "auto" | "krun" | "qemu";
@@ -135,5 +148,9 @@ export interface SandboxDriver {
     ): Promise<void>;
     /** Remove the image store and the package. */
     remove(): Promise<void>;
-    start(spec: VmSpec, signal?: AbortSignal): Promise<GuestVm>;
+    /**
+     * Start a VM. `onRunner` is told as soon as its runner process exists, before the boot is over, so that the caller
+     * can put the runner on record. A boot that fails after that rejects with a `VmStartError` that holds the VM.
+     */
+    start(spec: VmSpec, signal?: AbortSignal, onRunner?: (vm: GuestVm) => void): Promise<GuestVm>;
 }

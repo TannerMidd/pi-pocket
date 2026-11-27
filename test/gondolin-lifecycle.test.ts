@@ -228,3 +228,45 @@ test("stopAll waits for starts and closes under way", async () => {
         await vms.stopAll("the test ended");
     }
 });
+
+test("a release leaves a mark that outlives the entry: no call, browser launch, or shell starts a VM until the session is reinstated", async () => {
+    const { driver, vms, env } = setup();
+    const target = { rootId: 1, cwd: folder, uploadDir: undefined };
+
+    try {
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        await vms.release(1, "the sandbox was turned off");
+        assert.equal(vms.state(1), undefined, "the entry is gone");
+
+        // Core has not stored `off` yet: calls from before, and a new environment, still reach the manager.
+        for (const attempt of [
+            () => env.exec("true", undefined, context).then((result) => result.ok),
+            () =>
+                vms
+                    .envFor(1, target)
+                    .exec("true", undefined, context)
+                    .then((result) => result.ok),
+            () =>
+                vms.launchBrowser(target, []).then(
+                    () => true,
+                    () => false,
+                ),
+            () =>
+                vms.spawnShell(target, "true").then(
+                    () => true,
+                    () => false,
+                ),
+        ]) {
+            assert.equal(await attempt(), false);
+        }
+
+        assert.equal(driver.log.started.length, 1, "no VM started");
+        assert.equal(vms.running, 0);
+
+        vms.reinstate(1);
+        assert.ok((await vms.envFor(1, target).exec("true", undefined, context)).ok);
+        assert.equal(driver.log.started.length, 2);
+    } finally {
+        await vms.stopAll("the test ended");
+    }
+});

@@ -539,6 +539,11 @@ test("turning the sandbox off finishes when the VM is gone, and a VM that cannot
         await app.sandboxes.set(id, owner(app), false);
         assert.equal(driver.vms[0]!.closed, true, "the VM is gone when the setting is off");
         assert.equal((await app.sandboxes.get(id)).on, false);
+
+        // Turning it on again lifts the mark that the release left: the session starts a VM again.
+        await sandboxed(app, id);
+        await say(app, id, "again");
+        assert.equal(driver.log.started.length, 2);
     } finally {
         driver.failClose = undefined;
         await app.close();

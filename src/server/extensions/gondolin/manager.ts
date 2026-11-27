@@ -3,12 +3,21 @@
  * it, stopped when idle, archived, or turned off, and never replaced by the host when one cannot start.
  */
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    closeSync,
+    fsyncSync,
+    mkdirSync,
+    openSync,
+    readFileSync,
+    renameSync,
+    writeSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { Readable, Writable } from "node:stream";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { GuestEnv } from "./guest-env.ts";
 import { gitConfigProblem, gitMounts } from "./git.ts";
+import { VmStartError } from "./guest.ts";
 import type {
     Backend,
     GuestExecOptions,
@@ -70,8 +79,6 @@ interface Entry {
     starting?: Promise<GuestVm>;
     /** Counts the ends of this entry's VM: a start that began before one must not keep its VM (`#end`). */
     generation: number;
-    /** The session's sandbox is going (`release`): no call starts a VM for it any more. */
-    revoked?: boolean;
     /** The close of the VM, and the wait for a start under way, that an end began: every later end waits for it. */
     closing?: Promise<void>;
     /** A VM that could not be closed: no new one starts until a later end closes it. */
@@ -110,7 +117,7 @@ export interface ManagerOptions {
     readonly pidFile: string;
     readonly now?: () => number;
     /** The command line of a process, or undefined: how a stale runner is told from a process that reused its id. */
-    readonly inspect?: (pid: number) => Promise<string | undefined>;
+    readonly inspect?: (pid: number) => Promise<Inspected>;
     readonly kill?: (pid: number) => void;
     /** Called when the state of a VM changes. */
     readonly onChange?: (rootId: number) => void;
@@ -132,11 +139,27 @@ function sessionLabel(rootId: number, cwd: string): string {
     return `pi-pocket #${rootId} ${cwd.split("/").filter(Boolean).at(-1) ?? ""}`.trim();
 }
 
-export function psInspect(pid: number): Promise<string | undefined> {
+/** What is known of a process: gone, there with this command line, or not knowable (`ps` did not run). */
+export type Inspected = { state: "gone" } | { state: "unknown" } | { state: "alive"; line: string };
+
+export function psInspect(pid: number): Promise<Inspected> {
     return new Promise((resolve) => {
-        execFile("ps", ["-o", "args=", "-p", String(pid)], (error, stdout) =>
-            resolve(error === null && stdout.trim() !== "" ? stdout.trim() : undefined),
-        );
+        execFile("ps", ["-o", "args=", "-p", String(pid)], (error, stdout) => {
+            if (error === null) {
+                resolve(
+                    stdout.trim() === ""
+                        ? { state: "gone" }
+                        : { state: "alive", line: stdout.trim() },
+                );
+            } else {
+                // `ps` exits with 1 and prints nothing for a process that does not exist; anything else is unknown.
+                resolve(
+                    (error as { code?: unknown }).code === 1 && stdout.trim() === ""
+                        ? { state: "gone" }
+                        : { state: "unknown" },
+                );
+            }
+        });
     });
 }
 
@@ -175,6 +198,11 @@ export class SandboxManager {
     readonly #options: ManagerOptions;
     readonly #entries = new Map<number, Entry>();
     #stopped = false;
+    /**
+     * Sessions whose sandbox was released: no VM starts for them, whatever entry or environment exists, until
+     * `reinstate`. The mark outlives the entry, so a call that comes before core stores `off` cannot start one.
+     */
+    readonly #revoked = new Set<number>();
 
     constructor(options: ManagerOptions) {
         this.#options = options;
@@ -351,7 +379,7 @@ export class SandboxManager {
             throw new Error("The sandbox module is stopping, so nothing ran.");
         }
 
-        if (entry.revoked === true) {
+        if (this.#revoked.has(rootId)) {
             throw new Error("The sandbox for this session is being turned off, so nothing ran.");
         }
 
@@ -435,7 +463,7 @@ export class SandboxManager {
     async #startOnce(rootId: number, entry: Entry, generation: number): Promise<GuestVm> {
         // Whether this start still counts: not once the module stopped, the session's sandbox went, or an end began.
         const live = () =>
-            !this.#stopped && entry.revoked !== true && entry.generation === generation;
+            !this.#stopped && !this.#revoked.has(rootId) && entry.generation === generation;
 
         if (!live()) {
             throw new Stopped();
@@ -535,11 +563,41 @@ export class SandboxManager {
                 throw new Stopped();
             }
 
-            const vm = await this.#options.driver.start(spec);
+            // Nothing starts while the record of the runners cannot be read or written: it would run unrecorded.
+            this.#pids();
+
+            // The runner is on record from the moment it exists, before its boot is over, so that a boot that fails,
+            // or a close that fails below, cannot lose it.
+            let unrecorded: unknown;
+
+            const record = (runner: GuestVm) => {
+                try {
+                    this.#remember(runner, rootId);
+                } catch (error) {
+                    unrecorded ??= error;
+                }
+            };
+
+            let vm: GuestVm;
+
+            try {
+                vm = await this.#options.driver.start(spec, undefined, record);
+            } catch (error) {
+                if (error instanceof VmStartError) {
+                    await this.#discard(entry, error.vm);
+                }
+
+                throw error;
+            }
+
+            record(vm);
             let shell = "/bin/sh";
 
-            // The runner is on record from the moment it exists, so a close that fails below cannot lose it.
-            this.#remember(vm, rootId);
+            if (unrecorded !== undefined) {
+                await this.#discard(entry, vm);
+
+                throw unrecorded;
+            }
 
             if (!live()) {
                 await this.#discard(entry, vm);
@@ -796,10 +854,10 @@ export class SandboxManager {
      * later `release` closes it again.
      */
     async release(rootId: number, why: string): Promise<void> {
+        this.#revoked.add(rootId);
         const entry = this.#entries.get(rootId);
 
         if (entry !== undefined) {
-            entry.revoked = true;
             await this.#end(rootId, entry, why);
         }
 
@@ -816,6 +874,11 @@ export class SandboxManager {
         }
 
         this.#entries.delete(rootId);
+    }
+
+    /** The session's sandbox is on again (or the session is gone): its calls may start a VM. */
+    reinstate(rootId: number): void {
+        this.#revoked.delete(rootId);
     }
 
     /**
@@ -932,28 +995,63 @@ export class SandboxManager {
 
     // ─── Runners that a crash left behind ───────────────────────────────────
 
+    /**
+     * The runners on record. No file is no record; a file that cannot be read, or does not hold a list of records, is
+     * not "empty": it throws, so that no start and no release goes on without knowing what runs.
+     */
     #pids(): PidRecord[] {
-        try {
-            const list = JSON.parse(readFileSync(this.#options.pidFile, "utf8")) as unknown;
+        let text: string;
 
-            return Array.isArray(list)
-                ? list.filter(
-                      (item): item is PidRecord =>
-                          typeof item?.pid === "number" && typeof item?.vm === "string",
-                  )
-                : [];
-        } catch {
-            return [];
+        try {
+            text = readFileSync(this.#options.pidFile, "utf8");
+        } catch (error) {
+            if ((error as { code?: string }).code === "ENOENT") {
+                return [];
+            }
+
+            throw new Error(
+                `the record of the VM runners (${this.#options.pidFile}) cannot be read: ${String(error)}`,
+            );
         }
+
+        try {
+            const list = JSON.parse(text) as unknown;
+
+            if (
+                Array.isArray(list) &&
+                list.every((item) => typeof item?.pid === "number" && typeof item?.vm === "string")
+            ) {
+                return list as PidRecord[];
+            }
+        } catch {
+            // the same as a list of the wrong shape
+        }
+
+        throw new Error(
+            `the record of the VM runners (${this.#options.pidFile}) is damaged: delete it after checking that no VM runner is left, then try again`,
+        );
     }
 
+    /** Replace the record in one step: written and flushed under another name, then renamed over it. It throws on failure. */
     #writePids(list: PidRecord[]): void {
+        const file = this.#options.pidFile;
+        const temporary = `${file}.${process.pid}.tmp`;
+
         try {
-            mkdirSync(dirname(this.#options.pidFile), { recursive: true });
-            writeFileSync(this.#options.pidFile, JSON.stringify(list));
+            mkdirSync(dirname(file), { recursive: true });
+            const handle = openSync(temporary, "w");
+
+            try {
+                writeSync(handle, JSON.stringify(list));
+                fsyncSync(handle);
+            } finally {
+                closeSync(handle);
+            }
+
+            renameSync(temporary, file);
         } catch (error) {
-            this.#options.log(
-                `sandbox: could not write ${this.#options.pidFile}: ${String(error)}`,
+            throw new Error(
+                `the record of the VM runners (${file}) cannot be written: ${String(error)}`,
             );
         }
     }
@@ -981,7 +1079,8 @@ export class SandboxManager {
      * End the runners on record that `wanted` picks and that no entry holds (an earlier server's, a module that loaded
      * again, a VM that could not be closed), and take each off the record once it is shown gone. A process counts only
      * when its command line still names Gondolin's runner or QEMU: a number that another program reuses is left alone.
-     * Returns the process ids that are still there after the kill, which stay on record.
+     * What cannot be told (`ps` did not run) is not gone. Returns the process ids that are still there, or not known to
+     * be gone, after the kill: they stay on record.
      */
     async #reap(wanted: (item: PidRecord) => boolean): Promise<{ ended: number; left: number[] }> {
         const inspect = this.#options.inspect ?? psInspect;
@@ -990,8 +1089,6 @@ export class SandboxManager {
             ((pid: number) => {
                 process.kill(pid, "SIGKILL");
             });
-        const named = async (pid: number) =>
-            /gondolin-krun-runner|qemu-system/.test((await inspect(pid)) ?? "");
         const held = new Set(
             [...this.#entries.values()]
                 .flatMap((entry) => [entry.vm, entry.stuck?.vm])
@@ -1002,7 +1099,11 @@ export class SandboxManager {
         let ended = 0;
 
         for (const item of this.#pids().filter((each) => wanted(each) && !held.has(each.pid))) {
-            if (await named(item.pid)) {
+            let seen = await inspect(item.pid);
+            const named = () =>
+                seen.state === "alive" && /gondolin-krun-runner|qemu-system/.test(seen.line);
+
+            if (named()) {
                 try {
                     kill(item.pid);
                 } catch {
@@ -1010,20 +1111,27 @@ export class SandboxManager {
                 }
 
                 // A killed process is gone a moment later: its parent has to collect it.
-                let alive = await named(item.pid);
+                seen = await inspect(item.pid);
 
-                for (let wait = 0; alive && wait < 20; wait++) {
+                for (let wait = 0; (seen.state === "unknown" || named()) && wait < 20; wait++) {
                     await new Promise((resolve) => setTimeout(resolve, 25));
-                    alive = await named(item.pid);
+                    seen = await inspect(item.pid);
                 }
 
-                if (alive) {
+                if (seen.state === "unknown" || named()) {
                     left.push(item.pid);
 
                     continue;
                 }
 
                 ended++;
+            }
+
+            // Not a runner (the number is another program's now): nothing of ours is there. Not known: it stays.
+            if (seen.state === "unknown") {
+                left.push(item.pid);
+
+                continue;
             }
 
             gone.add(item.pid);
