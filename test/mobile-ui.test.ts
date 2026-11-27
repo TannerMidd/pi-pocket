@@ -148,7 +148,24 @@ async function fresh(): Promise<void> {
             )) === true,
         "the session list",
         20_000,
-    );
+    ).catch(async (error) => {
+        const state = await inPage<unknown>(`
+            const { store } = await import("/store.js");
+
+            return JSON.stringify({
+                url: location.href,
+                me: store.state.me?.id ?? null,
+                sessionsLoaded: store.state.sessionsLoaded,
+                sessions: store.state.sessions.length,
+                connection: store.state.connection,
+                rows: document.querySelectorAll(".home-list .session-row").length,
+                boot: document.querySelector(".boot") !== null,
+                sheet: store.state.sheet?.type ?? null,
+            });
+        `).catch((cause) => `the page could not be read: ${cause}`);
+
+        throw new Error(`${(error as Error).message}: ${JSON.stringify(state)}`);
+    });
 }
 
 /** Go to a session from inside the app, as a peek tile or a subagent's link does. */
