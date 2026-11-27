@@ -422,7 +422,12 @@ export class Sandboxes {
      * Suspend every tree, revoke every lease, and prove every VM gone (I5). A failure throws, leaves the trees suspended
      * with the reason, and keeps the provider. `leave`: the provider goes after the proof.
      */
-    async #stop(mine: { provider: SandboxProvider }, leave: boolean, why: string): Promise<void> {
+    async #stop(
+        mine: { provider: SandboxProvider } | undefined,
+        leave: boolean,
+        why: string,
+        final = false,
+    ): Promise<void> {
         // A provider change never ends, or overwrites, a transition that it does not own: it waits until they are done.
         await this.#quiet();
 
@@ -470,8 +475,11 @@ export class Sandboxes {
                 );
             }
 
-            // The provider stays, and so do the trees' suspensions: no teardown is going on any more.
-            this.#fence = undefined;
+            // The provider stays, and so do the trees' suspensions: no teardown is going on any more. At shutdown the fence
+            // stays: nothing may start in a server that is stopping.
+            if (!final) {
+                this.#fence = undefined;
+            }
 
             throw error;
         }
@@ -864,10 +872,11 @@ export class Sandboxes {
         for (const [key, meta] of Object.entries(items)) {
             const root = Number(key);
 
+            // A tree whose root works on a remote workspace is still looked at: its leases, tasks, children, and bound folders
+            // can be local, and they keep it in the group of those folders (I3). Only a tree with none of them is out.
             if (
                 root === self ||
                 meta.pip !== undefined ||
-                workspaceScheme(meta.cwd) !== undefined ||
                 (meta.archived === true && !this.#hasWork(root))
             ) {
                 continue;
@@ -880,7 +889,11 @@ export class Sandboxes {
             const reaches = (list: readonly string[]) =>
                 folders.some((mine) => list.some((theirs) => foldersOverlap(mine, theirs)));
 
-            if (reaches(there) || folders.some((mine) => foldersOverlap(mine, meta.cwd))) {
+            if (
+                reaches(there) ||
+                (workspaceScheme(meta.cwd) === undefined &&
+                    folders.some((mine) => foldersOverlap(mine, meta.cwd)))
+            ) {
                 // Work that stays behind keeps its tree here: say so, so the person knows what to stop.
                 const left = reaches(direct) ? [] : this.#workNames(root, folders);
 
@@ -963,7 +976,7 @@ export class Sandboxes {
         for (const [key, meta] of Object.entries(items)) {
             const root = Number(key);
 
-            if (meta.pip !== undefined || workspaceScheme(meta.cwd) !== undefined) {
+            if (meta.pip !== undefined) {
                 continue;
             }
 
@@ -1337,7 +1350,7 @@ export class Sandboxes {
             }
         }
 
-        if (boxed || target === undefined || workspaceScheme(target.cwd) !== undefined) {
+        if (boxed || target === undefined) {
             return;
         }
 
@@ -1346,7 +1359,11 @@ export class Sandboxes {
         const old = this.#folderOfRoot(root);
         const bound = this.#boundWork(root, old);
 
-        if (bound.length > 0 && !foldersOverlap(old, target.cwd)) {
+        // A remote destination leaves the old local folder behind too: the work bound there is checked all the same.
+        const staysHere =
+            workspaceScheme(target.cwd) === undefined && foldersOverlap(old, target.cwd);
+
+        if (bound.length > 0 && !staysHere) {
             throw new HttpError(
                 409,
                 `This session still has work bound to ${old}: ${bound.slice(0, 3).join("; ")}. Stop it, or wait until it ends, and then move the session.`,
@@ -2522,14 +2539,16 @@ export class Sandboxes {
 
     /** The server stops: every tree is suspended and every VM is stopped, within a bound. */
     async shutdown(): Promise<void> {
-        const roots = [...this.#on];
+        // The fence goes up now, in this tick: no sandboxed admission, turn-on, lease grant, or VM launch from here on.
+        this.#fence = "the server is stopping";
 
-        for (const root of roots) {
-            this.#setPhase(root, "suspended", "the server is stopping");
-        }
-
-        await this.#release(roots, "the server is stopping").catch((error: unknown) => {
-            this.#app.log(`Sandboxes did not all stop: ${describeError(error)}`);
+        await this.#serialised(async () => {
+            try {
+                // Transitions under way are waited for, and the roots are looked at again until none is left.
+                await this.#stop(undefined, false, "the server is stopping", true);
+            } catch (error) {
+                this.#app.log(`Sandboxes did not all stop: ${describeError(error)}`);
+            }
         });
     }
 

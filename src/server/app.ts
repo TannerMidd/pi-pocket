@@ -4841,6 +4841,10 @@ export class PocketApp {
 
     close(): Promise<void> {
         this.#closing ??= (async () => {
+            // First: every sandbox is fenced, drained, revoked and proved gone, within a bound. The commit listener is still
+            // attached, so a sandbox document that lands meanwhile is seen, and the modules are still there.
+            await this.sandboxes.shutdown();
+
             clearTimeout(this.#sessionsTimer);
             clearTimeout(this.#usageTimer);
             this.#stopWebWatch?.();
@@ -4857,9 +4861,6 @@ export class PocketApp {
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
             this.guard.close();
-
-            // Every sandbox is revoked and proved gone, within a bound, before the modules go.
-            await this.sandboxes.shutdown();
 
             // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.
             const cleaned = this.loader?.close();
