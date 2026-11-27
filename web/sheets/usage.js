@@ -87,7 +87,9 @@ function WindowRow({ window, now }) {
             <span class="usage-window-state" data-state=${state}>
                 <${StateMark} state=${state} />
             </span>
-            <span class="usage-window-left">${stale || window.left === undefined ? "—" : `${percent(window)} used`}</span>
+            <span class="usage-window-left">
+                ${stale || window.left === undefined ? "—" : `${percent(window)} used`}
+            </span>
         </div>
         <${UsageMeter} state=${state} used=${stale ? 0 : usedShare(window)} big />
         ${sub && html`<div class="usage-window-sub">${sub}</div>`}
@@ -146,7 +148,10 @@ function Current({ view, now }) {
         <div class="usage-prov-head">
             <h3>${provider.name}</h3>
             <span class="usage-kind">${KIND[provider.kind]}</span>
-            ${provider.asOf !== undefined && html`<span class="usage-asof">as of ${agoWords(now - provider.asOf)}</span>`}
+            ${
+                provider.asOf !== undefined &&
+                html`<span class="usage-asof">as of ${agoWords(now - provider.asOf)}</span>`
+            }
         </div>
         <${Windows} view=${view} now=${now} />
     </section>`;
@@ -174,7 +179,9 @@ function Row({ view, now, open, onToggle }) {
         >
             <span class="usage-row-name">
                 <span class="usage-row-title">${provider.name}</span>
-                <span class="usage-row-kind">${KIND[provider.kind]}${age}${models === "" ? "" : ` · ${models}`}</span>
+                <span class="usage-row-kind">
+                    ${KIND[provider.kind]}${age}${models === "" ? "" : ` · ${models}`}
+                </span>
             </span>
             ${!none && html`<${UsageMeter} state=${view.state} used=${usedShare(window)} />`}
             <span class="usage-row-left num">
@@ -205,8 +212,18 @@ function Row({ view, now, open, onToggle }) {
         </button>
         ${
             open &&
-            html`<div class="usage-row-body" id=${body} role="group" aria-label=${`${provider.name} usage`}>
-                ${provider.asOf !== undefined && html`<div class="usage-row-meta"><span>as of ${agoWords(now - provider.asOf)}</span></div>`}
+            html`<div
+                class="usage-row-body"
+                id=${body}
+                role="group"
+                aria-label=${`${provider.name} usage`}
+            >
+                ${
+                    provider.asOf !== undefined &&
+                    html`<div class="usage-row-meta">
+                        <span>as of ${agoWords(now - provider.asOf)}</span>
+                    </div>`
+                }
                 <${Windows} view=${view} now=${now} />
             </div>`
         }
@@ -328,8 +345,12 @@ function Panel({ onClose }) {
                                     onClick=${() => setGrouped(!grouped)}
                                 >
                                     <span class="usage-row-name">
-                                        <span class="usage-row-title">${none.length} without usage data</span>
-                                        <span class="usage-row-kind">${none.map((view) => view.provider.name).join(", ")}</span>
+                                        <span class="usage-row-title">
+                                            ${none.length} without usage data
+                                        </span>
+                                        <span class="usage-row-kind">
+                                            ${none.map((view) => view.provider.name).join(", ")}
+                                        </span>
                                     </span>
                                     <${Icon} name="chevron" size=${12} class="usage-chevron" />
                                 </button>
@@ -354,12 +375,17 @@ function Panel({ onClose }) {
                             none.length === 0 &&
                             html`<div class="usage-empty" role="status">
                                 <span>No provider matches “${filter.trim()}”.</span>
-                                <button class="button small" onClick=${() => setFilter("")}>Clear filter</button>
+                                <button class="button small" onClick=${() => setFilter("")}>
+                                    Clear filter
+                                </button>
                             </div>`
                         }
                     </div>`
             }
-            ${usage === null && html`<p class="usage-note usage-pad"><span>No usage yet.</span></p>`}
+            ${
+                usage === null &&
+                html`<p class="usage-note usage-pad"><span>No usage yet.</span></p>`
+            }
         </div>
         <footer class="usage-foot">
             <button class="usage-foot-link" onClick=${() => openSheet({ type: "providers" })}>
@@ -414,7 +440,12 @@ export function UsageSheet() {
     const panel = html`<${Panel} onClose=${closeSheet} />`;
 
     if (phone) {
-        return html`<div class="overlay" data-part="scrim" data-for="sheet" onMouseDown=${scrimPress(closeSheet)}>
+        return html`<div
+            class="overlay"
+            data-part="scrim"
+            data-for="sheet"
+            onMouseDown=${scrimPress(closeSheet)}
+        >
             <section
                 class="sheet usage-sheet"
                 data-part="sheet usage-panel"

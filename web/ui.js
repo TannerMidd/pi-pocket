@@ -2044,7 +2044,9 @@ export function Sheet({
             ${
                 info?.navigation &&
                 !BOTTOM_SHEETS.matches &&
-                html`<footer class="navigation-keys"><kbd>Esc</kbd> ${onBack ? "Go back" : "Close menu"}</footer>`
+                html`<footer class="navigation-keys">
+                    <kbd>Esc</kbd> ${onBack ? "Go back" : "Close menu"}
+                </footer>`
             }
         </section>
     </div>`;

@@ -27,19 +27,50 @@ function Relationships() {
     return html`<nav class="family-context" aria-label="Related sessions">
         ${
             lead &&
-            html`<button class="lead-route" data-family-open="lead" onClick=${() => navigate(lead.id)}>
-            <${Icon} name="fork" size=${14}/><span>Lead</span><strong>${lead.title ?? "New session"}</strong>
-            ${fresh && html`<span class="lead-unread">Unread</span>`}<${Icon} name="chevron" size=${13}/>
-        </button>`
+            html`<button
+                class="lead-route"
+                data-family-open="lead"
+                onClick=${() => navigate(lead.id)}
+            >
+                <${Icon} name="fork" size=${14} />
+                <span>Lead</span>
+                <strong>${lead.title ?? "New session"}</strong>
+                ${fresh && html`<span class="lead-unread">Unread</span>`}
+                <${Icon} name="chevron" size=${13} />
+            </button>`
         }
         ${
             family &&
-            html`<button data-family-open="header-family" aria-label=${kids === 0 ? "Browse archived links" : "Browse " + kids + " linked sessions" + (info?.waiting ? ", " + info.waiting + " waiting" : "") + (info?.failed ? ", " + info.failed + " failed" : "")} onClick=${(event) => openFamily(conversationId, "", event.currentTarget, kids === 0 ? "archived" : "all")}>
-            <${Icon} name="fork" size=${14}/><strong>${kids === 0 ? "Archived links" : kids.toLocaleString() + " linked"}</strong>
-            ${info?.waiting > 0 && html`<span class="family-attn">${info.waiting} waiting</span>`}
-            ${info?.failed > 0 && html`<span class="family-attn">${info.failed} failed</span>`}
-            <${Icon} name="chevron" size=${13}/>
-        </button>`
+            html`<button
+                data-family-open="header-family"
+                aria-label=${
+                    kids === 0
+                        ? "Browse archived links"
+                        : "Browse " +
+                          kids +
+                          " linked sessions" +
+                          (info?.waiting ? ", " + info.waiting + " waiting" : "") +
+                          (info?.failed ? ", " + info.failed + " failed" : "")
+                }
+                onClick=${(event) =>
+                    openFamily(
+                        conversationId,
+                        "",
+                        event.currentTarget,
+                        kids === 0 ? "archived" : "all",
+                    )}
+            >
+                <${Icon} name="fork" size=${14} />
+                <strong>
+                    ${kids === 0 ? "Archived links" : kids.toLocaleString() + " linked"}
+                </strong>
+                ${
+                    info?.waiting > 0 &&
+                    html`<span class="family-attn">${info.waiting} waiting</span>`
+                }
+                ${info?.failed > 0 && html`<span class="family-attn">${info.failed} failed</span>`}
+                <${Icon} name="chevron" size=${13} />
+            </button>`
         }
     </nav>`;
 }

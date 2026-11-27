@@ -516,7 +516,11 @@ function AgentMessage({ entry, view, cards, attachments, fresh }) {
             who=${card.address === undefined ? card.name : (title ?? "A session you cannot open")}
             unknown=${card.address === undefined ? card.unknown : title === undefined}
             go=${go}
-            extras=${index === 0 ? html`<${MessageExtras} entry=${entry} attachments=${attachments} />` : undefined}
+            extras=${
+                index === 0
+                    ? html`<${MessageExtras} entry=${entry} attachments=${attachments} />`
+                    : undefined
+            }
             onRaw=${raw}
             renderFenced=${(text) => html`<${FencedText} text=${text} />`}
         />`;
@@ -528,7 +532,11 @@ function AgentMessage({ entry, view, cards, attachments, fresh }) {
         data-entry-kind=${entry.presentation?.entryKind}
         id=${`entry-${entry.id}`}
     >
-        ${cards.length === 1 ? draw(cards[0], 0) : html`<div class="acard-group">${cards.map(draw)}</div>`}
+        ${
+            cards.length === 1
+                ? draw(cards[0], 0)
+                : html`<div class="acard-group">${cards.map(draw)}</div>`
+        }
     </div>`;
 }
 

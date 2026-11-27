@@ -322,11 +322,29 @@ test(
     },
 );
 
+/** Reload this tab in safe mode, which loads no theme, so the app's own stylesheets show as they are. */
+async function withoutTheme(t: { after: (hook: () => Promise<void>) => void }): Promise<void> {
+    t.after(async () => {
+        await page.evaluate(`sessionStorage.removeItem("pocket.noext")`);
+    });
+    await page.evaluate(`sessionStorage.setItem("pocket.noext", "1")`);
+    await page.navigate(`${base}/`);
+    await until(
+        async () =>
+            (await inPage<boolean>(
+                `return JSON.stringify(document.querySelector("#pocket-theme") === null && document.querySelector(${JSON.stringify(row(first))}) !== null)`,
+            )) === true,
+        "the session list without a theme",
+        20_000,
+    );
+}
+
 test(
-    "Places navigation: rail and menu use the app's row scale at every density",
+    "Places navigation: with no theme, rail and menu use the app's row scale at every density",
     real,
-    async () => {
+    async (t) => {
         await fresh();
+        await withoutTheme(t);
         await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
         await goTo(first);
         await page.click({ selector: '.topbar [aria-label="Menu"]' });
@@ -464,6 +482,56 @@ test(
 
         assert.equal(sheetControls.back, 44);
         assert.equal(sheetControls.close, 44);
+    },
+);
+
+test(
+    "Places navigation: Pocket's own look has an 88 px side rail of 60 px buttons, and 44 px buttons on a phone",
+    real,
+    async () => {
+        await fresh();
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.getElementById("pocket-theme")?.dataset.urls?.includes("/themes/pocket/") === true)`,
+                )) === true,
+            "Pocket's look is on the page",
+        );
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "comfortable" });`);
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        assert.ok(await page.waitFor({ selector: ".desktop-rail .rail-place" }));
+        const side = await inPage<{ rail: number; button: number; brand: number }>(`
+            const style = (selector) => getComputedStyle(document.querySelector(selector));
+            return JSON.stringify({
+                rail: parseFloat(style(".desktop-rail").width),
+                button: parseFloat(style(".desktop-rail .rail-place").minHeight),
+                brand: parseFloat(style(".rail-brand").height),
+            });
+        `);
+
+        assert.equal(side.rail, 88);
+        assert.equal(side.button, 60);
+        assert.ok(side.brand >= 32);
+
+        for (const [width, height] of [
+            [390, 844],
+            [844, 390],
+        ] as const) {
+            await page.setViewport({ ...VIEWPORTS.mobile, width, height });
+            assert.ok(await page.waitFor({ selector: ".mobile-rail .rail-place" }));
+            const phone = await inPage<number[]>(`
+                return JSON.stringify([...document.querySelectorAll(".mobile-rail .rail-place")]
+                    .filter((el) => el.getClientRects().length)
+                    .map((el) => el.getBoundingClientRect().height));
+            `);
+
+            assert.equal(phone.length, 4, `${width}x${height}: every destination shows`);
+            assert.ok(
+                phone.every((each) => each >= 44),
+                `${width}x${height}: ${JSON.stringify(phone)} are touch targets`,
+            );
+        }
     },
 );
 
@@ -2051,16 +2119,23 @@ test("a call's mark keeps its circle while it waits for an approval", real, asyn
             const mark = document.querySelector('[data-part~="tool-call"][data-state="waiting"] [data-part~="step-mark"]');
             const shape = mark && getComputedStyle(mark);
 
+            const size = getComputedStyle(document.documentElement).getPropertyValue("--step-mark-size").trim();
+
             return JSON.stringify(shape && { width: shape.width, height: shape.height,
-                padding: shape.paddingTop, border: shape.borderTopWidth });
+                padding: shape.paddingTop, border: shape.borderTopWidth, size });
         `);
 
     await until(async () => (await mark()) !== null, "the call waiting", 20_000);
-    assert.deepEqual(await mark(), {
-        width: "19px",
-        height: "19px",
+    const shape = await mark();
+
+    // The circle is the size the look gives every step mark (19px in the app's own, 20px in Pocket's).
+    assert.match(shape!.size!, /^\d+px$/);
+    assert.deepEqual(shape, {
+        width: shape!.size,
+        height: shape!.size,
         padding: "0px",
         border: "0px",
+        size: shape!.size,
     });
 });
 

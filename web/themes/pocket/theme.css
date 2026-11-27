@@ -216,10 +216,15 @@
 /* The rail is the darkest plane, the list one step up, the conversation the lightest. */
 .places-rail {
     --place-rail-width: 88px;
-    gap: 14px;
-    padding-inline: 12px;
     background: var(--desk);
     border-right: 0;
+}
+
+/* Only the side rail is spaced and sized here. The bar along the bottom of a phone keeps the app's own padding, which
+   clears a notch and the home bar, and its 44px buttons. */
+.places-rail.desktop-rail {
+    gap: 14px;
+    padding-inline: 12px;
 }
 
 /* The folded sidebar holds the whole rail, which is wider here than the app's 64 px: nothing of a label or a badge is
@@ -249,8 +254,11 @@
     color: var(--brand);
 }
 
-.places-rail .rail-place {
+.places-rail.desktop-rail .rail-place {
     min-height: 60px;
+}
+
+.places-rail .rail-place {
     gap: 4px;
     border-radius: var(--r-card);
     font-size: var(--text-xs, 0.68rem);

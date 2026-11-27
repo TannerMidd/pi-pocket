@@ -574,9 +574,14 @@ function App() {
                       : page
                         ? html`<${ExtensionPage} key=${`${state.page.module}:${state.page.id}`} />`
                         : state.family
-                          ? html`<${SessionList} key=${state.family.key} explorer=${state.family} />`
+                          ? html`<${SessionList}
+                                key=${state.family.key}
+                                explorer=${state.family}
+                            />`
                           : inConversation
-                            ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}<${Topbar} /><${LinkedSessions} />
+                            ? html`${prefs().sessionTabs && html`<${SessionTabs} />`}
+                    <${Topbar} />
+                    <${LinkedSessions} />
                     ${
                         peeking &&
                         tiles.length > 0 &&
@@ -625,7 +630,9 @@ function App() {
         ${!sidebar && html`<${RailNav} mobile=${true} />`}
         <${Drawer} />
         <${PipHost} />
-        <${Sheets} sideOccupied=${browsing || filing || paneling || people || peekColumn || state.pipOpen} />
+        <${Sheets}
+            sideOccupied=${browsing || filing || paneling || people || peekColumn || state.pipOpen}
+        />
         <${QuoteReplyButton} />
         <${LauncherHost} />
         <${Notices} />

@@ -2943,11 +2943,16 @@ function UsageItem() {
         ${limited && html`<${Icon} name="clock" size=${12} />`}
         ${state === "low" && html`<${Icon} path=${USAGE_ICONS.warn} size=${12} />`}
         ${state === "ok" && html`<${Icon} path=${USAGE_ICONS.gauge} size=${12} class="gauge" />`}
-        ${limited ? html`<span class="word">Limited</span>` : state === "low" && html`<span class="word">Low</span>`}
+        ${
+            limited
+                ? html`<span class="word">Limited</span>`
+                : state === "low" && html`<span class="word">Low</span>`
+        }
         ${!limited && window.tag !== "" && html`<span class="tag">${window.tag}</span>`}
         ${!limited && html`<${UsageMeter} state=${state} used=${usedShare(window)} />`}
         <span class="val">
-            <span class="num">${limited ? countText : percent(window)}</span>${limited ? "" : html`<span class="used"> used</span>`}
+            <span class="num">${limited ? countText : percent(window)}</span>
+            ${limited ? "" : html`<span class="used"> used</span>`}
         </span>
     </button>`;
 }

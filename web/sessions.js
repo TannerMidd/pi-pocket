@@ -888,9 +888,11 @@ function teamOf(sessions) {
 
 /** A parent's count on its row's one line: ⑂ and how many linked sessions, with a mark when some need attention. */
 function familyCount(kids, trouble) {
-    return html`<${Icon} name="fork" size=${11} /><span class="fold-count">${kids.toLocaleString()}</span>${
-        trouble > 0 && html`<span class="fold-alert"></span>`
-    }`;
+    return html`
+        <${Icon} name="fork" size=${11} />
+        <span class="fold-count">${kids.toLocaleString()}</span>
+        ${trouble > 0 && html`<span class="fold-alert"></span>`}
+    `;
 }
 
 /** The count as Browse: it opens the family's index. */
@@ -932,7 +934,12 @@ function rowStyle(arrival, depth, kids, trouble) {
 const LeadRow = memo(function LeadRow({ session, kids, trouble, onLead }) {
     const title = session.title ?? "New session";
 
-    return html`<div class="session-row lead-row with-fold" data-part="session-lead" data-lead=${session.id} style=${rowStyle(null, 0, kids, trouble)}>
+    return html`<div
+        class="session-row lead-row with-fold"
+        data-part="session-lead"
+        data-lead=${session.id}
+        style=${rowStyle(null, 0, kids, trouble)}
+    >
         <button
             class="session lead"
             data-part="session-lead-button"
@@ -957,7 +964,11 @@ const LeadRow = memo(function LeadRow({ session, kids, trouble, onLead }) {
 
 /** What a lead has past the few shown in one group: its family's index, filtered to the group's state where it can. */
 const MoreRow = memo(function MoreRow({ lead, count, filter }) {
-    return html`<div class="session-row family-more-row" data-part="session-more-family" style="--linked-depth:1">
+    return html`<div
+        class="session-row family-more-row"
+        data-part="session-more-family"
+        style="--linked-depth:1"
+    >
         <button
             class="family-more"
             data-family-open=${"more-" + lead.id}
@@ -1094,14 +1105,20 @@ function SessionRow({
                         ></span>`
                 }
             </span>
-            <span class=${`session-title ${hit || details ? "with-hit" : ""} ${details ? "with-context" : ""} ${crumb ? "with-crumb" : ""}`}>
+            <span
+                class=${`session-title ${hit || details ? "with-hit" : ""} ${details ? "with-context" : ""} ${crumb ? "with-crumb" : ""}`}
+            >
                 ${
                     hit || details
                         ? html`<span class="session-name">${withMark(title, needle)}</span>
-                            <span class="session-hit">${withMark([details, hit].filter(Boolean).join(" · "), needle)}</span>`
+                            <span class="session-hit">
+                                ${withMark([details, hit].filter(Boolean).join(" · "), needle)}
+                            </span>`
                         : crumb
                           ? html`<span class="session-name">${title}</span>
-                              <span class="session-hit session-crumb" data-part="session-crumb">${crumb}</span>`
+                              <span class="session-hit session-crumb" data-part="session-crumb">
+                                  ${crumb}
+                              </span>`
                           : withMark(title, needle)
                 }
             </span>
@@ -1169,7 +1186,12 @@ function SessionRow({
                     number < 9 &&
                     html`<kbd class="session-num">${number + 1}</kbd>`
                 }
-                ${kids !== null && html`<span class="fold-gap" aria-hidden="true">${familyCount(kids, trouble)}</span>`}
+                ${
+                    kids !== null &&
+                    html`<span class="fold-gap" aria-hidden="true">
+                        ${familyCount(kids, trouble)}
+                    </span>`
+                }
             </span>
         </button>
         ${kids !== null && familyButton(session.id, kids, trouble)}
@@ -2685,13 +2707,14 @@ function AllSessions({ compact = false, explorer = null }) {
         setPage(next);
     };
 
-    const routeButton = (
-        scope,
-        label,
-        icon,
-        query = "",
-    ) => html`<button class="family-index-link" data-family-open=${scope} onClick=${(event) => openFamily(scope, query, event.currentTarget)}>
-        <${Icon} name=${icon} size=${15} /><span>${label}</span><${Icon} name="chevron" size=${14} />
+    const routeButton = (scope, label, icon, query = "") => html`<button
+        class="family-index-link"
+        data-family-open=${scope}
+        onClick=${(event) => openFamily(scope, query, event.currentTarget)}
+    >
+        <${Icon} name=${icon} size=${15} />
+        <span>${label}</span>
+        <${Icon} name="chevron" size=${14} />
     </button>`;
 
     return html`<div
@@ -2701,7 +2724,13 @@ function AllSessions({ compact = false, explorer = null }) {
         ${
             explorer
                 ? html`<header class="family-head">
-            <button class="button" aria-label="Back from session index" onClick=${() => (routeUnder() ? goBack() : navigate(null, { replace: true }))}><${Icon} name="back" size=${16}/> Back</button>
+            <button
+                class="button"
+                aria-label="Back from session index"
+                onClick=${() => (routeUnder() ? goBack() : navigate(null, { replace: true }))}
+            >
+                <${Icon} name="back" size=${16} /> Back
+            </button>
             <p>${Number(explorer.scope) ? "Family index" : "Session index"}</p>
             <h1 class="family-heading" tabindex="-1">${scopeTitle}</h1>
         </header>`
@@ -2822,12 +2851,31 @@ function AllSessions({ compact = false, explorer = null }) {
                 setSort(explorer.sort);
                 turnPage(0);
             }}>
-                ${explorer.scope === "attention" && html`<option value="priority">Priority order</option>`}
+                ${
+                    explorer.scope === "attention" &&
+                    html`<option value="priority">Priority order</option>`
+                }
                 <option value="new">Newest first</option><option value="old">Oldest first</option>
             </select>
         </div>
-        <div class="family-range" role="status">${shown.length ? at * PAGE_SIZE + 1 + "–" + Math.min(shown.length, (at + 1) * PAGE_SIZE) + " of " + shown.length.toLocaleString() : "0 results"}</div>`
-                : html`<div class="session-tabs" data-part="session-tabs" role="tablist" ref=${tabs}>
+        <div class="family-range" role="status">
+            ${
+                shown.length
+                    ? at * PAGE_SIZE +
+                      1 +
+                      "–" +
+                      Math.min(shown.length, (at + 1) * PAGE_SIZE) +
+                      " of " +
+                      shown.length.toLocaleString()
+                    : "0 results"
+            }
+        </div>`
+                : html`<div
+            class="session-tabs"
+            data-part="session-tabs"
+            role="tablist"
+            ref=${tabs}
+        >
             ${TABS.map(
                 ([key, label]) => html`<button
                     key=${key}
@@ -2917,8 +2965,22 @@ function AllSessions({ compact = false, explorer = null }) {
             explorer &&
             html`<footer class="family-pager">
             <span>Page ${at + 1} of ${last + 1}</span>
-            <button class="button" aria-label="Previous page" disabled=${at === 0} onClick=${() => turnPage(at - 1)}><${Icon} name="back" size=${16}/></button>
-            <button class="button" aria-label="Next page" disabled=${at === last} onClick=${() => turnPage(at + 1)}><${Icon} name="chevron" size=${16}/></button>
+            <button
+                class="button"
+                aria-label="Previous page"
+                disabled=${at === 0}
+                onClick=${() => turnPage(at - 1)}
+            >
+                <${Icon} name="back" size=${16} />
+            </button>
+            <button
+                class="button"
+                aria-label="Next page"
+                disabled=${at === last}
+                onClick=${() => turnPage(at + 1)}
+            >
+                <${Icon} name="chevron" size=${16} />
+            </button>
         </footer>`
         }
         ${
@@ -3219,7 +3281,10 @@ function Rail({ folded = false, mobile = false }) {
             "account",
             "Account",
             me
-                ? html`<${Avatar} person=${store.state.users.find((each) => each.id === me.id) ?? me} size=${20} />`
+                ? html`<${Avatar}
+                      person=${store.state.users.find((each) => each.id === me.id) ?? me}
+                      size=${20}
+                  />`
                 : html`<${Icon} name="users" size=${19} />`,
             { title: `${me?.name ?? "Account"} · ${role}` },
         )}

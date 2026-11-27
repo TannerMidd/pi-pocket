@@ -91,7 +91,10 @@ export function AgentCard({ card, id, time, who, unknown, go, extras, onRaw, ren
                 <span class="acard-kicker" data-part="acard-kicker">
                     <span class="acard-state" data-part="acard-state">${card.state}</span>
                     <span class="acard-source">· ${card.source}</span>
-                    ${time && html`<span class="acard-time" data-part="acard-time">· ${time}</span>`}
+                    ${
+                        time &&
+                        html`<span class="acard-time" data-part="acard-time">· ${time}</span>`
+                    }
                 </span>
                 <span
                     class=${`acard-name ${unknown ? "unknown" : ""} ${card.mono ? "mono" : ""}`}
@@ -116,9 +119,26 @@ export function AgentCard({ card, id, time, who, unknown, go, extras, onRaw, ren
         ${
             (card.lead || card.command || card.body || extras) &&
             html`<div class="acard-body" data-part="acard-body linked-body" id=${bodyId}>
-                ${card.lead && html`<p class="acard-lead" data-tone=${card.lead.tone}>${readable(card.lead.text)}</p>`}
-                ${card.command && html`<div class="acard-command" data-part="acard-command">${card.command}</div>`}
-                ${card.body && html`<${Body} body=${card.body} open=${open} renderFenced=${renderFenced} />`}
+                ${
+                    card.lead &&
+                    html`<p class="acard-lead" data-tone=${card.lead.tone}>
+                        ${readable(card.lead.text)}
+                    </p>`
+                }
+                ${
+                    card.command &&
+                    html`<div class="acard-command" data-part="acard-command">
+                        ${card.command}
+                    </div>`
+                }
+                ${
+                    card.body &&
+                    html`<${Body}
+                        body=${card.body}
+                        open=${open}
+                        renderFenced=${renderFenced}
+                    />`
+                }
                 ${extras}
             </div>`
         }
@@ -138,7 +158,11 @@ export function AgentCard({ card, id, time, who, unknown, go, extras, onRaw, ren
             <span class="acard-facts">
                 ${
                     card.outcome &&
-                    html`<span class="acard-outcome" data-part="acard-outcome" data-outcome=${card.outcome.key}>
+                    html`<span
+                        class="acard-outcome"
+                        data-part="acard-outcome"
+                        data-outcome=${card.outcome.key}
+                    >
                         Outcome: ${card.outcome.label}
                     </span>`
                 }

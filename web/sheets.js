@@ -201,7 +201,14 @@ export function Sheets({ sideOccupied }) {
         inert=${leaving}
     >
         <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
-            <${SheetInfo.Provider} value=${{ type: sheet.type, navigation, navigationTrail, closing: Boolean(leaving) }}>
+            <${SheetInfo.Provider}
+                value=${{
+                    type: sheet.type,
+                    navigation,
+                    navigationTrail,
+                    closing: Boolean(leaving),
+                }}
+            >
                 <${Boundary} key=${key} reset=${sheet}>${sheetBody(sheet)}<//>
             <//>
         <//>

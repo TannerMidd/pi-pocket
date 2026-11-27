@@ -262,9 +262,16 @@ export function MessageSheet({ entryId }) {
         <//>`;
     }
 
-    return html`<${Sheet} title=${fromAgent ? "As Pi received it" : toPi ? "Message" : "Reply"} onClose=${closeSheet}>
+    return html`<${Sheet}
+        title=${fromAgent ? "As Pi received it" : toPi ? "Message" : "Reply"}
+        onClose=${closeSheet}
+    >
         <div class="message-preview">${filesAlone ? "(attachments)" : text}</div>
-        ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
+        ${
+            toPi &&
+            entry.presentation &&
+            html`<${PresentationChoice} presentation=${entry.presentation} />`
+        }
         ${
             canBranch &&
             view.conversation.inRepository &&
