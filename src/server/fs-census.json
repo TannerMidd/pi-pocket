@@ -447,9 +447,7 @@
         },
         "getBuiltinModule": {},
         "binding": {},
-        "dlopen": {
-            "gallery/reach.ts": "a pattern that detects it in a gallery extension; it loads nothing"
-        }
+        "dlopen": {}
     },
     "loaders": {
         "pattern": "loadProjectContextFiles|loadSkills|loadSkillsFromDir",

@@ -836,3 +836,44 @@ test(
         );
     },
 );
+
+test(
+    "a descriptor is held for every holder: ending a nested pin does not close a root that the view still lists",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+        const outer = statSync(root, { bigint: true });
+        const inner = statSync(nested, { bigint: true });
+        let listed = [
+            { path: root, dev: outer.dev, ino: outer.ino },
+            { path: nested, dev: inner.dev, ino: inner.ino },
+        ];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        // The nested folder is pinned under the outer root, while both are listed (overlapping roots).
+        const folder = host.folder(nested);
+
+        assert.equal(hostfs.readText(folder.at("deep.txt")), "deep");
+        assert.equal(host.heldRoots, 2, "the outer root, and the nested pin");
+
+        // The outer root is no longer listed: its hold goes, and the inner root is now a root of its own, held for the view.
+        listed = [{ path: nested, dev: inner.dev, ino: inner.ino }];
+        assert.equal(hostfs.readText(host.at(join(nested, "deep.txt"))), "deep");
+        assert.equal(
+            host.heldRoots,
+            1,
+            "the inner root is held by the pin and by the view: one descriptor",
+        );
+
+        // Teardown of the pin: the view still lists the root, so its descriptor stays.
+        host.unpinRoot(nested);
+        assert.equal(host.heldRoots, 1);
+
+        // Not listed any more, and no pin: now the last holder lets go.
+        listed = [];
+        host.at(root);
+        assert.equal(host.heldRoots, 0);
+        host.close();
+    },
+);

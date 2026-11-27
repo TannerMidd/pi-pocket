@@ -12,7 +12,7 @@ import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { modulesIn } from "./fs-scan.ts";
+import { type Facts, factsIn, modulesIn } from "./fs-scan.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server");
 
@@ -42,19 +42,9 @@ function walk(dir: string): string[] {
     );
 }
 
-/** The source without its comments, so a sentence that quotes an import is not one. */
-function code(text: string): string {
-    return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
-
-/** The files as they are written: module names are read from their syntax tree, which ignores comments itself. */
+/** The files as they are written. Every check reads their syntax tree, which has no comments or strings in its code. */
 const raws = new Map(
     walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")] as const),
-);
-
-/** The files with their comments cut, for the checks that look for a word with a pattern. */
-const sources = new Map(
-    walk(ROOT).map((file) => [relative(ROOT, file), code(readFileSync(file, "utf8"))] as const),
 );
 
 const modulesOf = modulesIn;
@@ -98,7 +88,7 @@ test("the census lists every importer of fs, fs/promises, and child_process, and
     }
 
     for (const [file, entry] of Object.entries(census.files)) {
-        if (!sources.has(file)) {
+        if (!raws.has(file)) {
             problems.push(`${file} is in the census and is not a file`);
         } else if (
             (entry.verdict === "own" ||
@@ -144,26 +134,31 @@ test("each indirect user exists and imports no primitive", () => {
     }
 });
 
+/** Whether a file uses the escape `name`: as a name, or as a member of `process`. */
+const escapes: Record<string, (facts: Facts) => boolean> = {
+    createRequire: (facts) => facts.names.has("createRequire"),
+    getBuiltinModule: (facts) => facts.names.has("getBuiltinModule"),
+    binding: (facts) => facts.members.has("process.binding"),
+    dlopen: (facts) => facts.names.has("dlopen"),
+};
+
+const factsOf = new Map([...raws].map(([file, text]) => [file, factsIn(text)] as const));
+const loaderNames = () => new Set(census.loaders.pattern.split("|"));
+
 test("createRequire, getBuiltinModule, process.binding, and dlopen are used only where the census says", () => {
-    const patterns: Record<string, RegExp> = {
-        createRequire: /\bcreateRequire\b/,
-        getBuiltinModule: /\bgetBuiltinModule\b/,
-        binding: /\bprocess\s*\.\s*binding\b/,
-        dlopen: /\bdlopen\b/,
-    };
     const problems: string[] = [];
 
-    for (const [name, pattern] of Object.entries(patterns)) {
+    for (const [name, uses] of Object.entries(escapes)) {
         const allowed = census.escapes[name] ?? {};
 
-        for (const [file, text] of sources) {
-            if (pattern.test(text) && !(file in allowed)) {
+        for (const [file, facts] of factsOf) {
+            if (uses(facts) && !(file in allowed)) {
                 problems.push(`${file} uses ${name} and the census does not allow it`);
             }
         }
 
         for (const file of Object.keys(allowed)) {
-            if (!pattern.test(sources.get(file) ?? "")) {
+            if (!uses(factsOf.get(file) ?? factsIn(""))) {
                 problems.push(`${file} is listed for ${name} and no longer uses it`);
             }
         }
@@ -173,10 +168,44 @@ test("createRequire, getBuiltinModule, process.binding, and dlopen are used only
 });
 
 test("Pi's loaders, which read the paths they are given, are called only on a snapshot", () => {
-    const pattern = new RegExp(`\\b(?:${census.loaders.pattern})\\s*\\(`);
-    const callers = [...sources].filter(([, text]) => pattern.test(text)).map(([file]) => file);
+    const callers = [...factsOf]
+        .filter(([, facts]) => facts.calls.some((call) => loaderNames().has(call.name)))
+        .map(([file]) => file);
 
     assert.deepEqual(callers.sort(), [...census.loaders.allowed].sort());
+});
+
+test("the escape and loader checks read the syntax: a string with comment markers hides nothing", () => {
+    const hide = (code: string) => `const open = "/*";\n${code}\nconst close = "*/";\n`;
+
+    assert.equal(escapes.binding!(factsIn(hide("process.binding('fs');"))), true);
+    assert.equal(escapes.binding!(factsIn(hide("process['binding']('fs');"))), true);
+    assert.equal(escapes.getBuiltinModule!(factsIn(hide("process.getBuiltinModule('fs');"))), true);
+    assert.equal(escapes.createRequire!(factsIn(hide("createRequire(import.meta.url);"))), true);
+    assert.equal(escapes.dlopen!(factsIn(hide("process.dlopen(m, 'x');"))), true);
+    assert.equal(
+        factsIn(hide("loadSkillsFromDir({ dir });")).calls.some((call) =>
+            loaderNames().has(call.name),
+        ),
+        true,
+    );
+    assert.equal(
+        factsIn(hide("loadProjectContextFiles({ cwd });")).calls.some((call) =>
+            loaderNames().has(call.name),
+        ),
+        true,
+    );
+    // A word in a string or a comment is not a use.
+    assert.equal(
+        escapes.binding!(factsIn("const t = 'process.binding'; // process.binding()")),
+        false,
+    );
+    assert.equal(
+        factsIn("const t = 'loadSkills('; /* loadSkills() */").calls.some((call) =>
+            loaderNames().has(call.name),
+        ),
+        false,
+    );
 });
 
 test("no package that wraps fs or spawn is imported, except where the census names it", () => {
@@ -266,7 +295,7 @@ test("import() and require() take a single string literal, except where the cens
     const problems: string[] = [];
     const raw = (file: string) => readFileSync(join(ROOT, file), "utf8");
 
-    for (const file of sources.keys()) {
+    for (const file of raws.keys()) {
         const open = loadsOf(raw(file)).filter((each) => !each.literal);
 
         if (open.length > 0 && !(file in census.dynamicImport)) {
@@ -304,9 +333,6 @@ test("a module is read by its decoded name: backticks and escapes are the same m
 test("a string that holds a comment marker does not hide an import: the source is read as it is written", () => {
     const hidden = 'const open = "/*";\nimport fs from "node:fs";\nconst close = "*/";\n';
 
-    // What cutting comments by pattern leaves: the import is gone.
-    assert.deepEqual(primitivesOf(code(hidden)), []);
-    // What is read as written: it is there.
     assert.deepEqual(primitivesOf(hidden), ["fs"]);
     assert.equal(
         [...raws.values()].some((text) => primitivesOf(text).length > 0),

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
-import { modulesIn } from "./fs-scan.ts";
+import { factsIn, modulesIn } from "./fs-scan.ts";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server");
@@ -28,16 +28,6 @@ function walk(dir: string): string[] {
 
 /** The files as they are written: module names are read from their syntax tree, which ignores comments itself. */
 const raws = new Map(walk(ROOT).map((file) => [relative(ROOT, file), readFileSync(file, "utf8")]));
-
-/** The files with their comments cut, for the check that looks for a word with a pattern. */
-const sources = new Map(
-    walk(ROOT).map((file) => [
-        relative(ROOT, file),
-        readFileSync(file, "utf8")
-            .replace(/\/\*[\s\S]*?\*\//g, "")
-            .replace(/^\s*\/\/.*$/gm, ""),
-    ]),
-);
 
 /** Whether the file loads one of the modules (`names`, with or without `node:`), read from its syntax tree. */
 const imports = (text: string, names: string[]): boolean => {
@@ -89,29 +79,64 @@ test("child_process is imported only by the named spawn wrappers and files of Po
     }
 });
 
+const SPAWNS = new Set([
+    "spawn",
+    "spawnSync",
+    "execFile",
+    "execFileSync",
+    "exec",
+    "execSync",
+    "fork",
+]);
+const PROGRAM = /^(?:.*[\\/])?(?:git|gh)(?:\.exe)?$/;
+
+/** Whether a file starts git or gh, from its syntax tree: a spawn call with the program as a string or a list's first. */
+function startsGit(text: string): boolean {
+    return factsIn(text).calls.some(
+        (call) => SPAWNS.has(call.name) && call.first !== undefined && PROGRAM.test(call.first),
+    );
+}
+
 test("no git or gh is started outside the hardened runner", () => {
     const runner = new Set(["git.ts", "git-own.ts", "github.ts"]);
-    const start =
-        /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork)\s*\(\s*(?:\[?\s*)?["'`](?:[^"'`]*[\\/])?(?:git|gh)(?:\.exe)?["'`]/;
-    const bare = /["'`](?:git|gh)["'`]\s*,\s*\[/;
     const problems: string[] = [];
 
-    for (const [file, text] of sources) {
+    for (const [file, text] of raws) {
         if (runner.has(file)) {
             continue;
         }
 
-        if (start.test(text)) {
+        if (startsGit(text)) {
             problems.push(`${file} starts git or gh`);
         }
 
-        // A command list that names git as its program, handed to a spawn helper of the file's own.
-        if (bare.test(text) && imports(raws.get(file) ?? "", ["child_process"])) {
+        // A command that names git as its program, handed to a spawn helper of the file's own.
+        if (
+            imports(text, ["child_process"]) &&
+            factsIn(text).calls.some(
+                (call) =>
+                    !SPAWNS.has(call.name) &&
+                    call.listed &&
+                    call.first !== undefined &&
+                    PROGRAM.test(call.first),
+            )
+        ) {
             problems.push(`${file} names git or gh as a program beside child_process`);
         }
     }
 
     assert.deepEqual(problems, []);
+});
+
+test("the git check reads the syntax: a string with comment markers hides no spawn", () => {
+    const hide = (code: string) => `const open = "/*";\n${code}\nconst close = "*/";\n`;
+
+    assert.equal(startsGit(hide('spawn("git", ["status"]);')), true);
+    assert.equal(startsGit(hide("execFileSync(`gh`, []);")), true);
+    assert.equal(startsGit(hide('cp.spawnSync("/usr/bin/git", args);')), true);
+    assert.equal(startsGit(hide('execFile(["git", "x"]);')), true);
+    assert.equal(startsGit('const t = \'spawn("git")\'; // spawn("git")'), false);
+    assert.equal(startsGit('spawn("npm", ["git"]);'), false);
 });
 
 test("hostfs exports no raw path-based file primitive: its operations take a Place", async () => {

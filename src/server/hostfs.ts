@@ -1710,7 +1710,7 @@ export class Hostfs {
      * first look), by device and inode. An open descriptor keeps its inode allocated, so the inode number cannot be reused
      * by a replacement folder: what a walk compares a root with is still the admitted folder. Plain folders hold none.
      */
-    readonly #held = new Map<string, number>();
+    readonly #held = new Map<string, { fd: number; holders: Set<string> }>();
     /** The key of each nested pin, by stated path, for teardown. */
     readonly #heldNested = new Map<string, string>();
 
@@ -1729,7 +1729,7 @@ export class Hostfs {
         return this.#held.size;
     }
 
-    /** Admission teardown: the folder's pinned identity and its descriptor go (a new look pins it again). */
+    /** Admission teardown: the folder's pinned identity goes, and its descriptor with it unless another holder has it. */
     unpinRoot(path: string): void {
         const target = resolve(path);
         const key = this.#heldNested.get(target);
@@ -1737,40 +1737,66 @@ export class Hostfs {
         this.#roots.delete(target);
         this.#heldNested.delete(target);
 
-        if (key !== undefined && ![...this.#heldNested.values()].includes(key)) {
-            this.#release(key);
+        if (key !== undefined) {
+            this.#drop(key, `nested:${target}`);
         }
     }
 
     /** Shutdown: every held descriptor is closed. */
     close(): void {
-        for (const key of [...this.#held.keys()]) {
-            this.#release(key);
+        for (const [key, entry] of [...this.#held]) {
+            this.#held.delete(key);
+
+            try {
+                closeSync(entry.fd);
+            } catch {
+                // Already closed.
+            }
         }
 
         this.#roots.clear();
         this.#heldNested.clear();
     }
 
-    #release(key: string): void {
-        const fd = this.#held.get(key);
+    /**
+     * A descriptor is held for every holder of the root: the sandbox view (the folder is listed), and each nested pin.
+     * It is closed only when the last of them lets go, so ending one holder never takes another's protection away.
+     */
+    #drop(key: string, holder: string): void {
+        const entry = this.#held.get(key);
 
-        this.#held.delete(key);
+        if (entry === undefined) {
+            return;
+        }
 
-        if (fd !== undefined) {
+        entry.holders.delete(holder);
+
+        if (entry.holders.size === 0) {
+            this.#held.delete(key);
+
             try {
-                closeSync(fd);
+                closeSync(entry.fd);
             } catch {
                 // Already closed.
             }
         }
     }
 
-    /** Hold the descriptor of `fd`'s folder under `key`; at the limit the root is refused and the descriptor closed. */
-    #keep(key: string, fd: number, shown: string): void {
-        if (this.#held.has(key)) {
-            closeSync(fd);
+    /** Hold the descriptor `fd` for `holder` under `key`; at the limit the root is refused and the descriptor closed. */
+    #keep(key: string, fd: number | undefined, holder: string, shown: string): void {
+        const have = this.#held.get(key);
 
+        if (have !== undefined) {
+            have.holders.add(holder);
+
+            if (fd !== undefined) {
+                closeSync(fd);
+            }
+
+            return;
+        }
+
+        if (fd === undefined) {
             return;
         }
 
@@ -1784,14 +1810,17 @@ export class Hostfs {
             );
         }
 
-        this.#held.set(key, fd);
+        this.#held.set(key, { fd, holders: new Set([holder]) });
     }
 
-    /** Hold the sandboxed folder's descriptor (once); a folder that cannot be opened now is left to fail at its use. */
+    /** Hold the sandboxed folder's descriptor for the view (once); a folder that cannot be opened now fails at its use. */
     #holdStart(start: SandboxedFolder): void {
         const key = keyOf(start);
+        const have = this.#held.get(key);
 
-        if (this.#held.has(key)) {
+        if (have !== undefined) {
+            have.holders.add("view");
+
             return;
         }
 
@@ -1803,7 +1832,7 @@ export class Hostfs {
             return;
         }
 
-        this.#keep(key, fd, start.path);
+        this.#keep(key, fd, "view", start.path);
     }
 
     /** A place for `located`, with the descriptor of the sandboxed folder it is in held. */
@@ -1822,14 +1851,13 @@ export class Hostfs {
             key: keyOf(each),
         }));
 
-        // A sandboxed folder that the view no longer lists is torn down: its descriptor goes unless a nested pin holds it.
+        // A sandboxed folder that the view no longer lists loses the view's hold; a nested pin on it keeps its own.
         if (this.#held.size > 0) {
             const live = new Set(listed.map((each) => each.key));
-            const nested = new Set(this.#heldNested.values());
 
-            for (const key of [...this.#held.keys()]) {
-                if (!live.has(key) && !nested.has(key)) {
-                    this.#release(key);
+            for (const [key, entry] of [...this.#held]) {
+                if (!live.has(key) && entry.holders.has("view")) {
+                    this.#drop(key, "view");
                 }
             }
         }
@@ -1883,7 +1911,9 @@ export class Hostfs {
                                 );
                             }
 
-                            this.#keep(key, dir, target);
+                            this.#keep(key, dir, `nested:${target}`, target);
+                        } else {
+                            this.#keep(key, undefined, `nested:${target}`, target);
                         }
 
                         this.#heldNested.set(target, key);
