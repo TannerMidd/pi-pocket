@@ -5,12 +5,21 @@
  */
 import { devNull } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { type GitOptions, git as runGit } from "./git.ts";
+import { type GitOptions, git as runGit, gitOwn } from "./git.ts";
 import {
     type FolderRef,
     type Hostfs,
+    lstat,
     lstatAsync,
+    makeTemporaryFolder,
+    mkdir,
+    own,
     type Place,
+    readFile,
+    readlink,
+    rm,
+    symlink,
+    writeFile,
     realpath,
     rmAsync,
 } from "./hostfs.ts";
@@ -302,6 +311,57 @@ async function versionOf(file: Place): Promise<string | undefined> {
     }
 }
 
+/**
+ * `git diff --no-index` of a new file against nothing. In a plain folder git reads the work tree, as it always did. In a
+ * sandboxed folder git never reads it: it follows a link that the guest puts in the middle of the path, which no flag
+ * stops. The file is read through `hostfs` (no link followed, at most `limit` bytes) into a private scratch folder under
+ * the same relative name, and git runs there, so its output names the same path. A link is copied as a link.
+ */
+export async function noIndexDiff(
+    top: FolderRef,
+    path: string,
+    flags: string[],
+    options: GitOptions,
+    scratch: string | undefined,
+    limit: number,
+): Promise<string> {
+    const args = ["diff", "--no-index", ...flags, "--", devNull, path];
+
+    if (!top.sandboxed) {
+        return git(top, args, options);
+    }
+
+    if (scratch === undefined) {
+        throw new Error(
+            "A sandboxed folder's new files are diffed from a private copy, and none is given.",
+        );
+    }
+
+    mkdir(own(scratch), { recursive: true, mode: 0o700 });
+
+    const dir = makeTemporaryFolder(join(scratch, "diff-"));
+
+    try {
+        const source = top.at(path);
+        const target = own(dir).child(path);
+        const info = lstat(source);
+
+        mkdir(own(dir).child(dirname(path)), { recursive: true });
+
+        if (info.isSymbolicLink()) {
+            symlink(readlink(source), target);
+        } else if (info.isFile() && info.size <= limit) {
+            writeFile(target, readFile(source, { max: limit }), { mode: info.mode & 0o777 });
+        } else {
+            throw new Error("That file is not a regular file of a size to diff.");
+        }
+
+        return await gitOwn(dir, args, { ...options, allowExit: options.allowExit });
+    } finally {
+        rm(own(dir), { recursive: true, force: true });
+    }
+}
+
 /** Where a folder is in its repository, as git writes paths: `app/` for the folder app, empty at the top. */
 async function prefixOf(folder: FolderRef): Promise<string> {
     return (await git(folder, ["rev-parse", "--show-prefix"])).trim();
@@ -315,6 +375,8 @@ export async function changesIn(
     folder: FolderRef,
     entries: readonly ClientEntry[],
     onlyHere = false,
+    /** Where private copies go for a sandboxed folder (`noIndexDiff`). */
+    scratch?: string,
 ): Promise<Changes> {
     let root: string;
 
@@ -360,12 +422,13 @@ export async function changesIn(
             }
 
             const added = parseNumstat(
-                await git(
+                await noIndexDiff(
                     top,
-                    ["diff", "--no-index", "--numstat", "-z", ...DIFF_FLAGS, "--", devNull, path],
-                    {
-                        allowExit: [1],
-                    },
+                    path,
+                    ["--numstat", "-z", ...DIFF_FLAGS],
+                    { allowExit: [1] },
+                    scratch,
+                    MAX_COUNTED_BYTES,
                 ),
             ).get(path);
 
@@ -421,7 +484,12 @@ export async function changesIn(
  * The diff of one changed file of the repository the folder is in, against the last commit; a new file's whole content.
  * Only files that git lists as changed: the path cannot point anywhere else. With `onlyHere`, only files in the folder.
  */
-export async function diffOf(folder: FolderRef, path: string, onlyHere = false): Promise<string> {
+export async function diffOf(
+    folder: FolderRef,
+    path: string,
+    onlyHere = false,
+    scratch?: string,
+): Promise<string> {
     const top = folder.host.traverse((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
     const change = parseStatus(
         await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
@@ -441,9 +509,14 @@ export async function diffOf(folder: FolderRef, path: string, onlyHere = false):
     const paths = change.from === undefined ? [path] : [change.from, path];
     const diff =
         change.code === "??" || !hasHead
-            ? await git(top, ["diff", "--no-index", "-U3", ...DIFF_FLAGS, "--", devNull, path], {
-                  allowExit: [1],
-              })
+            ? await noIndexDiff(
+                  top,
+                  path,
+                  ["-U3", ...DIFF_FLAGS],
+                  { allowExit: [1] },
+                  scratch,
+                  MAX_DIFF * 4,
+              )
             : await git(top, ["diff", "HEAD", "-M", "-U3", ...DIFF_FLAGS, "--", ...paths]);
 
     return diff.length > MAX_DIFF

@@ -41,6 +41,7 @@ import {
     rmSync,
     rmdirSync,
     statSync,
+    symlinkSync,
     unlinkSync,
     writeFileSync,
     writeSync,
@@ -1521,6 +1522,15 @@ export function isExecutable(path: string): boolean {
     }
 }
 
+/** Make a link at one of Pocket's own places (a scratch folder). A sandboxed place is never given one. */
+export function symlink(target: string, place: Place): void {
+    if (place.located.kind !== "plain") {
+        throw refused(place.display.text);
+    }
+
+    symlinkSync(target, place.located.path);
+}
+
 /** The link a sandboxed or plain place is, as text. */
 export function readlink(place: Place): string {
     return use(place, (path) => readlinkSync(path));
@@ -1724,8 +1734,15 @@ export class Hostfs {
     readonly #held = new Map<string, { fd: number; holders: Set<string> }>();
     /** The key of each nested pin, by stated path, for teardown. */
     readonly #heldNested = new Map<string, string>();
-    /** The identity of each nested pin, by stated path: any place built from a path inside one carries the pin. */
+    /** The identity of each nested pin, by stated path: the identity a folder for a walk starts with. */
     readonly #pins = new Map<string, { dev: bigint; ino: bigint }>();
+    /**
+     * The identity each nested pin must have, by its position: the sandboxed folder it lies in (by identity) and the names
+     * below it. A place carries the pins of the positions it passes through, whatever label or alias it was reached by.
+     */
+    readonly #positions = new Map<string, { dev: bigint; ino: bigint }>();
+    /** The position of each nested pin, by stated path, for teardown. */
+    readonly #posOf = new Map<string, string>();
 
     /**
      * `maxPins`: how many root descriptors are held at once, sandboxed folders and nested pins together (default 256,
@@ -1736,25 +1753,21 @@ export class Hostfs {
         view: SandboxView = NO_SANDBOX,
         options: {
             maxPins?: number;
-            /** The nested pins of another context (a worker's): identities only, as the owner holds the descriptors. */
-            pins?: readonly { path: string; dev: bigint; ino: bigint }[];
+            /** The pinned positions of another context (a worker's): identities only, as the owner holds the descriptors. */
+            positions?: readonly { position: string; dev: bigint; ino: bigint }[];
         } = {},
     ) {
         this.#view = view;
         this.#maxPins = options.maxPins ?? 256;
 
-        for (const pin of options.pins ?? []) {
-            this.#pins.set(resolve(pin.path), { dev: pin.dev, ino: pin.ino });
+        for (const pin of options.positions ?? []) {
+            this.#positions.set(pin.position, { dev: pin.dev, ino: pin.ino });
         }
     }
 
-    /** @internal: the nested pins that apply to `path` (it lies in one, or one lies in it), for a worker. */
-    pinsFor(path: string): { path: string; dev: bigint; ino: bigint }[] {
-        const shown = resolve(path);
-
-        return [...this.#pins]
-            .filter(([pin]) => within(pin, shown) || within(shown, pin))
-            .map(([pin, identity]) => ({ path: pin, ...identity }));
+    /** @internal: every pinned position, for a worker, which descends by identity as the owner does. */
+    positions(): { position: string; dev: bigint; ino: bigint }[] {
+        return [...this.#positions].map(([position, identity]) => ({ position, ...identity }));
     }
 
     /** How many root descriptors are held now. */
@@ -1772,6 +1785,14 @@ export class Hostfs {
         this.#roots.delete(target);
         this.#heldNested.delete(target);
         this.#pins.delete(target);
+
+        const position = this.#posOf.get(target);
+
+        this.#posOf.delete(target);
+
+        if (position !== undefined) {
+            this.#positions.delete(position);
+        }
 
         if (key !== undefined) {
             this.#drop(key, `nested:${target}`);
@@ -1793,6 +1814,8 @@ export class Hostfs {
         this.#roots.clear();
         this.#heldNested.clear();
         this.#pins.clear();
+        this.#positions.clear();
+        this.#posOf.clear();
     }
 
     /**
@@ -1882,28 +1905,42 @@ export class Hostfs {
     }
 
     /**
-     * @internal: `at` with the pin of every nested folder along its path (at every depth), so a place built from a path, or
-     * deeper than the folder it came from, still checks each admitted root.
+     * @internal: `at` with the identity that is required at every depth below its sandboxed folder, so a place built from a
+     * path, or deeper than the folder it came from, checks each admitted root as the walk passes it. Two sources, both
+     * matched by position (the folder's identity and the names below it), never by a path label:
+     * the nested pins, and every other sandboxed folder that the view lists inside this one.
      */
-    pinned(at: Located, label: string): Located {
-        if (at.kind !== "confined" || this.#pins.size === 0) {
+    pinned(at: Located, _label: string): Located {
+        if (at.kind !== "confined") {
             return at;
         }
 
-        const shown = resolve(label);
         const found = new Map<number, PinnedRoot>(
             (at.roots ?? []).map((each) => [each.depth, each]),
         );
+        const startKey = keyOf(at.start);
 
-        for (const [path, identity] of this.#pins) {
-            if (!within(path, shown) || !within(at.start.path, path)) {
-                continue;
-            }
+        for (let depth = 1; depth <= at.parts.length && this.#positions.size > 0; depth++) {
+            const identity = this.#positions.get(
+                `${startKey}\0${at.parts.slice(0, depth).join("/")}`,
+            );
 
-            const depth = relative(at.start.path, path).split(sep).filter(Boolean).length;
-
-            if (depth >= 1 && depth <= at.parts.length && !found.has(depth)) {
+            if (identity !== undefined && !found.has(depth)) {
                 found.set(depth, { depth, ...identity });
+            }
+        }
+
+        for (const listed of this.#view.sandboxedFolders()) {
+            const names = relative(at.start.path, resolve(listed.path)).split(sep).filter(Boolean);
+
+            if (
+                names.length >= 1 &&
+                names.length <= at.parts.length &&
+                !names.includes("..") &&
+                !found.has(names.length) &&
+                names.every((name, index) => name === at.parts[index])
+            ) {
+                found.set(names.length, { depth: names.length, dev: listed.dev, ino: listed.ino });
             }
         }
 
@@ -1999,6 +2036,11 @@ export class Hostfs {
 
                         this.#heldNested.set(target, key);
                         this.#pins.set(target, identity);
+
+                        const position = `${keyOf(where.start)}\0${where.parts.join("/")}`;
+
+                        this.#positions.set(position, identity);
+                        this.#posOf.set(target, position);
                     }
 
                     if (known === undefined) {
@@ -2190,15 +2232,15 @@ export type PlaceData = {
     located: Located;
     label: string;
     sandboxed: SandboxedFolder[];
-    pins: { path: string; dev: bigint; ino: bigint }[];
+    positions: { position: string; dev: bigint; ino: bigint }[];
 };
 
 export const sendPlace = (place: Place): PlaceData => ({
     located: place.located,
     label: place.display.text,
     sandboxed: [...(place.context?.sandboxed() ?? [])],
-    // Every nested pin that applies to the place, so the worker checks each admitted root as it descends.
-    pins: place.context?.pinsFor(place.display.text) ?? [],
+    // Every pinned position, so the worker checks each admitted root as it descends, by identity.
+    positions: place.context?.positions() ?? [],
 });
 
 /** In a worker: the same place, with the sandboxed folders it was sent with, so its children are classified as before. */
@@ -2206,7 +2248,7 @@ export const receivePlace = (data: PlaceData): Place =>
     new Place(
         data.located,
         data.label,
-        new Hostfs({ sandboxedFolders: () => data.sandboxed }, { pins: data.pins }),
+        new Hostfs({ sandboxedFolders: () => data.sandboxed }, { positions: data.positions }),
     );
 
 /**

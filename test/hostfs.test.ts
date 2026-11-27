@@ -1000,3 +1000,63 @@ test(
         assert.equal(host.heldRoots, before, "the listing took no pin");
     },
 );
+
+test(
+    "nested pins are matched by identity along the walk: an alias, an alias two levels up, and an overlapping listed root",
+    { skip: !linux },
+    (t) => {
+        const { root, outside, host } = lab(t);
+        const nested = join(root, "sub");
+        const base = join(root, "..");
+        const alias = join(base, "alias");
+        const up = join(base, "up");
+
+        symlinkSync(root, alias);
+        symlinkSync(base, up);
+        host.folder(nested);
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+
+        // Reached by an alias of the folder, and by an alias of the folder above it: the label is not the pinned path.
+        assert.throws(() => hostfs.readText(host.folder(alias).at("sub/deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.folder(alias).at("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.folder(join(up, "project")).at("sub/deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.ok(outside);
+
+        // Overlapping listed roots, and nothing that pinned the inner one: the view's own identity applies on the walk.
+        const outer = statSync(root, { bigint: true });
+        const inner = statSync(join(root, "inner"), { bigint: true, throwIfNoEntry: false });
+
+        assert.equal(inner, undefined);
+        mkdirSync(join(root, "inner"));
+        writeFileSync(join(root, "inner", "f.txt"), "real");
+
+        const innerInfo = statSync(join(root, "inner"), { bigint: true });
+        const listing = new hostfs.Hostfs({
+            sandboxedFolders: () => [
+                { path: root, dev: outer.dev, ino: outer.ino },
+                { path: join(root, "inner"), dev: innerInfo.dev, ino: innerInfo.ino },
+            ],
+        });
+
+        assert.equal(hostfs.readText(listing.at(join(root, "inner", "f.txt"))), "real");
+        rmSync(join(root, "inner"), { recursive: true });
+        mkdirSync(join(root, "inner"));
+        writeFileSync(join(root, "inner", "f.txt"), "forged");
+        assert.throws(() => hostfs.readText(listing.at(join(root, "inner", "f.txt"))), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(listing.at(root).child("inner").child("f.txt")), {
+            code: "ESTALE",
+        });
+        listing.close();
+        host.close();
+    },
+);

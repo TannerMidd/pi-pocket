@@ -4,7 +4,7 @@
  * operations people call directly check who may do them; `conversationPath` and `uploadDirectory` leave seeing the
  * conversation to their callers.
  */
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
@@ -483,13 +483,16 @@ export class Workspace {
         }
 
         const pending = (async () =>
-            changesIn(this.#app.folderOf(id), await this.#editEntries(id), onlyHere))().finally(
-            () => {
-                if (this.#changesUnderWay.get(key) === pending) {
-                    this.#changesUnderWay.delete(key);
-                }
-            },
-        );
+            changesIn(
+                this.#app.folderOf(id),
+                await this.#editEntries(id),
+                onlyHere,
+                join(this.#app.dataDir, "scratch"),
+            ))().finally(() => {
+            if (this.#changesUnderWay.get(key) === pending) {
+                this.#changesUnderWay.delete(key);
+            }
+        });
 
         this.#changesUnderWay.set(key, pending);
 
@@ -538,7 +541,12 @@ export class Workspace {
         this.#app.requireSteer(user);
 
         try {
-            return await diffOf(this.#app.folderOf(id), path, user.sessions !== undefined);
+            return await diffOf(
+                this.#app.folderOf(id),
+                path,
+                user.sessions !== undefined,
+                join(this.#app.dataDir, "scratch"),
+            );
         } catch (error) {
             throw new HttpError(404, describe(error));
         }

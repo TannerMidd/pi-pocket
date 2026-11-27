@@ -7,7 +7,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+    chmodSync,
     existsSync,
+    readdirSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -21,6 +23,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { context, modelTexts, newSession, openApp, owner, scriptedModel } from "./helpers.ts";
 import { getAgentDir, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
+import { noIndexDiff } from "../src/server/changes.ts";
 import { writeExport } from "../src/server/design/files.ts";
 import { type Place, readText, type SandboxView } from "../src/server/hostfs.ts";
 
@@ -368,5 +371,61 @@ test(
             false,
             "nothing was written into the replacement",
         );
+    },
+);
+
+test(
+    "a new file is diffed from a private copy in a sandboxed folder: a link in the middle of its path is not followed",
+    { skip: !linux, timeout: 60_000 },
+    async (t) => {
+        const { base, dir, outside, secret, view } = project();
+        const app = await openApp(scriptedModel(), join(base, "data"), undefined, undefined, view);
+
+        t.after(async () => {
+            await app.close();
+            rmSync(base, { recursive: true, force: true });
+        });
+
+        const id = await newSession(app, dir);
+        const me = owner(app);
+        const scratch = join(base, "scratch");
+
+        mkdirSync(join(dir, "sub"));
+        writeFileSync(join(dir, "sub", "file.txt"), "inside\n");
+        chmodSync(join(dir, "sub", "file.txt"), 0o755);
+
+        // As ever: the diff of a new file, under the same names, with its mode.
+        const shown = await app.workspace.changeDiff(id, me, "sub/file.txt");
+
+        assert.match(shown, /new file mode 100755/);
+        assert.match(shown, /\+\+\+ b\/sub\/file\.txt/);
+        assert.match(shown, /\+inside/);
+        assert.equal(
+            existsSync(join(base, "data", "scratch"))
+                ? readdirSync(join(base, "data", "scratch")).length
+                : 0,
+            0,
+            "no copy is left",
+        );
+
+        // After status listed `sub/file.txt`, the guest puts a link in place of `sub`: git would follow it, so it is not asked.
+        rmSync(join(dir, "sub"), { recursive: true });
+        mkdirSync(join(outside, "sub"));
+        writeFileSync(join(outside, "sub", "file.txt"), "OUTSIDE SECRET\n");
+        symlinkSync(join(outside, "sub"), join(dir, "sub"));
+
+        await assert.rejects(
+            noIndexDiff(
+                app.folderOf(id),
+                "sub/file.txt",
+                ["-U3"],
+                { allowExit: [1] },
+                scratch,
+                1_000_000,
+            ),
+            { code: "EACCES" },
+        );
+        assert.equal(existsSync(scratch) ? readdirSync(scratch).length : 0, 0, "no copy is left");
+        assert.ok(secret);
     },
 );
