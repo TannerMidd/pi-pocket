@@ -560,3 +560,41 @@ test(
         });
     },
 );
+
+test(
+    "a child of a plain place is classified again: a walk that starts above a sandboxed folder is confined from there",
+    { skip: !linux },
+    (t) => {
+        const { root, outside, host } = lab(t);
+        const above = host.at(join(root, ".."));
+        const alias = join(root, "..", "alias");
+
+        symlinkSync(root, alias);
+        symlinkSync(outside, join(root, "out"));
+
+        assert.equal(above.sandboxed, false);
+        // Entering the folder by name: confined, so its own link is not followed.
+        assert.equal(above.child("project").sandboxed, true);
+        assert.equal(hostfs.readText(above.child("project").child("ok.txt")), "ok");
+        assert.equal(hostfs.readText(above.child("project/sub/deep.txt")), "deep");
+        assert.throws(() => hostfs.readText(above.child("project/out/secret.txt")), {
+            code: "EACCES",
+        });
+        assert.throws(
+            () => hostfs.readText(above.child("project").child("out").child("secret.txt")),
+            { code: "EACCES" },
+        );
+        // Entering it by an alias is refused at the child that enters.
+        assert.throws(() => above.child("alias/ok.txt"), { code: "EACCES" });
+        assert.throws(() => above.child("alias").child("out"), { code: "EACCES" });
+        // Outside every folder it stays plain, and Pocket's own places have no context to classify with.
+        assert.equal(hostfs.readText(above.child("outside/secret.txt")), "secret");
+        assert.equal(hostfs.own(root).child("out").sandboxed, false);
+
+        // A worker takes the place with the folders it was sent with, and classifies its children the same way.
+        const received = hostfs.receivePlace(hostfs.sendPlace(above));
+
+        assert.equal(received.child("project").sandboxed, true);
+        assert.throws(() => received.child("alias/ok.txt"), { code: "EACCES" });
+    },
+);

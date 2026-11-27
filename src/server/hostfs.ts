@@ -214,11 +214,18 @@ export class Place {
     /** @internal */
     readonly located: Located;
     readonly #label: string;
+    readonly #host: Hostfs | undefined;
 
     /** @internal */
-    constructor(located: Located, label: string) {
+    constructor(located: Located, label: string, host?: Hostfs) {
         this.located = located;
         this.#label = label;
+        this.#host = host;
+    }
+
+    /** @internal: the context that classified this place; none for Pocket's own places. */
+    get context(): Hostfs | undefined {
+        return this.#host;
     }
 
     get display(): Display {
@@ -237,20 +244,26 @@ export class Place {
             return this;
         }
 
-        return this.located.kind === "plain"
-            ? new Place(
-                  { kind: "plain", path: join(this.located.path, ...parts) },
-                  join(this.#label, ...parts),
-              )
-            : new Place(
-                  {
-                      kind: "confined",
-                      start: this.located.start,
-                      parts: [...this.located.parts, ...parts],
-                      ...(this.located.root === undefined ? {} : { root: this.located.root }),
-                  },
-                  join(this.#label, ...parts),
-              );
+        // A plain place is classified again at each step: a child can enter a sandboxed folder (a walk that starts above
+        // one), and from there it is confined. Pocket's own places have no context, and stay plain.
+        if (this.located.kind === "plain") {
+            const joined = join(this.located.path, ...parts);
+
+            return this.#host === undefined
+                ? new Place({ kind: "plain", path: joined }, join(this.#label, ...parts))
+                : this.#host.classified(joined, join(this.#label, ...parts));
+        }
+
+        return new Place(
+            {
+                kind: "confined",
+                start: this.located.start,
+                parts: [...this.located.parts, ...parts],
+                ...(this.located.root === undefined ? {} : { root: this.located.root }),
+            },
+            join(this.#label, ...parts),
+            this.#host,
+        );
     }
 
     /** The place that holds this one; undefined at the top of its folder. */
@@ -262,7 +275,7 @@ export class Place {
 
             return up === at.path
                 ? undefined
-                : new Place({ kind: "plain", path: up }, dirname(this.#label));
+                : new Place({ kind: "plain", path: up }, dirname(this.#label), this.#host);
         }
 
         return at.parts.length === 0
@@ -277,6 +290,7 @@ export class Place {
                           : { root: at.root }),
                   },
                   dirname(this.#label),
+                  this.#host,
               );
     }
 
@@ -1700,7 +1714,7 @@ export class Hostfs {
     at(path: string): Place {
         const folders = this.#folders();
 
-        return new Place(this.#locate(path, folders, false), resolve(path));
+        return new Place(this.#locate(path, folders, false), resolve(path), this);
     }
 
     /** Whether a path is there. A refused path (a link into a sandboxed folder) is not. */
@@ -1737,7 +1751,11 @@ export class Hostfs {
         const folders = this.#folders();
 
         if (folders.length === 0) {
-            return new Place({ kind: "plain", path: join(base, ...parts) }, join(base, ...parts));
+            return new Place(
+                { kind: "plain", path: join(base, ...parts) },
+                join(base, ...parts),
+                this,
+            );
         }
 
         const own = this.#locate(base, folders, true);
@@ -1755,25 +1773,34 @@ export class Hostfs {
                         : { root: { depth: own.parts.length, ...identity } }),
                 },
                 join(base, ...parts),
+                this,
             );
         }
 
         // The folder is plain, but the name may pass through a sandboxed folder below it.
         const joined = join(base, ...parts);
 
-        return new Place(this.#locate(joined, folders, false), joined);
+        return new Place(this.#locate(joined, folders, false), joined, this);
+    }
+
+    /** @internal: a path below a plain place, classified as a raw path is. */
+    classified(path: string, label: string): Place {
+        return new Place(this.#locate(path, this.#folders(), false), label, this);
     }
 }
 
 /** A place as data a worker can take (it is cloned, and holds no handle): `receivePlace` makes the place again. */
-export type PlaceData = { located: Located; label: string };
+export type PlaceData = { located: Located; label: string; sandboxed: SandboxedFolder[] };
 
 export const sendPlace = (place: Place): PlaceData => ({
     located: place.located,
     label: place.display.text,
+    sandboxed: [...(place.context?.sandboxed() ?? [])],
 });
 
-export const receivePlace = (data: PlaceData): Place => new Place(data.located, data.label);
+/** In a worker: the same place, with the sandboxed folders it was sent with, so its children are classified as before. */
+export const receivePlace = (data: PlaceData): Place =>
+    new Place(data.located, data.label, new Hostfs({ sandboxedFolders: () => data.sandboxed }));
 
 /**
  * The place above `place`, even above the top of a sandboxed folder (where the folders above are named as the owner

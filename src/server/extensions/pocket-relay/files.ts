@@ -6,7 +6,7 @@ import {
     open,
     openNoFollow,
     realpathAsync,
-    renameAsync,
+    rename,
     unlinkAsync,
 } from "../../hostfs.ts";
 import { workspaceScheme } from "../../paths.ts";
@@ -74,6 +74,7 @@ export async function publishFetchedFile(
 ): Promise<void> {
     checkCurrent();
     const temporary = host.at(join(dirname(path), `.${randomUUID()}.tmp`));
+    const target = host.at(path);
     const handle = await open(temporary, "wx", 0o600);
 
     try {
@@ -84,8 +85,10 @@ export async function publishFetchedFile(
             await handle.close();
         }
 
+        // Nothing is awaited between this check and the rename: a route that changes after it cannot see the file
+        // published after the change.
         checkCurrent();
-        await renameAsync(temporary, host.at(path));
+        rename(temporary, target);
     } catch (error) {
         await unlinkAsync(temporary);
 
