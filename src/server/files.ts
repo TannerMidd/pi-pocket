@@ -5,7 +5,6 @@
  * has the newest one hears only that, and is compressed on demand. Browsers match the list
  * themselves as people type: typing never waits on the network.
  */
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, open, opendir, stat } from "node:fs/promises";
@@ -13,11 +12,11 @@ import { basename, join, resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
+import { openInside, realInside, within } from "./confined.ts";
 import { git } from "./git.ts";
 import { type ReadableFile, withUploadBytes } from "./upload-content.ts";
 
 const gzip = promisify(gzipCallback);
-const exec = promisify(execFile);
 
 /** The most files a list holds. Past it, the files nearest the folder's top are kept. */
 export const MAX_FILES = 100_000;
@@ -244,31 +243,19 @@ async function* candidates(
 
 /** Check only these candidates, without asking git to discover any files. NULs preserve every filename. */
 async function ignoredFiles(dir: string, names: string[], deadline: number): Promise<Set<string>> {
-    const command = exec(
-        "git",
-        ["--no-literal-pathspecs", "-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
-        {
-            cwd: dir,
-            timeout: Math.max(1, deadline - Date.now()),
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
-        },
+    const out = await git(dir, ["check-ignore", "-z", "--stdin"], {
+        allowExit: [1],
+        timeoutMs: Math.max(1, deadline - Date.now()),
+        input: names.map((name) => `./${name}\0`).join(""),
+        literalPaths: false,
+    });
+
+    return new Set(
+        out
+            .split("\0")
+            .filter((path) => path !== "")
+            .map((path) => path.slice(2)),
     );
-
-    // Git may exit before consuming stdin; the command promise reports its error.
-    command.child.stdin!.on("error", () => {});
-    command.child.stdin!.end(names.map((name) => `./${name}\0`).join(""));
-
-    try {
-        const { stdout } = await command;
-
-        return new Set(stdout.split("\0").map((path) => path.slice(2)));
-    } catch (error) {
-        if ((error as { code?: number }).code === 1) {
-            return new Set();
-        }
-
-        throw error;
-    }
 }
 
 /** A bounded breadth-first walk. A denied name spends scan work, never a result slot. */
@@ -570,16 +557,23 @@ function viewBytes(file: string, buffer: Buffer, size = buffer.length): FileView
 }
 
 /** What the viewer shows of `file`. Throws when it is not there. */
-export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]): Promise<FileView> {
+export async function viewFile(
+    file: ReadableFile,
+    allow?: FileFilter["allow"],
+    folder?: string,
+): Promise<FileView> {
     if (typeof file !== "string") {
         return withUploadBytes(file, async (bytes) => viewBytes(file.path, bytes));
     }
 
-    const info = await stat(file);
+    // In the session's folder a link that leads out of it is not followed (`confined.ts`).
+    const confined = folder !== undefined && within(folder, file);
+    const real = confined ? await realInside(folder, file) : file;
+    const info = await stat(real);
 
     if (info.isDirectory()) {
         const { entries, more } = await readSome(
-            resolve(file),
+            resolve(real),
             VIEW_ENTRIES,
             allow && Date.now() + WALK_MS,
             allow,
@@ -600,7 +594,7 @@ export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]):
         return { kind: "image", size: info.size };
     }
 
-    const handle = await open(file, "r");
+    const handle = confined ? await openInside(folder, file) : await open(file, "r");
 
     try {
         const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));

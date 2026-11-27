@@ -418,6 +418,12 @@ export class PocketApp {
     /** The data directory this server opened. Do not authorize or collect uploads under a replacement link. */
     readonly canonicalDataDir: string;
     readonly managedStorage: ManagedStorage;
+    /**
+     * Where this server loads code from while it runs: its install folder (the checkout or the package: server
+     * extensions, `web/`), the owner's drop-in extensions, and the owner's themes. A folder that shares one of them
+     * with a guest would let the guest change what the server runs (`sandbox.ts`).
+     */
+    readonly codeFolders: readonly string[];
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
@@ -579,6 +585,14 @@ export class PocketApp {
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
+        this.codeFolders = [
+            ...new Set([
+                APP_ROOT,
+                ...(options.appRoot === undefined ? [] : [options.appRoot]),
+                join(options.dataDir, "extensions"),
+                join(options.dataDir, "themes"),
+            ]),
+        ];
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
         this.updates = new Updates({

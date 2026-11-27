@@ -40,6 +40,7 @@ import {
     type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { minimatch } from "minimatch";
+import { within } from "./confined.ts";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
@@ -279,12 +280,24 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
 
 /** Pi's skills for a session in `cwd`: the first of each name, from `skillPlaces`. */
 export function loadSessionSkills(cwd: string, sources: SkillSources): Skill[] {
-    return loadSkills({
+    return inFolder(
         cwd,
-        agentDir: sources.agentDir,
-        skillPaths: skillPlaces(cwd, sources),
-        includeDefaults: false,
-    }).skills;
+        loadSkills({
+            cwd,
+            agentDir: sources.agentDir,
+            skillPaths: skillPlaces(cwd, sources),
+            includeDefaults: false,
+        }).skills,
+    );
+}
+
+/** The skills but those that lie in the session's folder by name and reach a file outside it: the guest may leave links. */
+function inFolder<T extends { filePath: string }>(cwd: string, skills: T[]): T[] {
+    const folder = canonical(cwd);
+
+    return skills.filter(
+        (skill) => !within(cwd, skill.filePath) || within(folder, canonical(skill.filePath)),
+    );
 }
 
 /** Whether Pi trusts the project a session in `cwd` works in, and the project skills that wait for it. */
@@ -297,12 +310,15 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
     const skillsIn = (paths: string[]) =>
         paths.length === 0
             ? []
-            : loadSkills({
+            : inFolder(
                   cwd,
-                  agentDir: sources.agentDir,
-                  skillPaths: paths,
-                  includeDefaults: false,
-              }).skills.map(({ name, description }) => ({ name, description }));
+                  loadSkills({
+                      cwd,
+                      agentDir: sources.agentDir,
+                      skillPaths: paths,
+                      includeDefaults: false,
+                  }).skills,
+              ).map(({ name, description }) => ({ name, description }));
     const skills = skillsIn(folders);
     const ownSkills = skillsIn(existsSync(own) ? [own] : []);
     const settings = existsSync(join(folder, CONFIG_DIR_NAME, "settings.json"));

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { renameSync } from "node:fs";
 import { open, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { openNoFollow } from "../../no-follow.ts";
+import { openInside } from "../../confined.ts";
 import { workspaceScheme } from "../../paths.ts";
 import { isEnvFile } from "../../secrets.ts";
 import type { RelayOutFile } from "./types.ts";
@@ -139,7 +139,7 @@ export async function readFiles(
             );
         }
 
-        const handle = await openNoFollow(real);
+        const handle = await openInside(root, real);
 
         try {
             const stat = await handle.stat();

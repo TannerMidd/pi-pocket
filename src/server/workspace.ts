@@ -403,7 +403,7 @@ export class Workspace {
             return {
                 path: name,
                 display: displayPath(name, this.#app.cwdOf(id)),
-                ...(await viewFile(file, policy?.allow)),
+                ...(await viewFile(file, policy?.allow, this.#app.cwdOf(id))),
             };
         } catch (error) {
             if (error instanceof HttpError && error.status !== 404) {

@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
+import { readInsideSync, within } from "../confined.ts";
 import type { PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
 
@@ -115,7 +116,32 @@ export default function createPrompt(host: PocketHost) {
         let skills: string | undefined;
 
         try {
-            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir });
+            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir }).flatMap(
+                (file) => {
+                    if (!within(cwd, file.path)) {
+                        return [file];
+                    }
+
+                    // The folder's own file is the guest's to write: read it again, and only if it stays in the folder.
+                    try {
+                        return [
+                            {
+                                ...file,
+                                content: readInsideSync(cwd, file.path)
+                                    .toString("utf8")
+                                    .replace(/^\uFEFF/, ""),
+                            },
+                        ];
+                    } catch {
+                        host.notice(
+                            "warning",
+                            `${file.path} leads out of the folder, so it is not in the prompt.`,
+                        );
+
+                        return [];
+                    }
+                },
+            );
 
             if (files.length > 0) {
                 context = files

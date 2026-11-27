@@ -13,6 +13,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { readInsideSync, within } from "./confined.ts";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = {
@@ -26,12 +27,17 @@ export type PromptTemplate = {
 /** How much of a template's first line serves as its description, when it has none. */
 const DESCRIPTION_LENGTH = 60;
 
-function readTemplate(path: string): PromptTemplate | undefined {
+/** A template, read as the host: a file of the session's folder is read only when the file it reaches is in the folder too. */
+function readTemplate(path: string, folder: string): PromptTemplate | undefined {
     let frontmatter: Record<string, unknown>;
     let body: string;
 
     try {
-        ({ frontmatter, body } = parseFrontmatter(readFileSync(path, "utf8")) as {
+        const text = within(folder, path)
+            ? readInsideSync(folder, path).toString("utf8")
+            : readFileSync(path, "utf8");
+
+        ({ frontmatter, body } = parseFrontmatter(text) as {
             frontmatter: Record<string, unknown>;
             body: string;
         });
@@ -68,7 +74,7 @@ function isFile(path: string): boolean {
 }
 
 /** The `.md` files of a folder, not its subfolders; a missing or unreadable folder has none. */
-function templatesIn(directory: string): PromptTemplate[] {
+function templatesIn(directory: string, folder: string): PromptTemplate[] {
     let names: string[];
 
     try {
@@ -81,7 +87,7 @@ function templatesIn(directory: string): PromptTemplate[] {
 
     return names.flatMap((name) => {
         const path = join(directory, name);
-        const template = isFile(path) ? readTemplate(path) : undefined;
+        const template = isFile(path) ? readTemplate(path, folder) : undefined;
 
         return template === undefined ? [] : [template];
     });
@@ -98,8 +104,8 @@ export function loadPromptTemplates(
     { project = true }: { project?: boolean } = {},
 ): PromptTemplate[] {
     const found = [
-        ...templatesIn(join(agentDir, "prompts")),
-        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
+        ...templatesIn(join(agentDir, "prompts"), cwd),
+        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts"), cwd) : []),
     ];
 
     for (const raw of paths) {
@@ -110,13 +116,13 @@ export function loadPromptTemplates(
         }
 
         if (isFile(path)) {
-            const template = path.endsWith(".md") ? readTemplate(path) : undefined;
+            const template = path.endsWith(".md") ? readTemplate(path, cwd) : undefined;
 
             if (template !== undefined) {
                 found.push(template);
             }
         } else {
-            found.push(...templatesIn(path));
+            found.push(...templatesIn(path, cwd));
         }
     }
 
