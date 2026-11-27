@@ -49,6 +49,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { CodingTools, createCodingTools } from "@earendil-works/pi-durable/tools";
+import { turnCredentialRouting, type TurnCredentials } from "./turn-credentials.ts";
 import { Alerts } from "./alerts.ts";
 import { sweepAssets } from "./artifacts.ts";
 import { Attribution, type Missing } from "./attribution.ts";
@@ -386,6 +387,8 @@ export interface OpenOptions {
     supervised: boolean;
     log?: (line: string) => void;
     rotateOwnerToken?: boolean;
+    /** A host may resolve personal credentials for turns on one gateway provider. */
+    turnCredentials?: TurnCredentials;
     /** Tests register scripted providers here. */
     configureModels?: (models: ModelRuntime) => void;
     /** Tests shorten the limit gate's waits (`limit-gate.ts`). */
@@ -553,6 +556,7 @@ export class PocketApp {
     #restoredThrough = 0;
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
+    readonly #turnCredentials: TurnCredentials | undefined;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
     /** Request shapers from the extension modules the owner turned on (`host.shapeModelRequests`). */
     readonly #shapers: ModelRequestShaper[] = [];
@@ -566,6 +570,7 @@ export class PocketApp {
     readonly now: () => number;
 
     private constructor(options: OpenOptions) {
+        this.#turnCredentials = options.turnCredentials;
         this.#configureModels = options.configureModels;
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
@@ -1153,6 +1158,15 @@ export class PocketApp {
         const storage = await openNodeSqliteStorage(join(this.dataDir, "pocket.sqlite"));
 
         this.#openingStorage = storage;
+
+        if (this.#turnCredentials) {
+            registry.install(
+                turnCredentialRouting(this.models, this.#turnCredentials, (id, ctx) =>
+                    storage.submission(id, ctx),
+                ),
+            );
+        }
+
         this.harness = await Harness.open(
             storage,
             {
@@ -1674,6 +1688,7 @@ export class PocketApp {
 
         const registry = () => this.#registry;
         const stream = () => this.streamSettings();
+        const personalTurns = this.#turnCredentials !== undefined;
         // Every model Pi knows, so each gets room for its summary when Pi's settings set no reserve (`compaction.ts`).
         const compaction = compactionReader(
             settings,
@@ -1707,7 +1722,10 @@ export class PocketApp {
                 return safe(() => settings.getSettings().steeringMode) ?? "all";
             },
             get followUpMode() {
-                return safe(() => settings.getSettings().followUpMode) ?? "all";
+                // Each queued follow-up starts a separate run when runs can use different accounts.
+                return personalTurns
+                    ? "one-at-a-time"
+                    : (safe(() => settings.getSettings().followUpMode) ?? "all");
             },
         } as HarnessSettings;
     }
