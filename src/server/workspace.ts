@@ -25,6 +25,7 @@ import type { User } from "./config.ts";
 import { describe, HttpError } from "./errors.ts";
 import type { ReadableFile, UploadContent } from "./upload-content.ts";
 import { uploadDirectory } from "./upload-references.ts";
+import { confines } from "./confined.ts";
 import { filePolicy } from "./file-policy.ts";
 import { FileLists, type FileListing, type FileView, viewFile } from "./files.ts";
 import { displayPath, expandHome } from "./paths.ts";
@@ -342,7 +343,9 @@ export class Workspace {
             throw new HttpError(404, "Image not found");
         }
 
-        return result;
+        // The policy gives the real path, which a link may have moved out of the folder. What was asked for decides
+        // whether the read is confined, so it stays the path that the reader opens (`confined.ts`).
+        return typeof result === "string" && confines(this.#app.cwdOf(id), file) ? file : result;
     }
 
     readableFile(user: User, id: ConversationId, path: string): ReadableFile {
