@@ -273,6 +273,7 @@ function createGondolin(
         onChange: (rootId) => web.send("changed", { c: rootId }),
         onActivity: () => web.send("vms", {}),
         onEnded: (rootId, reason) => jobs.vmEnded(rootId, reason),
+        onProblem: (message) => host.notice("warning", `Gondolin sandbox: ${message}`),
         folderProblem: (path, kind) => folderProblem(path, places(), kind),
     });
 
@@ -476,6 +477,12 @@ function createGondolin(
                     );
                 }
             })
+            .catch((error: unknown) =>
+                host.notice(
+                    "warning",
+                    `Gondolin sandbox: ${error instanceof Error ? error.message : String(error)}`,
+                ),
+            )
             .finally(() => web.send("changed", {}));
     });
 

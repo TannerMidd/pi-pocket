@@ -416,7 +416,11 @@ export class GondolinVm implements GuestVm {
             void Promise.resolve(this.#vm.close()).catch(() => undefined);
 
             for (const listener of this.#exits) {
-                listener(reason);
+                try {
+                    listener(reason);
+                } catch {
+                    // a listener that fails must not stop the others, or throw out of the runner's exit event
+                }
             }
         }
     }
@@ -429,17 +433,20 @@ export class GondolinVm implements GuestVm {
         let killing: Promise<void> | undefined;
 
         const kill = () => {
-            killing = Promise.resolve(
-                this.#vm.exec([
-                    "/bin/sh",
-                    "-c",
-                    'me=$$; for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = "$me" ] && continue; if tr "\\0" "\\n" < "$d/environ" 2>/dev/null | grep -qx "PI_POCKET_EXEC=$0"; then kill -9 "$p" 2>/dev/null; fi; done',
-                    marker,
-                ]),
-            ).then(
-                () => undefined,
-                () => undefined,
-            );
+            // Inside an abort event: a VM that throws instead of answering must not throw out of it.
+            killing = Promise.resolve()
+                .then(() =>
+                    this.#vm.exec([
+                        "/bin/sh",
+                        "-c",
+                        'me=$$; for d in /proc/[0-9]*; do p=${d#/proc/}; [ "$p" = "$me" ] && continue; if tr "\\0" "\\n" < "$d/environ" 2>/dev/null | grep -qx "PI_POCKET_EXEC=$0"; then kill -9 "$p" 2>/dev/null; fi; done',
+                        marker,
+                    ]),
+                )
+                .then(
+                    () => undefined,
+                    () => undefined,
+                );
         };
 
         options.signal?.addEventListener("abort", kill, { once: true });
@@ -993,7 +1000,11 @@ export class GondolinDriver implements SandboxDriver {
 
         vm.server?.controller?.on?.("state", (state: string) => {
             if (state === "running") {
-                own();
+                try {
+                    own();
+                } catch {
+                    // inside an event: the call after the boot owns the runner, and throws where it can be caught
+                }
             }
         });
 

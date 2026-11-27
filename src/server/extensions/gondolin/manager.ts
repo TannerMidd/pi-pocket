@@ -123,6 +123,8 @@ export interface ManagerOptions {
     readonly onChange?: (rootId: number) => void;
     /** Called when a VM goes from idle to working or back (the owner's list says which). */
     readonly onActivity?: (rootId: number) => void;
+    /** Called with a problem that no session's call can report: the runner record could not be written. */
+    readonly onProblem?: (message: string) => void;
     /** Called when a VM ends, for whatever reason, with its session and the reason: what ran in it ended too. */
     readonly onEnded?: (rootId: number, reason: string) => void;
     /** Why a folder may not be mounted (`policy.ts`), or undefined. A session's own folder that fails never starts. */
@@ -275,6 +277,15 @@ export class SandboxManager {
             this.#options.onEnded?.(rootId, reason);
         } catch (error) {
             this.#options.log(`sandbox: an end listener failed: ${String(error)}`);
+        }
+    }
+
+    /** Tell the owner of a problem with the runner record, which no call of a session can say. */
+    #problem(message: string): void {
+        try {
+            this.#options.onProblem?.(message);
+        } catch (error) {
+            this.#options.log(`sandbox: a problem listener failed: ${String(error)}`);
         }
     }
 
@@ -652,7 +663,19 @@ export class SandboxManager {
                     entry.phase = "stopped";
                     entry.stoppedAt = this.#now();
                     entry.note = `The sandbox ended: ${reason}`;
-                    this.#forget(vm);
+
+                    // The runner is gone: its record comes off, and when that fails it stays for a later release or
+                    // start to remove. Nothing thrown here may leave the callback, or the end is not reported.
+                    try {
+                        this.#forget(vm);
+                    } catch (error) {
+                        const problem = error instanceof Error ? error.message : String(error);
+
+                        entry.note += ` Its runner is still on record: ${problem}`;
+                        this.#options.log(`sandbox: ${problem}`);
+                        this.#problem(problem);
+                    }
+
                     this.#ended(rootId, `the sandbox ended: ${reason}`);
                     this.#changed(rootId);
                 }
