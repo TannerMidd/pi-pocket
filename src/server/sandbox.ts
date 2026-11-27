@@ -7,7 +7,8 @@
  * reason. The sandbox itself (the VM, its files, its network, its lifecycle) is a module's (`extensions/gondolin.ts`)
  * and comes in through `host.sandbox.register`.
  */
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { ExecutionError, FileError, type ExecutionEnv, err } from "@earendil-works/pi-durable/env";
@@ -16,6 +17,7 @@ import type { RemoteBrowser } from "./browser.ts";
 import type { Role, User } from "./config.ts";
 import { SandboxDoc, SubagentsDoc } from "./docs.ts";
 import { LiveDoc } from "@earendil-works/pi-durable";
+import { within } from "./confined.ts";
 import { HttpError } from "./errors.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -156,6 +158,46 @@ export function namesPath(args: unknown, depth = 0): boolean {
     return false;
 }
 
+function canonical(path: string): string {
+    try {
+        return realpathSync(path);
+    } catch {
+        return resolve(path);
+    }
+}
+
+/**
+ * Why a folder may not be shared with a guest whatever the mode (even read only), or undefined when it may. The server
+ * reloads its own code from the folders in `codeFolders`, and keeps its sign-ins and every session in the data folder:
+ * a folder that is, holds, or lies in one of them would let the guest run code as the server, or read and change
+ * what it keeps. Only the sessions' own worktrees (`worktrees/` of the data folder) are project folders.
+ */
+export function reloadedFolderProblem(
+    path: string,
+    codeFolders: readonly string[],
+    dataDir: string,
+): string | undefined {
+    const target = canonical(path);
+    const data = canonical(dataDir);
+    const say = (what: string) =>
+        `${path} is, holds, or lies in ${what}, which this server loads code from or keeps its data in: a sandbox cannot share it. Use a project folder somewhere else.`;
+
+    for (const folder of codeFolders.map(canonical)) {
+        if (within(folder, target) || within(target, folder)) {
+            return say(folder);
+        }
+    }
+
+    if (
+        within(target, data) ||
+        (within(data, target) && !within(join(data, "worktrees"), target))
+    ) {
+        return say(data);
+    }
+
+    return undefined;
+}
+
 /** The environment of a sandboxed session that cannot run anything: every call fails, and says why. */
 export function failedEnv(cwd: string, message: string): ExecutionEnv {
     const file = () => Promise.resolve(err(new FileError("permission_denied", message)));
@@ -208,6 +250,38 @@ export class Sandboxes {
         return this.#providers.at(-1)?.provider;
     }
 
+    /** Why `cwd` may not be a sandbox's folder: the server's own (`reloadedFolderProblem`), or the module's. */
+    #folderProblem(cwd: string): string | undefined {
+        const app = this.#app;
+
+        return (
+            reloadedFolderProblem(cwd, app.codeFolders, app.dataDir) ??
+            this.provider?.folderProblem?.(cwd)
+        );
+    }
+
+    /**
+     * Whether a sandboxed session uses `folder`, or a folder that holds it or lies in it: what a guest wrote can be
+     * there. A folder shared by a sandboxed and an ordinary session counts, as the guest writes it all the same.
+     */
+    usesFolder(folder: string): boolean {
+        const here = canonical(folder);
+
+        for (const id of this.#on) {
+            try {
+                const used = canonical(this.#app.cwdOf(id as unknown as ConversationId));
+
+                if (within(here, used) || within(used, here)) {
+                    return true;
+                }
+            } catch {
+                // A session that is gone uses no folder.
+            }
+        }
+
+        return false;
+    }
+
     /** Which conversations are sandboxed, kept in step with their documents: the browser asks without waiting. */
     readonly #on = new Set<number>();
 
@@ -243,6 +317,12 @@ export class Sandboxes {
             return none(
                 "This session runs in a sandbox, and the sandbox has no browser (this machine's browser is never used for it).",
             );
+        }
+
+        const problem = this.#folderProblem(app.cwdOf(id));
+
+        if (problem !== undefined) {
+            return none(problem);
         }
 
         try {
@@ -285,6 +365,15 @@ export class Sandboxes {
             return failedEnv(
                 cwd,
                 "This session runs in a sandbox, but the sandbox module is off, so nothing ran. Turn on Gondolin sandbox in Menu → Extensions, or ask the owner to turn the sandbox off for this session.",
+            );
+        }
+
+        const problem = this.#folderProblem(cwd);
+
+        if (problem !== undefined) {
+            return failedEnv(
+                cwd,
+                `The sandbox cannot share this folder, so nothing ran: ${problem}`,
             );
         }
 
@@ -433,6 +522,12 @@ export class Sandboxes {
             throw new HttpError(409, "A sandbox does not support a remote workspace.");
         }
 
+        const problem = this.#folderProblem(cwd);
+
+        if (problem !== undefined) {
+            throw new HttpError(409, problem);
+        }
+
         return provider.jobs({
             conversationId: id,
             rootId: app.rootOf(id),
@@ -458,7 +553,7 @@ export class Sandboxes {
             return `This session runs in a sandbox, so a linked session it starts works in its folder (${own}), not in ${cwd}. The owner can allow other folders in Menu → Extensions → Gondolin sandbox.`;
         }
 
-        return provider?.folderProblem?.(cwd);
+        return this.#folderProblem(cwd);
     }
 
     /**
@@ -524,7 +619,7 @@ export class Sandboxes {
                 throw new HttpError(409, "A sandbox does not support a remote workspace.");
             }
 
-            const folder = provider.folderProblem?.(app.cwdOf(id));
+            const folder = this.#folderProblem(app.cwdOf(id));
 
             if (folder !== undefined) {
                 throw new HttpError(409, folder);

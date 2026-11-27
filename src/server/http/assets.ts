@@ -1,10 +1,12 @@
 /** The web app's own files and the modules it imports, its content security policy, and image files it shows. */
 import { createHash } from "node:crypto";
-import { closeSync, createReadStream, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { type FileHandle, open } from "node:fs/promises";
+import { confines, openInside } from "../confined.ts";
 import { type ReadableFile, withUploadBytes } from "../upload-content.ts";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
@@ -400,6 +402,7 @@ export function serveImage(
     request: IncomingMessage,
     response: ServerResponse,
     file: ReadableFile,
+    folder?: string,
 ): void | Promise<void> {
     if (!IMAGE_EXTENSIONS.has(extname(typeof file === "string" ? file : file.path).toLowerCase())) {
         throw new HttpError(415, "Only image files can be shown");
@@ -427,59 +430,69 @@ export function serveImage(
         });
     }
 
-    let size: number;
-    let mtime: number;
-    let type: string | undefined;
+    return serveImageFile(request, response, file, folder);
+}
+
+async function serveImageFile(
+    request: IncomingMessage,
+    response: ServerResponse,
+    file: string,
+    folder: string | undefined,
+): Promise<void> {
+    let handle: FileHandle;
 
     try {
-        const stats = statSync(file);
-
-        if (!stats.isFile()) {
-            throw new Error("not a file");
-        }
-
-        size = stats.size;
-        mtime = stats.mtimeMs;
-        const head = Buffer.alloc(1024);
-        const fd = openSync(file, "r");
-
-        try {
-            type = sniffImage(head.subarray(0, readSync(fd, head, 0, head.length, 0)));
-        } finally {
-            closeSync(fd);
-        }
+        handle =
+            folder !== undefined && confines(folder, file)
+                ? await openInside(folder, file)
+                : await open(file, "r");
     } catch {
         throw new HttpError(404, "Image not found");
     }
 
-    if (type === undefined) {
-        throw new HttpError(415, "That file is not an image");
+    try {
+        const stats = await handle.stat();
+
+        if (!stats.isFile()) {
+            throw new HttpError(404, "Image not found");
+        }
+
+        const head = Buffer.alloc(1024);
+        const type = sniffImage(
+            head.subarray(0, (await handle.read(head, 0, head.length, 0)).bytesRead),
+        );
+
+        if (type === undefined) {
+            throw new HttpError(415, "That file is not an image");
+        }
+
+        if (stats.size > MAX_IMAGE_FILE) {
+            throw new HttpError(413, "Image too large to show");
+        }
+
+        const etag = `"${stats.size.toString(36)}-${Math.floor(stats.mtimeMs).toString(36)}"`;
+        const headers = {
+            etag,
+            "cache-control": "private, no-cache",
+            "content-security-policy": IMAGE_CSP,
+        };
+
+        if (request.headers["if-none-match"] === etag) {
+            response.writeHead(304, headers);
+            response.end();
+
+            return;
+        }
+
+        response.writeHead(200, {
+            ...headers,
+            "content-type": type,
+            "content-length": String(stats.size),
+        });
+        await pipeline(handle.createReadStream({ autoClose: false, start: 0 }), response).catch(
+            () => response.destroy(),
+        );
+    } finally {
+        await handle.close();
     }
-
-    if (size > MAX_IMAGE_FILE) {
-        throw new HttpError(413, "Image too large to show");
-    }
-
-    const etag = `"${size.toString(36)}-${Math.floor(mtime).toString(36)}"`;
-    const headers = {
-        etag,
-        "cache-control": "private, no-cache",
-        "content-security-policy": IMAGE_CSP,
-    };
-
-    if (request.headers["if-none-match"] === etag) {
-        response.writeHead(304, headers);
-        response.end();
-
-        return;
-    }
-
-    response.writeHead(200, {
-        ...headers,
-        "content-type": type,
-        "content-length": String(size),
-    });
-    createReadStream(file)
-        .on("error", () => response.destroy())
-        .pipe(response);
 }

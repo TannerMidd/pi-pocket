@@ -85,6 +85,7 @@ import {
     type UploadContent,
     withUploadBytes,
 } from "./upload-content.ts";
+import { confines, readInside } from "./confined.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
@@ -1400,23 +1401,35 @@ export class Commands {
                 const mime = IMAGE_MIME[extname(path).toLowerCase()];
 
                 if (mime !== undefined) {
-                    if (
-                        images &&
-                        (typeof file === "string" ? statSync(file).size : file.content.size) <=
-                            MAX_INLINE_IMAGE
-                    ) {
-                        parts.push(
-                            (typeof file === "string"
-                                ? await modelImage(file, mime)
-                                : await withUploadBytes(file, (bytes) => modelImage(bytes, mime))
-                            ).image,
-                        );
+                    if (images) {
+                        if (typeof file !== "string") {
+                            if (file.content.size <= MAX_INLINE_IMAGE) {
+                                parts.push(
+                                    (
+                                        await withUploadBytes(file, (bytes) =>
+                                            modelImage(bytes, mime),
+                                        )
+                                    ).image,
+                                );
+                            }
+                        } else {
+                            const folder = app.cwdOf(id);
+                            const source = confines(folder, file)
+                                ? await readInside(folder, file, MAX_INLINE_IMAGE)
+                                : statSync(file).size <= MAX_INLINE_IMAGE
+                                  ? file
+                                  : undefined;
+
+                            if (source !== undefined) {
+                                parts.push((await modelImage(source, mime)).image);
+                            }
+                        }
                     }
 
                     continue;
                 }
 
-                const view = await viewFile(file);
+                const view = await viewFile(file, undefined, app.cwdOf(id));
 
                 if (view.kind !== "text" || total >= MAX_MENTIONED_TOTAL) {
                     continue;

@@ -9,6 +9,7 @@ import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { readJobSupervision } from "../job-supervision.ts";
+import { confines, openInside } from "../confined.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
@@ -481,7 +482,12 @@ export async function conversationRoutes(
             throw new HttpError(400, "path is required");
         }
 
-        return serveImage(request, response, app.workspace.conversationFile(user, id, requested));
+        return serveImage(
+            request,
+            response,
+            app.workspace.conversationFile(user, id, requested),
+            app.cwdOf(id),
+        );
     }
 
     // A file of the session's folder as a download (a design's export): whom the file viewer lets read it, as it is.
@@ -516,7 +522,11 @@ export async function conversationRoutes(
         let handle: FileHandle;
 
         try {
-            handle = await openNoFollow(file);
+            const folder = app.cwdOf(id);
+
+            handle = confines(folder, file)
+                ? await openInside(folder, file)
+                : await openNoFollow(file);
         } catch {
             throw new HttpError(404, "File not found");
         }

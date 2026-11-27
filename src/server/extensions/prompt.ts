@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
+import { confines, readInsideSync, sandboxedFolder } from "../confined.ts";
 import type { PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
 
@@ -84,6 +85,8 @@ const STALE_MS = 30_000;
 type Resources = {
     at: number;
     trust: number;
+    /** Whether a sandboxed session used the folder: its context files were read confined. */
+    confined: boolean;
     context: string | undefined;
     skills: string | undefined;
 };
@@ -106,8 +109,14 @@ export default function createPrompt(host: PocketHost) {
     const load = (cwd: string): Resources => {
         const cached = resources.get(cwd);
         const trust = trustChanged();
+        const confined = sandboxedFolder(cwd);
 
-        if (cached !== undefined && Date.now() - cached.at < STALE_MS && cached.trust === trust) {
+        if (
+            cached !== undefined &&
+            Date.now() - cached.at < STALE_MS &&
+            cached.trust === trust &&
+            cached.confined === confined
+        ) {
             return cached;
         }
 
@@ -115,7 +124,32 @@ export default function createPrompt(host: PocketHost) {
         let skills: string | undefined;
 
         try {
-            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir });
+            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir }).flatMap(
+                (file) => {
+                    if (!confines(cwd, file.path)) {
+                        return [file];
+                    }
+
+                    // The folder's own file is the guest's to write: read it again, and only if it stays in the folder.
+                    try {
+                        return [
+                            {
+                                ...file,
+                                content: readInsideSync(cwd, file.path)
+                                    .toString("utf8")
+                                    .replace(/^\uFEFF/, ""),
+                            },
+                        ];
+                    } catch {
+                        host.notice(
+                            "warning",
+                            `${file.path} leads out of the folder, so it is not in the prompt.`,
+                        );
+
+                        return [];
+                    }
+                },
+            );
 
             if (files.length > 0) {
                 context = files
@@ -134,7 +168,7 @@ export default function createPrompt(host: PocketHost) {
             host.notice("warning", `Could not load skills for ${cwd}: ${String(error)}`);
         }
 
-        const fresh = { at: Date.now(), trust, context, skills };
+        const fresh = { at: Date.now(), trust, confined, context, skills };
 
         resources.set(cwd, fresh);
 

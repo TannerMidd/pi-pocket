@@ -139,6 +139,7 @@ import type { Surface } from "./surfaces/types.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
+import { onSandboxedFolders } from "./confined.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
@@ -418,6 +419,12 @@ export class PocketApp {
     /** The data directory this server opened. Do not authorize or collect uploads under a replacement link. */
     readonly canonicalDataDir: string;
     readonly managedStorage: ManagedStorage;
+    /**
+     * Where this server loads code from while it runs: its install folder (the checkout or the package: server
+     * extensions, `web/`), the owner's drop-in extensions, and the owner's themes. A folder that shares one of them
+     * with a guest would let the guest change what the server runs (`sandbox.ts`).
+     */
+    readonly codeFolders: readonly string[];
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
@@ -499,6 +506,9 @@ export class PocketApp {
     /** No variables for a sandboxed session's commands: what extensions add to host commands are secrets of the host. */
     readonly #noCommandEnvs = new CommandEnvs((line) => this.#log(line));
     readonly sandboxes = new Sandboxes(this);
+    readonly #stopSandboxedFolders = onSandboxedFolders((folder) =>
+        this.sandboxes.usesFolder(folder),
+    );
     readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
@@ -579,6 +589,14 @@ export class PocketApp {
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
         this.dataDir = options.dataDir;
+        this.codeFolders = [
+            ...new Set([
+                APP_ROOT,
+                ...(options.appRoot === undefined ? [] : [options.appRoot]),
+                join(options.dataDir, "extensions"),
+                join(options.dataDir, "themes"),
+            ]),
+        ];
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;
         this.updates = new Updates({
@@ -4822,6 +4840,7 @@ export class PocketApp {
             this.spend.close();
             this.limits.close();
             this.background.close();
+            this.#stopSandboxedFolders();
             this.#unsetComponents?.();
             this.#unsubscribeCommits?.();
             this.#unsubscribeRunEnds?.();
