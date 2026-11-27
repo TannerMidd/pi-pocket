@@ -39,7 +39,7 @@ const SWITCH_NOTE =
 const STALE_NOTE =
     "This VM keeps the rules it started with. The new settings apply when it starts again.";
 const NO_SESSION_NOTE =
-    "Open a session to choose whether its tools run in a sandbox. Set up below works without one.";
+    "Open a session to choose whether its tools run in a sandbox. Set up works without one.";
 const NOT_SET_UP_NOTE =
     "The sandbox is not set up yet. Tap Set up: it installs the Gondolin package and downloads the guest image. Nothing is installed outside Pi Pocket's data folder.";
 const REMOVE_NOTE =

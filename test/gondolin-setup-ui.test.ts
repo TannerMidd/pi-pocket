@@ -106,6 +106,19 @@ test(
     },
 );
 
+test("the menu itself has a Sandbox row at home too, and one tap opens Set up", real, async () => {
+    await page.navigate(`${base}/`);
+    await inPage(`(await import("/store.js")).openSheet({ type: "menu" }); return "null";`);
+    await until(
+        async () => (await rows()).some((each) => each.startsWith("Sandbox set up")),
+        "the Sandbox set up row in the menu",
+    );
+    await inPage(
+        `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Sandbox set up")).click(); return "null";`,
+    );
+    await until(async () => (await buttons()).includes("Set up"), "Set up in the sandbox sheet");
+});
+
 test("the Sandbox row is in the session menu itself", real, async () => {
     await page.navigate(`${base}/s/${session}`);
     await until(
