@@ -514,6 +514,37 @@ test("the VM stops when idle, when the session is archived, and when the module 
     }
 });
 
+test("turning the sandbox off finishes when the VM is gone, and a VM that cannot be closed keeps it on, with the reason", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(calls("bash", { command: "true" }));
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = await newSession(app, folder("turn-off"));
+
+        await sandboxed(app, id);
+        await say(app, id, "go");
+        assert.equal(driver.log.started.length, 1);
+
+        driver.failClose = "the runner does not answer";
+        await assert.rejects(
+            () => app.sandboxes.set(id, owner(app), false),
+            /could not be stopped, so it stays on: .*does not answer/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, true, "the setting stays on");
+
+        driver.failClose = undefined;
+        await app.sandboxes.set(id, owner(app), false);
+        assert.equal(driver.vms[0]!.closed, true, "the VM is gone when the setting is off");
+        assert.equal((await app.sandboxes.get(id)).on, false);
+    } finally {
+        driver.failClose = undefined;
+        await app.close();
+    }
+});
+
 test("too many sandboxes at once fail the call with the limit", async () => {
     const driver = new FakeDriver();
 

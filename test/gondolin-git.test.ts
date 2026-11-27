@@ -334,6 +334,15 @@ test("an include path is read as git expands it: ~/, ~user/, a name relative to 
     await refused(repo, "%(prefix)/etc/x.cfg", including("%(prefix)/etc/x.cfg"));
 });
 
+test("the machine's configuration counts when the folder holds no repository: what it includes lies in the folder", async () => {
+    const scratch = temp();
+    const global = homeWith(`[include]\n\tpath = ${join(scratch, "extra.conf")}\n`);
+
+    assert.equal((await gitMounts(scratch)).gitDirs.length, 0);
+    await refused(scratch, join(scratch, "extra.conf"), global);
+    assert.equal((await starts(temp(), "rw", homeWith("[user]\n\tname = x\n"))).started, true);
+});
+
 test("the repository's own configuration may set only plain data: any other key keeps a writable folder from starting", async () => {
     const repo = repository();
 

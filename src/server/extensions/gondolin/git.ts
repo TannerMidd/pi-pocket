@@ -483,35 +483,42 @@ export async function gitConfigProblem(cwd: string, found: GitMounts): Promise<s
     }
 
     const repositories = [
-        ...found.trees.map((tree) => ({ tree, args: [] as string[] })),
-        ...found.bare.map((tree) => ({ tree, args: ["--git-dir", tree] })),
+        ...found.trees.map((tree) => ({ tree, args: [] as string[], repository: true })),
+        ...found.bare.map((tree) => ({ tree, args: ["--git-dir", tree], repository: true })),
     ];
 
-    for (const { tree, args } of repositories) {
+    // With no repository, the machine's configuration (and what it includes) still counts: git reads it in every one.
+    if (repositories.length === 0) {
+        repositories.push({ tree: cwd, args: [], repository: false });
+    }
+
+    for (const { tree, args, repository } of repositories) {
         const inside = (rest: string[]) => git(tree, [...args, ...rest]);
-        const [hooks, ...sources] = (
-            await inside([
-                "rev-parse",
-                "--path-format=absolute",
-                "--git-path",
-                "hooks",
-                "--git-path",
-                "config",
-                "--git-path",
-                "config.worktree",
-            ])
-        )
-            .trim()
-            .split("\n");
+        const [hooks = "", ...sources] = repository
+            ? (
+                  await inside([
+                      "rev-parse",
+                      "--path-format=absolute",
+                      "--git-path",
+                      "hooks",
+                      "--git-path",
+                      "config",
+                      "--git-path",
+                      "config.worktree",
+                  ])
+              )
+                  .trim()
+                  .split("\n")
+            : [];
         let names: string[] = [];
 
         try {
-            names = readdirSync(hooks!).filter((name) => !name.endsWith(".sample"));
+            names = readdirSync(hooks).filter((name) => !name.endsWith(".sample"));
         } catch {
             // no hooks folder: nothing runs from it
         }
 
-        for (const path of [hooks!, ...names.map((name) => join(hooks!, name))]) {
+        for (const path of repository ? [hooks, ...names.map((name) => join(hooks, name))] : []) {
             const place = exposed(path);
 
             if (place !== undefined) {

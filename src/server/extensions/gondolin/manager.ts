@@ -68,6 +68,14 @@ interface Entry {
     target: VmTarget;
     vm?: GuestVm;
     starting?: Promise<GuestVm>;
+    /** Counts the ends of this entry's VM: a start that began before one must not keep its VM (`#end`). */
+    generation: number;
+    /** The session's sandbox is going (`release`): no call starts a VM for it any more. */
+    revoked?: boolean;
+    /** The close of the VM, and the wait for a start under way, that an end began: every later end waits for it. */
+    closing?: Promise<void>;
+    /** A VM that could not be closed: no new one starts until a later end closes it. */
+    stuck?: GuestVm;
     busy: number;
     shell: string;
     last: number;
@@ -149,6 +157,13 @@ function looserThanSettings(spec: VmSpec, settings: SandboxSettings): boolean {
 /** A VM that finished starting with rules the settings made stricter meanwhile: it ends and starts again. */
 class RulesChanged extends Error {}
 
+/** The VM was stopped, or its session's sandbox went, while it started: it closed what it made. */
+class Stopped extends Error {
+    constructor() {
+        super("The sandbox was stopped while it started.");
+    }
+}
+
 export class SandboxManager {
     readonly #options: ManagerOptions;
     readonly #entries = new Map<number, Entry>();
@@ -194,6 +209,7 @@ export class SandboxManager {
             entry = {
                 target,
                 busy: 0,
+                generation: 0,
                 shell: "/bin/sh",
                 last: this.#now(),
                 phase: "stopped",
@@ -328,6 +344,23 @@ export class SandboxManager {
             throw new Error("The sandbox module is stopping, so nothing ran.");
         }
 
+        if (entry.revoked === true) {
+            throw new Error("The sandbox for this session is being turned off, so nothing ran.");
+        }
+
+        // The VM that ended is really gone before another starts, and before this call is judged again.
+        if (entry.closing !== undefined) {
+            await entry.closing.catch(() => undefined);
+
+            return this.#ready(rootId, signal, expect);
+        }
+
+        if (entry.stuck !== undefined) {
+            throw new Error(
+                "The sandbox's earlier VM could not be closed, so no new one starts. Stop it from the sheet, then try again.",
+            );
+        }
+
         if (entry.vm !== undefined) {
             if (
                 entry.moved === true ||
@@ -375,9 +408,11 @@ export class SandboxManager {
 
     /** Start the VM with the settings as they are now; again when they get stricter while it starts. */
     async #start(rootId: number, entry: Entry): Promise<GuestVm> {
+        const generation = entry.generation;
+
         for (let attempt = 1; ; attempt++) {
             try {
-                return await this.#startOnce(rootId, entry);
+                return await this.#startOnce(rootId, entry, generation);
             } catch (error) {
                 if (!(error instanceof RulesChanged) || attempt >= 3) {
                     throw error instanceof RulesChanged
@@ -390,11 +425,22 @@ export class SandboxManager {
         }
     }
 
-    async #startOnce(rootId: number, entry: Entry): Promise<GuestVm> {
+    async #startOnce(rootId: number, entry: Entry, generation: number): Promise<GuestVm> {
+        // Whether this start still counts: not once the module stopped, the session's sandbox went, or an end began.
+        const live = () =>
+            !this.#stopped && entry.revoked !== true && entry.generation === generation;
+
+        if (!live()) {
+            throw new Stopped();
+        }
+
         const settings = this.#options.settings();
         const holders = [...this.#entries.entries()].filter(
             ([id, other]) =>
-                id !== rootId && (other.vm !== undefined || other.starting !== undefined),
+                id !== rootId &&
+                (other.vm !== undefined ||
+                    other.starting !== undefined ||
+                    other.closing !== undefined),
         );
 
         if (holders.length >= settings.maxVms) {
@@ -478,8 +524,18 @@ export class SandboxManager {
                 throw new Error(WRITABLE_CODE(problem));
             }
 
+            if (!live()) {
+                throw new Stopped();
+            }
+
             const vm = await this.#options.driver.start(spec);
             let shell = "/bin/sh";
+
+            if (!live()) {
+                await this.#discard(entry, vm);
+
+                throw new Stopped();
+            }
 
             try {
                 const chunks: string[] = [];
@@ -497,10 +553,10 @@ export class SandboxManager {
                 // a VM that cannot run a probe cannot run a command: the next call says so
             }
 
-            if (this.#stopped || this.#entries.get(rootId) !== entry) {
-                await vm.close().catch(() => undefined);
+            if (!live()) {
+                await this.#discard(entry, vm);
 
-                throw new Error("The sandbox was stopped while it started.");
+                throw new Stopped();
             }
 
             if (
@@ -509,7 +565,7 @@ export class SandboxManager {
                 entry.target.uploadDir !== target.uploadDir
             ) {
                 // The rules got stricter, or the session moved to another folder, while the VM started.
-                await vm.close().catch(() => undefined);
+                await this.#discard(entry, vm);
 
                 throw new RulesChanged();
             }
@@ -539,7 +595,7 @@ export class SandboxManager {
 
             return vm;
         } catch (error) {
-            if (error instanceof RulesChanged) {
+            if (error instanceof RulesChanged || error instanceof Stopped) {
                 throw error;
             }
 
@@ -635,51 +691,109 @@ export class SandboxManager {
         return { input, output, stop: () => stop.abort(), exited };
     }
 
-    /** Stop a session's VM. Commands that run in it end. The next call starts a new one. */
+    /** Close a VM that no entry holds. One that cannot be closed is kept (`stuck`), so that a later end tries again. */
+    async #discard(entry: Entry, vm: GuestVm): Promise<void> {
+        try {
+            await vm.close();
+        } catch (error) {
+            entry.stuck = vm;
+            this.#options.log(`sandbox: closing a VM failed: ${String(error)}`);
+        }
+    }
+
+    /**
+     * End what a session's entry holds: a start under way and its VM. It finishes when both are really gone, and
+     * rejects when a VM could not be closed (it is kept, and the next end closes it again). Each end waits for the one
+     * before it, so a second `stop` does not return while the first still closes. True when this call ended a VM or a start.
+     */
+    async #end(rootId: number, entry: Entry, why: string): Promise<boolean> {
+        clearTimeout(entry.timer);
+        entry.timer = undefined;
+        const { vm, starting } = entry;
+        const began = vm !== undefined || starting !== undefined;
+
+        if (began) {
+            entry.generation++;
+            entry.vm = undefined;
+            entry.phase = "stopped";
+            entry.stoppedAt = this.#now();
+            entry.note = `Stopped: ${why}.`;
+            this.#changed(rootId);
+
+            if (vm !== undefined) {
+                this.#forget(vm);
+                this.#ended(rootId, why);
+            }
+        }
+
+        if (began || entry.stuck !== undefined) {
+            const before = entry.closing;
+            const closing = (async () => {
+                await before?.catch(() => undefined);
+                // A start under way closes the VM it made (`#startOnce`): wait for that, and for a close that failed.
+                await starting?.catch(() => undefined);
+
+                for (const each of [entry.stuck, vm]) {
+                    if (each !== undefined) {
+                        entry.stuck = undefined;
+
+                        try {
+                            await each.close();
+                        } catch (error) {
+                            entry.stuck = each;
+
+                            throw error;
+                        }
+                    }
+                }
+            })();
+
+            const settled = () => {
+                if (entry.closing === closing) {
+                    entry.closing = undefined;
+                }
+            };
+
+            entry.closing = closing;
+            closing.then(settled, settled);
+        }
+
+        await entry.closing;
+
+        return began;
+    }
+
+    /** Stop a session's VM. Commands that run in it end, and it is gone when this returns. The next call starts a new one. */
     async stop(rootId: number, why: string): Promise<boolean> {
         const entry = this.#entries.get(rootId);
-        const vm = entry?.vm;
 
         if (entry === undefined) {
             return false;
         }
 
-        clearTimeout(entry.timer);
-        entry.timer = undefined;
-        const starting = entry.starting;
+        try {
+            return await this.#end(rootId, entry, why);
+        } catch (error) {
+            this.#options.log(`sandbox: closing a VM failed: ${String(error)}`);
 
-        if (vm === undefined && starting === undefined) {
-            return false;
+            return true;
         }
-
-        entry.vm = undefined;
-        entry.phase = "stopped";
-        entry.stoppedAt = this.#now();
-        entry.note = `Stopped: ${why}.`;
-        this.#changed(rootId);
-
-        if (starting !== undefined) {
-            // Whoever waits for it gets an error from `#start`, which closes the VM it made.
-            this.#entries.delete(rootId);
-        }
-
-        if (vm !== undefined) {
-            this.#forget(vm);
-            this.#ended(rootId, why);
-
-            try {
-                await vm.close();
-            } catch (error) {
-                this.#options.log(`sandbox: closing a VM failed: ${String(error)}`);
-            }
-        }
-
-        return true;
     }
 
-    /** Forget a session's entry, as when it was removed. */
+    /**
+     * A session's sandbox is going: no call of the session starts a VM from now on, what runs finishes ending, and the
+     * VM is really gone when this returns. It rejects when the VM could not be closed; the session stays revoked, and a
+     * later `release` closes it again.
+     */
     async release(rootId: number, why: string): Promise<void> {
-        await this.stop(rootId, why);
+        const entry = this.#entries.get(rootId);
+
+        if (entry === undefined) {
+            return;
+        }
+
+        entry.revoked = true;
+        await this.#end(rootId, entry, why);
         this.#entries.delete(rootId);
     }
 

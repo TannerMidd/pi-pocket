@@ -387,9 +387,8 @@ function createGondolin(
             },
             launch: (flags) => manager.launchBrowser(vmTarget(target), flags),
         }),
-        release: async (conversationId) => {
-            await manager.stop(Number(conversationId), "the session's sandbox was turned off");
-        },
+        release: (conversationId) =>
+            manager.release(Number(conversationId), "the session's sandbox was turned off"),
         changed: (conversationId) => {
             web.send("changed", { c: Number(conversationId) });
         },
@@ -416,7 +415,11 @@ function createGondolin(
             }
         }),
         host.on("session.removed", ({ conversationId }) => {
-            void manager.release(conversationId, "the session was removed");
+            manager
+                .release(conversationId, "the session was removed")
+                .catch((error: unknown) =>
+                    host.notice("warning", `Gondolin sandbox: ${String(error)}`),
+                );
         }),
     ];
 

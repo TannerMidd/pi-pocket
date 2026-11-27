@@ -63,6 +63,12 @@ export class FakeDriver implements SandboxDriver {
     };
     /** A delay before a VM is ready, in ms. */
     startDelay = 0;
+    /** `start` waits for this before it makes the VM: a test holds a start here, and opens it when it wants. */
+    startGate: Promise<void> | undefined;
+    /** Each VM's `close` waits for this: a test holds a close here. */
+    closeGate: Promise<void> | undefined;
+    /** Each VM's `close` fails with this message. */
+    failClose: string | undefined;
     readonly vms: FakeVm[] = [];
     #next = 1;
 
@@ -84,11 +90,13 @@ export class FakeDriver implements SandboxDriver {
             await new Promise((resolve) => setTimeout(resolve, this.startDelay));
         }
 
+        await this.startGate;
+
         if (this.failStart !== undefined) {
             throw new Error(this.failStart);
         }
 
-        const vm = new FakeVm(`fake-${this.#next++}`, this.log);
+        const vm = new FakeVm(`fake-${this.#next++}`, this.log, this);
 
         this.vms.push(vm);
 
@@ -126,13 +134,17 @@ export class FakeVm extends EventEmitter implements GuestVm {
     readonly id: string;
     readonly fs = fakeFs;
     closed = false;
+    /** Set when `close` was called: a test waits for it, and then opens the driver's `closeGate`. */
+    closeCalled = false;
     readonly #log: FakeLog;
+    readonly #driver: FakeDriver | undefined;
     readonly #children = new Set<ReturnType<typeof spawn>>();
 
-    constructor(id: string, log: FakeLog) {
+    constructor(id: string, log: FakeLog, driver?: FakeDriver) {
         super();
         this.id = id;
         this.#log = log;
+        this.#driver = driver;
     }
 
     hostPid(): number | null {
@@ -237,6 +249,13 @@ export class FakeVm extends EventEmitter implements GuestVm {
     }
 
     async close(): Promise<void> {
+        this.closeCalled = true;
+        await this.#driver?.closeGate;
+
+        if (this.#driver?.failClose !== undefined) {
+            throw new Error(this.#driver.failClose);
+        }
+
         if (!this.closed) {
             this.closed = true;
             this.#log.closed.push(this.id);
