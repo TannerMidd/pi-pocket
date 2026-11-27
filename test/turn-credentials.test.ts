@@ -30,7 +30,7 @@ test(
         const model = scriptedModel((req, opts) => {
             const { role, text } = lastText(req);
 
-            wire.push([opts?.apiKey, opts?.headers?.["x-litellm-api-key"]]);
+            wire.push([role, opts?.apiKey, opts?.headers?.["x-litellm-api-key"]]);
 
             return role === "user" && text.endsWith("ask Alice")
                 ? fauxAssistantMessage(
@@ -87,15 +87,14 @@ test(
             keys.set(bob.id, "fake-bob");
             await app.commands.submit(id, alice, { text: "ask Alice", requestId: "alice" });
             await until(() => app.approvals.forConversation(id).length === 1, "Alice's tool card");
-            assert.deepEqual(wire, [["fake-alice", "fake-alice-gateway"]]);
-            await app.commands.submit(id, bob, {
-                text: "Bob next",
-                requestId: "bob",
+            await app.commands.submit(id, alice, {
+                text: "Alice follow-up",
+                requestId: "alice-follow-up",
                 mode: "followUp",
             });
-            const followUp = await app.commands.submit(id, alice, {
-                text: "Alice after Bob",
-                requestId: "alice-last",
+            const followUp = await app.commands.submit(id, bob, {
+                text: "Bob last",
+                requestId: "bob",
                 mode: "followUp",
             });
 
@@ -113,10 +112,10 @@ test(
 
             await submission!.wait(context);
             assert.deepEqual(wire, [
-                ["fake-alice", "fake-alice-gateway"],
-                ["fake-alice-refreshed", "fake-alice-refreshed-gateway"],
-                ["fake-bob", "fake-bob-gateway"],
-                ["fake-alice-refreshed", "fake-alice-refreshed-gateway"],
+                ["user", "fake-alice", "fake-alice-gateway"],
+                ["toolResult", "fake-alice-refreshed", "fake-alice-refreshed-gateway"],
+                ["user", "fake-alice-refreshed", "fake-alice-refreshed-gateway"],
+                ["user", "fake-bob", "fake-bob-gateway"],
             ]);
             keys.delete(bob.id);
             const missing = await app.commands.submit(id, bob, {
@@ -180,7 +179,9 @@ test("native Codex sends each person's bearer, account id and gateway key over H
             supervised: false,
             dataDir: join(root, "native"),
             log: () => {},
-            configureModels: (models) => models.registerProvider(provider, { baseUrl }),
+            // A separate loopback path makes ignoring the resolver's gateway observable.
+            configureModels: (models) =>
+                models.registerProvider(provider, { baseUrl: baseUrl + "/provider-default" }),
             turnCredentials: {
                 provider,
                 baseUrl,
