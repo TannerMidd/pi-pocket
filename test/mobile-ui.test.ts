@@ -165,6 +165,8 @@ async function fresh(): Promise<void> {
                 history: history.length + " " + JSON.stringify(history.state),
                 storage: Object.keys(sessionStorage).join(","),
                 ready: document.readyState,
+                address: JSON.stringify(globalThis.addressLog ?? null).slice(-1500),
+                now: Math.round(performance.now()),
             });
         `).catch((cause) => `the page could not be read: ${cause}`);
 
@@ -184,9 +186,39 @@ before(async () => {
     writeFileSync(join(work, "README.md"), "# Hello\n\nA file to read.\n");
     writeFileSync(join(work, "web.env"), "PORT=3000\nHOST=127.0.0.1\n");
     app = await openApp(scriptedModel(route));
-    server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
-    );
+    const handler = createHandler({
+        app,
+        listen: { host: "127.0.0.1", port: 0 },
+        restart: () => {},
+    });
+    const appSource = readFileSync(join(import.meta.dirname, "../web/app.js"), "utf8");
+    // Writes down each change of the address, with its stack, so a page that moves by itself says what moved it.
+    const probe = `
+        globalThis.addressLog = [];
+        for (const name of ["pushState", "replaceState", "go", "back", "forward"]) {
+            const real = history[name].bind(history);
+
+            history[name] = (...args) => {
+                addressLog.push({ name, args: args.slice(0, 1).concat(args.slice(2)), at: Math.round(performance.now()), stack: new Error().stack.split("\\n").slice(2, 6).join(" | ") });
+
+                return real(...args);
+            };
+        }
+    `;
+
+    server = createServer(async (request, response) => {
+        if (new URL(request.url ?? "/", "http://test.local").pathname === "/app.js") {
+            response.writeHead(200, {
+                "content-type": "text/javascript",
+                "cache-control": "no-store",
+            });
+            response.end(probe + appSource);
+
+            return;
+        }
+
+        await handler(request, response);
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     browsers = new Browsers({
