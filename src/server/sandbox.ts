@@ -2342,7 +2342,8 @@ export class Sandboxes {
             const seen = this.#revision(root);
             const missing = await this.#problemOf(this.#folderOfRoot(root));
 
-            if (!this.#on.has(root)) {
+            // A transition that wrote the tree while this waited owns it: nothing is written, and nothing is waited for.
+            if (!this.#on.has(root) || this.#revision(root) !== seen) {
                 continue;
             }
 
