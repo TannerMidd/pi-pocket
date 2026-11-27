@@ -339,7 +339,7 @@ export async function noIndexDiff(
 
     mkdir(own(scratch), { recursive: true, mode: 0o700 });
 
-    const dir = makeTemporaryFolder(join(scratch, "diff-"));
+    const dir = makeTemporaryFolder(own(scratch), "diff-").display.text;
 
     try {
         const source = top.at(path);

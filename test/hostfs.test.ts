@@ -1413,3 +1413,178 @@ test(
         host.close();
     },
 );
+
+test(
+    "every kind of write works in a sandboxed view while the walk checks entries: create, mkdir, rename, temporary names",
+    { skip: !linux },
+    async (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+        const folder = host.folder(root);
+        const pinned = host.folder(nested);
+
+        assert.ok(host.checksWalk, "a pin is recorded, so every walk checks");
+
+        for (const where of [folder, pinned]) {
+            const name = where === folder ? "top" : "inner";
+            const place = (rest: string) => where.at(`${name}-${rest}`);
+            const path = (rest: string) =>
+                join(where === folder ? root : nested, `${name}-${rest}`);
+
+            // A new file, and a file that is replaced.
+            hostfs.writeFile(place("new.txt"), "one");
+            assert.equal(readFileSync(path("new.txt"), "utf8"), "one");
+            hostfs.writeFile(place("new.txt"), "two");
+            assert.equal(readFileSync(path("new.txt"), "utf8"), "two");
+            // A new folder, one level and several.
+            hostfs.mkdir(place("dir"));
+            assert.equal(statSync(path("dir")).isDirectory(), true);
+            hostfs.mkdir(place("deep/er/still"), { recursive: true });
+            assert.equal(statSync(path("deep/er/still")).isDirectory(), true);
+            await hostfs.mkdirAsync(place("async"), { recursive: true });
+            // A rename to a name that is not there.
+            hostfs.rename(place("new.txt"), place("renamed.txt"));
+            assert.equal(readFileSync(path("renamed.txt"), "utf8"), "two");
+            await hostfs.renameAsync(place("renamed.txt"), place("again.txt"));
+            // Atomic write: a temporary name, then a rename.
+            hostfs.writeFileAtomic(place("atomic.txt"), "atomic");
+            assert.equal(readFileSync(path("atomic.txt"), "utf8"), "atomic");
+            // A copy to a new name, and an append that makes the file.
+            hostfs.copyFile(place("atomic.txt"), place("copy.txt"));
+            assert.equal(readFileSync(path("copy.txt"), "utf8"), "atomic");
+            hostfs.append(place("log.txt"), "line");
+            assert.equal(readFileSync(path("log.txt"), "utf8"), "line");
+            // A temporary folder with a name of its own.
+            const made = hostfs.makeTemporaryFolder(where.at(""), `${name}-tmp-`);
+
+            assert.equal(
+                statSync(join(where === folder ? root : nested, made.name)).isDirectory(),
+                true,
+            );
+            // Remove what was made.
+            hostfs.rm(place("deep"), { recursive: true });
+            hostfs.unlink(place("again.txt"));
+            hostfs.rm(made, { recursive: true });
+        }
+
+        host.close();
+    },
+);
+
+test(
+    "the record of a listed root is kept when its way cannot be resolved for a moment",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+
+        const info = (path: string) => {
+            const found = statSync(path, { bigint: true });
+
+            return { path, dev: found.dev, ino: found.ino };
+        };
+
+        const extra = join(root, "..", "extra");
+
+        mkdirSync(extra);
+
+        let listed = [info(root), info(nested)];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        assert.equal(hostfs.readText(host.at(join(nested, "deep.txt"))), "deep");
+        // The inner root is missing as the view changes: its way cannot be resolved.
+        const held = nested + ".away";
+
+        execFileSync("mv", [nested, held]);
+        listed = [...listed, info(extra)];
+        host.at(root);
+        // It comes back as a folder that is not the one that was listed.
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.at(join(nested, "deep.txt"))), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+        host.close();
+    },
+);
+
+test(
+    "a listed root that moves with the same inode is recorded at its new place",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+        const moved = join(root, "sub2");
+        const found = statSync(nested, { bigint: true });
+        let listed = [
+            { path: root, ...(({ dev, ino }) => ({ dev, ino }))(statSync(root, { bigint: true })) },
+            { path: nested, dev: found.dev, ino: found.ino },
+        ];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        assert.equal(hostfs.readText(host.at(join(nested, "deep.txt"))), "deep");
+        // The folder is renamed, and the view lists it at its new path: the same inode.
+        execFileSync("mv", [nested, moved]);
+        listed = [listed[0]!, { path: moved, dev: found.dev, ino: found.ino }];
+        assert.equal(hostfs.readText(host.at(join(moved, "deep.txt"))), "deep");
+        // A replacement at the new name is refused.
+        execFileSync("mv", [moved, `${moved}.old`]);
+        mkdirSync(moved);
+        writeFileSync(join(moved, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.at(join(moved, "deep.txt"))), { code: "ESTALE" });
+        host.close();
+    },
+);
+
+test(
+    "a place that was plain is classified again when the view adds the folder it is in",
+    { skip: !linux },
+    (t) => {
+        const { root, secret } = lab(t);
+
+        symlinkSync(secret, join(root, "link.txt"));
+
+        const info = statSync(root, { bigint: true });
+        let listed: { path: string; dev: bigint; ino: bigint }[] = [];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+        const saved = host.at(join(root, "link.txt"));
+        const savedFolder = host.folder(root).at("link.txt");
+
+        // Nothing is sandboxed yet: a plain place follows the link, as ever.
+        assert.equal(hostfs.readText(saved), "secret");
+        // The view adds the folder: the saved places are in a sandboxed folder now, and do not follow the guest's link.
+        listed = [{ path: root, dev: info.dev, ino: info.ino }];
+        assert.throws(() => hostfs.readText(saved), { code: "EACCES" });
+        assert.throws(() => hostfs.readText(savedFolder), { code: "EACCES" });
+        assert.equal(saved.sandboxed, true);
+        host.close();
+    },
+);
+
+test(
+    "listed roots that share a directory on their way are all recorded: the walk goes on from the descriptor that is held",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const inners = ["one", "two", "three"].map((name) => {
+            mkdirSync(join(root, "shared", name), { recursive: true });
+            writeFileSync(join(root, "shared", name, "f.txt"), name);
+
+            const found = statSync(join(root, "shared", name), { bigint: true });
+
+            return { path: join(root, "shared", name), dev: found.dev, ino: found.ino };
+        });
+        const outer = statSync(root, { bigint: true });
+        const host = new hostfs.Hostfs({
+            sandboxedFolders: () => [{ path: root, dev: outer.dev, ino: outer.ino }, ...inners],
+        });
+
+        for (const [index, name] of ["one", "two", "three"].entries()) {
+            assert.equal(hostfs.readText(host.at(join(root, "shared", name, "f.txt"))), name);
+            assert.ok(inners[index]);
+        }
+
+        host.close();
+    },
+);

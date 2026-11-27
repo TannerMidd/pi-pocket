@@ -225,7 +225,7 @@ export class Snapshots {
 
         mkdir(own(this.#dir), { recursive: true });
 
-        const root = makeTemporaryFolder(join(this.#dir, "snapshot-"));
+        const root = makeTemporaryFolder(own(this.#dir), "snapshot-").display.text;
         const budget = { left: this.#limit };
 
         try {

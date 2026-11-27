@@ -47,7 +47,6 @@ import {
     writeSync,
     appendFileSync,
     accessSync,
-    mkdtempSync,
 } from "node:fs";
 import * as fsp from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -204,16 +203,34 @@ export class FolderRef {
 
 /** A file or folder in a folder, as a name to resolve at each use. */
 export class Place {
-    /** @internal */
-    readonly located: Located;
+    #located: Located;
+    #generation: number;
     readonly #label: string;
     readonly #host: Hostfs | undefined;
 
     /** @internal */
     constructor(located: Located, label: string, host?: Hostfs) {
-        this.located = located;
+        this.#located = located;
         this.#label = label;
         this.#host = host;
+        this.#generation = host?.generation() ?? 0;
+    }
+
+    /**
+     * @internal: where the place is. A place that was plain is classified again when the view of sandboxed folders has
+     * changed since, so a saved place never follows a guest's link by path in a folder that has become sandboxed.
+     */
+    get located(): Located {
+        if (this.#located.kind === "plain" && this.#host !== undefined) {
+            const generation = this.#host.generation();
+
+            if (generation !== this.#generation) {
+                this.#located = this.#host.reclassify(this.#located.path);
+                this.#generation = generation;
+            }
+        }
+
+        return this.#located;
     }
 
     /** @internal: the context that classified this place; none for Pocket's own places. */
@@ -474,23 +491,43 @@ function pin(
         // name in this directory (a link or another folder in its place is refused), and the call then uses that
         // descriptor, not the name.
         if (host?.checksWalk === true) {
-            const probe = noLink(shown, () => fsOpenSync(path, PATH_ONLY | NO_FOLLOW));
+            let probe: number | undefined;
 
             try {
-                const info = fstatSync(probe, { bigint: true });
-
-                host.checkStep(parent, name!, info, shown);
+                probe = fsOpenSync(path, PATH_ONLY | NO_FOLLOW);
             } catch (error) {
-                closeSync(probe);
+                const code = (error as NodeJS.ErrnoException).code;
 
-                throw error;
+                // A name that is not there and was never recorded is for a call to make (a new file, a new folder, a new
+                // name). A recorded one is a pinned folder that is gone: nothing may take its name.
+                if (code === "ENOENT" && !host.recorded(parent, name!)) {
+                    probe = undefined;
+                } else if (code === "ENOENT") {
+                    throw failure(
+                        "ESTALE",
+                        `${shown} is no longer the folder it was admitted as`,
+                        shown,
+                    );
+                } else {
+                    throw code === "ELOOP" || code === "ENOTDIR" ? refused(shown) : error;
+                }
             }
 
-            if (!byName && host.recorded(parent, name!)) {
+            if (probe !== undefined) {
+                try {
+                    host.checkStep(parent, name!, fstatSync(probe, { bigint: true }), shown);
+                } catch (error) {
+                    closeSync(probe);
+
+                    throw error;
+                }
+            }
+
+            if (probe !== undefined && !byName && host.recorded(parent, name!)) {
                 return {
                     path: entry(probe),
                     release: () => {
-                        closeSync(probe);
+                        closeSync(probe!);
                         closeSync(dir);
                     },
                     confined: true,
@@ -498,7 +535,9 @@ function pin(
                 };
             }
 
-            closeSync(probe);
+            if (probe !== undefined) {
+                closeSync(probe);
+            }
         }
 
         return {
@@ -1508,8 +1547,23 @@ export function createReadStream(
     });
 }
 
-export function makeTemporaryFolder(prefix: string): string {
-    return mkdtempSync(prefix);
+/** Make a new folder with a name of its own below `parent`, exclusive (never one that is there), and return it. */
+export function makeTemporaryFolder(parent: Place, prefix: string): Place {
+    for (let attempt = 0; attempt < 100; attempt++) {
+        const made = parent.child(`${prefix}${randomUUID().slice(0, 8)}`);
+
+        try {
+            mkdir(made);
+
+            return made;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                throw error;
+            }
+        }
+    }
+
+    throw failure("EEXIST", `no free name below ${parent.display.text}`);
 }
 
 /** Whether a file on an owner's path (the server's `PATH`) can be run. Not for a session's folder. */
@@ -1759,9 +1813,10 @@ export class Hostfs {
     /** The last entry of each path that holds a nested pin. */
     readonly #byPath = new Map<string, string>();
     /** The owners that stand for the view's listed roots nested in other listed roots. */
-    #viewOwners: Owner[] = [];
+    readonly #viewOwners = new Map<string, { owner: Owner; route: string }>();
     #nextOwner = 0;
-    /** The sandboxed folders the view listed at the last look. */
+    #generation = 0;
+    /** The sandboxed folders the view listed at the last look, by identity and by path. */
     #listedKey = "";
     #listedKeys = new Set<string>();
     /** Listed roots whose way from their sandboxed folder could not be held. */
@@ -1803,6 +1858,18 @@ export class Hostfs {
             this.#chainFailed.size > 0 ||
             [...this.#listedKeys].some((key) => !this.#held.has(key))
         );
+    }
+
+    /** @internal: a number that changes whenever the view lists other sandboxed folders (or other paths for them). */
+    generation(): number {
+        this.#folders();
+
+        return this.#generation;
+    }
+
+    /** @internal: where a raw path is now, under the folders now listed (a refused path throws). */
+    reclassify(path: string): Located {
+        return this.#locate(path, this.#folders(), false);
     }
 
     /** @internal: whether an entry was recorded. */
@@ -1906,7 +1973,7 @@ export class Hostfs {
         this.#owners.clear();
         this.#byPath.clear();
         this.#edges.clear();
-        this.#viewOwners = [];
+        this.#viewOwners.clear();
         this.#chainFailed.clear();
         this.#listedKeys.clear();
         this.#listedKey = "";
@@ -1937,21 +2004,21 @@ export class Hostfs {
     }
 
     /** Hold the descriptor `fd` for `holder` under `key`; at the limit the root is refused and the descriptor closed. */
-    #keep(key: string, fd: number | undefined, holder: string, shown: string): void {
+    #keep(key: string, fd: number | undefined, holder: string, shown: string): number | undefined {
         const have = this.#held.get(key);
 
         if (have !== undefined) {
             have.holders.add(holder);
 
-            if (fd !== undefined) {
+            if (fd !== undefined && fd !== have.fd) {
                 closeSync(fd);
             }
 
-            return;
+            return have.fd;
         }
 
         if (fd === undefined) {
-            return;
+            return undefined;
         }
 
         if (this.#held.size >= this.#maxPins) {
@@ -1965,6 +2032,8 @@ export class Hostfs {
         }
 
         this.#held.set(key, { fd, holders: new Set([holder]) });
+
+        return fd;
     }
 
     /** Hold the sandboxed folder's descriptor for the view (once); a folder that cannot be opened now fails at its use. */
@@ -2027,11 +2096,19 @@ export class Hostfs {
             }
         }
 
-        const listedKey = [...live].sort().join(",");
+        // Identities and paths: a root that moved, with the same inode, is a change too.
+        const listedKey = listed
+            .map((each) => `${each.key}@${each.path}`)
+            .sort()
+            .join("\n");
 
         // The listed folders changed (or a way could not be held before): the entries from each listed root to the roots
-        // nested in it are recorded again, by the real way to them, whatever path each is listed under.
+        // nested in it are brought up to date, by the real way to them, whatever path each is listed under.
         if (listedKey !== this.#listedKey || this.#chainFailed.size > 0) {
+            if (listedKey !== this.#listedKey) {
+                this.#generation++;
+            }
+
             this.#listedKey = listedKey;
             this.#listedKeys = live;
             this.#syncViewEntries(listed);
@@ -2040,20 +2117,26 @@ export class Hostfs {
         return listed;
     }
 
-    /** Record, for each pair of listed roots where one lies in the other, the entries on the way and the identity listed. */
+    /**
+     * Bring the entries between listed roots up to date: for each pair where one lies in the other, the real way from the
+     * outer root to the inner one, and the identity the view lists for the inner one. A record is replaced only by a new
+     * one that was made in full: a way that cannot be resolved now keeps what was recorded, and never drops a check.
+     */
     #syncViewEntries(listed: Folder[]): void {
-        for (const owner of this.#viewOwners) {
-            this.#release(owner);
-        }
-
-        this.#viewOwners = [];
         this.#chainFailed.clear();
+
+        const wanted = new Set<string>();
 
         for (const outer of listed) {
             for (const inner of listed) {
                 if (outer === inner || outer.key === inner.key) {
                     continue;
                 }
+
+                const pair = `${outer.key}>${inner.key}`;
+                const old = this.#viewOwners.get(pair);
+
+                wanted.add(pair);
 
                 let realOuter: string;
                 let realInner: string;
@@ -2062,73 +2145,120 @@ export class Hostfs {
                     realOuter = realpathSync(outer.path);
                     realInner = realpathSync(inner.path);
                 } catch {
+                    // Not resolved now (a folder is missing for a moment): what was recorded stays, and without a record
+                    // the inner root cannot be crossed.
+                    if (old === undefined) {
+                        this.#chainFailed.add(inner.key);
+                    }
+
                     continue;
                 }
 
                 if (realOuter === realInner || !within(realOuter, realInner)) {
+                    // Resolved, and not nested: the record of a way that is not there any more goes.
+                    if (old !== undefined) {
+                        this.#release(old.owner);
+                        this.#viewOwners.delete(pair);
+                    }
+
                     continue;
                 }
 
                 const names = relative(realOuter, realInner).split(sep).filter(Boolean);
-                const start = this.#held.get(outer.key);
+                const route = `${realOuter}\0${names.join("/")}`;
 
-                if (start === undefined) {
-                    this.#chainFailed.add(inner.key);
+                if (old?.route === route) {
+                    continue;
+                }
+
+                const made = this.#recordRoute(outer, inner, names);
+
+                if (made === undefined) {
+                    if (old === undefined) {
+                        this.#chainFailed.add(inner.key);
+                    }
 
                     continue;
                 }
 
-                const owner: Owner = {
-                    id: this.#nextOwner++,
-                    edgeKeys: [],
-                    chainKeys: [],
-                    paths: new Set(),
-                };
-                let dir = start.fd;
-                let at: { dev: bigint; ino: bigint } = { dev: outer.dev, ino: outer.ino };
-                const opened: number[] = [];
-
-                try {
-                    for (const [index, name] of names.entries()) {
-                        const fd = fsOpenSync(entry(dir, name), FOLDER);
-
-                        opened.push(fd);
-
-                        const info = fstatSync(fd, { bigint: true });
-                        const last = index === names.length - 1;
-                        // The last entry is the listed root: it must be the identity the view lists.
-                        const expected = last
-                            ? { dev: inner.dev, ino: inner.ino }
-                            : { dev: info.dev, ino: info.ino };
-
-                        this.#record(owner, at, name, expected);
-
-                        if (!last) {
-                            this.#keep(keyOf(info), opened.pop()!, `pos:${owner.id}`, inner.path);
-                            owner.chainKeys.push(keyOf(info));
-                        }
-
-                        dir = fd;
-                        at = { dev: info.dev, ino: info.ino };
-                    }
-                } catch {
-                    this.#chainFailed.add(inner.key);
-                    this.#release(owner);
-
-                    continue;
-                } finally {
-                    for (const fd of opened) {
-                        try {
-                            closeSync(fd);
-                        } catch {
-                            // Closed.
-                        }
-                    }
+                if (old !== undefined) {
+                    this.#release(old.owner);
                 }
 
-                this.#viewOwners.push(owner);
+                this.#viewOwners.set(pair, { owner: made, route });
             }
         }
+
+        for (const [pair, each] of [...this.#viewOwners]) {
+            if (!wanted.has(pair)) {
+                this.#release(each.owner);
+                this.#viewOwners.delete(pair);
+            }
+        }
+    }
+
+    /** Record the way from `outer` to `inner` by `names`; undefined when it cannot be walked and held in full. */
+    #recordRoute(outer: Folder, inner: Folder, names: string[]): Owner | undefined {
+        const start = this.#held.get(outer.key);
+
+        if (start === undefined) {
+            return undefined;
+        }
+
+        const owner: Owner = {
+            id: this.#nextOwner++,
+            edgeKeys: [],
+            chainKeys: [],
+            paths: new Set(),
+        };
+        let dir = start.fd;
+        let at: { dev: bigint; ino: bigint } = { dev: outer.dev, ino: outer.ino };
+        const opened: number[] = [];
+
+        try {
+            for (const [index, name] of names.entries()) {
+                const fd = fsOpenSync(entry(dir, name), FOLDER);
+
+                opened.push(fd);
+
+                const info = fstatSync(fd, { bigint: true });
+                const last = index === names.length - 1;
+                // The last entry is the listed root: it must be the identity the view lists.
+                const expected = last
+                    ? { dev: inner.dev, ino: inner.ino }
+                    : { dev: info.dev, ino: info.ino };
+
+                this.#record(owner, at, name, expected);
+
+                if (!last) {
+                    // The walk goes on from the descriptor that is held, whether this one or one held already.
+                    const held = this.#keep(
+                        keyOf(info),
+                        opened.pop()!,
+                        `pos:${owner.id}`,
+                        inner.path,
+                    );
+
+                    owner.chainKeys.push(keyOf(info));
+                    dir = held!;
+                    at = { dev: info.dev, ino: info.ino };
+                }
+            }
+        } catch {
+            this.#release(owner);
+
+            return undefined;
+        } finally {
+            for (const fd of opened) {
+                try {
+                    closeSync(fd);
+                } catch {
+                    // Closed.
+                }
+            }
+        }
+
+        return owner;
     }
 
     /** Record that the entry `name` of the directory `parent` must be `identity`, for `owner`. */
