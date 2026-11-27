@@ -92,7 +92,7 @@ export async function reveal(
         throw new HttpError(404, `${path} is not there`);
     }
 
-    if (place.sandboxed) {
+    if (place.sandboxed || place.context?.holdsSandboxed(path)) {
         throw new HttpError(
             409,
             "The files of a sandboxed session are not shown by the host's file manager",

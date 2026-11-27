@@ -1838,7 +1838,7 @@ export class BackgroundTasks {
             // The adapter can throw after it creates a process but before it returns a PID.
             spawnAttempted = true;
             const { pid: spawned, start } = await this.#procs
-                .spawn(WRAPPER, this.#app.hostfs.folder(item.cwd), env, ref, authorize)
+                .spawn(WRAPPER, this.#app.hostfs.traverse(item.cwd), env, ref, authorize)
                 .catch((error: Error) => {
                     authorize?.();
 

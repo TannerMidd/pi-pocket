@@ -88,7 +88,7 @@ export class Workspace {
             return known.gitDir;
         }
 
-        const gitDir = gitDirOf(this.#app.hostfs.folder(cwd));
+        const gitDir = gitDirOf(this.#app.hostfs.traverse(cwd));
 
         this.#gitDirs.set(cwd, { gitDir, at: Date.now() });
 

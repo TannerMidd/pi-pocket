@@ -149,7 +149,7 @@ type PinnedRoot = { depth: number; dev: bigint; ino: bigint };
 
 type Located =
     | { kind: "plain"; path: string }
-    | { kind: "confined"; start: SandboxedFolder; parts: string[]; root?: PinnedRoot };
+    | { kind: "confined"; start: SandboxedFolder; parts: string[]; roots?: PinnedRoot[] };
 
 /** A folder that a session works in. Opaque: it is no string, and `fs` rejects it. */
 export class FolderRef {
@@ -258,15 +258,14 @@ export class Place {
             kind: "confined",
             start: this.located.start,
             parts: [...this.located.parts, ...parts],
-            ...(this.located.root === undefined ? {} : { root: this.located.root }),
+            ...(this.located.roots === undefined ? {} : { roots: this.located.roots }),
         };
         const label = join(this.#label, ...parts);
 
-        // A child that enters a pinned nested folder (a walk from above it) carries that pin.
+        // A child that enters a pinned nested folder (a walk from above it, or from a folder with a pin of its own)
+        // carries the pin of every nested folder along its path.
         return new Place(
-            this.located.root === undefined && this.#host !== undefined
-                ? this.#host.pinned(confined, label)
-                : confined,
+            this.#host === undefined ? confined : this.#host.pinned(confined, label),
             label,
             this.#host,
         );
@@ -291,9 +290,11 @@ export class Place {
                       kind: "confined",
                       start: at.start,
                       parts: at.parts.slice(0, -1),
-                      ...(at.root === undefined || at.root.depth > at.parts.length - 1
+                      ...(at.roots === undefined
                           ? {}
-                          : { root: at.root }),
+                          : {
+                                roots: at.roots.filter((each) => each.depth <= at.parts.length - 1),
+                            }),
                   },
                   dirname(this.#label),
                   this.#host,
@@ -373,7 +374,7 @@ function pinParent(
     parts: readonly string[],
     shown: string,
     make = false,
-    root?: PinnedRoot,
+    roots?: PinnedRoot[],
 ): { dir: number; name: string | undefined; release: (closeDir?: boolean) => void } {
     let dir = openStart(start);
 
@@ -404,8 +405,10 @@ function pinParent(
                 }
             });
 
-            if (root?.depth === index + 1) {
-                checkRoot(next, root, shown);
+            const pinned = roots?.find((each) => each.depth === index + 1);
+
+            if (pinned !== undefined) {
+                checkRoot(next, pinned, shown);
             }
 
             closeSync(dir);
@@ -469,20 +472,22 @@ function pin(
         return { path: entry(fd), release: () => closeSync(fd), confined: true, self: true };
     }
 
-    const { dir, name } = pinParent(at.start, at.parts, shown, make, at.root);
+    const { dir, name } = pinParent(at.start, at.parts, shown, make, at.roots);
 
     try {
         const path = entry(dir, checkName(name!, shown));
 
         // The entry itself is the admitted root: the descriptor that is opened must be that folder (a link or another
         // folder in its place is refused), and the call then uses that descriptor, not the name.
-        if (at.root?.depth === at.parts.length) {
+        const admitted = at.roots?.find((each) => each.depth === at.parts.length);
+
+        if (admitted !== undefined) {
             const probe = noLink(shown, () => fsOpenSync(path, PATH_ONLY | NO_FOLLOW));
 
             try {
                 const info = fstatSync(probe, { bigint: true });
 
-                if (info.dev !== at.root.dev || info.ino !== at.root.ino) {
+                if (info.dev !== admitted.dev || info.ino !== admitted.ino) {
                     throw failure(
                         "ESTALE",
                         `${shown} is no longer the folder it was admitted as`,
@@ -1112,7 +1117,7 @@ export function mkdir(place: Place, options?: { recursive?: boolean; mode?: numb
         // Every name on the way is a folder: made one at a time, never through a link.
         const at = place.located;
 
-        closeSync(pinParent(at.start, [...at.parts, ""], place.display.text, true, at.root).dir);
+        closeSync(pinParent(at.start, [...at.parts, ""], place.display.text, true, at.roots).dir);
 
         return;
     }
@@ -1727,9 +1732,29 @@ export class Hostfs {
      * well under a usual soft limit of 1024 descriptors for the process). A pin is never dropped to make room: at the
      * limit a new root is refused with `EMFILE`.
      */
-    constructor(view: SandboxView = NO_SANDBOX, options: { maxPins?: number } = {}) {
+    constructor(
+        view: SandboxView = NO_SANDBOX,
+        options: {
+            maxPins?: number;
+            /** The nested pins of another context (a worker's): identities only, as the owner holds the descriptors. */
+            pins?: readonly { path: string; dev: bigint; ino: bigint }[];
+        } = {},
+    ) {
         this.#view = view;
         this.#maxPins = options.maxPins ?? 256;
+
+        for (const pin of options.pins ?? []) {
+            this.#pins.set(resolve(pin.path), { dev: pin.dev, ino: pin.ino });
+        }
+    }
+
+    /** @internal: the nested pins that apply to `path` (it lies in one, or one lies in it), for a worker. */
+    pinsFor(path: string): { path: string; dev: bigint; ino: bigint }[] {
+        const shown = resolve(path);
+
+        return [...this.#pins]
+            .filter(([pin]) => within(pin, shown) || within(shown, pin))
+            .map(([pin, identity]) => ({ path: pin, ...identity }));
     }
 
     /** How many root descriptors are held now. */
@@ -1849,51 +1874,40 @@ export class Hostfs {
 
     /** A place for `located`, with the descriptor of the sandboxed folder it is in held. */
     #placed(located: Located, label: string): Place {
-        let at = located;
-
-        if (at.kind === "confined") {
-            this.#holdStart(at.start);
-
-            // A place built from a path inside a pinned nested folder carries that pin, so a rebuild from a path does
-            // not drop the admitted-root check.
-            if (at.root === undefined && this.#pins.size > 0) {
-                at = this.#withPin(at, label);
-            }
+        if (located.kind === "confined") {
+            this.#holdStart(located.start);
         }
 
-        return new Place(at, label, this);
+        return new Place(this.pinned(located, label), label, this);
     }
 
-    /** @internal: `at` with the pin of the nested folder it lies in, if any. */
+    /**
+     * @internal: `at` with the pin of every nested folder along its path (at every depth), so a place built from a path, or
+     * deeper than the folder it came from, still checks each admitted root.
+     */
     pinned(at: Located, label: string): Located {
-        return at.kind === "confined" && at.root === undefined && this.#pins.size > 0
-            ? this.#withPin(at, label)
-            : at;
-    }
+        if (at.kind !== "confined" || this.#pins.size === 0) {
+            return at;
+        }
 
-    #withPin(at: Located & { kind: "confined" }, label: string): Located {
         const shown = resolve(label);
-        let best: { path: string; depth: number } | undefined;
+        const found = new Map<number, PinnedRoot>(
+            (at.roots ?? []).map((each) => [each.depth, each]),
+        );
 
-        for (const path of this.#pins.keys()) {
+        for (const [path, identity] of this.#pins) {
             if (!within(path, shown) || !within(at.start.path, path)) {
                 continue;
             }
 
             const depth = relative(at.start.path, path).split(sep).filter(Boolean).length;
 
-            if (
-                depth >= 1 &&
-                depth <= at.parts.length &&
-                (best === undefined || depth > best.depth)
-            ) {
-                best = { path, depth };
+            if (depth >= 1 && depth <= at.parts.length && !found.has(depth)) {
+                found.set(depth, { depth, ...identity });
             }
         }
 
-        return best === undefined
-            ? at
-            : { ...at, root: { depth: best.depth, ...this.#pins.get(best.path)! } };
+        return found.size === 0 ? at : { ...at, roots: [...found.values()] };
     }
 
     #folders(): Folder[] {
@@ -1919,6 +1933,17 @@ export class Hostfs {
         }
 
         return listed;
+    }
+
+    /**
+     * A folder for a walk or a listing, not one a session was admitted with: it uses the pin that exists for the path (an
+     * admitted root, or a root pinned by its first look) and makes none, so a traversal of many folders holds no
+     * descriptor. Persistent pins are for the folders sessions work in (`folder`, `PocketApp.folderOf`).
+     */
+    traverse(path: string): FolderRef {
+        const target = resolve(path);
+
+        return new FolderRef(this, target, this.#pins.get(target));
     }
 
     /** A folder as a session works in it. */
@@ -2142,7 +2167,7 @@ export class Hostfs {
                     parts: [...own.parts, ...parts],
                     ...(identity === undefined || own.parts.length === 0
                         ? {}
-                        : { root: { depth: own.parts.length, ...identity } }),
+                        : { roots: [{ depth: own.parts.length, ...identity }] }),
                 },
                 join(base, ...parts),
             );
@@ -2161,17 +2186,28 @@ export class Hostfs {
 }
 
 /** A place as data a worker can take (it is cloned, and holds no handle): `receivePlace` makes the place again. */
-export type PlaceData = { located: Located; label: string; sandboxed: SandboxedFolder[] };
+export type PlaceData = {
+    located: Located;
+    label: string;
+    sandboxed: SandboxedFolder[];
+    pins: { path: string; dev: bigint; ino: bigint }[];
+};
 
 export const sendPlace = (place: Place): PlaceData => ({
     located: place.located,
     label: place.display.text,
     sandboxed: [...(place.context?.sandboxed() ?? [])],
+    // Every nested pin that applies to the place, so the worker checks each admitted root as it descends.
+    pins: place.context?.pinsFor(place.display.text) ?? [],
 });
 
 /** In a worker: the same place, with the sandboxed folders it was sent with, so its children are classified as before. */
 export const receivePlace = (data: PlaceData): Place =>
-    new Place(data.located, data.label, new Hostfs({ sandboxedFolders: () => data.sandboxed }));
+    new Place(
+        data.located,
+        data.label,
+        new Hostfs({ sandboxedFolders: () => data.sandboxed }, { pins: data.pins }),
+    );
 
 /**
  * The place above `place`, even above the top of a sandboxed folder (where the folders above are named as the owner

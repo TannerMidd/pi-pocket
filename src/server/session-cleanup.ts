@@ -456,11 +456,11 @@ export class SessionCleanup {
         ) {
             state = "shared";
         } else {
-            const status = await git(app.hostfs.folder(worktree.path), ["status", "--porcelain"]);
+            const status = await git(app.hostfs.traverse(worktree.path), ["status", "--porcelain"]);
 
             if (status.trim() !== "") {
                 state = "changes";
-            } else if (await hasIgnoredEnv(app.hostfs.folder(worktree.path)).catch(() => true)) {
+            } else if (await hasIgnoredEnv(app.hostfs.traverse(worktree.path)).catch(() => true)) {
                 state = "env";
             }
         }
@@ -468,7 +468,7 @@ export class SessionCleanup {
         return {
             path: worktree.path,
             branch: worktree.branch,
-            bytes: await sizeOf(app.hostfs.folder(worktree.path).at()),
+            bytes: await sizeOf(app.hostfs.traverse(worktree.path).at()),
             state,
         };
     }
@@ -640,14 +640,14 @@ export class SessionCleanup {
 
             if (
                 folder !== undefined &&
-                (await hasIgnoredEnv(this.#app.hostfs.folder(folder)).catch(() => true))
+                (await hasIgnoredEnv(this.#app.hostfs.traverse(folder)).catch(() => true))
             ) {
                 outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
                 continue;
             }
 
             const bytes =
-                folder === undefined ? 0 : await sizeOf(this.#app.hostfs.folder(folder).at());
+                folder === undefined ? 0 : await sizeOf(this.#app.hostfs.traverse(folder).at());
 
             try {
                 if (this.#worktreeFolder(meta.worktree) !== folder) {
@@ -888,11 +888,11 @@ export class SessionCleanup {
                     return;
                 }
 
-                if (await hasIgnoredEnv(this.#app.hostfs.folder(folder)).catch(() => true)) {
+                if (await hasIgnoredEnv(this.#app.hostfs.traverse(folder)).catch(() => true)) {
                     throw new Error(ENV_STAYS);
                 }
 
-                const size = await sizeOf(this.#app.hostfs.folder(folder).at());
+                const size = await sizeOf(this.#app.hostfs.traverse(folder).at());
 
                 await removeWorktree(this.#app.hostfs, tree, false, () => {
                     if (checkedFolder() !== folder) {

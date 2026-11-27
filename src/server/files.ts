@@ -318,7 +318,7 @@ async function filteredFiles(folder: FolderRef, max: number, filter: FileFilter)
             const ignored =
                 repository && batch.length !== 0
                     ? await ignoredFiles(
-                          folder.host.folder(dir),
+                          folder.host.traverse(dir),
                           batch.map((entry) => entry.name),
                           deadline,
                       )

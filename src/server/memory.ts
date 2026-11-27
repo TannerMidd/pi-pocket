@@ -135,7 +135,7 @@ async function projectOf(host: Hostfs, cwd: string): Promise<Project> {
     }
 
     const folder = host.real(cwd) ?? resolve(cwd);
-    const repo = host.folder(folder);
+    const repo = host.traverse(folder);
     const common = await git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .catch(() => git(repo, ["rev-parse", "--git-common-dir"]))
         .then(

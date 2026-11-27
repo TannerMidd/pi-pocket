@@ -166,7 +166,12 @@ export class Snapshots {
     sandboxed(paths: readonly string[]): boolean {
         return paths.some((path) => {
             try {
-                return this.#host.at(path).sandboxed || this.#host.confines(resolve(path));
+                // Inside a sandboxed folder, or one itself, or a folder that holds one: the guest wrote what is below.
+                return (
+                    this.#host.at(path).sandboxed ||
+                    this.#host.confines(resolve(path)) ||
+                    this.#host.holdsSandboxed(resolve(path))
+                );
             } catch {
                 // A link into a sandboxed folder: refused, so it is read from the copy, where there are no links.
                 return true;

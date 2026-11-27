@@ -331,7 +331,7 @@ export async function changesIn(
     }
 
     const edits = piEdits(entries, folder, true);
-    const top = folder.host.folder(root);
+    const top = folder.host.traverse(root);
     const branch = await git(folder, ["rev-parse", "--abbrev-ref", "HEAD"]).then(
         (name) => name.trim(),
         () => undefined,
@@ -422,7 +422,7 @@ export async function changesIn(
  * Only files that git lists as changed: the path cannot point anywhere else. With `onlyHere`, only files in the folder.
  */
 export async function diffOf(folder: FolderRef, path: string, onlyHere = false): Promise<string> {
-    const top = folder.host.folder((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
+    const top = folder.host.traverse((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
     const change = parseStatus(
         await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ).find((each) => each.path === path);
@@ -461,7 +461,7 @@ export async function revertFile(
     path: string,
     onlyHere = false,
 ): Promise<ChangeKind> {
-    const top = folder.host.folder((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
+    const top = folder.host.traverse((await git(folder, ["rev-parse", "--show-toplevel"])).trim());
     const change = parseStatus(
         await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
     ).find((each) => each.path === path);

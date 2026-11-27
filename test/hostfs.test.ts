@@ -920,3 +920,83 @@ test(
         });
     },
 );
+
+test(
+    "a pin at every depth is checked: a root pinned below another is not accepted when it is replaced",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const outer = join(root, "sub");
+        const inner = join(outer, "inner");
+
+        mkdirSync(inner);
+        writeFileSync(join(inner, "f.txt"), "real");
+
+        const folder = host.folder(outer);
+
+        host.folder(inner);
+        assert.equal(hostfs.readText(folder.at("inner/f.txt")), "real");
+        rmSync(inner, { recursive: true });
+        mkdirSync(inner);
+        writeFileSync(join(inner, "f.txt"), "forged");
+
+        // The place comes from the outer folder, which is itself intact: the pin of the inner one still applies.
+        assert.throws(() => hostfs.readText(folder.at("inner/f.txt")), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(folder.at("inner").child("f.txt")), { code: "ESTALE" });
+        assert.equal(
+            hostfs.readText(folder.at("deep.txt")),
+            "deep",
+            "the rest of the outer folder is still read",
+        );
+    },
+);
+
+test("a place sent to a worker takes the nested pins with it", { skip: !linux }, (t) => {
+    const { root, host } = lab(t);
+    const nested = join(root, "sub");
+
+    host.folder(nested);
+    rmSync(nested, { recursive: true });
+    mkdirSync(nested);
+    writeFileSync(join(nested, "deep.txt"), "forged");
+
+    const received = hostfs.receivePlace(hostfs.sendPlace(host.at(root)));
+
+    // The worker descends from above the pinned folder: the pin is checked where it enters it.
+    assert.throws(() => hostfs.readText(received.child("sub").child("deep.txt")), {
+        code: "ESTALE",
+    });
+    assert.throws(() => hostfs.readText(received.child("sub/deep.txt")), { code: "ESTALE" });
+});
+
+test(
+    "a walk over many folders holds no descriptor: only the folders sessions work in are pinned",
+    { skip: !linux, timeout: 60_000 },
+    async (t) => {
+        const { root } = lab(t);
+        const info = statSync(root, { bigint: true });
+        const host = new hostfs.Hostfs(
+            { sandboxedFolders: () => [{ path: root, dev: info.dev, ino: info.ino }] },
+            { maxPins: 20 },
+        );
+
+        execFileSync("git", ["init", "-q", "-b", "main", root]);
+
+        for (let index = 0; index < 60; index++) {
+            mkdirSync(join(root, `d${index}`));
+            writeFileSync(join(root, `d${index}`, "f.txt"), "x");
+        }
+
+        const { listFiles } = await import("../src/server/files.ts");
+        const folder = host.folder(root);
+        const before = host.heldRoots;
+        const listed = await listFiles(folder, 10_000, {
+            ordinaryTree: false,
+            allow: () => true,
+            children: () => undefined,
+        });
+
+        assert.ok(listed.files.includes("d59/f.txt"), "every folder was listed");
+        assert.equal(host.heldRoots, before, "the listing took no pin");
+    },
+);

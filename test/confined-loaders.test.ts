@@ -245,3 +245,47 @@ test(
         assert.ok(reads > 0 && reads <= 20, `${reads} entries read`);
     },
 );
+
+test(
+    "a configured skills folder that holds a sandboxed folder is loaded from a snapshot, not read in place",
+    { skip: !linux },
+    (t) => {
+        const { base, agentDir, secret } = lab(t);
+        const home = join(base, "home");
+        const holder = join(base, "skills-root");
+        const child = join(holder, "project");
+        const info = (path: string) => statSync(path, { bigint: true });
+
+        mkdirSync(join(child, "careful"), { recursive: true });
+        writeFileSync(
+            join(child, "careful", "SKILL.md"),
+            "---\nname: careful\ndescription: Be careful.\n---\nTake care.\n",
+        );
+        // The guest wrote a link as the ignore file of its folder, and it names a pattern that hides the skill.
+        writeFileSync(secret, "careful/\n");
+        symlinkSync(secret, join(child, ".gitignore"));
+
+        const childInfo = info(child);
+        const host = new Hostfs({
+            sandboxedFolders: () => [{ path: child, dev: childInfo.dev, ino: childInfo.ino }],
+        });
+        const sources: SkillSources = {
+            host,
+            snapshots: new Snapshots(host, join(base, "data", "snapshots")),
+            agentDir,
+            home,
+            settingsPaths: [holder],
+            defaultProjectTrust: "always",
+        };
+        const names = loadSessionSkills(join(base, "elsewhere"), sources).map(
+            (skill) => skill.name,
+        );
+
+        // From the snapshot the link is not copied, so it hides nothing; read in place it would hide the skill.
+        assert.deepEqual(names, ["careful"]);
+        assert.equal(
+            new Snapshots(host, join(base, "data", "snapshots")).sandboxed([holder]),
+            true,
+        );
+    },
+);

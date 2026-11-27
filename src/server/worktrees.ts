@@ -88,7 +88,7 @@ export async function createWorktree(
         throw new HttpError(400, "Remote workspaces do not support worktrees.");
     }
 
-    const here = host.folder(cwd);
+    const here = host.traverse(cwd);
     const top = await repositoryOf(here);
 
     if (top === undefined) {
@@ -99,7 +99,7 @@ export async function createWorktree(
     }
 
     // Where `cwd` is within the repository, as git sees it: `cwd` may be reached through a symbolic link, `root` not.
-    const root = host.folder(top);
+    const root = host.traverse(top);
     const within = (await git(here, ["rev-parse", "--show-prefix"])).trim();
 
     if (
@@ -134,10 +134,10 @@ export async function createWorktree(
         const changes = (await git(root, ["stash", "create"])).trim();
 
         if (changes !== "") {
-            await git(host.folder(worktree.path), ["stash", "apply", changes]);
+            await git(host.traverse(worktree.path), ["stash", "apply", changes]);
         }
 
-        const skipped = await copyNewFiles(root, host.folder(worktree.path));
+        const skipped = await copyNewFiles(root, host.traverse(worktree.path));
 
         return { worktree, cwd: resolve(worktree.path, within), skipped };
     } catch (error) {
@@ -172,7 +172,7 @@ export async function sourceFolders(
     host: Hostfs,
     worktree: Worktree,
 ): Promise<(cwd: string) => string> {
-    const root = await repositoryOf(host.folder(worktree.source));
+    const root = await repositoryOf(host.traverse(worktree.source));
     const original = host.has(worktree.source) ? real(host, worktree.source) : undefined;
 
     return (cwd) => {
@@ -202,7 +202,7 @@ export async function removeWorktree(
         return;
     }
 
-    const top = await repositoryOf(host.folder(worktree.source));
+    const top = await repositoryOf(host.traverse(worktree.source));
 
     if (top === undefined) {
         throw new HttpError(409, `${worktree.source} is not in a git repository anymore.`);
@@ -211,7 +211,7 @@ export async function removeWorktree(
     check?.();
 
     try {
-        await git(host.folder(top), [
+        await git(host.traverse(top), [
             "worktree",
             "remove",
             ...(force ? ["--force"] : []),
@@ -236,9 +236,9 @@ export async function discardWorktree(
     check?: () => void,
 ): Promise<void> {
     await removeWorktree(host, worktree, true, check);
-    const root = await repositoryOf(host.folder(worktree.source));
+    const root = await repositoryOf(host.traverse(worktree.source));
 
     if (root !== undefined) {
-        await git(host.folder(root), ["branch", "-D", worktree.branch]);
+        await git(host.traverse(root), ["branch", "-D", worktree.branch]);
     }
 }

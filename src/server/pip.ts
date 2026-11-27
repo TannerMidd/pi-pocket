@@ -1154,7 +1154,7 @@ export class Pip {
                 sameRepo(await this.#origin(folder), info.repo)
             ) {
                 return (
-                    await git(app.hostfs.folder(folder), ["rev-parse", "--show-toplevel"]).catch(
+                    await git(app.hostfs.traverse(folder), ["rev-parse", "--show-toplevel"]).catch(
                         () => folder,
                     )
                 ).trim();
@@ -1232,7 +1232,7 @@ export class Pip {
             return known.repo;
         }
 
-        const repo = await originRepo(this.#app.hostfs.folder(folder));
+        const repo = await originRepo(this.#app.hostfs.traverse(folder));
 
         this.#origins.set(folder, { repo, at: now });
 

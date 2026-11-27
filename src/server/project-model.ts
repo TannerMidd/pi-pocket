@@ -64,7 +64,7 @@ export function projectModelDefault(
     settings: SettingsManager,
     models: ModelRuntime,
 ) {
-    if (host.folder(cwd).sandboxed || !projectModelTrusted(cwd, settings)) {
+    if (host.traverse(cwd).sandboxed || !projectModelTrusted(cwd, settings)) {
         return undefined;
     }
 
