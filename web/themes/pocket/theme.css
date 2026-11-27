@@ -1,9 +1,9 @@
 /*
  * Pocket: the app's own look, "C · Bold": near-black neutral planes that rise by tone, sharp corners, 1px hairlines, one
- * quiet tool well, a monochrome primary button (blue is for links and focus), and the amber approval as the strongest
- * state. Appearance → Duplicate makes a copy of this folder that is yours to change: change a token below, or add rules
- * for the parts of the app (`data-part`). The guide is docs/extensions/themes.md; every token and part is in
- * docs/extensions/reference/theme-surface.md.
+ * quiet tool well, an accent for "here" and the primary button (coral in Pocket neutral; blue stays for links and
+ * focus), and the amber approval as the strongest state. Appearance → Duplicate makes a copy of this folder that is
+ * yours to change: change a token below, or add rules for the parts of the app (`data-part`). The guide is
+ * docs/extensions/themes.md; every token and part is in docs/extensions/reference/theme-surface.md.
  *
  * The planes, the text, and the status colors are made from the colors in use (`--o-*`, Colors in Appearance), so this
  * look follows any palette: Pocket neutral is the one it is drawn for. A copy of this folder keeps the look it was
@@ -64,18 +64,22 @@
     --glyph: color-mix(in oklab, var(--body) var(--faint-pct), var(--bg));
 
     /*
-     * The accent is the text color: what the app draws for "here", "selected", "working", and the primary button is
-     * monochrome. Blue (`--link`) is for links and the keyboard's focus ring. The state colors keep their meaning.
+     * The accent is the hue (`--hue`) of what the app draws for "here", "selected", "working", and the primary button.
+     * The hue is the palette's own accent; Pocket neutral sets it to the brand coral (below). Links and the keyboard's
+     * focus ring keep the palette's accent (`--link`, `--focus-ring`), so with Pocket neutral they stay a muted blue.
+     * The state colors keep their meaning.
      */
+    --hue: var(--o-accent);
     --link: var(--o-accent);
-    --accent: var(--text);
-    --accent-fill: var(--text);
+    --accent: var(--hue);
+    --accent-fill: var(--hue);
     --accent-ink: var(--bg);
     --accent-fill-hover: color-mix(in oklab, var(--accent-fill), var(--bg) 14%);
-    --accent-soft: color-mix(in srgb, var(--text) 12%, transparent);
-    --accent-line: color-mix(in srgb, var(--text) 40%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 55%, transparent);
     --focus-ring: var(--link);
-    --brand: var(--text);
+    --focus-soft: color-mix(in srgb, var(--focus-ring) 15%, transparent);
+    --brand: var(--accent);
     --accent-2: var(--o-magenta);
     --warn-soft: color-mix(in srgb, var(--warn) 11%, transparent);
     --warn-line: color-mix(in srgb, var(--warn) 55%, transparent);
@@ -116,7 +120,7 @@
     --pop: 0 0 0 1px var(--hair-2), inset 0 1px 0 var(--lip), 0 20px 40px -16px var(--sh);
     --window-border: var(--hair);
     --window-border-active: var(--hair-2);
-    --window-ring: 0 0 0 2px var(--accent-soft);
+    --window-ring: 0 0 0 2px var(--focus-soft);
 }
 
 /* The status colors keep their hue from the palette and their lightness fixed, so contrast holds on any colors. */
@@ -124,7 +128,12 @@
     :root {
         --accent-l: 0.76;
         --accent-c: 1.15;
+        --hue-l: 0.76;
+        --hue-c: 1.15;
         --link: oklch(from var(--o-accent) var(--accent-l) calc(c * var(--accent-c)) h);
+        --accent: oklch(from var(--hue) var(--hue-l) calc(c * var(--hue-c)) h);
+        --accent-fill: oklch(from var(--hue) 0.75 c h);
+        --accent-ink: oklch(from var(--hue) 0.22 0.02 h);
         --warn: oklch(from var(--o-yellow) 0.83 calc(c * 1.15) h);
         --err: oklch(from var(--o-red) 0.76 calc(c * 1.1) h);
         --ok: oklch(from var(--o-green) 0.8 calc(c * 1.05) h);
@@ -145,6 +154,22 @@
     :root[data-colors="pocket-neutral"] {
         --accent-l: 0.72;
         --accent-c: 1;
+        --hue-l: 0.74;
+        --hue-c: 1;
+    }
+}
+
+/*
+ * Pocket neutral carries the brand coral (the π mark) as its hue. Its red is close to coral, so the failed color moves
+ * toward crimson to stay apart from it. Any other palette keeps its own accent and its own red.
+ */
+:root[data-colors^="pocket-neutral"] {
+    --hue: #eb927b;
+}
+
+@supports (color: oklch(from red l c h)) {
+    :root[data-colors="pocket-neutral"] {
+        --err: oklch(from var(--o-red) 0.72 calc(c * 1.5) calc(h - 12));
     }
 }
 
@@ -168,10 +193,6 @@
     --sh: rgba(34, 38, 70, 0.2);
     --scrim: color-mix(in srgb, var(--o-fg) 38%, transparent);
     --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
-    --accent-fill: var(--text);
-    --accent-ink: var(--bg);
-    --accent-soft: color-mix(in srgb, var(--text) 9%, transparent);
-    --accent-line: color-mix(in srgb, var(--text) 35%, transparent);
     --warn: color-mix(in oklab, var(--o-yellow) 62%, var(--o-fg));
     --ok: color-mix(in oklab, var(--o-green) 78%, var(--o-fg));
     --err: color-mix(in oklab, var(--o-red) 85%, var(--o-fg));
@@ -181,6 +202,8 @@
     :root[data-mode="light"] {
         --accent-l: 0.49;
         --accent-c: 1.3;
+        --hue-l: 0.49;
+        --hue-c: 1.3;
         --warn: oklch(from var(--o-yellow) 0.48 calc(c * 1.1) h);
         --err: oklch(from var(--o-red) 0.5 calc(c * 1.1) h);
         --ok: oklch(from var(--o-green) 0.47 calc(c * 1.05) h);
@@ -208,7 +231,16 @@
     :root[data-mode="light"][data-colors="pocket-neutral-light"] {
         --accent-l: 0.53;
         --accent-c: 1;
+        --hue-l: 0.47;
+        --hue-c: 1.1;
+        --err: oklch(from var(--o-red) 0.48 calc(c * 1.3) calc(h - 12));
     }
+}
+
+/* In light colors the accent's ink is dark (its fill is bright), but warm and failed fills are deep: their text stays light. */
+:root[data-mode="light"]
+    :is(.badge.warn, .peeks-jump, .badge-host .badge.err, .board-mark, .board-cell-core) {
+    color: var(--bg);
 }
 
 /* ───────────────────────────── The rail and the session list ───────────────────────────── */
@@ -279,7 +311,7 @@
 /* The place you are in: its button lifts a plane and a 3px edge stands at the rail's edge. */
 .places-rail .rail-place.on {
     background: var(--row-on);
-    color: var(--text);
+    color: var(--accent);
 }
 
 .places-rail .rail-place.on::before {
@@ -299,13 +331,15 @@
     min-width: 16px;
     height: 16px;
     border-radius: var(--r-tag);
+    background: var(--text);
+    color: var(--bg);
     box-shadow: none;
     font-weight: 700;
 }
 
 .rail-count.attn {
     background: var(--warn);
-    color: var(--accent-ink);
+    color: var(--bg);
 }
 
 /* The list: a plane of its own. */
@@ -405,7 +439,7 @@
     line-height: 1;
 }
 
-/* Find any session, Needs attention, Pinned & working: calm rows, 32px on a desktop. */
+/* Find any session, Needs attention, Pinned & working: calm rows, 36px on a desktop. */
 .family-routes {
     margin: 8px 0 0;
     padding-bottom: 4px;
@@ -428,13 +462,13 @@
 
 @media (pointer: fine) {
     .family-index-link {
-        min-height: 32px;
+        min-height: 36px;
     }
 }
 
 /* Group heads: air above, a quiet label, lined up with the state marks. Priority's are mono capitals. */
 .group-head {
-    padding: 20px 12px 6px 12px;
+    padding: 24px 14px 8px 14px;
     font-size: 12px;
     font-weight: 500;
     color: var(--muted);
@@ -442,7 +476,7 @@
 
 .session-items > .session-group:first-child > .group-head,
 .session-items > .family-routes + .session-group > .group-head {
-    padding-top: 16px;
+    padding-top: 18px;
 }
 
 .group-name,
@@ -480,16 +514,16 @@
     }
 }
 
-/* A session's line: one line at 30px on a desktop, a thumb's size on a touch screen. */
+/* A session's line: one line at 36px on a desktop (less when the density is tighter), a thumb's size on a touch screen. */
 .session-row {
-    --row-line: calc(18px + 12px * var(--space-y));
+    --row-line: calc(22px + 14px * var(--space-y));
     padding-block: 0;
 }
 
 .session {
     grid-template-columns: 10px minmax(0, 1fr) auto;
-    gap: 0 10px;
-    padding-left: 12px;
+    gap: 0 12px;
+    padding-left: 14px;
     border-radius: var(--r-row);
 }
 
@@ -506,15 +540,15 @@
 
 @media (pointer: fine) {
     :root[data-density="comfortable"] .sidebar .session-row:not(.with-chips, .needs-you) {
-        --row-line: calc(18px + 12px * var(--space-y));
-        contain-intrinsic-size: auto calc(18px + 12px * var(--space-y));
+        --row-line: calc(22px + 14px * var(--space-y));
+        contain-intrinsic-size: auto calc(22px + 14px * var(--space-y));
     }
 
     :root[data-density="comfortable"]
         .sidebar
         .session-row:not(.with-chips, .needs-you)
         > .session {
-        height: calc(18px + 12px * var(--space-y));
+        height: calc(22px + 14px * var(--space-y));
     }
 
     :root[data-density="comfortable"]
@@ -537,8 +571,8 @@
     content: "";
     position: absolute;
     left: 0;
-    top: 6px;
-    bottom: 6px;
+    top: 8px;
+    bottom: 8px;
     width: var(--edge-w);
     border-radius: 0 var(--r-mark) var(--r-mark) 0;
     background: var(--accent);
@@ -681,7 +715,7 @@
 .session-group[data-group="failed"] > .group-head,
 .session-group[data-group="needs"] > .group-bar > .group-head,
 .session-group[data-group="failed"] > .group-bar > .group-head {
-    padding-top: 12px;
+    padding-top: 14px;
 }
 
 .group-head.fail .group-name,
@@ -1094,7 +1128,7 @@ a,
     border-color: var(--focus-ring);
     box-shadow:
         var(--shadow),
-        0 0 0 2px var(--accent-soft);
+        0 0 0 2px var(--focus-soft);
 }
 
 .model-chip,
