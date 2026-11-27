@@ -24,7 +24,6 @@ import { test } from "node:test";
 import { context, modelTexts, newSession, openApp, owner, scriptedModel } from "./helpers.ts";
 import { getAgentDir, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import { noIndexDiff } from "../src/server/changes.ts";
-import { writeExport } from "../src/server/design/files.ts";
 import { type Place, readText, type SandboxView } from "../src/server/hostfs.ts";
 
 const linux = process.platform === "linux";
@@ -269,107 +268,6 @@ test(
             status: 409,
         });
         assert.equal(existsSync(join(outside, "escaped")), false);
-    },
-);
-
-test(
-    "a nested session's root is pinned by its first look or by admission, and a replacement is refused",
-    { skip: !linux, timeout: 60_000 },
-    async (t) => {
-        const { base, dir, view } = project();
-        const inner = join(dir, "inner");
-
-        t.after(() => rmSync(base, { recursive: true, force: true }));
-        mkdirSync(inner);
-        writeFileSync(join(inner, "a.txt"), "real");
-
-        const replace = () => {
-            rmSync(inner, { recursive: true });
-            mkdirSync(inner);
-            writeFileSync(join(inner, "a.txt"), "forged");
-        };
-
-        const refused = (error: { status?: number }) => [404, 409].includes(error.status ?? 0);
-
-        // Pinned by the first look: the replacement after it is not the root.
-        const first = await openApp(
-            scriptedModel(),
-            join(base, "data-first"),
-            undefined,
-            undefined,
-            view,
-        );
-
-        t.after(() => first.close());
-
-        const id = await newSession(first, inner);
-        const me = owner(first);
-
-        assert.ok((await first.workspace.viewFile(id, me, "a.txt")) !== undefined);
-        replace();
-        await assert.rejects(first.workspace.viewFile(id, me, "a.txt"), refused);
-        // The list fails closed too: the folder is refused, so nothing of the replacement is named.
-        await assert.rejects(first.workspace.fileList(id, me), { code: "ESTALE" });
-
-        // Pinned by admission state, through the view: the replacement before the first look is refused too.
-        rmSync(inner, { recursive: true });
-        mkdirSync(inner);
-        writeFileSync(join(inner, "a.txt"), "real");
-
-        const admitted = statSync(inner, { bigint: true });
-        const second = await openApp(
-            scriptedModel(),
-            join(base, "data-second"),
-            undefined,
-            undefined,
-            {
-                ...view,
-                pinnedRoot: (_conversation, path) =>
-                    path === inner ? { dev: admitted.dev, ino: admitted.ino } : undefined,
-            },
-        );
-
-        t.after(() => second.close());
-
-        const other = await newSession(second, inner);
-
-        replace();
-        await assert.rejects(second.workspace.viewFile(other, owner(second), "a.txt"), refused);
-    },
-);
-
-test(
-    "an export is written from the admitted root: a nested folder replaced after the first look is refused",
-    { skip: !linux, timeout: 60_000 },
-    async (t) => {
-        const { base, dir, view } = project();
-        const inner = join(dir, "inner");
-        const app = await openApp(scriptedModel(), join(base, "data"), undefined, undefined, view);
-
-        t.after(async () => {
-            await app.close();
-            rmSync(base, { recursive: true, force: true });
-        });
-        mkdirSync(inner);
-
-        const id = await newSession(app, inner);
-
-        const replace = () => {
-            rmSync(inner, { recursive: true });
-            mkdirSync(inner);
-        };
-
-        await assert.rejects(
-            writeExport(app.folderOf(id), "exports/a.txt", Buffer.from("data"), replace),
-            {
-                code: "ESTALE",
-            },
-        );
-        assert.equal(
-            existsSync(join(inner, "exports")),
-            false,
-            "nothing was written into the replacement",
-        );
     },
 );
 
