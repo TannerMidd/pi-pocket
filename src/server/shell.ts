@@ -20,6 +20,7 @@ import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { ShellRequestsDoc } from "./docs.ts";
 import { SHELL_ENTRY, type ShellData } from "./entry-format.ts";
+import { submitRecord } from "./deliver.ts";
 import { describe, HttpError } from "./errors.ts";
 import { ownRequest } from "./requests.ts";
 
@@ -240,7 +241,8 @@ export class Shell {
         const conversation = await app.conversation(id);
 
         if (app.steeringUser(id, data.by) !== undefined) {
-            await conversation.submit({ type: "write", entry, requestId }, context);
+            // The output of a command that ran under a lease: a record, which starts no turn.
+            await submitRecord(conversation, { type: "write", entry, requestId }, context);
         }
     }
 

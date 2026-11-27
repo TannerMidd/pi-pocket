@@ -29,6 +29,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { addActivity } from "./collab.ts";
+import { Deferred, submitIn } from "./deliver.ts";
 import { ChatDoc, type ChatMessage, type Schedule, ScheduleDoc } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { FROM_PREFIX } from "./entry-format.ts";
@@ -353,12 +354,29 @@ export class Schedules {
                     return { status: "running", checkpoint: { phase: "wait" } };
                 }
 
-                await conversation.submit(tx, {
-                    type: "input",
-                    content: item.content,
-                    whenBusy: "followUp",
-                    requestId,
-                });
+                try {
+                    await submitIn(
+                        (target) => this.#app.sandboxes.requireDelivery(target),
+                        conversation,
+                        tx,
+                        {
+                            type: "input",
+                            content: item.content,
+                            whenBusy: "followUp",
+                            requestId,
+                        },
+                    );
+                } catch (error) {
+                    if (!(error instanceof Deferred)) {
+                        throw error;
+                    }
+
+                    // The sandbox of the session is changing, or its group breaks the rules: the schedule and its
+                    // checkpoint stay as they are (`runs` too, so the request id is the same), and it asks again later.
+                    item.next = runtime.now() + error.retryMs;
+
+                    return { status: "running", checkpoint: { phase: "wait" } };
+                }
             } else {
                 delete doc.items[id];
                 addActivity(
@@ -712,62 +730,71 @@ export class Schedules {
                 ? `${SCHEDULED_PREFIX}${text}`
                 : app.commands.messageText(by, `${SCHEDULED_PREFIX}${text}`);
 
-        return app.harness.commit(async (tx) => {
-            const doc = await tx.doc(ScheduleDoc, conversationId);
+        return app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                const doc = await tx.doc(ScheduleDoc, conversationId);
 
-            if (app.steeringUser(conversationId, by?.id ?? request.requestedBy) === undefined) {
-                throw new HttpError(403, "A schedule needs someone who can steer here.");
-            }
+                if (app.steeringUser(conversationId, by?.id ?? request.requestedBy) === undefined) {
+                    throw new HttpError(403, "A schedule needs someone who can steer here.");
+                }
 
-            const same =
-                request.key === undefined
-                    ? undefined
-                    : Object.values(doc.items).find((item) => item.key === request.key);
+                // Work on an archived session makes it live again: refused when its group is sandboxed and it is not.
+                await app.sandboxes.admit(tx, {
+                    kind: "work-add",
+                    id: conversationId,
+                    what: "A scheduled message",
+                });
 
-            if (same !== undefined) {
-                return JSON.parse(JSON.stringify(same)) as Schedule;
-            }
+                const same =
+                    request.key === undefined
+                        ? undefined
+                        : Object.values(doc.items).find((item) => item.key === request.key);
 
-            if (Object.keys(doc.items).length >= limits.perSession) {
-                throw new HttpError(
-                    409,
-                    `A session can have ${limits.perSession} scheduled messages at most.`,
+                if (same !== undefined) {
+                    return JSON.parse(JSON.stringify(same)) as Schedule;
+                }
+
+                if (Object.keys(doc.items).length >= limits.perSession) {
+                    throw new HttpError(
+                        409,
+                        `A session can have ${limits.perSession} scheduled messages at most.`,
+                    );
+                }
+
+                let id = randomUUID().slice(0, 6);
+
+                while (Object.hasOwn(doc.items, id)) {
+                    id = randomUUID().slice(0, 6);
+                }
+
+                const taskId = await tx.createTask(
+                    this.task,
+                    { scheduleId: id },
+                    { ownership: { kind: "conversation" }, background: true, conversationId },
                 );
-            }
+                const schedule: Schedule = {
+                    id,
+                    text,
+                    content,
+                    next: parsed.next,
+                    ...(parsed.every === undefined ? {} : { every: parsed.every }),
+                    zone,
+                    ...(by === undefined ? {} : { by: by.id }),
+                    ...(by !== undefined || request.requestedBy === undefined
+                        ? {}
+                        : { requestedBy: request.requestedBy }),
+                    createdAt: app.now(),
+                    runs: 0,
+                    taskId,
+                    ...(request.key === undefined ? {} : { key: request.key }),
+                    ...(request.compactBefore === true ? { compactBefore: true } : {}),
+                };
 
-            let id = randomUUID().slice(0, 6);
+                doc.items[id] = schedule;
 
-            while (Object.hasOwn(doc.items, id)) {
-                id = randomUUID().slice(0, 6);
-            }
-
-            const taskId = await tx.createTask(
-                this.task,
-                { scheduleId: id },
-                { ownership: { kind: "conversation" }, background: true, conversationId },
-            );
-            const schedule: Schedule = {
-                id,
-                text,
-                content,
-                next: parsed.next,
-                ...(parsed.every === undefined ? {} : { every: parsed.every }),
-                zone,
-                ...(by === undefined ? {} : { by: by.id }),
-                ...(by !== undefined || request.requestedBy === undefined
-                    ? {}
-                    : { requestedBy: request.requestedBy }),
-                createdAt: app.now(),
-                runs: 0,
-                taskId,
-                ...(request.key === undefined ? {} : { key: request.key }),
-                ...(request.compactBefore === true ? { compactBefore: true } : {}),
-            };
-
-            doc.items[id] = schedule;
-
-            return schedule;
-        }, context);
+                return schedule;
+            }, context),
+        );
     }
 
     /**
@@ -930,33 +957,44 @@ export class Schedules {
 
         let replaced: Schedule["taskId"] | undefined;
 
-        const schedule = await app.harness.commit(async (tx) => {
-            const doc = await tx.doc(ScheduleDoc, conversationId);
-            const item = own(doc.items, scheduleId);
+        const schedule = await app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                const doc = await tx.doc(ScheduleDoc, conversationId);
+                const item = own(doc.items, scheduleId);
 
-            if (item === undefined) {
-                throw new HttpError(404, "No such scheduled message");
-            }
-
-            if ((item.paused !== undefined) === paused) {
-                return JSON.parse(JSON.stringify(item)) as Schedule;
-            }
-
-            replaced = item.taskId;
-            item.taskId = await this.#handOff(tx, conversationId, item);
-
-            if (paused) {
-                item.paused = { at: app.now(), by: by.id };
-            } else {
-                delete item.paused;
-
-                if (item.every !== undefined && item.next <= app.now()) {
-                    item.next = nextRepeat(item.every, app.now(), item.zone);
+                if (item === undefined) {
+                    throw new HttpError(404, "No such scheduled message");
                 }
-            }
 
-            return JSON.parse(JSON.stringify(item)) as Schedule;
-        }, context);
+                if ((item.paused !== undefined) === paused) {
+                    return JSON.parse(JSON.stringify(item)) as Schedule;
+                }
+
+                // Resuming is new work: it makes an archived session live again, so it passes admission.
+                if (!paused) {
+                    await app.sandboxes.admit(tx, {
+                        kind: "work-add",
+                        id: conversationId,
+                        what: "A resumed schedule",
+                    });
+                }
+
+                replaced = item.taskId;
+                item.taskId = await this.#handOff(tx, conversationId, item);
+
+                if (paused) {
+                    item.paused = { at: app.now(), by: by.id };
+                } else {
+                    delete item.paused;
+
+                    if (item.every !== undefined && item.next <= app.now()) {
+                        item.next = nextRepeat(item.every, app.now(), item.zone);
+                    }
+                }
+
+                return JSON.parse(JSON.stringify(item)) as Schedule;
+            }, context),
+        );
 
         if (replaced !== undefined) {
             await app.harness.abortTask(replaced, context).catch(() => undefined);

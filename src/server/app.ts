@@ -75,9 +75,13 @@ import {
     DecisionsDoc,
     DeletedDoc,
     FolderFavoritesDoc,
+    HooksDoc,
     MemoryDoc,
+    RepoWatchesDoc,
     RunFailureDoc,
     type RemovedSession,
+    SandboxDoc,
+    ScheduleDoc,
     type SessionMeta,
     SessionsDoc,
     SpendDoc,
@@ -85,8 +89,10 @@ import {
     SubagentsDoc,
     SurfacesDoc,
     TurnsDoc,
+    WatchDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
+import { Sandboxes, type SandboxOptions } from "./sandbox.ts";
 import { ExtensionCommands } from "./extension-commands.ts";
 import { ExtensionWebs, mayUse } from "./extension-web.ts";
 import { defang, quoted } from "./fence.ts";
@@ -401,6 +407,8 @@ export interface OpenOptions {
     restart?: () => void;
     /** Where Pi Pocket's own code is, for its updates; tests give a checkout of their own. */
     appRoot?: string;
+    /** Sandbox core's seams (platform, components, trusted places, waits): constructor options, never globals. */
+    sandbox?: SandboxOptions;
 }
 
 export class PocketApp {
@@ -434,6 +442,8 @@ export class PocketApp {
     models!: ModelRuntime;
     settings!: SettingsManager;
     loader!: ExtensionLoader;
+    /** Sandboxed sessions: their setting, phases, admission, leases, and gate (`sandbox.ts`). */
+    readonly sandboxes: Sandboxes;
     readonly commands = new Commands(this);
     readonly extensionCommands = new ExtensionCommands(this);
     readonly linkedSessions = new LinkedSessions(this);
@@ -570,6 +580,7 @@ export class PocketApp {
     readonly now: () => number;
 
     private constructor(options: OpenOptions) {
+        this.sandboxes = new Sandboxes(this, options.sandbox);
         this.#configureModels = options.configureModels;
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
@@ -643,6 +654,10 @@ export class PocketApp {
             dataDir: options.dataDir,
             ...(options.browser === undefined ? {} : { executable: options.browser }),
             log: (line) => this.#log(line),
+            refuse: (id) =>
+                this.sandboxes.isOn(id as unknown as ConversationId)
+                    ? "This session runs in a sandbox, so this machine's browser is not used for it."
+                    : undefined,
             load: async (id) =>
                 (await this.harness.snapshot(
                     BrowserDoc,
@@ -981,7 +996,20 @@ export class PocketApp {
                 // Values extensions hide (`host.hide`) leave every tool's result before it is stored.
                 hooks: [
                     hook(ToolTask, {
+                        // A sandboxed tree runs no tool that would run on this machine (`sandbox.ts`); a plain tree's
+                        // calls that run here are known to its leases.
+                        beforeTool: async (call, api) => {
+                            const why = await this.sandboxes.beforeTool(
+                                api.conversationId,
+                                String(api.taskId),
+                                call.name,
+                                call.arguments,
+                            );
+
+                            return why === undefined ? undefined : { block: why };
+                        },
                         afterTool: (_call, result, api) => {
+                            this.sandboxes.toolEnded(String(api.taskId));
                             // A secret that changed while the tool ran is hidden from its result too.
                             this.secrets.sync();
                             const cleaned = this.hidden.result(result, api.conversationId);
@@ -1033,6 +1061,8 @@ export class PocketApp {
             requesterOf: (conversationId) => this.attribution.requesterOf(conversationId),
             roleOf: (personId) => this.config.userById(personId)?.role,
             canSteer: (id, personId) => this.steeringUser(id, personId) !== undefined,
+            checkDelivery: (id) => this.sandboxes.requireDelivery(id),
+            admitChild: (tx, parent) => this.sandboxes.admit(tx, { kind: "child", parent }),
             on: (event, listener) => this.events.on(event, listener),
             ask: (request, askContext) => ask(this, request, askContext, this.#restoredThrough),
             hide: (value) => this.hidden.add(value),
@@ -1143,7 +1173,12 @@ export class PocketApp {
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
             // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
-            { webs: this.webs, notify: (level, message) => this.ownerNotice(level, message) },
+            {
+                webs: this.webs,
+                notify: (level, message) => this.ownerNotice(level, message),
+                // A module's sandbox is revoked and proved gone before it is replaced, turned off, or removed.
+                suspend: (file, leave) => this.sandboxes.suspendOwner(file, leave),
+            },
         );
         await this.themes.load().catch((error: unknown) => {
             this.#log(`Themes could not be read: ${describe(error)}`);
@@ -1166,8 +1201,13 @@ export class PocketApp {
                 registry,
                 settings: this.#harnessSettings(),
                 now: this.now,
-                env: ({ conversationId, cwd }) =>
-                    this.#wrapped(conversationId, cwd ?? this.defaultCwd),
+                env: async ({ conversationId, cwd, read }) => {
+                    // The setting of the tree's root decides, as stored now (invariant I2); a child's own is never read.
+                    const root = this.rootOf(conversationId);
+                    const sandboxed = (await read.snapshot(SandboxDoc, root, context))?.on === true;
+
+                    return this.#environment(conversationId, cwd ?? this.defaultCwd, sandboxed);
+                },
                 conversationCreated: async (tx, conversation) => {
                     // Every conversation gets the app's documents up front, so views can read them from the start.
                     await tx.doc(AuthorsDoc, conversation.id);
@@ -1181,6 +1221,9 @@ export class PocketApp {
 
         this.#openingStorage = undefined;
         const conversations = await this.#recover(storage);
+
+        // Stored sandboxes are audited like any other (I1) before any work resumes.
+        await this.sandboxes.reconcile();
 
         this.background.startSweeping();
         await this.spend.load(conversations);
@@ -1314,6 +1357,28 @@ export class PocketApp {
 
                 this.#noteSubagents(id, await this.harness.snapshot(SubagentsDoc, id, context));
                 this.#noteBackground(id, await this.harness.snapshot(BackgroundDoc, id, context));
+
+                this.sandboxes.noteDoc(
+                    SandboxDoc.definition.kind,
+                    id,
+                    await this.harness.snapshot(SandboxDoc, id, context),
+                );
+                this.sandboxes.noteDoc(
+                    ScheduleDoc.definition.kind,
+                    id,
+                    await this.harness.snapshot(ScheduleDoc, id, context),
+                );
+                this.sandboxes.noteDoc(
+                    WatchDoc.definition.kind,
+                    id,
+                    await this.harness.snapshot(WatchDoc, id, context),
+                );
+                this.sandboxes.noteDoc(
+                    BackgroundDoc.definition.kind,
+                    id,
+                    await this.harness.snapshot(BackgroundDoc, id, context),
+                );
+
                 // An action a restart cut off between its record and its delivery.
                 this.surfacePending.note(
                     id,
@@ -1325,6 +1390,18 @@ export class PocketApp {
         } while (cursor !== undefined);
 
         await this.attribution.repair(unrecorded);
+
+        // Webhooks and repository watches belong to no conversation: they make work for the session they target.
+        this.sandboxes.noteDoc(
+            HooksDoc.definition.kind,
+            undefined,
+            await this.harness.snapshot(HooksDoc, context),
+        );
+        this.sandboxes.noteDoc(
+            RepoWatchesDoc.definition.kind,
+            undefined,
+            await this.harness.snapshot(RepoWatchesDoc, context),
+        );
 
         return conversations;
     }
@@ -1464,6 +1541,9 @@ export class PocketApp {
         // A retired document reads as none.
         const value = change.kind === "change" ? change.value : null;
         let sessionsChanged = false;
+
+        // Sandboxes keep their setting, and what can make work later, in step with the documents.
+        this.sandboxes.noteDoc(kind, id, value);
 
         if (
             kind === BackgroundDoc.definition.kind &&
@@ -1836,9 +1916,19 @@ export class PocketApp {
         return canonical;
     }
 
-    /** Where a conversation's commands run: its folder here, or its workspace provider's env. */
-    envFor(id: ConversationId): ExecutionEnv {
-        return this.#wrapped(id, this.cwdOf(id));
+    /**
+     * Where a conversation's commands run: its folder here, or its workspace provider's env, or, in a sandboxed tree,
+     * the sandbox's. `hops` counts how often a call moved to the environment that a changed state gave it.
+     */
+    envFor(id: ConversationId, hops = 0): ExecutionEnv {
+        return this.#environment(id, this.cwdOf(id), this.sandboxes.isOn(id), hops);
+    }
+
+    /** A sandboxed tree's environment never reaches the host; a plain one's calls hold a `host` lease. */
+    #environment(id: ConversationId, cwd: string, sandboxed: boolean, hops = 0): ExecutionEnv {
+        return sandboxed
+            ? this.sandboxes.env(id, cwd, hops)
+            : this.sandboxes.hostEnv(id, cwd, this.#wrapped(id, cwd), hops);
     }
 
     /** A folder's environment, with what extensions add to each command and hide from its output in this session. */
@@ -4347,7 +4437,8 @@ export class PocketApp {
         this.config.setExtensionSettings(module, next);
         // Hidden at once in every session: the new value, and the old one too.
         this.secrets.sync();
-        this.webs.settingsChanged(module);
+        // Stricter rules stop a looser VM before a new call can use them (`sandbox.ts`, the `rules` transition).
+        this.sandboxes.rulesOf(module, () => this.webs.settingsChanged(module));
 
         return shownSettings(fields, next, false);
     }
@@ -4766,6 +4857,9 @@ export class PocketApp {
             this.#unsubscribeApprovals?.();
             this.#unsubscribeBrowsers?.();
             this.guard.close();
+
+            // Every sandbox is revoked and proved gone, within a bound, before the modules go.
+            await this.sandboxes.shutdown();
 
             // Modules' cleanups may wait (closing a connection), but not for long: the rest must close too.
             const cleaned = this.loader?.close();

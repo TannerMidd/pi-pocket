@@ -75,6 +75,7 @@ function delivery(kind: Delivery) {
         parentOf: () => undefined,
         spend: { check: () => {} },
         pip: { ownerOf: () => undefined },
+        sandboxes: { requireDelivery: () => {} },
         config: { subagentModels: [], users: [user], userById: () => undefined },
         agentState: () => ({ model: { provider: "fixture", modelId: "fixture" } }),
         models: { getModel: () => ({ input: ["text"] }) },

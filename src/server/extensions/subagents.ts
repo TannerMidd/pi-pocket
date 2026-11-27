@@ -51,6 +51,7 @@ import {
     type SubagentRecord,
     SubagentsDoc,
 } from "../docs.ts";
+import { submitNow, untilDelivered } from "../deliver.ts";
 import { describe } from "../errors.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { levelFor, sameModel, THINKING_LEVELS } from "../models.ts";
@@ -161,7 +162,7 @@ async function heldAgain(
 /** Delivers one message to a subagent, waits for the answer, and reports it to the parent, through `Courier`. */
 function reporterFor(
     Courier: CourierTask,
-    host: Pick<PocketHost, "notice" | "classifyRunOutcome" | "canSteer">,
+    host: Pick<PocketHost, "notice" | "classifyRunOutcome" | "canSteer" | "checkDelivery">,
 ) {
     /**
      * Report how a message ended, or follow it when a Stop held it to go again (`sent`: its submission and request).
@@ -333,7 +334,17 @@ function reporterFor(
                 }
 
                 const requestId = requestFor(requestedBy, `subagent-${reporter.id}`);
-                const submission = await subagent.submit({ ...request, requestId }, context);
+                // A delivery to a changing sandbox waits and tries again: the task stays in this phase, unfinished.
+                const submission = await untilDelivered(
+                    () =>
+                        submitNow(
+                            (target) => host.checkDelivery?.(target),
+                            subagent,
+                            { ...request, requestId },
+                            context,
+                        ),
+                    context,
+                );
                 // Pi Durable leaves a failed run's inbox alone, so a queued follow-up waits for a boundary that never
                 // comes: once the subagent is idle with it still queued, withdraw it, which ends the wait below.
                 const watch = await runtime.watchDoc(LiveDoc, conversationId, context);
@@ -638,7 +649,10 @@ type CourierState =
     | { phase: "send"; batch?: number; text?: string };
 
 /** What the courier asks Pi Pocket about spend limits. */
-type Limits = Pick<PocketHost, "heldBack" | "onLimitsChanged" | "notice" | "canSteer">;
+type Limits = Pick<
+    PocketHost,
+    "heldBack" | "onLimitsChanged" | "notice" | "canSteer" | "checkDelivery"
+>;
 
 type CourierTask = ReturnType<typeof courierFor>;
 
@@ -914,7 +928,11 @@ function courierFor(limits: Limits) {
                         }
 
                         // Under its own id: a batch sent before is not sent again, and its submission is what it was.
-                        const submission = await parent.submit(
+                        // A deferred delivery throws before anything is written: `orRetry` keeps the batch whole, under
+                        // its own number, and sends it again after a wait.
+                        const submission = await submitNow(
+                            (target) => limits.checkDelivery?.(target),
+                            parent,
                             {
                                 type: "input",
                                 content: sending.reports.map((report) => report.text).join("\n\n"),
@@ -1886,6 +1904,9 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                     if (Object.hasOwn(state.agents, name)) {
                         return `${name} already exists; use send.`;
                     }
+
+                    // The subagent joins its session's tree in this commit, and reads the session's sandbox setting.
+                    await host.admitChild(tx, api.conversationId);
 
                     const anchor = await tx.createTask(Anchor, null, BACKGROUND);
                     // Owned by a task of this conversation, so it starts as a copy of this agent.

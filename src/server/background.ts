@@ -42,6 +42,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { DEFAULT_QUIET_MINUTES, DEFAULT_TASK_QUIET_MINUTES } from "./deadline.ts";
+import { submitIn, untilDelivered } from "./deliver.ts";
 import {
     BackgroundCallDoc,
     BackgroundDoc,
@@ -1136,20 +1137,31 @@ export class BackgroundTasks {
         }, context);
 
         if (sent.length > 0) {
-            await runtime.commit(async (tx) => {
-                if (sent.every((item) => this.#askable(conversationId, item))) {
-                    await conversation.submit(tx, {
-                        type: "input",
-                        content: sent
-                            .map((item) => this.#message(conversationId, item))
-                            .join("\n\n"),
-                        whenBusy: "steer",
-                        requestId,
-                    });
-                }
+            // The sandbox of the session may be changing: the batch stays saved under its request id and nothing is
+            // marked told. The send is tried again after a wait, and sends the same batch, which Pi Durable places once.
+            await untilDelivered(
+                () =>
+                    runtime.commit(async (tx) => {
+                        if (sent.every((item) => this.#askable(conversationId, item))) {
+                            await submitIn(
+                                (target) => app.sandboxes.requireDelivery(target),
+                                conversation,
+                                tx,
+                                {
+                                    type: "input",
+                                    content: sent
+                                        .map((item) => this.#message(conversationId, item))
+                                        .join("\n\n"),
+                                    whenBusy: "steer",
+                                    requestId,
+                                },
+                            );
+                        }
 
-                return undefined;
-            }, context);
+                        return undefined;
+                    }, context),
+                context,
+            );
         }
 
         // Marked once the message is sent: a crash between the two sends the saved batch again under its id, and Pi

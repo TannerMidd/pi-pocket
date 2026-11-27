@@ -35,9 +35,10 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
-import { AuthorsDoc, FollowsDoc, PipAskedDoc, SessionsDoc } from "./docs.ts";
+import { AuthorsDoc, FollowsDoc, PipAskedDoc } from "./docs.ts";
 import { presentationOptions, presentationPip } from "./entry-presentation.ts";
 import { NOTE_ENTRY } from "./entry-format.ts";
+import { replaySubmission, submitNow, submitRecord } from "./deliver.ts";
 import { describe, HttpError } from "./errors.ts";
 import { clip, defang, quoted } from "./fence.ts";
 import { git } from "./git.ts";
@@ -356,32 +357,40 @@ export class Pip {
         const initial = app.commands.defaultModel();
         const now = Date.now();
         const cwd = app.defaultCwd;
-        const conversation = await app.harness.createConversation(
-            {
-                ownership: { kind: "ownerless" },
-                agent: {
-                    cwd,
-                    ...(initial.model === undefined ? {} : { model: initial.model }),
-                    ...(initial.thinkingLevel === undefined
-                        ? {}
-                        : { thinkingLevel: initial.thinkingLevel }),
-                },
-                init: async (tx, id) => {
-                    const agent = await tx.doc(AgentDoc, id);
-
-                    agent.extensions = [...PIP_EXTENSIONS];
-                    agent.tools = { remove: [...PIP_WITHOUT] };
-                    (await tx.doc(SessionsDoc)).items[String(id)] = {
-                        title: PIP_NAME,
+        const conversation = await app.sandboxes.exclusive(() =>
+            app.harness.createConversation(
+                {
+                    ownership: { kind: "ownerless" },
+                    agent: {
                         cwd,
-                        createdAt: now,
-                        updatedAt: now,
-                        createdBy: user.id,
-                        pip: user.id,
-                    };
+                        ...(initial.model === undefined ? {} : { model: initial.model }),
+                        ...(initial.thinkingLevel === undefined
+                            ? {}
+                            : { thinkingLevel: initial.thinkingLevel }),
+                    },
+                    init: async (tx, id) => {
+                        const agent = await tx.doc(AgentDoc, id);
+
+                        agent.extensions = [...PIP_EXTENSIONS];
+                        agent.tools = { remove: [...PIP_WITHOUT] };
+                        // PiP has no folder in a group: it is plain, beside whatever is sandboxed.
+                        await app.sandboxes.admit(tx, {
+                            kind: "join",
+                            id,
+                            user,
+                            entry: {
+                                title: PIP_NAME,
+                                cwd,
+                                createdAt: now,
+                                updatedAt: now,
+                                createdBy: user.id,
+                                pip: user.id,
+                            },
+                        });
+                    },
                 },
-            },
-            context,
+                context,
+            ),
         );
 
         return conversation.id;
@@ -1690,7 +1699,11 @@ export class Pip {
         }
 
         // The submission PiP made: a request id already known finds it without sending anything.
-        const submission = await session.submit({ type: "input", content: "", requestId }, context);
+        const submission = await replaySubmission(
+            session,
+            { type: "input", content: "", requestId },
+            context,
+        );
         // Pi Durable leaves a failed run's queue alone, so a queued message waits for a boundary that never comes: once
         // the session is idle with it still queued, withdraw it, which ends the wait below.
         const watch = await runtime.watchDoc(LiveDoc, input.sessionId, context);
@@ -1816,12 +1829,15 @@ export class Pip {
         if (pip !== undefined && canReport()) {
             try {
                 if (this.#app.spend.heldBack(pipId, input.userId) === undefined) {
-                    await pip.submit(
+                    await submitNow(
+                        (target) => this.#app.sandboxes.requireDelivery(target),
+                        pip,
                         { type: "input", content: text, whenBusy: "followUp", requestId },
                         context,
                     );
                 } else {
-                    await pip.submit(
+                    await submitRecord(
+                        pip,
                         {
                             type: "write",
                             entry: {

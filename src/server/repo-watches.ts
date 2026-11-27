@@ -25,6 +25,7 @@ import {
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
 import { type RepoEvent, type RepoWatch, RepoWatchesDoc } from "./docs.ts";
+import { Deferred } from "./deliver.ts";
 import { describe, HttpError } from "./errors.ts";
 import { attribute, clip, defang, quoted } from "./fence.ts";
 import {
@@ -327,73 +328,82 @@ export class RepoWatches {
         const info = await requirePush(this.#gh, named);
         const now = app.now();
 
-        const watch = await app.harness.commit(async (tx) => {
-            if (app.steeringUser(request.target, person.id) === undefined) {
-                throw new HttpError(403, "A watch needs someone who can steer here.");
-            }
+        const watch = await app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                if (app.steeringUser(request.target, person.id) === undefined) {
+                    throw new HttpError(403, "A watch needs someone who can steer here.");
+                }
 
-            const doc = await tx.doc(RepoWatchesDoc);
-            const same =
-                request.key === undefined
-                    ? undefined
-                    : Object.values(doc.items).find((item) => item.key === request.key);
+                // A watch is work that can start later: on an archived session it makes the session live again.
+                await app.sandboxes.admit(tx, {
+                    kind: "work-add",
+                    id: request.target,
+                    what: "A repository watch",
+                });
 
-            if (same !== undefined) {
-                return JSON.parse(JSON.stringify(same)) as RepoWatch;
-            }
+                const doc = await tx.doc(RepoWatchesDoc);
+                const same =
+                    request.key === undefined
+                        ? undefined
+                        : Object.values(doc.items).find((item) => item.key === request.key);
 
-            if (
-                Object.values(doc.items).filter((item) => item.by === person.id).length >=
-                MAX_WATCHES
-            ) {
-                throw new HttpError(
-                    409,
-                    `A person can have ${MAX_WATCHES} repository watches at most: remove one first.`,
+                if (same !== undefined) {
+                    return JSON.parse(JSON.stringify(same)) as RepoWatch;
+                }
+
+                if (
+                    Object.values(doc.items).filter((item) => item.by === person.id).length >=
+                    MAX_WATCHES
+                ) {
+                    throw new HttpError(
+                        409,
+                        `A person can have ${MAX_WATCHES} repository watches at most: remove one first.`,
+                    );
+                }
+
+                let id: string;
+
+                // Short, so a new one could be one there is already: that one would be lost.
+                do {
+                    id = randomUUID().slice(0, 6);
+                } while (Object.hasOwn(doc.items, id));
+
+                const taskId = await tx.createTask(
+                    this.task,
+                    { watchId: id },
+                    {
+                        ownership: { kind: "conversation" },
+                        background: true,
+                        conversationId: request.target,
+                    },
                 );
-            }
+                const item: RepoWatch = {
+                    id,
+                    repo: info.repo,
+                    events: events as RepoEvent[],
+                    instructions,
+                    ...(label === undefined ? {} : { label }),
+                    ...(request.assigned === true ? { assigned: true } : {}),
+                    branch: asked ?? info.defaultBranch,
+                    ...(request.anyone === true ? { anyone: true } : {}),
+                    target: Number(request.target),
+                    by: person.id,
+                    byPi: request.byPi,
+                    createdAt: now,
+                    since: new Date(now).toISOString(),
+                    taskId,
+                    next: now,
+                    seen: [],
+                    count: 0,
+                    errors: 0,
+                    ...(request.key === undefined ? {} : { key: request.key }),
+                };
 
-            let id: string;
+                doc.items[id] = item;
 
-            // Short, so a new one could be one there is already: that one would be lost.
-            do {
-                id = randomUUID().slice(0, 6);
-            } while (Object.hasOwn(doc.items, id));
-
-            const taskId = await tx.createTask(
-                this.task,
-                { watchId: id },
-                {
-                    ownership: { kind: "conversation" },
-                    background: true,
-                    conversationId: request.target,
-                },
-            );
-            const item: RepoWatch = {
-                id,
-                repo: info.repo,
-                events: events as RepoEvent[],
-                instructions,
-                ...(label === undefined ? {} : { label }),
-                ...(request.assigned === true ? { assigned: true } : {}),
-                branch: asked ?? info.defaultBranch,
-                ...(request.anyone === true ? { anyone: true } : {}),
-                target: Number(request.target),
-                by: person.id,
-                byPi: request.byPi,
-                createdAt: now,
-                since: new Date(now).toISOString(),
-                taskId,
-                next: now,
-                seen: [],
-                count: 0,
-                errors: 0,
-                ...(request.key === undefined ? {} : { key: request.key }),
-            };
-
-            doc.items[id] = item;
-
-            return item;
-        }, context);
+                return item;
+            }, context),
+        );
 
         return this.view(watch);
     }
@@ -767,6 +777,17 @@ export class RepoWatches {
                     `${REPO_WATCH_VIA} ${watch.repo}`,
                 );
             } catch (error) {
+                // The sandbox of the target is changing: nothing failed. What was found waits, untold, for the next look.
+                if (error instanceof Deferred) {
+                    return this.#again(
+                        id,
+                        runtime,
+                        error.retryMs,
+                        context,
+                        "the sandbox is changing",
+                    );
+                }
+
                 // A spend limit, someone else's turn, no model: it may pass. The look runs again, and finds the same.
                 return this.#failed(
                     id,

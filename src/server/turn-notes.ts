@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { TURN_NOTE_ENTRY, type TurnNoteData } from "./entry-format.ts";
+import { type DeliveryCheck, submitIn } from "./deliver.ts";
 import { describe } from "./errors.ts";
 
 export type Turn = {
@@ -81,6 +82,7 @@ export class TurnNotes {
         draft: InputSubmissionDraft & { requestId: string },
         turn: Omit<Turn, "signal" | "previousActivityAt" | "conversationId">,
         context: Context,
+        deliver: DeliveryCheck,
         checkAdmission: () => void,
         checkPolicy?: (tx: Tx) => Promise<void>,
     ): Promise<SubmissionId | undefined> {
@@ -115,7 +117,7 @@ export class TurnNotes {
 
             await checkPolicy?.(tx);
             checkAdmission();
-            const submissionId = await conversation.submit(tx, draft);
+            const submissionId = await submitIn(deliver, conversation, tx, draft);
 
             if (idle && (await tx.doc(LiveDoc, id)).run?.inputs.includes(submissionId) === true) {
                 // The time of this commit, as the input's own: Durable stamps it here too.

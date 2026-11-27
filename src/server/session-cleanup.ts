@@ -724,95 +724,104 @@ export class SessionCleanup {
             return { id: Number(id), done: false, why: "Pi is working in it. Stop it first." };
         }
 
-        await app.harness.commit(async (tx) => {
-            const sessions = await tx.doc(SessionsDoc);
-            const meta = sessions.items[String(id)];
+        // A sandboxed session's VM stops before anything is deleted (I5); admission deletes its entry after the body.
+        await app.sandboxes.change(
+            { kind: "remove", id },
+            {
+                commit: async (tx) => {
+                    const sessions = await tx.doc(SessionsDoc);
+                    const meta = sessions.items[String(id)];
 
-            if (meta?.archived !== true || meta.pip !== undefined) {
-                throw new HttpError(409, "It is not archived.");
-            }
+                    if (meta?.archived !== true || meta.pip !== undefined) {
+                        throw new HttpError(409, "It is not archived.");
+                    }
 
-            const deleted = await tx.doc(DeletedDoc);
-            // A fork can finish while the plan runs. Include it before queuing any removal.
-            const retention = uploadRetention(sessions.items, deleted.items, leaving);
+                    const deleted = await tx.doc(DeletedDoc);
+                    // A fork can finish while the plan runs. Include it before queuing any removal.
+                    const retention = uploadRetention(sessions.items, deleted.items, leaving);
 
-            const keepUploads = tree.filter((each) => retention(each) !== undefined);
-            const worktree = plan.worktree?.state === "clean" ? meta.worktree : undefined;
+                    const keepUploads = tree.filter((each) => retention(each) !== undefined);
+                    const worktree = plan.worktree?.state === "clean" ? meta.worktree : undefined;
 
-            if (
-                worktree !== undefined &&
-                (worktree.path !== plan.worktree?.path || worktree.branch !== plan.worktree.branch)
-            ) {
-                throw new HttpError(409, "The session worktree changed during cleanup.");
-            }
+                    if (
+                        worktree !== undefined &&
+                        (worktree.path !== plan.worktree?.path ||
+                            worktree.branch !== plan.worktree.branch)
+                    ) {
+                        throw new HttpError(409, "The session worktree changed during cleanup.");
+                    }
 
-            const folders: NonNullable<RemovedSession["folders"]> = { uploads: {}, background: {} };
+                    const folders: NonNullable<RemovedSession["folders"]> = {
+                        uploads: {},
+                        background: {},
+                    };
 
-            for (const each of tree) {
-                const name = String(each);
+                    for (const each of tree) {
+                        const name = String(each);
 
-                folders.uploads[name] = app.managedStorage.capture("uploads", name);
-                folders.background[name] = app.managedStorage.capture("background", name);
-            }
+                        folders.uploads[name] = app.managedStorage.capture("uploads", name);
+                        folders.background[name] = app.managedStorage.capture("background", name);
+                    }
 
-            if (worktree !== undefined) {
-                folders.worktree = app.managedStorage.capture(
-                    "worktrees",
-                    this.#worktreeName(worktree),
-                );
-            }
+                    if (worktree !== undefined) {
+                        folders.worktree = app.managedStorage.capture(
+                            "worktrees",
+                            this.#worktreeName(worktree),
+                        );
+                    }
 
-            delete sessions.items[String(id)];
-            const record: RemovedSession = {
-                ...(meta.title === undefined ? {} : { title: meta.title }),
-                cwd: meta.cwd,
-                ...(meta.forkedFrom === undefined ? {} : { forkedFrom: meta.forkedFrom }),
-                conversations: tree,
-                folders,
-                by: userId,
-                at: Date.now(),
-                ...(worktree === undefined ? {} : { worktree }),
-                ...(keepUploads.length === 0 ? {} : { keepUploads }),
-            };
+                    const record: RemovedSession = {
+                        ...(meta.title === undefined ? {} : { title: meta.title }),
+                        cwd: meta.cwd,
+                        ...(meta.forkedFrom === undefined ? {} : { forkedFrom: meta.forkedFrom }),
+                        conversations: tree,
+                        folders,
+                        by: userId,
+                        at: Date.now(),
+                        ...(worktree === undefined ? {} : { worktree }),
+                        ...(keepUploads.length === 0 ? {} : { keepUploads }),
+                    };
 
-            deleted.items[String(id)] = record;
-            const hooks = await tx.doc(HooksDoc);
+                    deleted.items[String(id)] = record;
+                    const hooks = await tx.doc(HooksDoc);
 
-            for (const [key, hook] of Object.entries(hooks.items)) {
-                if (numbers.has(hook.target)) {
-                    delete hooks.items[key];
-                }
-            }
+                    for (const [key, hook] of Object.entries(hooks.items)) {
+                        if (numbers.has(hook.target)) {
+                            delete hooks.items[key];
+                        }
+                    }
 
-            const watches = await tx.doc(RepoWatchesDoc);
+                    const watches = await tx.doc(RepoWatchesDoc);
 
-            for (const [key, watch] of Object.entries(watches.items)) {
-                if (numbers.has(watch.target)) {
-                    watchTasks.push(watch.taskId);
-                    delete watches.items[key];
-                }
-            }
+                    for (const [key, watch] of Object.entries(watches.items)) {
+                        if (numbers.has(watch.target)) {
+                            watchTasks.push(watch.taskId);
+                            delete watches.items[key];
+                        }
+                    }
 
-            for (const conversation of conversations) {
-                await retireArtifacts(tx, conversation, null);
-            }
+                    for (const conversation of conversations) {
+                        await retireArtifacts(tx, conversation, null);
+                    }
 
-            const links = await tx.doc(PublicLinksDoc);
+                    const links = await tx.doc(PublicLinksDoc);
 
-            for (const [key, link] of Object.entries(links.items)) {
-                if (link.conversation !== undefined && numbers.has(link.conversation)) {
-                    delete links.items[key];
-                }
-            }
+                    for (const [key, link] of Object.entries(links.items)) {
+                        if (link.conversation !== undefined && numbers.has(link.conversation)) {
+                            delete links.items[key];
+                        }
+                    }
 
-            const memory = await tx.doc(MemoryDoc);
+                    const memory = await tx.doc(MemoryDoc);
 
-            for (const [key, lesson] of Object.entries(memory.items)) {
-                if (lesson.project === sessionKey(id)) {
-                    delete memory.items[key];
-                }
-            }
-        }, context);
+                    for (const [key, lesson] of Object.entries(memory.items)) {
+                        if (lesson.project === sessionKey(id)) {
+                            delete memory.items[key];
+                        }
+                    }
+                },
+            },
+        );
 
         for (const task of watchTasks) {
             await app.harness.abortTask(task, context).catch(() => undefined);

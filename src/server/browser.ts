@@ -38,6 +38,11 @@ export interface BrowsersOptions {
     log?(line: string): void;
     /** A page nobody used or watched for this long closes. */
     idleMs?: number;
+    /**
+     * Why this machine's browser may not open a page for the conversation, or undefined. A sandboxed session never
+     * gets this machine's browser (`sandbox.ts`).
+     */
+    refuse?(conversationId: number): string | undefined;
 }
 
 /**
@@ -228,6 +233,12 @@ export class Browsers {
     async open(conversationId: number, options: OpenOptions = {}): Promise<BrowserPage> {
         if (this.#closing) {
             throw new BrowserError("The server is stopping.");
+        }
+
+        const refused = this.#options.refuse?.(conversationId);
+
+        if (refused !== undefined) {
+            throw new BrowserError(refused);
         }
 
         const open = this.page(conversationId);

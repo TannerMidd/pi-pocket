@@ -422,17 +422,26 @@ export class Hooks {
             count: 0,
         };
 
-        await app.harness.commit(async (tx) => {
-            const doc = await tx.doc(HooksDoc);
+        await app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                const doc = await tx.doc(HooksDoc);
 
-            if (
-                Object.values(doc.items).filter((each) => each.by === user.id).length >= MAX_HOOKS
-            ) {
-                throw new HttpError(409, `A person can have ${MAX_HOOKS} webhooks at most.`);
-            }
+                if (
+                    Object.values(doc.items).filter((each) => each.by === user.id).length >=
+                    MAX_HOOKS
+                ) {
+                    throw new HttpError(409, `A person can have ${MAX_HOOKS} webhooks at most.`);
+                }
 
-            doc.items[hook.id] = hook;
-        }, context);
+                // A webhook is work that can start later: on an archived session it makes the session live again.
+                await app.sandboxes.admit(tx, {
+                    kind: "work-add",
+                    id: hook.target as unknown as ConversationId,
+                    what: "A webhook",
+                });
+                doc.items[hook.id] = hook;
+            }, context),
+        );
 
         return this.view(hook);
     }

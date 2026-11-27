@@ -94,6 +94,7 @@ test("sending held messages checks the original requester separately from the dr
         requireSteer: noop,
         requireDriver: noop,
         pip: { ownerOf: () => undefined },
+        sandboxes: { requireDelivery: noop },
         spend: { check: noop },
         collab: { activity: noop },
         conversation: () => ({
@@ -124,11 +125,11 @@ test("an interrupt rechecks its sender before stopping and checks each restored 
     };
     const input = { content: "interrupt", requestId: ids[1], run: 10, others: ids.map(held) };
 
-    await interruptTask(() => assert.fail("no stop"), canSteer).definition.phases.send(
-        { input } as never,
-        runtime as never,
-        BACKGROUND_CONTEXT,
-    );
+    await interruptTask(
+        () => assert.fail("no stop"),
+        canSteer,
+        () => {},
+    ).definition.phases.send({ input } as never, runtime as never, BACKGROUND_CONTEXT);
     assert.deepEqual(sent, [ids[0], ids[2]]);
     assert.deepEqual(interrupts.pending, {});
 
@@ -140,11 +141,16 @@ test("an interrupt rechecks its sender before stopping and checks each restored 
             stopping = false;
         },
         (target, person) => (person === "old" ? stopping : canSteer(target, person)),
+        () => {},
     ).definition.phases.send({ input } as never, runtime as never, BACKGROUND_CONTEXT);
     assert.deepEqual(sent.splice(0), [ids[0], ids[2], ids[0], ids[2]]);
 
     for (const by of ["old", "current"]) {
-        await resendTask(canSteer, async () => new Set()).definition.phases.send(
+        await resendTask(
+            canSteer,
+            async () => new Set(),
+            () => {},
+        ).definition.phases.send(
             { input: { text: "fork", by } } as never,
             runtime as never,
             BACKGROUND_CONTEXT,
@@ -182,6 +188,7 @@ test("turn notes cannot admit a message after its requester loses access during 
             { type: "input", content: "message", requestId: "u:current:test" },
             { by: "current", text: "message", at: 0 },
             BACKGROUND_CONTEXT,
+            () => {},
             () => {
                 if (!allowed) {
                     throw new Error("access ended");

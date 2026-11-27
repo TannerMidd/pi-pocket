@@ -958,78 +958,90 @@ export class LinkedSessions implements LinkedSessionsApi {
         const cwd = approved?.cwd ?? (await this.#directory(source, user, agent, request.cwd));
         const now = Date.now();
 
-        return app.harness.commit(async (tx) => {
-            let inherited = agent;
+        return app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                let inherited = agent;
 
-            if (actor !== undefined) {
-                user = await this.#authorize(tx, source, actor);
-                inherited = JSON.parse(
-                    JSON.stringify(await tx.doc(AgentDoc, source)),
-                ) as AgentState;
-                actor.checkSource(inherited);
+                if (actor !== undefined) {
+                    user = await this.#authorize(tx, source, actor);
+                    inherited = JSON.parse(
+                        JSON.stringify(await tx.doc(AgentDoc, source)),
+                    ) as AgentState;
+                    actor.checkSource(inherited);
 
-                if (this.#selection(agent, request, true).thinking !== thinking) {
-                    throw new HttpError(
-                        409,
-                        "The selected model's thinking support changed. Try again.",
-                    );
+                    if (this.#selection(agent, request, true).thinking !== thinking) {
+                        throw new HttpError(
+                            409,
+                            "The selected model's thinking support changed. Try again.",
+                        );
+                    }
+
+                    if (
+                        user.sessions !== undefined ||
+                        app.sessionMeta(source)?.linkedFrom !== undefined
+                    ) {
+                        throw new HttpError(
+                            403,
+                            "This person or source cannot start linked sessions.",
+                        );
+                    }
                 }
+
+                const receipt = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, now);
 
                 if (
-                    user.sessions !== undefined ||
-                    app.sessionMeta(source)?.linkedFrom !== undefined
+                    actor !== undefined &&
+                    receipt.by !== undefined &&
+                    receipt.by !== actor.current().id
                 ) {
-                    throw new HttpError(403, "This person or source cannot start linked sessions.");
+                    throw new HttpError(409, "This start key belongs to another person.");
                 }
-            }
 
-            const receipt = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, now);
-
-            if (
-                actor !== undefined &&
-                receipt.by !== undefined &&
-                receipt.by !== actor.current().id
-            ) {
-                throw new HttpError(409, "This start key belongs to another person.");
-            }
-
-            if (receipt.conversationId !== undefined) {
-                return receipt.conversationId as unknown as ConversationId;
-            }
-
-            const sessions = await tx.doc(SessionsDoc);
-            const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
-
-            Object.assign(await tx.doc(AgentDoc, child.id), inherited, {
-                cwd,
-                model,
-                thinkingLevel: thinking,
-            });
-            sessions.items[String(child.id)] = {
-                cwd,
-                title,
-                createdAt: now,
-                updatedAt: now,
-                createdBy: user.id,
-                linkedFrom: { id: Number(source) },
-            };
-            receipt.conversationId = Number(child.id);
-            receipt.by = user.id;
-
-            if (actor !== undefined) {
-                await this.#authorize(tx, source, actor);
-                actor.checkSource(await tx.doc(AgentDoc, source));
-
-                if (this.#selection(agent, request, true).thinking !== thinking) {
-                    throw new HttpError(
-                        409,
-                        "The selected model's thinking support changed. Try again.",
-                    );
+                if (receipt.conversationId !== undefined) {
+                    return receipt.conversationId as unknown as ConversationId;
                 }
-            }
 
-            return child.id;
-        }, actor?.context ?? context);
+                const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
+
+                Object.assign(await tx.doc(AgentDoc, child.id), inherited, {
+                    cwd,
+                    model,
+                    thinkingLevel: thinking,
+                });
+                // A linked session inherits its starter's sandbox setting, in its starter's folder, in this commit.
+                await app.sandboxes.admit(tx, {
+                    kind: "join",
+                    id: child.id,
+                    user,
+                    copyFrom: source,
+                    sameFolder: app.cwdOf(source),
+                    entry: {
+                        cwd,
+                        title,
+                        createdAt: now,
+                        updatedAt: now,
+                        createdBy: user.id,
+                        linkedFrom: { id: Number(source) },
+                    },
+                });
+                receipt.conversationId = Number(child.id);
+                receipt.by = user.id;
+
+                if (actor !== undefined) {
+                    await this.#authorize(tx, source, actor);
+                    actor.checkSource(await tx.doc(AgentDoc, source));
+
+                    if (this.#selection(agent, request, true).thinking !== thinking) {
+                        throw new HttpError(
+                            409,
+                            "The selected model's thinking support changed. Try again.",
+                        );
+                    }
+                }
+
+                return child.id;
+            }, actor?.context ?? context),
+        );
     }
 
     /**
@@ -1278,43 +1290,62 @@ export class LinkedSessions implements LinkedSessionsApi {
 
         // The archive and its receipt are one commit: a crash leaves neither, and a key for another session is refused
         // before this one changes. The activity line follows, as it does for a person's own archive.
-        const { result, changed } = await app.harness.commit(async (tx) => {
-            const record = recordOf(await tx.doc(LinkedSessionCallsDoc, source), token, app.now());
+        // The VM of a sandboxed session stops before the flag is written, and the flag is written by admission.
+        const { result, changed } = await app.sandboxes.change<{
+            result: { archived: boolean; repeating: number };
+            changed: boolean;
+        }>(
+            { kind: archived ? "leave" : "enter", id },
+            {
+                skipAdmit: (done) => !done.changed,
+                commit: async (tx) => {
+                    const record = recordOf(
+                        await tx.doc(LinkedSessionCallsDoc, source),
+                        token,
+                        app.now(),
+                    );
 
-            if (record.conversationId !== undefined && record.conversationId !== Number(id)) {
-                throw new HttpError(409, "This call already refers to another linked session.");
-            }
+                    if (
+                        record.conversationId !== undefined &&
+                        record.conversationId !== Number(id)
+                    ) {
+                        throw new HttpError(
+                            409,
+                            "This call already refers to another linked session.",
+                        );
+                    }
 
-            if (record.result !== undefined && !("archived" in record.result)) {
-                throw new HttpError(409, "This call already did something else.");
-            }
+                    if (record.result !== undefined && !("archived" in record.result)) {
+                        throw new HttpError(409, "This call already did something else.");
+                    }
 
-            if (record.result !== undefined && "archived" in record.result) {
-                return {
-                    result: {
-                        archived: record.result.archived,
-                        repeating: record.result.repeating,
-                    },
-                    changed: false,
-                };
-            }
+                    if (record.result !== undefined && "archived" in record.result) {
+                        return {
+                            result: {
+                                archived: record.result.archived,
+                                repeating: record.result.repeating,
+                            },
+                            changed: false,
+                        };
+                    }
 
-            const sessions = await tx.doc(SessionsDoc);
-            const meta = sessions.items[String(id)];
+                    const sessions = await tx.doc(SessionsDoc);
+                    const meta = sessions.items[String(id)];
 
-            if (meta === undefined) {
-                throw new HttpError(404, "Not a session");
-            }
+                    if (meta === undefined) {
+                        throw new HttpError(404, "Not a session");
+                    }
 
-            const before = meta.archived === true;
+                    const before = meta.archived === true;
 
-            meta.archived = archived;
-            record.conversationId = Number(id);
-            record.by ??= user.id;
-            record.result = { archived, repeating };
+                    record.conversationId = Number(id);
+                    record.by ??= user.id;
+                    record.result = { archived, repeating };
 
-            return { result: { archived, repeating }, changed: archived !== before };
-        }, context);
+                    return { result: { archived, repeating }, changed: archived !== before };
+                },
+            },
+        );
 
         if (changed) {
             await app.collab.activity(

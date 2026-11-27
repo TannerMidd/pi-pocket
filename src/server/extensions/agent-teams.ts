@@ -14,6 +14,7 @@ import {
 // and the classifier helpers (`classify.ts`, `classifier-activity.ts`).
 import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
+import { Deferred, submitNow } from "../deliver.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { modelLine } from "../model-facts.ts";
 import { requestFor } from "../requests.ts";
@@ -414,20 +415,39 @@ function stallWatchFor(
                         context,
                     );
 
-                    if (mayAct()) {
-                        await conversation?.submit(
-                            {
-                                type: "input",
-                                content: `[linked sessions] ${lines.join(" ")} Their final answers still come by themselves.`,
-                                whenBusy: "steer",
-                                // As the lead's person's work, so a spend limit there holds it back.
-                                requestId: requestFor(
-                                    by,
-                                    `linked-stalls-${String(runtime.taskId)}-${checkpoint.at}`,
-                                ),
-                            },
-                            context,
-                        );
+                    if (mayAct() && conversation !== undefined) {
+                        try {
+                            await submitNow(
+                                (target) => host.checkDelivery?.(target),
+                                conversation,
+                                {
+                                    type: "input",
+                                    content: `[linked sessions] ${lines.join(" ")} Their final answers still come by themselves.`,
+                                    whenBusy: "steer",
+                                    // As the lead's person's work, so a spend limit there holds it back.
+                                    requestId: requestFor(
+                                        by,
+                                        `linked-stalls-${String(runtime.taskId)}-${checkpoint.at}`,
+                                    ),
+                                },
+                                context,
+                            );
+                        } catch (error) {
+                            if (!(error instanceof Deferred)) {
+                                throw error;
+                            }
+
+                            // The lead's sandbox is changing. Nothing is marked told: this act runs again later, and
+                            // its message, under its own id, goes once.
+                            return runtime.commit(
+                                () => ({
+                                    status: "sleeping",
+                                    until: runtime.now() + error.retryMs,
+                                    checkpoint,
+                                }),
+                                context,
+                            );
+                        }
                     }
                 }
 

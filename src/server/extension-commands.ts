@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
+import { submitRecord } from "./deliver.ts";
 import { CommandRequestsDoc } from "./docs.ts";
 import { COMMAND_ENTRY, type CommandData } from "./entry-format.ts";
 import { describe, HttpError } from "./errors.ts";
@@ -126,19 +127,46 @@ export class ExtensionCommands {
                                     : "A server restart came before the command ran: it did not run. Run it again.",
                             };
                         } else {
-                            await runtime.memo("started", true, context);
-                            this.#running.set(String(task.id), task.input.by);
+                            // The handler runs extension code on this machine: a lease, so a turn-on sees it. A
+                            // sandboxed tree takes no extension command (design 4.6): its handler never starts.
+                            const lease = await this.#app.sandboxes
+                                .lease(runtime.conversationId, {
+                                    kind: "host",
+                                    what: "an extension command that is running",
+                                })
+                                .catch((error: unknown) => error as Error);
 
-                            try {
-                                result = await this.#handle(picked.command, task.input, runtime);
-                            } catch (error) {
-                                if (runtime.signal.aborted) {
-                                    throw error;
+                            if (lease instanceof Error || lease.sandboxed) {
+                                lease instanceof Error || lease.end();
+                                result = {
+                                    status: "failed",
+                                    type: "toast",
+                                    level: "error",
+                                    message:
+                                        lease instanceof Error
+                                            ? lease.message
+                                            : "A sandboxed session runs no extension commands: they run on this machine.",
+                                };
+                            } else {
+                                await runtime.memo("started", true, context);
+                                this.#running.set(String(task.id), task.input.by);
+
+                                try {
+                                    result = await this.#handle(
+                                        picked.command,
+                                        task.input,
+                                        runtime,
+                                    );
+                                } catch (error) {
+                                    if (runtime.signal.aborted) {
+                                        throw error;
+                                    }
+
+                                    result = this.#failed(picked.command, error);
+                                } finally {
+                                    this.#running.delete(String(task.id));
+                                    lease.end();
                                 }
-
-                                result = this.#failed(picked.command, error);
-                            } finally {
-                                this.#running.delete(String(task.id));
                             }
                         }
 
@@ -157,7 +185,8 @@ export class ExtensionCommands {
                         };
 
                         // No person's prefix in the request id: the card does not change whom Pi works for.
-                        await conversation.submit(
+                        await submitRecord(
+                            conversation,
                             {
                                 type: "write",
                                 requestId: `extension-command:${task.id}`,

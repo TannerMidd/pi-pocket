@@ -612,6 +612,21 @@ export const PlanDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
     initial: () => ({ on: false }),
 });
 
+/**
+ * Whether a session runs in a sandbox (`sandbox.ts`), kept on the session's root: a subagent's own copy is never read
+ * (`rootOf` decides), so it cannot be stale. `by` is who chose it: only the owner takes away a sandbox the owner chose.
+ * A fork copies it in the commit that makes the fork. Nothing in this build can turn it on (the readiness gate refuses).
+ */
+export const SandboxDoc = defineDoc<{ on: boolean; by?: string; at?: number }>({
+    kind: "pocket.sandbox",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "current",
+    initial: () => ({ on: false }),
+});
+
 export type Schedule = {
     /** Short and stable: what people and Pi use to cancel it. */
     id: string;

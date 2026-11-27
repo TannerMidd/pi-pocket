@@ -603,6 +603,17 @@ export interface PocketHost {
     /** Internal: check the current steering access of the person recorded on deferred work. */
     canSteer(conversationId: ConversationId, personId: string | undefined): boolean;
     /**
+     * Internal: the check every delivery makes first (`deliver.ts`). It throws `Deferred`, a 409, when a message to this
+     * conversation's session may not be made now (its sandbox is changing, or its group breaks the sandbox rules); the
+     * caller keeps its record and asks again later.
+     */
+    checkDelivery(conversationId: ConversationId): void;
+    /**
+     * Internal: a conversation starts a subagent, in the commit that makes it (`sandbox.ts`, `child`). A subagent joins its
+     * session's tree and reads the session's setting, so this only refuses while that tree's sandbox is changing.
+     */
+    admitChild(tx: Tx, parent: ConversationId): Promise<void>;
+    /**
      * Listen to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and
      * runs that start and end. Returns how to stop; pass that to `web.onDispose`. PiP's conversations send none.
      *

@@ -84,6 +84,7 @@ for (const annotated of [false, true]) {
             hidden: { replace: (value: string) => value },
             now: () => 1,
             pip: { ownerOf: () => undefined },
+            sandboxes: { requireDelivery: () => {} },
             parentOf: () => undefined,
             log: (line: string) => log.push(line),
             conversation: async () => ({

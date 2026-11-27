@@ -12,6 +12,7 @@ import {
     type InputEntry,
     type UserInput,
 } from "@earendil-works/pi-durable";
+import { type DeliveryCheck, submitIn, untilDelivered } from "./deliver.ts";
 import { InterruptsDoc, SessionsDoc, type SessionMeta } from "./docs.ts";
 import { CONTEXT_BLOCK, FILE_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
@@ -114,6 +115,7 @@ export function canRequeue(
 export const resendTask = (
     canSteer: CanSteer,
     checkedGrants: (id: ConversationId, input: Resend) => Promise<ReadonlySet<string>>,
+    deliver: DeliveryCheck,
 ) =>
     defineTask<Resend, { phase: "send" }, null>({
         name: "pocket.resend",
@@ -128,27 +130,43 @@ export const resendTask = (
                     ? await checkedGrants(runtime.conversationId, resend)
                     : new Set<string>();
 
-                await runtime.commit(async (tx) => {
-                    const images =
-                        original === undefined
-                            ? []
-                            : userContent((await tx.entry(original))?.model?.[0]).images;
+                // A delivery to a changing sandbox waits: the task stays as it is, and is not finished.
+                await untilDelivered(
+                    () =>
+                        runtime.commit(async (tx) => {
+                            const images =
+                                original === undefined
+                                    ? []
+                                    : userContent((await tx.entry(original))?.model?.[0]).images;
 
-                    const fork =
-                        resend.uploadsApproved === true
-                            ? (await tx.doc(SessionsDoc)).items[String(runtime.conversationId)]
-                            : undefined;
+                            const fork =
+                                resend.uploadsApproved === true
+                                    ? (await tx.doc(SessionsDoc)).items[
+                                          String(runtime.conversationId)
+                                      ]
+                                    : undefined;
 
-                    if (canSteer(runtime.conversationId, resend.by)) {
-                        await conversation?.submit(tx, resendDraft(resend, images, grants, fork));
+                            if (canSteer(runtime.conversationId, resend.by)) {
+                                if (conversation !== undefined) {
+                                    await submitIn(
+                                        deliver,
+                                        conversation,
+                                        tx,
+                                        resendDraft(resend, images, grants, fork),
+                                    );
+                                }
 
-                        if (!canSteer(runtime.conversationId, resend.by)) {
-                            throw new Error("The requester can no longer submit this message.");
-                        }
-                    }
+                                if (!canSteer(runtime.conversationId, resend.by)) {
+                                    throw new Error(
+                                        "The requester can no longer submit this message.",
+                                    );
+                                }
+                            }
 
-                    return finished;
-                }, context);
+                            return finished;
+                        }, context),
+                    context,
+                );
             },
         },
         abort: (_task, runtime, context) =>
@@ -186,7 +204,7 @@ export type StopRun = (run: number, context: Context, allowed: () => boolean) =>
  * made for by its id (`stopRun`, from the app's harness), never whichever run is going: one that started after it ended
  * goes on.
  */
-export const interruptTask = (stopRun: StopRun, canSteer: CanSteer) =>
+export const interruptTask = (stopRun: StopRun, canSteer: CanSteer, deliver: DeliveryCheck) =>
     defineTask<Interrupt, { phase: "send" }, null>({
         name: "pocket.interrupt",
         version: 1,
@@ -214,21 +232,28 @@ export const interruptTask = (stopRun: StopRun, canSteer: CanSteer) =>
                             await stopRun(run, context, allowed);
                         }
 
-                        await runtime.commit(async (tx) => {
-                            const interrupts = await tx.doc(InterruptsDoc, id);
+                        await untilDelivered(
+                            () =>
+                                runtime.commit(async (tx) => {
+                                    const interrupts = await tx.doc(InterruptsDoc, id);
 
-                            if (!allowed()) {
-                                return;
-                            }
+                                    if (!allowed()) {
+                                        return;
+                                    }
 
-                            await conversation?.submit(tx, {
-                                type: "input",
-                                content,
-                                requestId,
-                                ...(entry === undefined ? {} : { entry }),
-                            });
-                            delete interrupts.pending[requestId];
-                        }, context);
+                                    if (conversation !== undefined) {
+                                        await submitIn(deliver, conversation, tx, {
+                                            type: "input",
+                                            content,
+                                            requestId,
+                                            ...(entry === undefined ? {} : { entry }),
+                                        });
+                                    }
+
+                                    delete interrupts.pending[requestId];
+                                }, context),
+                            context,
+                        );
                     } catch (error) {
                         if (context.abortSignal?.aborted === true) {
                             throw error;
@@ -245,17 +270,25 @@ export const interruptTask = (stopRun: StopRun, canSteer: CanSteer) =>
                 // In their order, behind the message: a request id already known finds its submission.
                 for (const other of others ?? []) {
                     try {
-                        await runtime.commit(async (tx) => {
-                            if (canRequeue(id, other.requestId, canSteer)) {
-                                await conversation?.submit(tx, {
-                                    type: "input",
-                                    content: other.content,
-                                    whenBusy: other.mode,
-                                    requestId: other.requestId,
-                                    ...(other.entry === undefined ? {} : { entry: other.entry }),
-                                });
-                            }
-                        }, context);
+                        await untilDelivered(
+                            () =>
+                                runtime.commit(async (tx) => {
+                                    if (canRequeue(id, other.requestId, canSteer)) {
+                                        if (conversation !== undefined) {
+                                            await submitIn(deliver, conversation, tx, {
+                                                type: "input",
+                                                content: other.content,
+                                                whenBusy: other.mode,
+                                                requestId: other.requestId,
+                                                ...(other.entry === undefined
+                                                    ? {}
+                                                    : { entry: other.entry }),
+                                            });
+                                        }
+                                    }
+                                }, context),
+                            context,
+                        );
                     } catch (error) {
                         if (context.abortSignal?.aborted === true) {
                             throw error;

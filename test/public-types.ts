@@ -85,6 +85,8 @@ type Internal =
     | "memory"
     | "surfaces"
     | "canSteer"
+    | "checkDelivery"
+    | "admitChild"
     | "toolNames"
     | "stopToolCall"
     | "waitsForLimit"

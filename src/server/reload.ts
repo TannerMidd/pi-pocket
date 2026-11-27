@@ -379,6 +379,11 @@ export class ExtensionLoader {
      */
     readonly #generations = new Map<string, number>();
     readonly #loadLimitMs: number;
+    /**
+     * Before a module is replaced, turned off, or removed: whatever it serves is revoked and proved gone, and the
+     * replacement or removal waits for it (a sandbox provider, `sandbox.ts`). It rejects when that cannot be proved.
+     */
+    readonly #suspend: (file: string, leave: boolean) => Promise<void>;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -404,6 +409,8 @@ export class ExtensionLoader {
             notify?: (level: "info" | "warning" | "error", message: string) => void;
             /** How long a load may take; tests make it short. */
             loadLimitMs?: number;
+            /** `leave`: the module goes (turned off or removed), not replaced by a new version of itself. */
+            suspend?: (file: string, leave: boolean) => Promise<void>;
         } = {},
     ) {
         this.#registry = registry;
@@ -414,6 +421,7 @@ export class ExtensionLoader {
         this.#webs = options.webs ?? new ExtensionWebs();
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
+        this.#suspend = options.suspend ?? (() => Promise.resolve());
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -536,6 +544,8 @@ export class ExtensionLoader {
             return;
         }
 
+        // Revoke, prove gone, then take the module away: a failure keeps it installed.
+        await this.#suspend(file, true);
         this.#uninstall(file);
     }
 
@@ -706,6 +716,11 @@ export class ExtensionLoader {
                 `the module needs version ${String(needs)} of Pi Pocket's extension API, and this Pi Pocket has ${POCKET_API}: update Pi Pocket`,
             );
         }
+
+        // What the old version serves is revoked and proved gone before the new version registers anything (the sandbox's
+        // provider): a replacement is serialised after the old teardown.
+        await this.#suspend(file, false);
+        this.#stillLatest(file, generation);
 
         // What it adds to the app counts only once it installed; a version that fails leaves the one before in place,
         // and what it set up (its cleanups) goes. The new version starts before the old one's cleanups run.
@@ -1029,16 +1044,26 @@ export class ExtensionLoader {
         ) {
             const installed = this.#installed.has(file);
 
-            this.#uninstall(file);
+            // Revoke and prove gone before the module goes; when that cannot be proved, the module stays installed.
+            void this.#suspend(file, true).then(
+                () => {
+                    this.#uninstall(file);
 
-            if (installed) {
-                this.#notify(
-                    "info",
-                    directory === this.#dropIn
-                        ? `Removed the drop-in extension ${file}.`
-                        : `Removed the extension module ${file}.`,
-                );
-            }
+                    if (installed) {
+                        this.#notify(
+                            "info",
+                            directory === this.#dropIn
+                                ? `Removed the drop-in extension ${file}.`
+                                : `Removed the extension module ${file}.`,
+                        );
+                    }
+                },
+                (error: unknown) =>
+                    this.#notify(
+                        "error",
+                        `Kept ${file}, which was removed from its folder: what it runs could not be stopped (${describe(error)}).`,
+                    ),
+            );
 
             return;
         }

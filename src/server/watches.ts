@@ -21,6 +21,7 @@ import {
 import type { PocketApp } from "./app.ts";
 import { addActivity } from "./collab.ts";
 import { ChatDoc, type PrWatch, TurnsDoc, type WatchStatus, WatchDoc } from "./docs.ts";
+import { Deferred } from "./deliver.ts";
 import { describe, HttpError } from "./errors.ts";
 import { attribute, clip, defang, quoted } from "./fence.ts";
 import {
@@ -472,65 +473,70 @@ export class Watches {
         const number = found.number;
         const now = app.now();
 
-        return app.harness.commit(async (tx) => {
-            const doc = await tx.doc(WatchDoc, id);
-            const current = doc.watch;
+        return app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                const doc = await tx.doc(WatchDoc, id);
+                const current = doc.watch;
 
-            if (app.steeringUser(id, person.id) === undefined) {
-                throw new HttpError(403, "A watch needs someone who can steer here.");
-            }
+                if (app.steeringUser(id, person.id) === undefined) {
+                    throw new HttpError(403, "A watch needs someone who can steer here.");
+                }
 
-            if (
-                current !== undefined &&
-                ((request.key !== undefined && current.key === request.key) ||
-                    (current.status === "watching" &&
-                        current.repo === repo &&
-                        current.number === number))
-            ) {
-                return JSON.parse(JSON.stringify(current)) as PrWatch;
-            }
+                if (
+                    current !== undefined &&
+                    ((request.key !== undefined && current.key === request.key) ||
+                        (current.status === "watching" &&
+                            current.repo === repo &&
+                            current.number === number))
+                ) {
+                    return JSON.parse(JSON.stringify(current)) as PrWatch;
+                }
 
-            if (current?.status === "watching") {
-                throw new HttpError(
-                    409,
-                    `This session watches PR #${current.number} already: stop that first.`,
+                if (current?.status === "watching") {
+                    throw new HttpError(
+                        409,
+                        `This session watches PR #${current.number} already: stop that first.`,
+                    );
+                }
+
+                // A watch is work that can start later: on an archived session it makes the session live again.
+                await app.sandboxes.admit(tx, { kind: "work-add", id, what: "A PR watch" });
+
+                const taskId = await tx.createTask(
+                    this.task,
+                    {},
+                    { ownership: { kind: "conversation" }, background: true, conversationId: id },
                 );
-            }
+                const watch: PrWatch = {
+                    repo,
+                    number,
+                    url: found.url!,
+                    // One line: Pi reads it in the watch's status, and PiP in its list.
+                    title: snippet(found.title ?? `PR #${number}`, 200),
+                    branch: found.headRefName ?? "",
+                    ...(elsewhere ? { elsewhere: true } : {}),
+                    ...(unchecked ? { unchecked: true } : {}),
+                    by: person.id,
+                    ...(request.byPi === true ? { byPi: true } : {}),
+                    createdAt: now,
+                    taskId,
+                    status: "watching",
+                    // The first look comes at once: checks may have failed already.
+                    next: now,
+                    sent: 0,
+                    max: MAX_SENT,
+                    since: new Date(now).toISOString(),
+                    seen: [],
+                    lastNewsAt: now,
+                    errors: 0,
+                    ...(request.key === undefined ? {} : { key: request.key }),
+                };
 
-            const taskId = await tx.createTask(
-                this.task,
-                {},
-                { ownership: { kind: "conversation" }, background: true, conversationId: id },
-            );
-            const watch: PrWatch = {
-                repo,
-                number,
-                url: found.url!,
-                // One line: Pi reads it in the watch's status, and PiP in its list.
-                title: snippet(found.title ?? `PR #${number}`, 200),
-                branch: found.headRefName ?? "",
-                ...(elsewhere ? { elsewhere: true } : {}),
-                ...(unchecked ? { unchecked: true } : {}),
-                by: person.id,
-                ...(request.byPi === true ? { byPi: true } : {}),
-                createdAt: now,
-                taskId,
-                status: "watching",
-                // The first look comes at once: checks may have failed already.
-                next: now,
-                sent: 0,
-                max: MAX_SENT,
-                since: new Date(now).toISOString(),
-                seen: [],
-                lastNewsAt: now,
-                errors: 0,
-                ...(request.key === undefined ? {} : { key: request.key }),
-            };
+                doc.watch = watch;
 
-            doc.watch = watch;
-
-            return watch;
-        }, context);
+                return watch;
+            }, context),
+        );
     }
 
     /** Stop a session's watch, or clear one that ended (a subagent's session's). Returns it; undefined for none. */
@@ -956,6 +962,13 @@ export class Watches {
                     WATCH_VIA,
                 );
             } catch (error) {
+                // The sandbox of the session is changing: nothing failed. What was found waits, untold, for the next look.
+                if (error instanceof Deferred) {
+                    return this.#again(runtime, error.retryMs, {}, context, {
+                        note: "Waits while the sandbox changes.",
+                    });
+                }
+
                 // Someone else's turn, a spend limit, no model: it may pass. The look runs again, and finds the same.
                 return this.#failed(runtime, `Pi could not be told: ${describe(error)}`, context);
             }
