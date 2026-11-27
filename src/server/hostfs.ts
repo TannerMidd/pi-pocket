@@ -25,6 +25,7 @@ import {
     copyFileSync,
     createReadStream as fsCreateReadStream,
     existsSync,
+    fchmodSync,
     fstatSync,
     ftruncateSync,
     lstatSync,
@@ -45,7 +46,6 @@ import {
     writeSync,
     appendFileSync,
     accessSync,
-    chmodSync,
     mkdtempSync,
 } from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -588,6 +588,23 @@ export class OpenFile {
         for (let done = 0; done < data.length;) {
             done += writeSync(this.#fd, data, done);
         }
+    }
+
+    /** Change the mode of this file itself, by the descriptor: what the name names now is not touched. */
+    chmod(mode: number): void {
+        fchmodSync(this.#fd, mode);
+    }
+
+    /**
+     * A stream of this descriptor, at most `bytes` long (and at most what is there): the descriptor that was checked is
+     * the one that is read, and a file that grows is not sent past the bound. The stream owns the descriptor.
+     */
+    readStream(bytes: number): ReadStream {
+        this.#closed = true;
+
+        return bytes <= 0
+            ? fsCreateReadStream("", { fd: this.#fd, autoClose: true, start: 0, end: 0 })
+            : fsCreateReadStream("", { fd: this.#fd, autoClose: true, start: 0, end: bytes - 1 });
     }
 
     /** What is left of the file, from the start; `max` bounds it (more than that is `EFBIG`). */
@@ -1147,11 +1164,11 @@ export function copyFile(
     mode?: number,
     max = MAX_COPY,
     onChunk?: () => void,
-): void {
+): number {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         copyFileSync(from.located.path, to.located.path);
 
-        return;
+        return statSync(to.located.path).size;
     }
 
     const source = openSync(from, "r");
@@ -1186,13 +1203,18 @@ export function copyFile(
             throw error;
         }
 
-        target.close();
+        try {
+            // By the descriptor that was written, not by the name: a link swapped in is not followed.
+            if (mode !== undefined) {
+                target.chmod(mode);
+            }
+        } finally {
+            target.close();
+        }
+
+        return total;
     } finally {
         source.close();
-    }
-
-    if (mode !== undefined) {
-        use(to, (path) => chmodSync(path, mode));
     }
 }
 
@@ -1201,14 +1223,14 @@ export async function copyFileAsync(
     to: Place,
     max = MAX_COPY,
     onChunk?: () => void,
-): Promise<void> {
+): Promise<number> {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         await fsp.copyFile(from.located.path, to.located.path);
 
-        return;
+        return (await fsp.stat(to.located.path)).size;
     }
 
-    copyFile(from, to, undefined, max, onChunk);
+    return copyFile(from, to, undefined, max, onChunk);
 }
 
 /** Write a file (`flag` `w` by default; `wx` makes it fail if it is there). A sandboxed place is never opened through a link. */

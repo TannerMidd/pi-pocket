@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
     appendFileSync,
+    chmodSync,
     closeSync,
     existsSync,
     mkdirSync,
@@ -681,5 +682,55 @@ test(
             { code: "EFBIG" },
         );
         assert.equal(existsSync(join(root, "from-plain.bin")), false);
+    },
+);
+
+test(
+    "a copy sets the mode by the descriptor it wrote, never through a link swapped in, and reports what it copied",
+    { skip: !linux },
+    (t) => {
+        const { root, outside, host } = lab(t);
+        const folder = host.folder(root);
+        const victim = join(outside, "victim.txt");
+
+        writeFileSync(join(root, "source.txt"), "x".repeat(100));
+        writeFileSync(victim, "keep");
+        chmodSync(victim, 0o644);
+
+        // The guest swaps the target's name for a link to a file outside after the bytes were written.
+        const swap = () => {
+            rmSync(join(root, "target.txt"));
+            symlinkSync(victim, join(root, "target.txt"));
+        };
+
+        hostfs.copyFile(folder.at("source.txt"), folder.at("target.txt"), 0o600, 1000, swap);
+        assert.equal(
+            statSync(victim).mode & 0o777,
+            0o644,
+            "the outside file's mode is not changed",
+        );
+        assert.equal(readFileSync(victim, "utf8"), "keep");
+
+        // The count is what was read, not what a look at the size said first.
+        let grown = false;
+
+        const grow = () => {
+            if (!grown) {
+                grown = true;
+                appendFileSync(join(root, "source.txt"), "y".repeat(200));
+            }
+        };
+
+        assert.equal(
+            hostfs.copyFile(
+                folder.at("source.txt"),
+                folder.at("counted.txt"),
+                undefined,
+                1000,
+                grow,
+            ),
+            300,
+        );
+        assert.equal(statSync(join(root, "counted.txt")).size, 300);
     },
 );

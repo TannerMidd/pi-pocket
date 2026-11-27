@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createReadStream, openSync, own, Place, readFile, stat } from "../hostfs.ts";
+import { openSync, own, Place, readFile, stat } from "../hostfs.ts";
 import { type ReadableFile, withUploadBytes } from "../upload-content.ts";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
@@ -434,9 +434,13 @@ export function serveImage(
     let size: number;
     let mtime: number;
     let type: string | undefined;
+    let opened;
 
+    // One descriptor for the look, the sniff, and the stream: what was checked is what is sent.
     try {
-        const stats = stat(file);
+        opened = openSync(file, "r");
+
+        const stats = opened.stat();
 
         if (!stats.isFile()) {
             throw new Error("not a file");
@@ -444,24 +448,22 @@ export function serveImage(
 
         size = stats.size;
         mtime = stats.mtimeMs;
-        const head = Buffer.alloc(1024);
-        const opened = openSync(file, "r");
 
-        try {
-            type = sniffImage(head.subarray(0, opened.read(head, 0, head.length, 0)));
-        } finally {
-            opened.close();
-        }
+        const head = Buffer.alloc(1024);
+
+        type = sniffImage(head.subarray(0, opened.read(head, 0, head.length, 0)));
     } catch {
+        opened?.close();
+
         throw new HttpError(404, "Image not found");
     }
 
-    if (type === undefined) {
-        throw new HttpError(415, "That file is not an image");
-    }
+    if (type === undefined || size > MAX_IMAGE_FILE) {
+        opened.close();
 
-    if (size > MAX_IMAGE_FILE) {
-        throw new HttpError(413, "Image too large to show");
+        throw type === undefined
+            ? new HttpError(415, "That file is not an image")
+            : new HttpError(413, "Image too large to show");
     }
 
     const etag = `"${size.toString(36)}-${Math.floor(mtime).toString(36)}"`;
@@ -472,6 +474,7 @@ export function serveImage(
     };
 
     if (request.headers["if-none-match"] === etag) {
+        opened.close();
         response.writeHead(304, headers);
         response.end();
 
@@ -483,7 +486,27 @@ export function serveImage(
         "content-type": type,
         "content-length": String(size),
     });
-    createReadStream(file)
+
+    if (size === 0) {
+        opened.close();
+        response.end();
+
+        return;
+    }
+
+    // No more than the declared size, from the checked descriptor; a file that shrank is cut off, not padded.
+    let sent = 0;
+
+    opened
+        .readStream(size)
+        .on("data", (chunk) => {
+            sent += chunk.length;
+        })
+        .on("end", () => {
+            if (sent < size) {
+                response.destroy();
+            }
+        })
         .on("error", () => response.destroy())
         .pipe(response);
 }

@@ -537,7 +537,15 @@ export async function conversationRoutes(
 
             response.writeHead(200, headers(stats.size));
 
-            await pipeline(handle.createReadStream({ autoClose: false }), response);
+            // No more than the size that was declared: a file that grows is not sent past it.
+            if (stats.size === 0) {
+                response.end();
+            } else {
+                await pipeline(
+                    handle.createReadStream({ autoClose: false, start: 0, end: stats.size - 1 }),
+                    response,
+                );
+            }
         } finally {
             await handle.close();
         }

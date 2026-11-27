@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
+import { modulesIn } from "./fs-scan.ts";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server");
@@ -34,16 +35,12 @@ const sources = new Map(
     ]),
 );
 
-/** Whether the file loads one of the modules (`names`, with or without `node:`): by `import`, `import()`, or `require`. */
-const imports = (text: string, names: string[]): boolean =>
-    names.some((name) =>
-        [
-            new RegExp(`\\b(?:import|export)\\b[^;'"\`]*?\\bfrom\\s*["'](?:node:)?${name}["']`),
-            new RegExp(`\\bimport\\s*["'](?:node:)?${name}["']`),
-            new RegExp(`\\bimport\\s*\\(\\s*["'](?:node:)?${name}["']`),
-            new RegExp(`\\brequire\\s*\\(\\s*["'](?:node:)?${name}["']`),
-        ].some((pattern) => pattern.test(text)),
-    );
+/** Whether the file loads one of the modules (`names`, with or without `node:`), read from its syntax tree. */
+const imports = (text: string, names: string[]): boolean => {
+    const loaded = [...modulesIn(text)].map((name) => name.replace(/^node:/, ""));
+
+    return names.some((name) => loaded.includes(name.replace(/\\\//g, "/")));
+};
 
 test("fs is imported only by hostfs.ts and files of Pocket's own data", () => {
     const allowed = new Set(

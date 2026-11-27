@@ -12,6 +12,7 @@ import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { modulesIn } from "./fs-scan.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server");
 
@@ -50,23 +51,7 @@ const sources = new Map(
     walk(ROOT).map((file) => [relative(ROOT, file), code(readFileSync(file, "utf8"))] as const),
 );
 
-/** The modules a file loads: `import … from`, `export … from`, `import "…"`, `import("…")`, and `require("…")`. */
-function modulesOf(text: string): Set<string> {
-    const found = new Set<string>();
-
-    for (const pattern of [
-        /\b(?:import|export)\b[^;'"`]*?\bfrom\s*["']([^"']+)["']/g,
-        /\bimport\s*["']([^"']+)["']/g,
-        /\bimport\s*\(\s*["']([^"']+)["']/g,
-        /\brequire\s*\(\s*["']([^"']+)["']/g,
-    ]) {
-        for (const match of text.matchAll(pattern)) {
-            found.add(match[1]!);
-        }
-    }
-
-    return found;
-}
+const modulesOf = modulesIn;
 
 const PRIMITIVES: Record<string, string> = {
     fs: "fs",
@@ -292,4 +277,20 @@ test("import() and require() take a single string literal, except where the cens
     }
 
     assert.deepEqual(problems, []);
+});
+
+test("a module is read by its decoded name: backticks and escapes are the same module", () => {
+    const primitives = (code: string) => primitivesOf(code);
+
+    assert.deepEqual(primitives("import(`node:fs`);"), ["fs"]);
+    assert.deepEqual(primitives('import("node:\\x66s");'), ["fs"]);
+    assert.deepEqual(primitives('import("node:fs\\u002Fpromises");'), ["fs/promises"]);
+    assert.deepEqual(primitives("const c = require(`child_process`);"), ["child_process"]);
+    assert.deepEqual(primitives('const c = require("child_pro\\x63ess");'), ["child_process"]);
+    assert.deepEqual(primitives('import fs from "node:\\u0066s";'), ["fs"]);
+    assert.deepEqual(primitives('export * from "fs";'), ["fs"]);
+    assert.deepEqual(primitives('import fs = require("fs");'), ["fs"]);
+    assert.deepEqual(primitives('type T = import("node:fs").Stats;'), ["fs"]);
+    assert.deepEqual(primitives('import("node:path");'), []);
+    assert.deepEqual(primitives('const text = "import(`node:fs`)"; // import("fs")'), []);
 });
