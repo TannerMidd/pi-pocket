@@ -26,7 +26,10 @@ export const runGh: Gh = (args, cwd, timeoutMs = GH_TIMEOUT_MS) =>
                 timeout: timeoutMs,
                 maxBuffer: 64 * 1024 * 1024,
                 env: {
-                    ...process.env,
+                    // `gh` runs git in `cwd`, with the git variables that this server was started with: none of them.
+                    ...Object.fromEntries(
+                        Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+                    ),
                     GH_PROMPT_DISABLED: "1",
                     GH_NO_UPDATE_NOTIFIER: "1",
                     GIT_TERMINAL_PROMPT: "0",
