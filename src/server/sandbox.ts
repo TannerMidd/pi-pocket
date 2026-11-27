@@ -16,7 +16,7 @@ import {
     LiveDoc,
     type Tx,
 } from "@earendil-works/pi-durable";
-import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { type ExecutionEnv, ok } from "@earendil-works/pi-durable/env";
 import type { PocketApp } from "./app.ts";
 import type { Role, User } from "./config.ts";
 import { type SessionMeta, SandboxDoc, SessionsDoc } from "./docs.ts";
@@ -28,6 +28,7 @@ import {
     hostToolBlocked,
     INERT_TOOLS,
     namesPath,
+    RESOURCE_CALLS,
     ROUTED_BY_PROVIDER,
     ROUTED_TOOLS,
     TEAM_TOOL,
@@ -230,17 +231,16 @@ const delay = (ms: number, signal: AbortSignal): Promise<void> =>
             return;
         }
 
-        const timer = setTimeout(resolve, ms);
+        const done = () => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", done);
+            resolve();
+        };
+
+        const timer = setTimeout(done, ms);
 
         timer.unref?.();
-        signal.addEventListener(
-            "abort",
-            () => {
-                clearTimeout(timer);
-                resolve();
-            },
-            { once: true },
-        );
+        signal.addEventListener("abort", done, { once: true });
     });
 
 type Reservation = { folders: string[]; roots: Set<number>; what: string };
@@ -256,8 +256,13 @@ export class Sandboxes {
     readonly #timer: (ms: number, signal: AbortSignal) => Promise<void>;
     /** Live registration; the newest serves. Undefined: no module. */
     #provider: { provider: SandboxProvider; owner: string | undefined } | undefined;
-    /** The teardown of the provider that left, which a new registration waits for (design 4.1). */
-    #teardown: Promise<void> = Promise.resolve();
+    /**
+     * Registrations, replacements, and teardowns of the provider run one at a time, in order (design 4.1): a new provider
+     * is installed only after the old one's teardown succeeded.
+     */
+    #serial: Promise<unknown> = Promise.resolve();
+    /** Counts every change of the provider: an environment handle made under another generation is stale. */
+    #generation = 0;
     readonly #phases = new Map<number, { phase: Phase; reason?: string }>();
     readonly #changed = new Set<() => void>();
     /** Which roots are sandboxed, kept in step with their documents. */
@@ -332,32 +337,92 @@ export class Sandboxes {
         provider: SandboxProvider,
         owner?: string,
     ): Promise<{ unregister: () => Promise<void> }> {
-        await this.#teardown;
-        const mine = { provider, owner };
+        return this.#serialised(async () => {
+            const old = this.#provider;
 
-        this.#provider = mine;
-
-        if (provider.env !== undefined) {
-            this.#present.add("driver");
-        }
-
-        if (provider.jobs !== undefined) {
-            this.#present.add("jobs");
-        }
-
-        if (provider.browser !== undefined) {
-            this.#present.add("browser");
-        }
-
-        await this.reconcile();
-
-        return {
-            unregister: async () => {
-                if (this.#provider === mine) {
-                    this.#provider = undefined;
+            // A live provider is stopped first: its trees are suspended, its calls revoked, its VMs proved gone. When that
+            // cannot be proved the old provider stays, and the new one is not installed.
+            if (old !== undefined && old.provider !== provider) {
+                try {
+                    await this.#stop(old, true, "the sandbox module is being replaced");
+                } catch (error) {
+                    throw new HttpError(
+                        409,
+                        `The sandbox that is running could not be stopped, so the new one was not installed: ${describeError(error)}`,
+                    );
                 }
-            },
-        };
+            }
+
+            const mine = { provider, owner };
+
+            this.#provider = mine;
+            this.#generation++;
+
+            if (provider.env !== undefined) {
+                this.#present.add("driver");
+            }
+
+            if (provider.jobs !== undefined) {
+                this.#present.add("jobs");
+            }
+
+            if (provider.browser !== undefined) {
+                this.#present.add("browser");
+            }
+
+            await this.reconcile();
+
+            return {
+                unregister: () =>
+                    this.#serialised(async () => {
+                        if (this.#provider === mine) {
+                            await this.#stop(mine, true, "the sandbox module went away");
+                        }
+                    }),
+            };
+        });
+    }
+
+    #serialised<T>(work: () => Promise<T>): Promise<T> {
+        const run = this.#serial.then(work, work);
+
+        this.#serial = run.then(
+            () => undefined,
+            () => undefined,
+        );
+
+        return run;
+    }
+
+    /**
+     * Suspend every tree, revoke every lease, and prove every VM gone (I5). A failure throws, leaves the trees suspended
+     * with the reason, and keeps the provider. `leave`: the provider goes after the proof.
+     */
+    async #stop(mine: { provider: SandboxProvider }, leave: boolean, why: string): Promise<void> {
+        const roots = [...this.#on];
+
+        for (const root of roots) {
+            this.#setPhase(root, "suspended", why);
+        }
+
+        try {
+            await this.#release(roots, why);
+        } catch (error) {
+            for (const root of roots) {
+                this.#setPhase(
+                    root,
+                    "suspended",
+                    `it could not be stopped (${describeError(error)})`,
+                );
+            }
+
+            throw error;
+        }
+
+        if (leave && this.#provider === mine) {
+            this.#provider = undefined;
+            this.#generation++;
+        }
     }
 
     // ─── What the app tells us as documents commit ──────────────────────────
@@ -1283,6 +1348,9 @@ export class Sandboxes {
             return Promise.resolve();
         });
 
+        // Set once the release began: a failure after that leaves the tree suspended until a recovery succeeds.
+        let released = false;
+
         try {
             const request = await resolve();
 
@@ -1298,11 +1366,17 @@ export class Sandboxes {
                 reservation.folders.push(...added);
             }
 
+            // Admission is tried first, in a commit that is rolled back: a refused destination stops here, before a VM
+            // is stopped or a folder is deleted.
+            await this.#validate(request);
+
             if (releases) {
+                released = true;
                 await this.#release([root], "the session is being changed");
             }
 
             await steps.afterRelease?.();
+            released = releases;
 
             const done = await commit(request);
 
@@ -1316,12 +1390,12 @@ export class Sandboxes {
 
             return done;
         } catch (error) {
-            this.#reservations.delete(reservation);
-
-            // A refusal (a 4xx) after the release changed nothing: the VM is only stopped, and the next call starts one.
-            if (releases && !(error instanceof HttpError && error.status < 500)) {
+            if (released) {
+                // Section 3: a step that fails after the release leaves the tree suspended, with its old folder and
+                // setting, and its group reserved, until an explicit recovery (`resume`) proves the teardown.
                 this.#setPhase(root, "suspended", describeError(error));
             } else {
+                this.#reservations.delete(reservation);
                 this.#setPhase(root, "stable");
             }
 
@@ -1329,6 +1403,25 @@ export class Sandboxes {
                 ? error
                 : new HttpError(409, `The session stays as it was: ${describeError(error)}`);
         }
+    }
+
+    /** Run admission for `request` in a commit that is rolled back: it throws what the real commit would refuse with. */
+    async #validate(request: Request): Promise<void> {
+        const rollback = new Error("validated");
+
+        await this.exclusive(() =>
+            this.#app.harness
+                .commit(async (tx) => {
+                    await this.admit(tx, request);
+
+                    throw rollback;
+                }, context)
+                .catch((error: unknown) => {
+                    if (error !== rollback) {
+                        throw error;
+                    }
+                }),
+        );
     }
 
     // ─── Leases ─────────────────────────────────────────────────────────────
@@ -1518,6 +1611,34 @@ export class Sandboxes {
      * The callers set a phase before they call, so no new lease is granted meanwhile.
      */
     async #release(roots: readonly number[], reason: string): Promise<void> {
+        // One bound on the whole attempt: a revoke handler that never settles, a lease that never ends, or a provider that
+        // never closes leaves the caller with a failure (the tree stays suspended), not with a wait that never ends.
+        const stop = new AbortController();
+        let expired = false;
+        const timeout = this.#timer(this.#drainMs, stop.signal).then(() => {
+            expired = !stop.signal.aborted;
+
+            return expired
+                ? Promise.reject(
+                      new Error(
+                          "the release did not finish in time, so it is not known to be gone",
+                      ),
+                  )
+                : new Promise<never>(() => {});
+        });
+        const attempt = this.#releaseAttempt(roots, reason);
+
+        // The attempt may fail after the bound: that failure is no one's to handle any more.
+        attempt.catch(() => undefined);
+
+        try {
+            await Promise.race([attempt, timeout]);
+        } finally {
+            stop.abort();
+        }
+    }
+
+    async #releaseAttempt(roots: readonly number[], reason: string): Promise<void> {
         const mine = [...this.#leases].filter((lease) => roots.includes(lease.root));
         const failures: string[] = [];
 
@@ -1530,21 +1651,7 @@ export class Sandboxes {
                 }
             }),
         );
-
-        const stop = new AbortController();
-        const bound = this.#timer(this.#drainMs, stop.signal);
-
-        try {
-            await Promise.race([Promise.all(mine.map((lease) => lease.ended)), bound]);
-        } finally {
-            stop.abort();
-        }
-
-        const left = [...this.#leases].filter((lease) => roots.includes(lease.root));
-
-        if (left.length > 0) {
-            failures.push(`${left.map((lease) => lease.what).join(", ")} did not stop`);
-        }
+        await Promise.all(mine.map((lease) => lease.ended));
 
         if (failures.length > 0) {
             throw new Error(failures.join("; "));
@@ -1696,6 +1803,8 @@ export class Sandboxes {
                 );
             }
 
+            // A retry from `suspended` replaces the reservation that the failed attempt kept.
+            this.#dropReservations(root);
             this.#reservations.add(reservation);
             this.#setPhase(root, "turning-off");
         });
@@ -1717,7 +1826,7 @@ export class Sandboxes {
             await this.exclusive(() =>
                 app.harness.commit((tx) => this.admit(tx, { kind: "off", id, user }), context),
             );
-            this.#reservations.delete(reservation);
+            this.#dropReservations(root);
             this.#setPhase(root, "stable");
         } catch (error) {
             this.#setPhase(
@@ -1751,7 +1860,17 @@ export class Sandboxes {
             throw new HttpError(409, `It could not be resumed: ${describeError(error)}`);
         }
 
+        // The teardown is proved: the reservation that the failure kept goes, so the group is free again.
+        this.#dropReservations(root);
         this.#setPhase(root, "stable");
+    }
+
+    #dropReservations(root: number): void {
+        for (const reservation of [...this.#reservations]) {
+            if (reservation.roots.has(root)) {
+                this.#reservations.delete(reservation);
+            }
+        }
     }
 
     // ─── Rules, recovery, reload, shutdown ──────────────────────────────────
@@ -1763,22 +1882,32 @@ export class Sandboxes {
      * with stricter rules a looser VM is stopped, and the next call starts one under the new rules.
      */
     rules(reason: string): Promise<void> {
-        const roots = [...this.#on];
+        // Only the trees that this transition stopped are its own: a tree in another transition, or one a failed release left
+        // suspended, is not touched, and not cleared.
+        const tag = `its rules changed (${reason}) #${++this.#rulesCount}`;
+        const mine = [...this.#on].filter((root) => !this.#phases.has(root));
 
-        if (roots.length === 0) {
+        if (mine.length === 0) {
             return Promise.resolve();
         }
 
-        for (const root of roots) {
-            if (this.#phases.get(root)?.phase !== "suspended") {
-                this.#setPhase(root, "suspended", `its rules changed (${reason})`);
-            }
+        for (const root of mine) {
+            this.#setPhase(root, "suspended", tag);
         }
 
+        const still = (root: number) => this.#phases.get(root)?.reason === tag;
+
         return this.exclusive(async () => {
-            for (const root of roots) {
-                const folder = this.#folderOfRoot(root);
-                const problem = await this.#trusted.check(folder);
+            for (const root of mine) {
+                if (!still(root)) {
+                    continue;
+                }
+
+                const problem = await this.#trusted.check(this.#folderOfRoot(root));
+
+                if (!still(root)) {
+                    continue;
+                }
 
                 if (problem !== undefined) {
                     this.#setPhase(root, "suspended", problem);
@@ -1790,13 +1919,17 @@ export class Sandboxes {
                         await this.#release([root], "the rules got stricter");
                     }
 
-                    this.#setPhase(root, "stable");
+                    if (still(root)) {
+                        this.#setPhase(root, "stable");
+                    }
                 } catch (error) {
                     this.#setPhase(root, "suspended", describeError(error));
                 }
             }
         });
     }
+
+    #rulesCount = 0;
 
     /**
      * The settings of `module` changed. When it serves the sandbox, every call stops at once and the `rules` transition
@@ -1846,28 +1979,15 @@ export class Sandboxes {
      * registration waits for this teardown (`register`), and reconciles the trees that waited.
      */
     async suspendOwner(owner: string, leave: boolean): Promise<void> {
-        const mine = this.#provider;
+        await this.#serialised(async () => {
+            const mine = this.#provider;
 
-        if (mine === undefined || mine.owner !== owner) {
-            return;
-        }
-
-        const roots = [...this.#on];
-
-        for (const root of roots) {
-            this.#setPhase(root, "suspended", "the sandbox module is being replaced or turned off");
-        }
-
-        const done = (async () => {
-            await this.#release(roots, "the sandbox module is being replaced or turned off");
-
-            if (leave && this.#provider === mine) {
-                this.#provider = undefined;
+            if (mine === undefined || mine.owner !== owner) {
+                return;
             }
-        })();
 
-        this.#teardown = done.catch(() => undefined);
-        await done;
+            await this.#stop(mine, leave, "the sandbox module is being replaced or turned off");
+        });
     }
 
     /** The server stops: every tree is suspended and every VM is stopped, within a bound. */
@@ -1956,6 +2076,7 @@ export class Sandboxes {
         hops: number,
     ): ExecutionEnv {
         const app = this.#app;
+        const generation = this.#generation;
         const failure = (message: string, property: string) =>
             (
                 Reflect.get(failedEnv(cwd, message), property) as
@@ -1987,6 +2108,9 @@ export class Sandboxes {
                     const cancel =
                         !boxed || at === -1 ? undefined : withCancel(args[at] as Context);
                     const kind: VmKind = property === "exec" ? "exec" : "file";
+                    // A reader or a watcher is used after its open returns: its lease lasts until it is closed.
+                    const resource = RESOURCE_CALLS[property];
+                    let closeResource: (() => Promise<void>) | undefined;
                     let lease: Lease;
 
                     try {
@@ -1996,7 +2120,11 @@ export class Sandboxes {
                                 ? {
                                       kind,
                                       folder: cwd,
-                                      revoke: (reason) => cancel?.cancel(new Error(reason)),
+                                      revoke: (reason) => {
+                                          cancel?.cancel(new Error(reason));
+
+                                          return closeResource?.();
+                                      },
                                   }
                                 : { kind: "host", folder: cwd, what: `a ${property} call` },
                         );
@@ -2004,7 +2132,13 @@ export class Sandboxes {
                         return failure(describeError(error), property);
                     }
 
-                    if (lease.sandboxed !== boxed) {
+                    // What the handle was made for is looked at again at every call: the state of the tree, its folder,
+                    // and the provider. When any changed, the call goes to the environment that the new state gives.
+                    if (
+                        lease.sandboxed !== boxed ||
+                        this.#generation !== generation ||
+                        this.#app.cwdOf(id) !== cwd
+                    ) {
                         lease.end();
 
                         if (hops >= 2) {
@@ -2022,6 +2156,8 @@ export class Sandboxes {
                         return again[property]!(...args);
                     }
 
+                    let result: unknown;
+
                     try {
                         const call = [...args];
 
@@ -2029,10 +2165,61 @@ export class Sandboxes {
                             call[at] = cancel.context;
                         }
 
-                        return await (value as (...call: unknown[]) => unknown).apply(target, call);
-                    } finally {
+                        result = await (value as (...call: unknown[]) => unknown).apply(
+                            target,
+                            call,
+                        );
+                    } catch (error) {
                         lease.end();
+
+                        throw error;
                     }
+
+                    const opened = (result as { ok?: boolean; value?: unknown } | undefined)?.ok
+                        ? (result as { value: Record<string, unknown> }).value
+                        : undefined;
+
+                    if (resource === undefined || opened === undefined) {
+                        lease.end();
+
+                        return result;
+                    }
+
+                    const done = opened[resource] as
+                        ((context: Context) => Promise<void>) | undefined;
+
+                    // A revoke closes the resource itself, and the lease ends with it.
+                    closeResource = async () => {
+                        try {
+                            await done?.call(opened, context);
+                        } finally {
+                            lease.end();
+                        }
+                    };
+
+                    return ok(
+                        new Proxy(opened, {
+                            get: (held, name) => {
+                                const member: unknown = Reflect.get(held, name, held);
+
+                                if (name === resource && typeof member === "function") {
+                                    return async (...closing: unknown[]) => {
+                                        try {
+                                            return await (
+                                                member as (...call: unknown[]) => unknown
+                                            ).apply(held, closing);
+                                        } finally {
+                                            lease.end();
+                                        }
+                                    };
+                                }
+
+                                return typeof member === "function"
+                                    ? (member as (...call: unknown[]) => unknown).bind(held)
+                                    : member;
+                            },
+                        }),
+                    );
                 };
             },
         });
@@ -2066,6 +2253,14 @@ export class Sandboxes {
             return await this.#whenStable(root, () => {
                 if (this.#on.has(root)) {
                     return this.gate(tool, args);
+                }
+
+                // Every call of a plain tree checks I1 for its group at this moment, as a lease grant does: also a call
+                // that needs no host lease.
+                const problem = this.#grantProblem(root);
+
+                if (problem !== undefined) {
+                    return problem;
                 }
 
                 if (this.#toolNeedsLease(tool) && !this.#toolLeases.has(taskId)) {

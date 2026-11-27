@@ -419,6 +419,12 @@ function stallWatchFor(
                         try {
                             await submitNow(
                                 (target) => host.checkDelivery?.(target),
+                                (change) =>
+                                    runtime.commit(async (tx) => {
+                                        await change(tx);
+
+                                        return undefined;
+                                    }, context),
                                 conversation,
                                 {
                                     type: "input",

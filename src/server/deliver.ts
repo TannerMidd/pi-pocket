@@ -39,16 +39,26 @@ export async function submitIn(
     return await conversation.submit(tx, draft);
 }
 
-/** Deliver a message in its own commit. Throws `Deferred` before writing anything. */
+/** Runs `change` in a commit of the caller's: a task's `runtime.commit`, or the harness's. */
+export type DeliveryCommit = (change: (tx: Tx) => Promise<unknown>) => Promise<unknown>;
+
+/**
+ * Deliver a message in a commit of its own, and answer its submission. The check runs **inside** that commit, with the
+ * admission (`submitIn`), so a change of the sandbox cannot start between the check and the queue. The submission is
+ * then found by its request id, which places nothing new. Throws `Deferred` before anything is written.
+ */
 export async function submitNow(
     check: DeliveryCheck,
+    commit: DeliveryCommit,
     conversation: Submitter,
-    draft: SubmissionDraft,
+    draft: SubmissionDraft & { requestId: string },
     context: Context,
 ): Promise<Submission> {
-    check(conversation.id);
+    await commit(async (tx) => {
+        await submitIn(check, conversation, tx, draft);
+    });
 
-    return await conversation.submit(draft, context);
+    return conversation.submit(draft, context);
 }
 
 /**
@@ -84,16 +94,16 @@ function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
             return;
         }
 
-        const timer = setTimeout(resolve, ms);
+        // Either end of the wait removes the listener, so a long wait with many retries keeps none.
+        const done = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", done);
+            resolve();
+        };
 
-        signal?.addEventListener(
-            "abort",
-            () => {
-                clearTimeout(timer);
-                resolve();
-            },
-            { once: true },
-        );
+        const timer = setTimeout(done, ms);
+
+        signal?.addEventListener("abort", done, { once: true });
     });
 }
 

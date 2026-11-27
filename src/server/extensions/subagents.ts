@@ -339,6 +339,12 @@ function reporterFor(
                     () =>
                         submitNow(
                             (target) => host.checkDelivery?.(target),
+                            (change) =>
+                                runtime.commit(async (tx) => {
+                                    await change(tx);
+
+                                    return undefined;
+                                }, context),
                             subagent,
                             { ...request, requestId },
                             context,
@@ -932,6 +938,12 @@ function courierFor(limits: Limits) {
                         // its own number, and sends it again after a wait.
                         const submission = await submitNow(
                             (target) => limits.checkDelivery?.(target),
+                            (change) =>
+                                runtime.commit(async (tx) => {
+                                    await change(tx);
+
+                                    return undefined;
+                                }, context),
                             parent,
                             {
                                 type: "input",

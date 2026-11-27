@@ -85,6 +85,7 @@ for (const who of ["allowed", "revoked before commit", "missing"] as const) {
             steeringUser: (_id: unknown, by: string | undefined) =>
                 allowed && by === person.id ? person : undefined,
             sessionMeta: () => ({}),
+            sandboxes: { requireDelivery: () => {} },
             spend: { heldBack: () => undefined },
         } as never);
         const items = {

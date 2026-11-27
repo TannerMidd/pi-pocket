@@ -19,6 +19,7 @@ export function gate() {
 
     return {
         open,
+        opened,
         reached,
         wait: async () => {
             reach();
@@ -36,6 +37,11 @@ export class FakeProvider implements SandboxProvider {
     targets: SandboxTarget[] = [];
     /** Commands the fake guest ran. */
     ran: string[] = [];
+    /** What the fake guest's readers closed, and the readers it opened. */
+    closed: string[] = [];
+    readers: { close(): Promise<void> }[] = [];
+    /** Holds `listFiles` until opened, when set. */
+    holdList: Gate | undefined;
     /** Holds `release` until opened, when set. */
     holdRelease: Gate | undefined;
     failRelease: string | undefined;
@@ -59,6 +65,25 @@ export class FakeProvider implements SandboxProvider {
                 return Promise.resolve(ok({ exitCode: 0 }));
             },
             readTextFile: () => Promise.resolve(ok("guest")),
+            openTextLineReader: () => {
+                const reader = {
+                    readLine: () => Promise.resolve(ok(undefined)),
+                    close: () => {
+                        this.closed.push("reader");
+
+                        return Promise.resolve();
+                    },
+                };
+
+                this.readers.push(reader);
+
+                return Promise.resolve(ok(reader));
+            },
+            listFiles: async () => {
+                await this.holdList?.wait();
+
+                return ok({ entries: [], truncated: false });
+            },
             cleanup: () => Promise.resolve(),
         } as unknown as ExecutionEnv;
     }

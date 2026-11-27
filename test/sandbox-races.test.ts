@@ -175,46 +175,62 @@ test("row: terminal continue joins like a new session, and is refused while the 
     await off.finish();
 });
 
-test("row: a subagent's report and a courier batch are delivered only in a stable phase", async () => {
+test("the delivery wrapper checks inside the delivering commit, in every phase, and writes nothing when it defers", async () => {
     const w = await world("subagent-delivery");
-    const check = (id: ConversationId) => w.app.sandboxes.requireDelivery(id);
-    const sent: string[] = [];
+    const log: string[] = [];
     const conversation = {
         id: w.a,
-        submit: (draft: { content?: string }) => {
-            sent.push(draft.content ?? "");
+        submit: (first: unknown) => {
+            // The commit form places the message; the plain form finds it again by its request id.
+            log.push(
+                typeof first === "object" && first !== null && "type" in first ? "found" : "queued",
+            );
 
             return Promise.resolve({ id: 1 });
         },
     };
     const { submitNow } = await import("../src/server/deliver.ts");
     const attempt = () =>
-        submitNow(check, conversation as never, { type: "input", content: "report" }, context);
+        submitNow(
+            (id) => {
+                log.push("check");
+                w.app.sandboxes.requireDelivery(id);
+            },
+            async (change) => {
+                log.push("commit starts");
+                await change({} as never);
+                log.push("commit ends");
+            },
+            conversation as never,
+            { type: "input", content: "report", requestId: "r1" },
+            context,
+        );
 
-    // Stable: queued.
     await attempt();
-    assert.deepEqual(sent, ["report"]);
+    assert.deepEqual(
+        log,
+        ["commit starts", "check", "queued", "commit ends", "found"],
+        "the check is in the commit",
+    );
+    log.length = 0;
 
-    // Turning off, and moving, and suspended: deferred, never sent.
     const off = await turningOff(w);
 
     await assert.rejects(attempt(), /Nothing was sent/);
+    assert.deepEqual(log, ["commit starts", "check"], "nothing was queued");
     await off.finish();
-    assert.deepEqual(sent, ["report"]);
+    log.length = 0;
     w.provider.failRelease = "stuck";
     await w.app.sandboxes.turnOn(w.a, owner(w.app));
     await assert.rejects(w.app.sandboxes.turnOff(w.a, owner(w.app)), /stuck/);
     assert.equal(w.app.sandboxes.phaseOf(w.a), "suspended");
     await assert.rejects(attempt(), /suspended/);
-    assert.deepEqual(
-        sent,
-        ["report"],
-        "nothing ran on the host and nothing was sent while suspended",
-    );
+    assert.ok(!log.includes("queued"), "nothing was sent while suspended");
     w.provider.failRelease = undefined;
     await w.app.sandboxes.resume(w.a);
+    log.length = 0;
     await attempt();
-    assert.deepEqual(sent, ["report", "report"]);
+    assert.ok(log.includes("queued"));
 });
 
 test("row: the first message of an extension's session comes after its join, and a changing group stops both", async () => {
@@ -332,7 +348,7 @@ test("row: a move reserves the old and the new group, releases first, and writes
     assert.equal(await on(w.app, w.a), true);
 });
 
-test("row: a move into a plain folder is refused after the release, and leaves the session as it was", async () => {
+test("row: a move into a plain folder is refused before anything is stopped, and leaves the session as it was", async () => {
     const w = await world("move-mixed");
     const target = join(root, "races-move-mixed-target");
 
@@ -343,6 +359,11 @@ test("row: a move into a plain folder is refused after the release, and leaves t
     await assert.rejects(
         w.app.commands.configure(w.a, owner(w.app), { cwd: target }),
         /without a sandbox/,
+    );
+    assert.deepEqual(
+        w.provider.released,
+        [],
+        "the VM was not stopped for a move that admission refuses",
     );
     assert.deepEqual(await folders(w.app, w.a), { entry: w.dir, agent: w.dir });
     assert.equal(w.app.sandboxes.phaseOf(w.a), "stable");
@@ -786,7 +807,9 @@ test("row: server start audits stored sandboxes: not ready means suspended, and 
     await first.close();
 
     // The stored doc is on, the gate is not met: suspended. The folder is mixed: no VM starts either.
-    const second = await openApp(scriptedModel(), data);
+    const second = await openApp(scriptedModel(), data, undefined, undefined, {
+        sandbox: { platform: "linux" },
+    });
 
     apps.push(second);
     assert.equal(second.sandboxes.isOn(a), true);

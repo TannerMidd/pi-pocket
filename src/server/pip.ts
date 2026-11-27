@@ -1831,6 +1831,12 @@ export class Pip {
                 if (this.#app.spend.heldBack(pipId, input.userId) === undefined) {
                     await submitNow(
                         (target) => this.#app.sandboxes.requireDelivery(target),
+                        (change) =>
+                            runtime.commit(async (tx) => {
+                                await change(tx);
+
+                                return undefined;
+                            }, context),
                         pip,
                         { type: "input", content: text, whenBusy: "followUp", requestId },
                         context,

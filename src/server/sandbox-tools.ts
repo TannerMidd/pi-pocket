@@ -67,6 +67,7 @@ export function namesPath(args: unknown, depth = 0): boolean {
 export const FILE_CALLS: ReadonlySet<string> = new Set([
     "absolutePath",
     "joinPath",
+    "listFiles",
     "readTextFile",
     "openTextLineReader",
     "readTextLines",
@@ -88,6 +89,17 @@ export const FILE_CALLS: ReadonlySet<string> = new Set([
     "createTempDir",
     "createTempFile",
 ]);
+
+/**
+ * The calls that hand back something used after the call returns, and the member that ends it. Their lease lasts until
+ * that member is called (or a revoke calls it): a reader or a watcher is work in flight until it is closed.
+ */
+export const RESOURCE_CALLS: Readonly<Record<string, "close" | "stop" | undefined>> = {
+    openTextLineReader: "close",
+    openBinaryReader: "close",
+    openDirReader: "close",
+    watch: "stop",
+};
 
 /** The environment of a sandboxed tree that cannot run anything: every call fails at once, and says why. */
 export function failedEnv(cwd: string, message: string): ExecutionEnv {

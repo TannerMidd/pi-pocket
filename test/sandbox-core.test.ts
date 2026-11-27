@@ -60,7 +60,13 @@ const stored = (app: App, id: number) =>
     app.harness.snapshot(SandboxDoc, id as never, context).then((doc) => doc?.on === true);
 
 test("the readiness gate refuses a sandbox until every component is registered", async () => {
-    const app = await openApp(scriptedModel(), join(root, `data-core-${++opened}`));
+    const app = await openApp(
+        scriptedModel(),
+        join(root, `data-core-${++opened}`),
+        undefined,
+        undefined,
+        { sandbox: { platform: "linux" } },
+    );
 
     apps.push(app);
     const id = await newSession(app, folder("ready"));
@@ -167,10 +173,13 @@ test("a lease waits in turning-off; the wait is bounded", async () => {
     const hold = gate();
     let expire!: () => void;
     const expired = new Promise<void>((resolve) => (expire = resolve));
+    // Only the bound of a waiting call fires (1000 ms); the bound of the release (2000 ms) does not.
     const { app, provider, id } = await sandboxed("lease-phases", {
-        timer: (_ms, signal) =>
+        waitMs: 1000,
+        drainMs: 2000,
+        timer: (ms, signal) =>
             Promise.race([
-                expired,
+                ms === 1000 ? expired : new Promise<void>(() => {}),
                 new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve())),
             ]),
     });
@@ -411,7 +420,9 @@ test("a join of a sandboxed group is refused while the readiness gate is closed"
 
     await first.sandboxes.turnOn(a, owner(first));
     await first.close();
-    const second = await openApp(scriptedModel(), data);
+    const second = await openApp(scriptedModel(), data, undefined, undefined, {
+        sandbox: { platform: "linux" },
+    });
 
     apps.push(second);
     await assert.rejects(
