@@ -23,6 +23,7 @@ import { type SessionMeta, SandboxDoc, SessionsDoc, SubagentsDoc } from "./docs.
 import { HttpError } from "./errors.ts";
 import { foldersOverlap, within } from "./folder-overlap.ts";
 import {
+    failedCall,
     failedEnv,
     FILE_CALLS,
     hostToolBlocked,
@@ -261,6 +262,8 @@ export class Sandboxes {
      * is installed only after the old one's teardown succeeded.
      */
     #serial: Promise<unknown> = Promise.resolve();
+    /** Set while the provider is being torn down: nothing starts under it (`#fenceProblem`). */
+    #fence: string | undefined;
     /** Counts every change of the provider: an environment handle made under another generation is stale. */
     #generation = 0;
     /**
@@ -376,6 +379,8 @@ export class Sandboxes {
 
             this.#provider = mine;
             this.#generation++;
+            // The new provider serves: the fence of the old one's teardown comes down.
+            this.#fence = undefined;
 
             if (provider.env !== undefined) {
                 this.#present.add("driver");
@@ -420,22 +425,41 @@ export class Sandboxes {
     async #stop(mine: { provider: SandboxProvider }, leave: boolean, why: string): Promise<void> {
         // A provider change never ends, or overwrites, a transition that it does not own: it waits until they are done.
         await this.#quiet();
-        const roots = [...this.#on];
+
+        // The fence goes up in the same tick as the last look at the transitions: from now on no sandboxed admission, turn-on,
+        // lease grant, or VM launch may use this provider (`#fenceProblem`), so no tree can start under it that the teardown
+        // does not see. It stays up until the new provider is installed, or the module is gone.
+        this.#fence = why;
 
         // Only a tree that is stable, or suspended by a provider change, is suspended here; a suspension that another
         // transition left (a failed release, the rules) keeps its record, and the VM is stopped all the same.
         const owned = new Map<number, number>();
-
-        for (const root of roots) {
-            const current = this.#phases.get(root);
-
-            if (current === undefined || current.lifecycle === true) {
-                owned.set(root, this.#setPhase(root, "suspended", why, true));
-            }
-        }
+        const done = new Set<number>();
 
         try {
-            await this.#release(roots, why);
+            // Looked at again until nothing is left: a tree that became sandboxed after the first look (a commit that began
+            // before the fence) is stopped too.
+            for (;;) {
+                const roots = [...this.#on].filter((root) => !done.has(root));
+
+                if (roots.length === 0) {
+                    break;
+                }
+
+                for (const root of roots) {
+                    const current = this.#phases.get(root);
+
+                    if (current === undefined || current.lifecycle === true) {
+                        owned.set(root, this.#setPhase(root, "suspended", why, true));
+                    }
+                }
+
+                await this.#release(roots, why);
+
+                for (const root of roots) {
+                    done.add(root);
+                }
+            }
         } catch (error) {
             for (const [root, token] of owned) {
                 this.#setIf(
@@ -446,13 +470,25 @@ export class Sandboxes {
                 );
             }
 
+            // The provider stays, and so do the trees' suspensions: no teardown is going on any more.
+            this.#fence = undefined;
+
             throw error;
         }
 
         if (leave && this.#provider === mine) {
             this.#provider = undefined;
             this.#generation++;
+            // No provider: nothing can start. The fence has done its work.
+            this.#fence = undefined;
         }
+    }
+
+    /** Why nothing may start under the provider now: its teardown has begun, and the new one is not installed yet. */
+    #fenceProblem(): string | undefined {
+        return this.#fence === undefined
+            ? undefined
+            : `The sandbox module is being replaced or turned off (${this.#fence}), so no sandbox starts now. Try again once the new one is in.`;
     }
 
     // ─── What the app tells us as documents commit ──────────────────────────
@@ -1055,7 +1091,7 @@ export class Sandboxes {
 
     /** What must hold before a tree may be (or join) sandboxed in `cwd`, or undefined when it may. */
     async #sandboxProblem(cwd: string, user: User): Promise<string | undefined> {
-        return (
+        const found =
             this.unsupported() ??
             this.#notReady() ??
             (this.provider === undefined ? "The sandbox module is off." : undefined) ??
@@ -1064,8 +1100,10 @@ export class Sandboxes {
                 ? undefined
                 : "A sandbox does not support a remote workspace.") ??
             this.provider?.folderProblem?.(cwd) ??
-            (await this.#trusted.check(cwd))
-        );
+            (await this.#trusted.check(cwd));
+
+        // The fence is looked at last, after every wait: a teardown that began meanwhile is seen.
+        return found ?? this.#fenceProblem();
     }
 
     /**
@@ -1156,11 +1194,15 @@ export class Sandboxes {
                     throw new HttpError(409, refused);
                 }
 
-                Object.assign(await tx.doc(SandboxDoc, request.id), {
-                    on: true,
-                    by: request.user.id,
-                    at: Date.now(),
-                });
+                const doc = await tx.doc(SandboxDoc, request.id);
+                // After every wait, in the tick that writes: a teardown that began meanwhile refuses it.
+                const fenced = this.#fenceProblem();
+
+                if (fenced !== undefined) {
+                    throw new HttpError(409, fenced);
+                }
+
+                Object.assign(doc, { on: true, by: request.user.id, at: Date.now() });
             }
         } else if (!folder && copies) {
             throw new HttpError(
@@ -1440,11 +1482,14 @@ export class Sandboxes {
             throw new HttpError(409, refused);
         }
 
-        Object.assign(await tx.doc(SandboxDoc, request.id), {
-            on: true,
-            by: request.user.id,
-            at: Date.now(),
-        });
+        const doc = await tx.doc(SandboxDoc, request.id);
+        const fenced = this.#fenceProblem();
+
+        if (fenced !== undefined) {
+            throw new HttpError(409, fenced);
+        }
+
+        Object.assign(doc, { on: true, by: request.user.id, at: Date.now() });
     }
 
     async #admitOff(tx: Tx, request: Extract<Request, { kind: "off" }>): Promise<void> {
@@ -1722,6 +1767,14 @@ export class Sandboxes {
 
             if (problem !== undefined) {
                 throw new HttpError(409, problem);
+            }
+
+            // No lease of a sandboxed tree is granted under a provider whose teardown has begun: a tree that joined after the
+            // teardown looked would start a VM it never sees.
+            const fenced = this.#on.has(root) ? this.#fenceProblem() : undefined;
+
+            if (fenced !== undefined) {
+                throw new HttpError(409, fenced);
             }
 
             return this.#grant(root, Number(conversation), request);
@@ -2495,6 +2548,12 @@ export class Sandboxes {
             return failedEnv(cwd, "A sandbox does not support a remote workspace.");
         }
 
+        const fenced = this.#fenceProblem();
+
+        if (fenced !== undefined) {
+            return failedEnv(cwd, `${fenced} Nothing ran.`);
+        }
+
         const at = this.#phases.get(root);
 
         if (at?.phase === "suspended") {
@@ -2554,11 +2613,7 @@ export class Sandboxes {
     ): ExecutionEnv {
         const app = this.#app;
         const generation = this.#generation;
-        const failure = (message: string, property: string) =>
-            (
-                Reflect.get(failedEnv(cwd, message), property) as
-                    ((...args: unknown[]) => unknown) | undefined
-            )?.();
+        const failure = (message: string, property: string) => failedCall(message, property);
 
         return new Proxy(inner, {
             get: (target, property) => {

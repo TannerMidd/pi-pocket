@@ -9,6 +9,7 @@ import {
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { ExecutionError, FileError, type ExecutionEnv, ok } from "@earendil-works/pi-durable/env";
 import type { OpenOptions } from "../src/server/app.ts";
+import { FILE_CALLS } from "../src/server/sandbox-tools.ts";
 
 /** A promise that settles when `open` is called, and one that settles when a step reaches `wait`. */
 export function gate() {
@@ -56,7 +57,13 @@ export class FakeProvider implements SandboxProvider {
         this.targets.push(target);
         const ran = this.ran;
 
+        // Every file call exists, so a handle intercepts each of them; the ones that matter to a test override these.
+        const stubs = Object.fromEntries(
+            [...FILE_CALLS].map((name) => [name, () => Promise.resolve(ok(undefined))]),
+        );
+
         return {
+            ...stubs,
             id: "fake-guest",
             cwd: target.cwd,
             exec: (command: unknown) => {

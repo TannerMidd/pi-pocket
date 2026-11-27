@@ -124,3 +124,15 @@ export function failedEnv(cwd: string, message: string): ExecutionEnv {
                     : undefined,
     });
 }
+
+/**
+ * The failed result of one intercepted call (`Sandboxes` handles): the type that call returns, with the reason. Every method a
+ * handle intercepts has one, `listFiles` included, which `failedEnv` leaves out so that it does not look like a capability.
+ */
+export function failedCall(message: string, property: string): Promise<unknown> {
+    return Promise.resolve(
+        property === "exec"
+            ? err(new ExecutionError("spawn_error", message))
+            : err(new FileError("permission_denied", message)),
+    );
+}
