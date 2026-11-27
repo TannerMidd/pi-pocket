@@ -1180,6 +1180,7 @@ export class PocketApp {
                 suspend: (file, leave) => this.sandboxes.suspendOwner(file, leave),
                 reloadFailed: (file) => this.sandboxes.reloadFailed(file),
                 reloadCommitted: (file) => this.sandboxes.reloadCommitted(file),
+                registrationScope: (_file, valid, run) => this.sandboxes.inLoad(valid, run),
             },
         );
         await this.themes.load().catch((error: unknown) => {

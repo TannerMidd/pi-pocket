@@ -387,6 +387,7 @@ export class ExtensionLoader {
     /** The old version stays after a failed reload: whatever its suspension stopped goes on again. */
     readonly #reloadFailed: (file: string) => Promise<void>;
     readonly #reloadCommitted: (file: string) => Promise<void>;
+    readonly #registrationScope: <T>(file: string, valid: () => boolean, run: () => T) => T;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -416,6 +417,11 @@ export class ExtensionLoader {
             suspend?: (file: string, leave: boolean) => Promise<void>;
             /** A new version of a module failed to load after its old one was suspended: the old one stays, and goes on. */
             reloadFailed?: (file: string) => Promise<void>;
+            /**
+             * Run a module's default export so that what it registers (a sandbox provider) is tied to this load: `valid` is false
+             * once the load failed, ran out of time, or was replaced by a newer one, and then a registration is refused.
+             */
+            registrationScope?: <T>(file: string, valid: () => boolean, run: () => T) => T;
             /** A new version of a module was installed after its old one was suspended: whatever it staged takes effect. */
             reloadCommitted?: (file: string) => Promise<void>;
         } = {},
@@ -431,6 +437,7 @@ export class ExtensionLoader {
         this.#suspend = options.suspend ?? (() => Promise.resolve());
         this.#reloadFailed = options.reloadFailed ?? (() => Promise.resolve());
         this.#reloadCommitted = options.reloadCommitted ?? (() => Promise.resolve());
+        this.#registrationScope = options.registrationScope ?? ((_file, _valid, run) => run());
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -748,9 +755,16 @@ export class ExtensionLoader {
         // and what it set up (its cleanups) goes. The new version starts before the old one's cleanups run.
         const { part, web } = this.#webs.stage(file, module.directory, titleOf(file));
         let committed = false;
+        // The load ends when it fails or runs out of time (a default export that is still going on is not cancelled): a
+        // registration it makes later is refused, as one from a load that a newer one replaced.
+        let ended = false;
 
         try {
-            const returned = loaded.default(this.#host, web) as unknown;
+            const returned = this.#registrationScope(
+                file,
+                () => !ended && this.#isLatest(file, generation),
+                () => loaded.default(this.#host, web) as unknown,
+            );
             // An async default export: it may register until it settles.
             const built = isThenable(returned)
                 ? await this.#within(Promise.resolve(returned), deadline, file)
@@ -811,6 +825,7 @@ export class ExtensionLoader {
             return installed;
         } finally {
             if (!committed) {
+                ended = true;
                 this.#webs.discard(part);
             }
         }

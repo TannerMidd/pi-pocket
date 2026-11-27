@@ -8,6 +8,7 @@
  * Nothing in this build can turn a sandbox on: the readiness gate (`readiness`) stays closed until every component of
  * the design is registered, and the last PR registers the last of them.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { BACKGROUND_CONTEXT, type Context, withCancel } from "@earendil-works/chord/context";
 import {
     AgentDoc,
@@ -287,6 +288,9 @@ export class Sandboxes {
         | {
               owner: string;
               token: number;
+              /** The provider that was stopped for this reload, and the generation it was current in. */
+              entry: { provider: SandboxProvider; owner: string | undefined };
+              generation: number;
               staged?: { provider: SandboxProvider; owner: string | undefined };
           }
         | undefined;
@@ -387,7 +391,12 @@ export class Sandboxes {
         provider: SandboxProvider,
         owner?: string,
     ): Promise<{ unregister: () => Promise<void> }> {
+        // A registration that a load made after that load failed, ran out of time, or was superseded is refused (`inLoad`).
+        this.#assertLoadValid();
+
         return this.#serialised(async () => {
+            this.#assertLoadValid();
+
             // A server that is stopping takes no provider: nothing may install one, clear a fence, or reopen a tree.
             if (this.#stopping) {
                 throw new HttpError(
@@ -411,6 +420,7 @@ export class Sandboxes {
             // VMs are proved gone already), and the new one takes its place when the loader commits the reload. A reload that
             // fails drops it. Nothing of the old provider is removed here.
             if (this.#reloading !== undefined && this.#reloading.owner === owner) {
+                this.#assertLoadValid();
                 this.#reloading.staged = mine;
 
                 return handle;
@@ -431,6 +441,15 @@ export class Sandboxes {
                 }
             }
 
+            // The provider is the one that was looked at above (or none): nothing else installed meanwhile.
+            if (this.#provider !== undefined && this.#provider !== old) {
+                throw new HttpError(
+                    409,
+                    "The sandbox module changed while this was registering. Try again.",
+                );
+            }
+
+            this.#assertLoadValid();
             this.#install(mine);
             await this.reconcile();
 
@@ -440,6 +459,9 @@ export class Sandboxes {
 
     /** The provider serves from now: the generation moves, and its parts count toward the readiness gate. */
     #install(mine: { provider: SandboxProvider; owner: string | undefined }): void {
+        // A registration that installs now is not the commit of a reload (that clears its record first): it replaces the
+        // provider the reload stopped, and cancels the reload.
+        this.#reloading = undefined;
         this.#provider = mine;
         this.#generation++;
 
@@ -459,6 +481,28 @@ export class Sandboxes {
 
         if (mine.provider.browser !== undefined) {
             this.#present.add("browser");
+        }
+    }
+
+    /**
+     * The load that a module's default export runs in (`reload.ts`): a registration made from it, at any point of its async
+     * chain, belongs to that load. The loader says when the load is still the one that counts (`valid`).
+     */
+    readonly #load = new AsyncLocalStorage<{ valid: () => boolean }>();
+
+    /** Run a module's default export so that its registrations are tied to this load. */
+    inLoad<T>(valid: () => boolean, run: () => T): T {
+        return this.#load.run({ valid }, run);
+    }
+
+    #assertLoadValid(): void {
+        const scope = this.#load.getStore();
+
+        if (scope !== undefined && !scope.valid()) {
+            throw new HttpError(
+                409,
+                "The load that made this registration has ended (it failed, ran out of time, or was replaced), so it is refused.",
+            );
         }
     }
 
@@ -552,6 +596,10 @@ export class Sandboxes {
         }
 
         if (leave && this.#provider === mine) {
+            if (this.#reloading?.entry === mine) {
+                this.#reloading = undefined;
+            }
+
             this.#provider = undefined;
             this.#generation++;
             // No provider: nothing can start. The fence has done its work.
@@ -1398,6 +1446,11 @@ export class Sandboxes {
             );
         }
 
+        // After every await above, in the tick that writes: no change reserves this folder meanwhile.
+        if (folder && (this.#on.size > 0 || copies)) {
+            this.#assertFree([cwd], id);
+        }
+
         sessions.items[String(id)] = request.entry;
 
         // One writer, two stores (I6): the agent's folder is the entry's.
@@ -1435,6 +1488,13 @@ export class Sandboxes {
 
         if (this.#on.size > 0 || boxed) {
             await this.#checkMove(tx, request, { root, boxed, target, items: sessions.items });
+        }
+
+        // After every await of the checks, in the tick that writes: no other change reserves a folder it moves to.
+        for (const move of request.moves) {
+            if ((this.#on.size > 0 || boxed) && workspaceScheme(move.cwd) === undefined) {
+                this.#assertFree([move.cwd], root);
+            }
         }
 
         // One writer, two stores (I6): every folder that moves is written in this one commit.
@@ -1545,27 +1605,56 @@ export class Sandboxes {
         }
     }
 
+    /**
+     * The group of a tree as one state: every document it needs is read first (the awaits), and then, with nothing awaited
+     * any more, the reservation that covers its folders and the live neighbours are looked at. The decision is made on a state
+     * that no wait lies between: a reservation that appeared during the reads is seen.
+     */
+    async #groupView(
+        tx: Tx,
+        items: Readonly<Record<string, SessionMeta>>,
+        root: number,
+        folders: () => string[],
+    ): Promise<{
+        boxed: boolean;
+        reserved: string | undefined;
+        others: { root: number; label: string; boxed: boolean }[];
+    }> {
+        const known = new Map<number, boolean>();
+
+        const look = async (each: number) => {
+            known.set(each, await this.#isOn(tx, each));
+        };
+
+        await look(root);
+        await Promise.all(this.#overlapping(items, root, folders()).map((each) => look(each.root)));
+
+        const now = folders();
+
+        return {
+            boxed: known.get(root) === true,
+            reserved: this.#reservedProblem(now, this.#reservationOf(root)),
+            others: this.#overlapping(items, root, now).map((each) => ({
+                ...each,
+                boxed: known.get(each.root) ?? this.#on.has(each.root),
+            })),
+        };
+    }
+
     async #admitEnter(tx: Tx, request: Extract<Request, { kind: "enter" }>): Promise<void> {
         const sessions = await tx.doc(SessionsDoc);
         const root = Number(request.id);
 
         if (this.#on.size > 0) {
-            const boxed = await this.#isOn(tx, root);
-            const reserved = this.#reservedProblem(
+            const view = await this.#groupView(tx, sessions.items, root, () =>
                 this.#treeFolders(root),
-                this.#reservationOf(root),
             );
 
-            if (reserved !== undefined) {
-                throw new HttpError(409, reserved);
+            if (view.reserved !== undefined) {
+                throw new HttpError(409, view.reserved);
             }
 
-            const others = await Promise.all(
-                this.#overlapping(sessions.items, root, this.#treeFolders(root)).map(
-                    async (each) => ({ ...each, boxed: await this.#isOn(tx, each.root) }),
-                ),
-            );
-            const refused = this.#mixing(others, boxed);
+            const refused = this.#mixing(view.others, view.boxed);
 
             if (refused !== undefined) {
                 throw new HttpError(409, `It cannot be brought back from the archive. ${refused}`);
@@ -1601,27 +1690,29 @@ export class Sandboxes {
         }
 
         // A tree that gains work joins its group again: a change that reserves the folder (a turn-off of a neighbour, say)
-        // has to be finished first, or the gain could break the rule that change checked.
-        const reserved = this.#reservedProblem(this.#treeFolders(root), this.#reservationOf(root));
+        // has to be finished first, or the gain could break the rule that change checked. Decided after every read.
+        const view = await this.#groupView(tx, sessions.items, root, () => this.#treeFolders(root));
 
-        if (reserved !== undefined) {
-            throw new HttpError(409, `${request.what} cannot be added now. ${reserved}`);
+        if (view.reserved !== undefined) {
+            throw new HttpError(409, `${request.what} cannot be added now. ${view.reserved}`);
         }
 
-        const boxed = await this.#isOn(tx, root);
-        const others = await Promise.all(
-            this.#overlapping(sessions.items, root, this.#treeFolders(root)).map(async (each) => ({
-                ...each,
-                boxed: await this.#isOn(tx, each.root),
-            })),
-        );
-        const refused = this.#mixing(others, boxed);
+        const refused = this.#mixing(view.others, view.boxed);
 
         if (refused !== undefined) {
             throw new HttpError(
                 409,
                 `${request.what} would make this archived session live again beside others in its folder. ${refused}`,
             );
+        }
+    }
+
+    /** After the last await of an admission, in the tick that writes: no reservation of another change covers these folders. */
+    #assertFree(folders: readonly string[], root: number): void {
+        const reserved = this.#reservedProblem(folders, this.#reservationOf(root));
+
+        if (reserved !== undefined) {
+            throw new HttpError(409, reserved);
         }
     }
 
@@ -1679,6 +1770,9 @@ export class Sandboxes {
         if (fenced !== undefined) {
             throw new HttpError(409, fenced);
         }
+
+        // And the reservation once more, after the last await: only this turn-on's own covers the tree.
+        this.#assertFree(this.#treeFolders(root), root);
 
         Object.assign(doc, { on: true, by: request.user.id, at: Date.now() });
     }
@@ -1849,7 +1943,11 @@ export class Sandboxes {
 
             // Admission is tried first, in a commit that is rolled back: a refused destination stops here, before a VM
             // is stopped or a folder is deleted.
+            // Every step that stops, deletes, or installs runs in the tick of a check of this change's owner token and of the
+            // provider generation: what was decided before an await is not used after it.
+            this.#assertOwner(root, token, generation);
             await this.#validate(request);
+            this.#assertOwner(root, token, generation);
 
             if (releases) {
                 released = true;
@@ -1857,7 +1955,7 @@ export class Sandboxes {
             }
 
             // The folder of a removed worktree goes only while this change still owns the tree.
-            this.#assertOwner(root, token);
+            this.#assertOwner(root, token, generation);
             await steps.afterRelease?.();
             released = releases;
 
@@ -2231,6 +2329,11 @@ export class Sandboxes {
         }
 
         if (this.#needsProof.has(root)) {
+            // Another transition may own the tree by now: nothing is stopped on a decision made before the waits above.
+            if (this.#revision(root) !== revision) {
+                return { moved: true };
+            }
+
             try {
                 await this.#release([root], "the VM is proved gone before work is let in");
             } catch (error) {
@@ -2480,7 +2583,8 @@ export class Sandboxes {
         });
 
         try {
-            // (2) and (3): revoke, drain, prove gone.
+            // (2) and (3): revoke, drain, prove gone: only while this turn-off still owns the tree and the provider.
+            this.#assertOwner(root, token, generation);
             await this.#release([root], "the sandbox is being turned off");
         } catch (error) {
             this.#setIf(
@@ -2811,7 +2915,9 @@ export class Sandboxes {
             );
 
             // A reload keeps the provider, and its fence, until the loader commits the reload or reports its failure.
-            this.#reloading = leave ? undefined : { owner, token };
+            this.#reloading = leave
+                ? undefined
+                : { owner, token, entry: mine, generation: this.#generation };
         });
     }
 
@@ -2828,6 +2934,14 @@ export class Sandboxes {
             }
 
             this.#reloading = undefined;
+
+            // The reload belongs to the provider it stopped, in the generation it was current in. Another registration that
+            // replaced that provider cancelled it: the staged one is dropped, and nothing is installed over the newer provider.
+            if (reload.entry !== this.#provider || reload.generation !== this.#generation) {
+                this.#lowerFence(reload.token);
+
+                return;
+            }
 
             if (reload.staged !== undefined) {
                 this.#install(reload.staged);

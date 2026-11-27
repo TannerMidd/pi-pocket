@@ -133,3 +133,52 @@ test("the provider API is not public: not on the host, in the public types, or i
     assert.doesNotMatch(host, /readonly sandbox\b|\bsandbox:\s*\{|SandboxProvider/);
     assert.doesNotMatch(types, /sandbox/i);
 });
+
+test("every release, stop, provider install, and provider removal is a known call site, each one under a check of its owner", () => {
+    // Each runs in the tick of a check (owner token and generation, a revision, or the identity of the provider read in the same
+    // tick); a new call site must be added here, with the check it relies on, after the same audit.
+    const text = all.find((file) => file.name === "sandbox.ts")!.text;
+    const lines = text.split("\n");
+    const found: string[] = [];
+    let method = "";
+
+    for (const line of lines) {
+        const head = /^ {4}(?:async |readonly |get )?(#?\w+)[<(]/.exec(line);
+
+        if (head !== null && !/^(if|for|while|switch|catch|return)$/.test(head[1]!)) {
+            method = head[1]!;
+        }
+
+        for (const match of line.matchAll(
+            /this\.#(release|stop|install)\(|this\.#provider = (\w+)/g,
+        )) {
+            found.push(`${method}: ${match[0]}`);
+        }
+    }
+
+    assert.deepEqual(
+        found.sort(),
+        [
+            // register: a provider read in the same tick (`old`), the load and the identity checked before the install.
+            "register: this.#install(",
+            "register: this.#stop(",
+            "register: this.#stop(",
+            // #install: the provider switch itself.
+            "#install: this.#provider = mine",
+            // #stop: the removal of a provider, after its proof.
+            "#stop: this.#provider = undefined",
+            "#stop: this.#release(",
+            // #change, turn-off, resume, proof, rules: owner token and generation or revision just before.
+            "#change: this.#release(",
+            "#proof: this.#release(",
+            "#turnOff: this.#release(",
+            "#resume: this.#release(",
+            "rules: this.#release(",
+            // suspendOwner and shutdown: the provider read in the same tick; the shutdown fence is permanent.
+            "suspendOwner: this.#stop(",
+            "shutdown: this.#stop(",
+            // reloadCommitted: the reload record, the provider it stopped, and its generation, checked in the same tick.
+            "reloadCommitted: this.#install(",
+        ].sort(),
+    );
+});
