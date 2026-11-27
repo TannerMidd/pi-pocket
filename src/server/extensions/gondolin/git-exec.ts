@@ -487,9 +487,16 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
         }
 
         if (key === "core.hookspath") {
-            // Relative to where hooks run: the top of the working tree, or the git directory of a bare repository.
-            const hooks =
-                context.top !== undefined ? [context.top] : [context.gitDir ?? context.cwd];
+            // Relative to where hooks run (the top of the working tree), and to the git directory: git reads hooks of a
+            // push into the repository from there, whatever the repository is. Both are held.
+            const hooks = [
+                ...(context.top === undefined ? [] : [context.top]),
+                ...(context.gitDir === undefined ? [] : [context.gitDir]),
+            ];
+
+            if (hooks.length === 0) {
+                hooks.push(context.cwd);
+            }
 
             for (const where of candidates(entry.value, hooks, home)) {
                 hold(where, true, entry, originFile, true);

@@ -563,9 +563,15 @@ test("in a real VM, tasks that start together each keep a process, and a stricte
             answers.map((text) => /Started (vm-\d)/.exec(text)?.[1]),
             ["vm-1", "vm-2", "vm-3"],
         );
-        await until(async () => (await api.output("vm-3")).includes("three"), "the third task");
-        assert.match(await api.output("vm-1"), /one/);
-        assert.match(await api.output("vm-2"), /two/);
+
+        for (const [id, word] of [
+            ["vm-1", "one"],
+            ["vm-2", "two"],
+            ["vm-3", "three"],
+        ] as const) {
+            await until(async () => (await api.output(id)).includes(word), `the task ${id}`);
+        }
+
         assert.equal(vms.running, 1);
 
         // The settings get stricter and nothing calls `enforce`: the next call gets a VM with the new rules.
@@ -1077,4 +1083,129 @@ test("a link that leads through .. into the project is refused: the guest cannot
     const allowed = await inVm(repo, "echo fine > notes.txt; echo notes=$?");
 
     assert.match(allowed.output, /notes=0/);
+});
+
+test("the guest cannot add a file to a git folder, so a hook of a push into the repository is the owner's", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("receive");
+    const pusher = repository("receive-pusher");
+
+    mkdirSync(join(repo, ".githooks"));
+    onHost(repo, "config", "core.hooksPath", ".githooks");
+    onHost(repo, "config", "receive.denyCurrentBranch", "ignore");
+    const marker = join(repo, "..", "EVIL_RECEIVE");
+    const { output } = await inVm(
+        repo,
+        [
+            `mkdir -p .git/.githooks; echo mkdir=$?`,
+            `printf '#!/bin/sh\\ntouch ${marker}\\n' > .git/.githooks/pre-receive; echo hook=$?`,
+            "echo x > .git/pre-receive; echo plain=$?",
+            "echo x > .git/anything-new; echo anything=$?",
+            "mkdir .git/lfs; echo lfs=$?",
+            "echo ok > notes.txt; echo notes=$?",
+        ].join("; "),
+    );
+
+    for (const name of ["mkdir", "hook", "plain", "anything", "lfs"]) {
+        assert.match(output, new RegExp(`${name}=[1-9]`), `${name}: ${output}`);
+    }
+
+    assert.match(output, /notes=0/);
+    assert.equal(existsSync(join(repo, ".git", ".githooks")), false);
+
+    // The owner's next push into the repository runs the owner's hooks only.
+    onHost(pusher, "remote", "add", "target", repo);
+    onHost(pusher, "push", "-q", "target", "main:pushed");
+    assert.equal(existsSync(marker), false);
+});
+
+test("the git commands that the sandbox promises work, and the others say who may do them", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("promised");
+
+    writeFileSync(join(repo, "other.txt"), "other\n");
+    onHost(repo, "add", ".");
+    onHost(repo, "commit", "-q", "-m", "other");
+    onHost(repo, "branch", "side", "HEAD~1");
+    onHost(repo, "checkout", "-q", "side");
+    writeFileSync(join(repo, "side.txt"), "side\n");
+    onHost(repo, "add", ".");
+    onHost(repo, "commit", "-q", "-m", "side");
+    onHost(repo, "checkout", "-q", "main");
+    const works = await inVm(
+        repo,
+        [
+            "git status --short; echo status=$?",
+            "echo b >> a.txt; git diff --stat | tail -1; echo diff=$?",
+            "git add -A; echo add=$?",
+            "git commit -q -m 'one'; echo commit=$?",
+            "git commit -q --amend -m 'one amended'; echo amend=$?",
+            "git branch topic; echo branch=$?",
+            "git tag v1; git tag -a v2 -m 'two'; echo tag=$?",
+            "git log --oneline | head -1; echo log=$?",
+            "echo c >> a.txt; git stash; echo stash=$?; git stash pop -q; echo pop=$?",
+            "git checkout -q -b work; echo checkout=$?",
+            "git switch -q main; echo switch=$?",
+            "git merge -q --no-edit side; echo merge=$?",
+            "git reset -q --hard HEAD~1; echo reset=$?",
+            "git restore a.txt; echo restore=$?",
+            "git cherry-pick side 2>&1 | tail -1; echo pick=$?",
+            "git merge --squash topic 2>&1 | tail -1; echo squash=$?",
+        ].join("; "),
+    );
+
+    for (const name of [
+        "status",
+        "diff",
+        "add",
+        "commit",
+        "amend",
+        "branch",
+        "tag",
+        "log",
+        "stash",
+        "pop",
+        "checkout",
+        "switch",
+        "merge",
+        "reset",
+        "restore",
+    ]) {
+        assert.match(works.output, new RegExp(`${name}=0`), `${name}: ${works.output}`);
+    }
+
+    assert.match(onHost(repo, "log", "-1", "--format=%s"), /./);
+    assert.match(onHost(repo, "tag"), /v1/);
+    assert.match(onHost(repo, "branch"), /topic/);
+
+    const refused = await inVm(
+        repo,
+        [
+            "git config user.name evil 2>&1; echo config=$?",
+            "git remote add other https://x.example/y.git 2>&1; echo remote=$?",
+            "git worktree add ../w-other 2>&1; echo worktree=$?",
+            "git branch --set-upstream-to=main topic 2>&1; echo upstream=$?",
+            "git rebase main 2>&1; echo rebase=$?",
+            "git submodule add https://x.example/z.git z 2>&1; echo submodule=$?",
+        ].join("; "),
+    );
+
+    for (const name of ["config", "remote", "worktree", "upstream", "submodule"]) {
+        assert.match(refused.output, new RegExp(`${name}=[1-9]`), `${name}: ${refused.output}`);
+    }
+
+    assert.equal(
+        refused.output.split("ask the person to change them from the host").length - 1 >= 4,
+        true,
+        refused.output,
+    );
+    assert.match(refused.output, /Rebase from the host/);
+    assert.ok(!readFileSync(join(repo, ".git", "config"), "utf8").includes("evil"));
+    assert.equal(existsSync(join(repo, "..", "w-other")), false);
 });

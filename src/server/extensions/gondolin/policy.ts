@@ -120,40 +120,66 @@ function ownFiles(rest: string[]): { inner: string[]; nested: boolean } {
 }
 
 /**
- * The folders in which git keeps the state of a rebase, an `am`, or a cherry-pick or revert of several commits. Git turns
- * what is in them into commands: `git rebase --continue` runs the `exec` lines of `rebase-merge/git-rebase-todo`, and
- * `git rebase --continue` on the host cannot tell a rebase that the guest started from one it faked. So the guest may
- * not create or change them: `git rebase` and `git am` fail in the sandbox, and the owner runs them on the host.
+ * What the guest may write in a git folder, and nothing else: the files that the promised git commands (`status`,
+ * `diff`, `add`, `commit`, `branch`, `tag`, `log`, `stash`, `merge` without conflicts, a single `cherry-pick`, `checkout`,
+ * `switch`, `reset`, `restore`) write. These are data: objects, refs, reflogs, the index, and the files that name a
+ * commit or a merge. Every other file of a git folder, a new one too, is the host's: the host's `git` reads it as
+ * configuration or runs it (`config`, `hooks`, `info`, a hooks folder under another name, `commondir`, `gitdir`,
+ * `objects/info/alternates`, the state of a rebase: its todo list is run by `git rebase --continue`, `modules`,
+ * `worktrees`, and what a later git adds). A list of what to deny kept missing files; this one lists what to allow.
  */
-const SEQUENCER_STATE = new Set(["rebase-merge", "rebase-apply", "sequencer"]);
+const GIT_FILES = new Set([
+    "head",
+    "orig_head",
+    "fetch_head",
+    "commit_editmsg",
+    "merge_head",
+    "merge_msg",
+    "merge_mode",
+    "merge_rr",
+    "auto_merge",
+    "squash_msg",
+    "cherry_pick_head",
+    "revert_head",
+    "tag_editmsg",
+    "packed-refs",
+    "index",
+]);
 
-/**
- * Whether `rest`, the path below a git folder, is a file that points Git at another folder: with it the host's `git`
- * would read the config and hooks of a folder that the guest made. They are `commondir` (where the shared config, hooks,
- * and objects are) of the repository, of a linked worktree (`worktrees/<name>/`), or of a submodule (`modules/<name>/`,
- * nested ones too); the `gitdir` of a linked worktree or a submodule; and the lists of other object stores. A branch
- * or a worktree named like one of them is no such file: only the places Git looks at count.
- */
-function redirectsGit(rest: string[]): boolean {
-    const { inner, nested } = ownFiles(rest);
-    const name = inner.join("/");
+/** The folders of a git folder that hold data only: all below them is the guest's, except the lists of other stores. */
+const GIT_TREES = new Set(["objects", "refs", "logs"]);
+
+/** Whether `rest`, the path below a git folder (a repository's, a linked worktree's, a submodule's), is the guest's. */
+function writableInGitDir(rest: string[]): boolean {
+    const [top, ...below] = ownFiles(rest).inner;
+
+    if (top === undefined) {
+        return false;
+    }
+
+    if (GIT_TREES.has(top)) {
+        return !(
+            top === "objects" &&
+            below[0] === "info" &&
+            (below[1] === "alternates" || below[1] === "http-alternates")
+        );
+    }
+
+    // A file, or the lock file that git writes before it renames it into place; and the temporary indexes of `stash`
+    // and of `commit <paths>`, which are copies of the index.
+    const name = top.endsWith(".lock") ? top.slice(0, -5) : top;
 
     return (
-        name === "commondir" ||
-        (nested && name === "gitdir") ||
-        name === "objects/info/alternates" ||
-        name === "objects/info/http-alternates"
+        below.length === 0 &&
+        (GIT_FILES.has(name) || /^(index\.stash|next-index-)\.?\d+$/.test(name))
     );
 }
 
 /**
  * Whether the guest may not write `path` (absolute inside the folder, `/`-separated). The git rule keeps what the
- * host's own `git` runs from the guest's hands: a repository's config (an `fsmonitor`, a `pager`, an `sshCommand` run as
- * the owner when Pi Pocket's Changes panel or the owner's shell uses git), its hooks, its `info` folder, the files that
- * name filters and submodules, the files that point Git at another folder (`commondir`, a linked worktree's `gitdir`,
- * `objects/info/alternates`), the state of a rebase, `am`, or sequence of picks (`rebase-merge`, `rebase-apply`,
- * `sequencer`: git runs the `exec` lines in it), and any change to an entry named `.git` (a swap of the whole repository folder). The
- * guest still reads everything except these files, which look missing to it.
+ * host's own `git` runs from the guest's hands: everything in a `.git` folder but the data that the promised git
+ * commands write (`writableInGitDir`), the files that name filters and submodules (`.gitmodules`, `.gitattributes`), and
+ * any change to an entry named `.git` (a swap of the whole repository folder). The guest still reads all of them.
  */
 function gitProtected(segments: string[], op: string): boolean {
     const last = segments.at(-1);
@@ -166,46 +192,9 @@ function gitProtected(segments: string[], op: string): boolean {
         return true;
     }
 
-    for (let at = 0; at < segments.length - 1; at++) {
-        if (segments[at] !== ".git") {
-            continue;
-        }
+    const at = segments.indexOf(".git");
 
-        const next = segments[at + 1]!;
-
-        if (
-            next === "config" ||
-            next === "config.worktree" ||
-            next === "hooks" ||
-            next === "info"
-        ) {
-            return true;
-        }
-
-        const rest = segments.slice(at + 1);
-
-        if (redirectsGit(rest) || SEQUENCER_STATE.has(ownFiles(rest).inner[0] ?? "")) {
-            return true;
-        }
-
-        // Submodules and linked worktrees keep their own config and hooks below `.git/modules` and `.git/worktrees`.
-        if (
-            (next === "modules" || next === "worktrees") &&
-            segments
-                .slice(at + 2)
-                .some(
-                    (part) =>
-                        part === "config" ||
-                        part === "config.worktree" ||
-                        part === "hooks" ||
-                        part === "info",
-                )
-        ) {
-            return true;
-        }
-    }
-
-    return false;
+    return at !== -1 && at < segments.length - 1 && !writableInGitDir(segments.slice(at + 1));
 }
 
 /** A predicate for the paths the guest may not write: it still reads them (`real-driver.ts` refuses the writes). */

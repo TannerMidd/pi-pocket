@@ -89,6 +89,7 @@ test("what the configuration names inside the folder is held: hooks folder, incl
 
     assert.deepEqual(held(paths, root), [
         "/.git",
+        "/.git/.githooks",
         "/.git/config",
         "/.git/more.cfg",
         "/.githooks",
@@ -312,7 +313,7 @@ test("a hooks folder that is the folder itself cannot be held, and the way it is
             mounts: [root],
         });
 
-        assert.equal(plan.problems.length, 1, JSON.stringify(value));
+        assert.ok(plan.problems.length >= 1, JSON.stringify(value));
         assert.match(plan.problems[0]!, /core\.hookspath .* is the folder .* itself/i);
         assert.deepEqual(hooksOnly(plan.paths, root), []);
     }
@@ -581,19 +582,10 @@ test("a link that leads nowhere and lies outside the folder does not block it, a
 
 // ─── The resolver walks as the kernel does ──────────────────────────────────
 
-/** What the kernel says a path is: `realpath` when the path is there, else `readlink -f` (a missing last part). */
+/** What the kernel says a path is, by `realpath` (libc's): undefined for a path that is not there, or a loop. */
 function kernel(path: string): string | undefined {
     try {
         return realpathSync.native(path);
-    } catch {
-        // missing, or a loop
-    }
-
-    try {
-        return (
-            execFileSync("readlink", ["-f", path], { encoding: "utf8", stdio: "pipe" }).trim() ||
-            undefined
-        );
     } catch {
         return undefined;
     }
@@ -654,14 +646,27 @@ test("the resolver ends where the kernel does, for links, .. after links, relati
         "l1/missing",
         "l1/nope/x/y",
     ];
+    // A last part that is not there: no tool says where it would be (`readlink -f` differs between systems), so the table
+    // does, from the part that is there; the kernel is asked for that part.
+    const missing: Record<string, [string, string]> = {
+        "a/missing": ["a", "missing"],
+        "a/missing/": ["a", "missing"],
+        "l1/missing": ["a", "missing"],
+        alias: ["a", "hook.sh"],
+        "pivot/../hook.sh": ["a", "hook.sh"],
+        "pivot/../a": ["a", "a"],
+        "l4/x": ["a", "x"],
+        "dd/ee/ff/deep/../file": ["a", "file"],
+    };
     let compared = 0;
 
     for (const text of cases) {
         const raw = `${base}/${text}`;
-        const want = kernel(raw);
         const got = follow(raw, []);
 
         assert.equal(got.problem, undefined, text);
+        const parent = missing[text];
+        const want = parent === undefined ? kernel(raw) : `${kernel(at(parent[0]))}/${parent[1]}`;
 
         if (want !== undefined) {
             assert.equal(got.physical, want, `${text}: the kernel says ${want}`);
@@ -669,10 +674,9 @@ test("the resolver ends where the kernel does, for links, .. after links, relati
         }
     }
 
-    // Most of the table is there on disk: the kernel is the judge. The rest is a missing middle part, which no tool
-    // resolves, and the walk keeps as written.
+    // Every case but those with a missing middle part is compared: the kernel (or the part of it that is there) is the judge.
     assert.ok(
-        compared >= cases.length - 6,
+        compared >= cases.length - 3,
         `${compared} of ${cases.length} compared with the kernel`,
     );
     assert.equal(follow(`${base}/a/b/missing/more`, []).physical, at("a", "b", "missing", "more"));
@@ -723,4 +727,76 @@ test("a link that is followed by .. is read as the kernel reads it: a hook that 
     // A plain path stays allowed and is held.
     assert.deepEqual(plan("sh ./tools/hook.sh").problems, []);
     assert.ok(held(plan("sh ./tools/hook.sh").paths, project).includes("/tools"));
+});
+
+// ─── A relative hooks path is held from the git folder as well ──────────────
+
+test("a hooks path that is relative is held from the top of the tree and from the git folder", () => {
+    const root = temp();
+
+    mkdirSync(join(root, ".git"));
+    const plan = execPlan([entry("core.hookspath", ".githooks")], {
+        cwd: root,
+        top: root,
+        gitDir: join(root, ".git"),
+        mounts: [root],
+    });
+
+    assert.ok(held(plan.paths, root).includes("/.githooks"));
+    assert.ok(held(plan.paths, root).includes("/.git/.githooks"), "the receive hooks of a push in");
+});
+
+// ─── macOS: a link in a parent of the folder ────────────────────────────────
+
+test("a folder below a link of the owner's (as /tmp and /var are on macOS) is no way in by a link", () => {
+    const base = temp();
+    const real = join(base, "private", "tmp");
+    const named = join(base, "tmp");
+    const project = join(real, "proj");
+
+    mkdirSync(join(project, ".git"), { recursive: true });
+    mkdirSync(join(project, ".githooks"));
+    symlinkSync("private/tmp", named);
+    symlinkSync(`${named}/proj/.githooks`, join(base, "front"));
+
+    // The session's folder is named through the link, git's top is the real path: both ways hold the same folder.
+    const sessions: [string, string][] = [
+        [join(named, "proj"), project],
+        [project, project],
+        [join(named, "proj"), join(named, "proj")],
+    ];
+
+    for (const [cwd, top] of sessions) {
+        const plan = execPlan([entry("core.hookspath", ".githooks")], {
+            cwd,
+            top,
+            gitDir: join(project, ".git"),
+            mounts: [cwd],
+        });
+
+        assert.deepEqual(plan.problems, [], `${cwd} ${top}`);
+        assert.ok(
+            plan.paths.some((each) => each.path === join(project, ".githooks")),
+            `${cwd} ${top}: held at the real path`,
+        );
+    }
+
+    // A path of the owner's that goes through the link into the folder by a plain walk is the same folder, held.
+    const walked = execPlan([entry("core.hookspath", `${named}/proj/.githooks`)], {
+        cwd: project,
+        top: project,
+        mounts: [project],
+    });
+
+    assert.deepEqual(walked.problems, []);
+    assert.ok(walked.paths.some((each) => each.path === join(project, ".githooks")));
+
+    // But a link whose own target is inside the folder is a way in by a link, whatever the parents are.
+    const front = execPlan([entry("core.hookspath", join(base, "front"))], {
+        cwd: project,
+        top: project,
+        mounts: [project],
+    });
+
+    assert.match(front.problems[0] ?? "", /by way of a link|through a link/);
 });

@@ -149,6 +149,10 @@ export function gitMounts(cwd: string): GitMounts {
 export const NO_REBASE =
     "pi-pocket sandbox: git keeps the state of a rebase, of git am, and of a cherry-pick or revert of several commits in files that git runs commands from, so this sandbox may not write them. Rebase from the host: ask the person to run it there.";
 
+/** What the guest's git says when it needs to write a part of the repository that is the host's. */
+export const NO_GIT_WRITE =
+    "pi-pocket sandbox: git may write only objects, refs, logs, the index, HEAD, and the files of a commit or a merge in a repository folder. Its configuration, hooks, remotes, worktrees, submodules, and maintenance are the host's: ask the person to change them from the host.";
+
 /**
  * The guest's `git`, in `/usr/local/bin` before the real one: `rebase` and `am` say at once what they cannot do, and
  * `pull`, `cherry-pick`, and `revert` add it when they fail because of the held state. Everything else is the real git.
@@ -170,13 +174,15 @@ export const GIT_WRAPPER = [
     "done",
     'case "$cmd" in',
     `  rebase|am) echo ${JSON.stringify(NO_REBASE)} >&2; exit 1 ;;`,
-    "  pull|cherry-pick|revert)",
+    "  pull|cherry-pick|revert|config|remote|worktree|submodule|init|clone|gc|maintenance|repack|prune|notes|sparse-checkout|branch|checkout|switch)",
     '    log=$(mktemp) || exec "$real" "$@"',
     '    "$real" "$@" 2>"$log"; code=$?',
     '    cat "$log" >&2',
     '    if grep -qiE "rebase-merge|rebase-apply|sequencer" "$log"; then',
     `      echo ${JSON.stringify(NO_REBASE)} >&2`,
     '      [ "$code" -eq 0 ] && code=1',
+    '    elif [ "$code" -ne 0 ] && grep -qiE "permission denied|could not lock config|could not create|read-only" "$log"; then',
+    `      echo ${JSON.stringify(NO_GIT_WRITE)} >&2`,
     "    fi",
     '    rm -f "$log"',
     '    exit "$code" ;;',
