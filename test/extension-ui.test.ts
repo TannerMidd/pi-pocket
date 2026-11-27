@@ -1239,7 +1239,10 @@ test(
         const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         document.body.append(host);
         render(pocket.h(pocket.Markdown, { text }), host);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Wait for what the test reads, not a fixed time: under load the render comes late.
+        for (let waited = 0; waited < 5000 && !(host.querySelector("output.fence-probe") !== null && host.querySelector('code[data-part="inline-math"][data-mounted]') !== null); waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         const block = host.querySelector("output.fence-probe");
         const math = host.querySelector('code[data-part="inline-math"]');
 
@@ -1274,7 +1277,10 @@ test(
         const newline = String.fromCharCode(10);
         const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         render(pocket.h(pocket.Markdown, { text }), globalThis.markdownTestHost);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Wait for what the test reads, not a fixed time: under load the render comes late.
+        for (let waited = 0; waited < 5000 && !(globalThis.markdownTestHost.querySelector(".math-updated") !== null); waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         const updated = globalThis.markdownTestHost.querySelector(".math-updated");
 
         return JSON.stringify(updated?.dataset.source ?? null);
@@ -1308,7 +1314,10 @@ test(
         const newline = String.fromCharCode(10);
         const text = [fence + "Pi-Test", "fence-body", fence, "", "$x+y$"].join(newline);
         render(pocket.h(pocket.Markdown, { text }), host);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Wait for what the test reads, not a fixed time: under load the render comes late.
+        for (let waited = 0; waited < 5000 && !(host.querySelector('pre[data-lang="Pi-Test"] code') !== null && (!(await import("/markdown-ext.js")).mathOn() || host.querySelector('code[data-part="inline-math"][data-mounted]') !== null)); waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         const math = host.querySelector('code[data-part="inline-math"]');
 
         return JSON.stringify({
@@ -1360,7 +1369,10 @@ test(
         );
         document.body.append(host);
         render(pocket.h(pocket.Markdown, { text }), host);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Wait for what the test reads, not a fixed time: under load the render comes late.
+        for (let waited = 0; waited < 5000 && !(host.querySelector(".error-box") !== null && host.querySelector("pre code") !== null && (host.textContent ?? "").includes("after the fence")); waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         const result = {
             error: /bad source/.test(host.querySelector(".error-box")?.textContent ?? ""),
             source: host.querySelector("pre code")?.textContent,
@@ -1406,7 +1418,10 @@ test("turning the module off takes away its button and closes its page", real, a
         const text = [fence + "unload-test", "value", fence].join(String.fromCharCode(10));
         document.body.append(host);
         render(pocket.h(pocket.Markdown, { text }), host);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        // Wait for what the test reads, not a fixed time: under load the render comes late.
+        for (let waited = 0; waited < 5000 && !(host.querySelector("output.unload-fence") !== null); waited += 20) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         return JSON.stringify({
             registered: (await import("/markdown-ext.js")).fenceFor("unload-test") !== undefined,
             custom: host.querySelector("output.unload-fence") !== null,
