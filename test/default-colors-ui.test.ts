@@ -313,6 +313,140 @@ test(
     },
 );
 
+type Accent = {
+    hue: string;
+    link: string;
+    fill: number[];
+    ink: number[];
+    edge: number[];
+    place: number[];
+    focus: number[];
+    err: number[];
+};
+
+/** What the accent paints in Pocket's look, as RGB: New's fill, the active place's edge and label, the focus ring, `--err`. */
+async function accent(kept: Record<string, unknown>): Promise<Accent> {
+    await visit(kept);
+
+    return JSON.parse(
+        await page.evaluate(`
+            const canvas = document.createElement("canvas");
+
+            canvas.width = canvas.height = 1;
+
+            const paint = canvas.getContext("2d", { willReadFrequently: true });
+            const rgb = (css) => {
+                paint.clearRect(0, 0, 1, 1);
+                paint.fillStyle = "#000";
+                paint.fillStyle = css;
+                paint.fillRect(0, 0, 1, 1);
+
+                return [...paint.getImageData(0, 0, 1, 1).data].slice(0, 3);
+            };
+            const token = (name) => {
+                const probe = document.createElement("span");
+
+                probe.style.color = "var(" + name + ")";
+                document.body.append(probe);
+
+                const color = getComputedStyle(probe).color;
+
+                probe.remove();
+
+                return rgb(color);
+            };
+            const root = getComputedStyle(document.documentElement);
+            const fill = document.querySelector(".new-button");
+            const place = document.querySelector(".places-rail .rail-place.on");
+
+            return JSON.stringify({
+                hue: root.getPropertyValue("--hue").trim(),
+                link: root.getPropertyValue("--o-accent").trim(),
+                fill: rgb(getComputedStyle(fill).backgroundColor),
+                ink: rgb(getComputedStyle(fill).color),
+                edge: rgb(getComputedStyle(place, "::before").backgroundColor),
+                place: rgb(getComputedStyle(place).color),
+                focus: token("--focus-ring"),
+                err: token("--err"),
+            });
+        `),
+    ) as Accent;
+}
+
+const hueOf = ([r = 0, g = 0, b = 0]: number[]) => {
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const turn =
+        max === r
+            ? (g - b) / (max - min)
+            : max === g
+              ? 2 + (b - r) / (max - min)
+              : 4 + (r - g) / (max - min);
+
+    return (turn * 60 + 360) % 360;
+};
+
+const near = (found: number[], want: number[], by: number) =>
+    found.every((channel, index) => Math.abs(channel - want[index]!) <= by);
+
+test(
+    "Pocket neutral paints the accent coral on New and the active place, in dark and light",
+    real,
+    async () => {
+        const chosen = { "pocket.themeChosen": { theme: true, look: false } };
+        const dark = await accent({});
+        const light = await accent({
+            ...chosen,
+            "pocket.appearance": { theme: "pocket-neutral-light" },
+        });
+
+        for (const [mode, shown] of [
+            ["dark", dark],
+            ["light", light],
+        ] as const) {
+            assert.equal(shown.hue, "#eb927b", `${mode}: the hue is the brand coral`);
+            assert.ok(near(shown.fill, [235, 146, 123], 14), `${mode}: New is coral ${shown.fill}`);
+            assert.ok(
+                shown.ink.every((channel) => channel < 70),
+                `${mode}: dark ink on New`,
+            );
+            assert.ok(hueOf(shown.edge) < 24, `${mode}: the place's edge is coral ${shown.edge}`);
+            assert.deepEqual(shown.place, shown.edge, `${mode}: its label has the edge's color`);
+            // Links and the focus ring stay the palette's muted blue.
+            assert.ok(
+                hueOf(shown.focus) > 190 && hueOf(shown.focus) < 250,
+                `${mode}: ${shown.focus}`,
+            );
+            // The failed color is crimson, apart from the coral.
+            const err = hueOf(shown.err);
+
+            assert.ok(err > 340 || err < 4, `${mode}: --err ${shown.err} is crimson (${err})`);
+        }
+
+        assert.ok(near(dark.edge, [235, 146, 123], 20), `dark edge ${dark.edge}`);
+        assert.ok(
+            light.edge[0]! < 200 && light.edge[1]! < 100,
+            `light edge is deep: ${light.edge}`,
+        );
+    },
+);
+
+test(
+    "another palette keeps its own accent for New, the place, links, and its red",
+    real,
+    async () => {
+        const tokyo = await accent({
+            "pocket.themeChosen": { theme: true, look: false },
+            "pocket.appearance": { theme: "tokyo-night" },
+        });
+
+        assert.equal(tokyo.hue, "#7aa2f7", "the hue is the palette's accent, not the coral");
+        assert.ok(hueOf(tokyo.fill) > 200 && hueOf(tokyo.fill) < 250, `New: ${tokyo.fill}`);
+        assert.ok(hueOf(tokyo.edge) > 200 && hueOf(tokyo.edge) < 250, `edge: ${tokyo.edge}`);
+        assert.deepEqual(tokyo.focus.length, 3);
+    },
+);
+
 test("the folded sidebar holds the whole rail, labels and badges included", real, async () => {
     await visit({});
     await page.evaluate(`(await import("/theme.js")).setPrefs({ sidebar: "rail" }); return "true"`);
