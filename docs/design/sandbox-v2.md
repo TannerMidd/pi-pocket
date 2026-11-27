@@ -357,19 +357,21 @@ Each PR reviews alone and **ships safe with the sandbox off**: the readiness gat
 
 **Linux only:** `/proc` identity, the `/proc/self/fd` walk, real VM. **All platforms:** state machine, gate, fake driver. CI runs the full suite on each head; locally run only the touched areas.
 
-## 8. Open decisions for Tanner
+## 8. Decisions (accepted by the owner, 2026-11-27)
 
-1. **Launcher:** `setpriv --pdeathsig=KILL` with an intent marker. _Recommend yes._
-2. **Ledger home.** _Recommend core._
-3. **Archived tree with work items.** _Recommend it stays live, plain or sandboxed_ (2.5); a sandboxed one gets a new VM only for admitted work. The alternative pauses its schedules and hooks on archive.
-4. **Turn-on with host work.** _Recommend refuse._
-5. **A mixed group at server start.** _Recommend block VMs and tell the owner._
-6. **`memory` from a sandboxed tree.** _Recommend session scope only._ The alternative holds project scope for approval, labelled.
-7. **Pi loaders on a sandboxed folder.** _Recommend snapshots plus Pi's own loaders._ The alternative reimplements them.
-8. **`node_modules` in the trusted walk.** _Recommend depth-2 positions plus an mtime cache._ The alternative is a high cap, and it risks refusing every machine.
-9. **Hooks off for Pocket's own Git in sandboxed folders.** _Recommend yes;_ the cost is that husky hooks do not run on Pocket's worktree and branch switches there.
-10. **Project `.pi/settings.json` of a sandboxed folder.** _Recommend never read._
-11. **Extension slash commands in a sandboxed tree.** _Recommend blocked until the extension says it is inert._
-12. **The guest bridge.** _Recommend our own `GuardedFs` on `hostfs`_ over wrapping Gondolin's `RealFSProvider`. The cost is more code in PR 4 and PR 5.
-13. **Guest text reaching PiP.** _Recommend a documented limit_ (fenced and labelled data). The alternative removes PiP's host tools after it reads a sandboxed transcript.
-14. **MCP launch point.** _Recommend_ finding the spawn in PR 3 and routing it through `launchCheck`. If it lives outside Pocket, accept the change-time check alone and say so. Either way, a sandboxed folder's **project-level MCP config is never read**, the same as decision 10 for `settings.json`. "MCP launch point resolved" is a readiness-gate component: the gate stays closed until PR 3 records which of the two cases holds.
+The owner accepted all 14 decisions as recommended. Each line below is **decided**.
+
+1. **Decided as recommended.** **Launcher:** `setpriv --pdeathsig=KILL` with an intent marker. _Recommend yes._
+2. **Decided as recommended.** **Ledger home.** _Recommend core._
+3. **Decided as recommended.** **Archived tree with work items.** _Recommend it stays live, plain or sandboxed_ (2.5); a sandboxed one gets a new VM only for admitted work. The alternative pauses its schedules and hooks on archive.
+4. **Decided as recommended.** **Turn-on with host work.** _Recommend refuse._
+5. **Decided as recommended.** **A mixed group at server start.** _Recommend block VMs and tell the owner._
+6. **Decided as recommended.** **`memory` from a sandboxed tree.** _Recommend session scope only._ The alternative holds project scope for approval, labelled.
+7. **Decided as recommended.** **Pi loaders on a sandboxed folder.** _Recommend snapshots plus Pi's own loaders._ The alternative reimplements them.
+8. **Decided as recommended.** **`node_modules` in the trusted walk.** _Recommend depth-2 positions plus an mtime cache._ The alternative is a high cap, and it risks refusing every machine.
+9. **Decided as recommended.** **Hooks off for Pocket's own Git in sandboxed folders.** _Recommend yes;_ the cost is that husky hooks do not run on Pocket's worktree and branch switches there.
+10. **Decided as recommended.** **Project `.pi/settings.json` of a sandboxed folder.** _Recommend never read._
+11. **Decided as recommended.** **Extension slash commands in a sandboxed tree.** _Recommend blocked until the extension says it is inert._
+12. **Decided as recommended.** **The guest bridge.** _Recommend our own `GuardedFs` on `hostfs`_ over wrapping Gondolin's `RealFSProvider`. The cost is more code in PR 4 and PR 5.
+13. **Decided as recommended.** **Guest text reaching PiP.** _Recommend a documented limit_ (fenced and labelled data). The alternative removes PiP's host tools after it reads a sandboxed transcript.
+14. **Decided as recommended.** **MCP launch point.** _Recommend_ finding the spawn in PR 3 and routing it through `launchCheck`. If it lives outside Pocket, accept the change-time check alone and say so. Either way, a sandboxed folder's **project-level MCP config is never read**, the same as decision 10 for `settings.json`. "MCP launch point resolved" is a readiness-gate component: the gate stays closed until PR 3 records which of the two cases holds.
