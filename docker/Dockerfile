@@ -31,6 +31,7 @@ RUN apt-get update \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
+        fonts-noto-cjk \
         gh \
         git \
         jq \
