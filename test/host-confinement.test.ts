@@ -10,6 +10,7 @@ import {
     realpathSync,
     rmSync,
     symlinkSync,
+    truncateSync,
     writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -34,6 +35,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     type App,
 } from "./helpers.ts";
@@ -503,6 +505,54 @@ test(
             assert.equal(sandboxedFolder(join(links, "elsewhere")), false);
         } finally {
             stop();
+        }
+    },
+);
+
+test(
+    "a context file of a sandboxed folder that is larger than the limit is not read into the prompt",
+    { skip: LINUX },
+    async () => {
+        useDriver(new FakeDriver());
+        const seen: string[] = [];
+        const app = await openApp(
+            scriptedModel((request) => {
+                seen.push(JSON.stringify(request));
+
+                return fauxAssistantMessage([fauxText("ok")]);
+            }),
+            join(root, "data-big-context"),
+            undefined,
+            undefined,
+            sandboxOptions(),
+        );
+
+        try {
+            await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
+            const big = folder("big-context");
+            const small = folder("small-context");
+
+            writeFileSync(join(big, "AGENTS.md"), "BIG_MARKER");
+            truncateSync(join(big, "AGENTS.md"), 3 * 1024 * 1024);
+            writeFileSync(join(big, "CLAUDE.md"), "CLAUDE_FALLBACK_MARKER");
+            writeFileSync(join(small, "AGENTS.md"), "SMALL_MARKER");
+
+            for (const path of [big, small]) {
+                const id = await newSession(app, path);
+
+                await app.sandboxes.set(id, owner(app), true);
+                seen.length = 0;
+                await say(app, id, "hello");
+
+                if (path === small) {
+                    assert.match(seen.join("\n"), /SMALL_MARKER/);
+                } else {
+                    assert.doesNotMatch(seen.join("\n"), /big-context\/AGENTS\.md/);
+                }
+            }
+        } finally {
+            useDriver(undefined);
+            await app.close();
         }
     },
 );

@@ -441,7 +441,10 @@ export class PocketApp {
 
     /** `trustedFolders` and every path that Pi's settings and MCP file name, read now (`trusted-places.ts`). Throws when unreadable. */
     trustedPlaces(): string[] {
-        return [...this.trustedFolders, ...configuredPlaces(getAgentDir(), this.#home)];
+        return [
+            ...this.trustedFolders,
+            ...configuredPlaces(getAgentDir(), this.#home, this.defaultCwd),
+        ];
     }
     readonly defaultCwd: string;
     readonly supervised: boolean;

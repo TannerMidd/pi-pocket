@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { getDocsPath, loadProjectContextFiles, type Skill } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import { APP_ROOT } from "../config.ts";
-import { confines, readInsideSync, sandboxedFolder } from "../confined.ts";
+import { inSandboxedFolder, listInsideSync, readInsideSync, sandboxedFolder } from "../confined.ts";
 import type { PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
 
@@ -91,6 +91,64 @@ type Resources = {
     skills: string | undefined;
 };
 
+/** The names that Pi takes a folder's context file from, the first that is a file (`loadContextFileFromDir`). */
+const CONTEXT_NAMES = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+
+/**
+ * The context files of `cwd` and the folders above it, as Pi's `loadProjectContextFiles` gives them. Its reader follows
+ * links and reads a file whole: in a folder that a sandboxed session works in, where a guest wrote them, the folders
+ * are read here instead, regular files only and at most `MAX_TEXT` bytes (`confined.ts`), and Pi reads the rest.
+ */
+function contextFiles(
+    cwd: string,
+    agentDir: string,
+    warn: (message: string) => void,
+): { path: string; content: string }[] {
+    const inside: string[] = [];
+    let outside = cwd;
+
+    while (inSandboxedFolder(outside) && dirname(outside) !== outside) {
+        inside.push(outside);
+        outside = dirname(outside);
+    }
+
+    const own = inside.reverse().flatMap((dir) => {
+        try {
+            const { entries } = listInsideSync(dir, dir);
+
+            for (const name of CONTEXT_NAMES) {
+                const found = entries.find((each) => each.name === name);
+
+                if (found === undefined) {
+                    continue;
+                }
+
+                if (!found.file) {
+                    warn(`${join(dir, name)} is not a regular file, so it is not in the prompt.`);
+                    continue;
+                }
+
+                const path = join(dir, name);
+
+                return [
+                    {
+                        path,
+                        content: readInsideSync(dir, path)
+                            .toString("utf8")
+                            .replace(/^\uFEFF/, ""),
+                    },
+                ];
+            }
+        } catch (error) {
+            warn(`The context files of ${dir} were not read: ${String(error)}`);
+        }
+
+        return [];
+    });
+
+    return [...loadProjectContextFiles({ cwd: outside, agentDir }), ...own];
+}
+
 export default function createPrompt(host: PocketHost) {
     // Context files and skills load once per directory, and again when the copy is older than STALE_MS, or Pi's trust
     // store changed since: a project trusted now has skills it did not have, from the next request on. Only answers to
@@ -124,31 +182,8 @@ export default function createPrompt(host: PocketHost) {
         let skills: string | undefined;
 
         try {
-            const files = loadProjectContextFiles({ cwd, agentDir: host.agentDir }).flatMap(
-                (file) => {
-                    if (!confines(cwd, file.path)) {
-                        return [file];
-                    }
-
-                    // The folder's own file is the guest's to write: read it again, and only if it stays in the folder.
-                    try {
-                        return [
-                            {
-                                ...file,
-                                content: readInsideSync(cwd, file.path)
-                                    .toString("utf8")
-                                    .replace(/^\uFEFF/, ""),
-                            },
-                        ];
-                    } catch {
-                        host.notice(
-                            "warning",
-                            `${file.path} leads out of the folder, so it is not in the prompt.`,
-                        );
-
-                        return [];
-                    }
-                },
+            const files = contextFiles(cwd, host.agentDir, (message) =>
+                host.notice("warning", message),
             );
 
             if (files.length > 0) {

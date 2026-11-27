@@ -11,7 +11,9 @@ import {
     constants,
     lstatSync,
     mkdirSync,
+    fstatSync,
     openSync,
+    opendirSync,
     readFileSync,
     readlinkSync,
     realpathSync,
@@ -401,12 +403,61 @@ export function openInsideSync(root: string, path: string): number {
     }
 }
 
-/** What `readFileSync(path)` gives, for a path in `root`. */
-export function readInsideSync(root: string, path: string): Buffer {
+/** The most that a file read for the prompt may hold (a skill, an `AGENTS.md`, a prompt template), and entries of a folder. */
+export const MAX_TEXT = 1024 * 1024;
+export const MAX_ENTRIES = 1000;
+
+/**
+ * What `readFileSync(path)` gives, for a path in `root`: a regular file of at most `max` bytes. Anything else (a
+ * device, a pipe, a file the guest made enormous) is refused before it is read: a guest wrote it.
+ */
+export function readInsideSync(root: string, path: string, max = MAX_TEXT): Buffer {
     const fd = openInsideSync(root, path);
 
     try {
+        const info = fstatSync(fd);
+
+        if (!info.isFile() || info.size > max) {
+            throw Object.assign(
+                new Error(`EFBIG: ${path} is not a regular file of at most ${max} bytes`),
+                { code: "EFBIG", path },
+            );
+        }
+
         return readFileSync(fd);
+    } finally {
+        closeSync(fd);
+    }
+}
+
+/**
+ * The first `limit` entries of the folder `path` in `root`, as names with their kind (a link is neither a file nor a
+ * folder): read as they come, so a folder of a million names costs `limit`. `more` says some were left.
+ */
+export function listInsideSync(
+    root: string,
+    path: string,
+    limit = MAX_ENTRIES,
+): { entries: { name: string; file: boolean; folder: boolean }[]; more: boolean } {
+    const fd = openInsideSync(root, path);
+
+    try {
+        const dir = opendirSync(entry(fd));
+        const entries: { name: string; file: boolean; folder: boolean }[] = [];
+
+        try {
+            for (let each = dir.readSync(); each !== null; each = dir.readSync()) {
+                if (entries.length >= limit) {
+                    return { entries, more: true };
+                }
+
+                entries.push({ name: each.name, file: each.isFile(), folder: each.isDirectory() });
+            }
+        } finally {
+            dir.closeSync();
+        }
+
+        return { entries, more: false };
     } finally {
         closeSync(fd);
     }

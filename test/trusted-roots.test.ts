@@ -429,3 +429,45 @@ test("a folder that a configured path holds, a package, a program, and an MCP se
         await running.close();
     }
 });
+
+test("a program's every argument, an encoded address, and a relative argument are places Pi runs or loads", async () => {
+    const running = await app();
+
+    try {
+        const shared = project("trusted-arguments");
+        const id = await newSession(running, shared);
+        const encoded = `file://${join(root, "trusted-%61rguments")}/skill`;
+        const cases: [string, unknown][] = [
+            [
+                "a wrapper that npm runs",
+                { npmCommand: ["/usr/bin/node", join(shared, "wrapper.js")] },
+            ],
+            [
+                "an update command's argument",
+                { selfUpdateCommand: ["env", "~/x", join(shared, "update.sh")] },
+            ],
+            ["a percent-encoded address", { skills: [encoded] }],
+            [
+                "a path in the home folder's style, through the cwd",
+                { npmCommand: ["node", "./wrapper.js"] },
+            ],
+        ];
+
+        for (const [what, settings] of cases) {
+            // Relative arguments start at the folder the server runs in: a session in it holds the wrapper.
+            const folder = what.startsWith("a path in") ? running.defaultCwd : shared;
+            const session = folder === shared ? id : await newSession(running, folder);
+
+            await withSettings(settings, async () => {
+                await assert.rejects(
+                    running.sandboxes.set(session, owner(running), true),
+                    /reaches into/,
+                    what,
+                );
+            });
+        }
+    } finally {
+        useDriver(undefined);
+        await running.close();
+    }
+});

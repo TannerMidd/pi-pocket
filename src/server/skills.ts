@@ -41,7 +41,7 @@ import {
     type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { minimatch } from "minimatch";
-import { confines, readInsideSync } from "./confined.ts";
+import { inSandboxedFolder, listInsideSync, readInsideSync } from "./confined.ts";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
@@ -281,49 +281,121 @@ export function skillPlaces(cwd: string, sources: SkillSources): string[] {
 
 /** Pi's skills for a session in `cwd`: the first of each name, from `skillPlaces`. */
 export function loadSessionSkills(cwd: string, sources: SkillSources): Skill[] {
-    return inFolder(
-        cwd,
-        loadSkills({
-            cwd,
-            agentDir: sources.agentDir,
-            skillPaths: skillPlaces(cwd, sources),
-            includeDefaults: false,
-        }).skills,
-    );
+    return skillsFrom(cwd, skillPlaces(cwd, sources), sources);
 }
 
 /**
- * The skills, with the description of each skill in the folder of a sandboxed session read again as the host may
- * read it there (`confined.ts`): Pi's own reader follows links, and the guest may leave one. A skill that cannot be
- * read so is left out.
+ * The skills at `places`, the first of each name. Pi's loader reads what it finds (an ignore file, a link to a device),
+ * and in a folder that a sandboxed session works in a guest wrote it: there the skills are found by a walk that takes
+ * only regular files, follows no link, and reads at most `MAX_TEXT` bytes of each and `MAX_ENTRIES` names of a folder
+ * (`confined.ts`). Ignore files are not applied there. Every other place is Pi's to load.
  */
-function inFolder<T extends { filePath: string; description: string }>(
-    cwd: string,
-    skills: T[],
-): T[] {
-    return skills.flatMap((skill) => {
-        if (!confines(cwd, skill.filePath)) {
-            return [skill];
+function skillsFrom(cwd: string, places: readonly string[], sources: SkillSources): Skill[] {
+    const found = new Map<string, Skill>();
+
+    for (const place of places) {
+        const skills = inSandboxedFolder(place)
+            ? confinedSkills(place, place, true, { folders: 0 })
+            : loadSkills({
+                  cwd,
+                  agentDir: sources.agentDir,
+                  skillPaths: [place],
+                  includeDefaults: false,
+              }).skills;
+
+        for (const skill of skills) {
+            if (!found.has(skill.name)) {
+                found.set(skill.name, skill);
+            }
         }
+    }
 
-        try {
-            const { frontmatter } = parseFrontmatter(
-                readInsideSync(cwd, skill.filePath).toString("utf8"),
-            ) as { frontmatter: Record<string, unknown> };
+    return [...found.values()];
+}
 
-            return [
-                {
-                    ...skill,
-                    description:
-                        typeof frontmatter.description === "string"
-                            ? frontmatter.description
-                            : skill.description,
-                },
-            ];
-        } catch {
+/** The folders that one walk looks into: a guest can make a tree of any size. */
+const MAX_FOLDERS = 2000;
+
+/** `loadSkillsFromDir`'s rules (a `SKILL.md` makes its folder a skill; else the `.md` files at the top, and the folders below), by the confined walk. */
+function confinedSkills(
+    root: string,
+    dir: string,
+    top: boolean,
+    budget: { folders: number },
+): Skill[] {
+    if (++budget.folders > MAX_FOLDERS) {
+        return [];
+    }
+
+    let listed;
+
+    try {
+        listed = listInsideSync(root, dir);
+    } catch {
+        return [];
+    }
+
+    const names = listed.entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+    if (names.some((each) => each.file && each.name === "SKILL.md")) {
+        return confinedSkill(root, join(dir, "SKILL.md")) ?? [];
+    }
+
+    return names.flatMap((each) => {
+        if (each.name.startsWith(".") || each.name === "node_modules") {
             return [];
         }
+
+        if (each.folder) {
+            return confinedSkills(root, join(dir, each.name), false, budget);
+        }
+
+        return top && each.file && each.name.endsWith(".md")
+            ? (confinedSkill(root, join(dir, each.name)) ?? [])
+            : [];
     });
+}
+
+/** One skill file, as Pi's loader reads one; a file that is not a skill, or cannot be read so, gives none. */
+function confinedSkill(root: string, file: string): Skill[] | undefined {
+    let frontmatter: Record<string, unknown>;
+
+    try {
+        ({ frontmatter } = parseFrontmatter(readInsideSync(root, file).toString("utf8")) as {
+            frontmatter: Record<string, unknown>;
+        });
+    } catch {
+        return undefined;
+    }
+
+    const description = frontmatter.description;
+
+    if (typeof description !== "string" || description.trim() === "") {
+        return undefined;
+    }
+
+    const baseDir = dirname(file);
+    const name =
+        typeof frontmatter.name === "string" && frontmatter.name !== ""
+            ? frontmatter.name
+            : basename(baseDir);
+
+    return [
+        {
+            name,
+            description,
+            filePath: file,
+            baseDir,
+            sourceInfo: {
+                path: file,
+                source: "local",
+                scope: "project",
+                origin: "top-level",
+                baseDir,
+            },
+            disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+        },
+    ];
 }
 
 /** Whether Pi trusts the project a session in `cwd` works in, and the project skills that wait for it. */
@@ -334,17 +406,7 @@ export function readProjectTrust(cwd: string, sources: SkillSources): ProjectTru
     const folders = projectAgentsFolders(resolve(cwd), sources.home);
     const own = join(resolve(cwd), CONFIG_DIR_NAME, "skills");
     const skillsIn = (paths: string[]) =>
-        paths.length === 0
-            ? []
-            : inFolder(
-                  cwd,
-                  loadSkills({
-                      cwd,
-                      agentDir: sources.agentDir,
-                      skillPaths: paths,
-                      includeDefaults: false,
-                  }).skills,
-              ).map(({ name, description }) => ({ name, description }));
+        skillsFrom(cwd, paths, sources).map(({ name, description }) => ({ name, description }));
     const skills = skillsIn(folders);
     const ownSkills = skillsIn(existsSync(own) ? [own] : []);
     const settings = existsSync(join(folder, CONFIG_DIR_NAME, "settings.json"));

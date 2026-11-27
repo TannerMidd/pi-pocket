@@ -11,9 +11,9 @@
  * `_expandSkillCommand` in `dist/core/agent-session.js` writes them.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { confines, readInsideSync } from "./confined.ts";
+import { inSandboxedFolder, listInsideSync, readInsideSync } from "./confined.ts";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = {
@@ -27,14 +27,17 @@ export type PromptTemplate = {
 /** How much of a template's first line serves as its description, when it has none. */
 const DESCRIPTION_LENGTH = 60;
 
-/** A template, read as the host: a file of the session's folder is read only when the file it reaches is in the folder too. */
-function readTemplate(path: string, folder: string): PromptTemplate | undefined {
+/**
+ * A template, read as the host: in a folder that a sandboxed session works in, only as a regular file of a limited size
+ * that no link leads to (`confined.ts`).
+ */
+function readTemplate(path: string): PromptTemplate | undefined {
     let frontmatter: Record<string, unknown>;
     let body: string;
 
     try {
-        const text = confines(folder, path)
-            ? readInsideSync(folder, path).toString("utf8")
+        const text = inSandboxedFolder(dirname(path))
+            ? readInsideSync(dirname(path), path).toString("utf8")
             : readFileSync(path, "utf8");
 
         ({ frontmatter, body } = parseFrontmatter(text) as {
@@ -74,11 +77,18 @@ function isFile(path: string): boolean {
 }
 
 /** The `.md` files of a folder, not its subfolders; a missing or unreadable folder has none. */
-function templatesIn(directory: string, folder: string): PromptTemplate[] {
+function templatesIn(directory: string): PromptTemplate[] {
+    const inside = inSandboxedFolder(directory);
     let names: string[];
 
     try {
-        names = readdirSync(directory)
+        names = (
+            inside
+                ? listInsideSync(directory, directory).entries.flatMap((each) =>
+                      each.file ? [each.name] : [],
+                  )
+                : readdirSync(directory)
+        )
             .filter((name) => name.endsWith(".md"))
             .sort();
     } catch {
@@ -87,7 +97,7 @@ function templatesIn(directory: string, folder: string): PromptTemplate[] {
 
     return names.flatMap((name) => {
         const path = join(directory, name);
-        const template = isFile(path) ? readTemplate(path, folder) : undefined;
+        const template = inside || isFile(path) ? readTemplate(path) : undefined;
 
         return template === undefined ? [] : [template];
     });
@@ -104,8 +114,8 @@ export function loadPromptTemplates(
     { project = true }: { project?: boolean } = {},
 ): PromptTemplate[] {
     const found = [
-        ...templatesIn(join(agentDir, "prompts"), cwd),
-        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts"), cwd) : []),
+        ...templatesIn(join(agentDir, "prompts")),
+        ...(project ? templatesIn(resolve(cwd, CONFIG_DIR_NAME, "prompts")) : []),
     ];
 
     for (const raw of paths) {
@@ -116,13 +126,13 @@ export function loadPromptTemplates(
         }
 
         if (isFile(path)) {
-            const template = path.endsWith(".md") ? readTemplate(path, cwd) : undefined;
+            const template = path.endsWith(".md") ? readTemplate(path) : undefined;
 
             if (template !== undefined) {
                 found.push(template);
             }
         } else {
-            found.push(...templatesIn(path, cwd));
+            found.push(...templatesIn(path));
         }
     }
 
