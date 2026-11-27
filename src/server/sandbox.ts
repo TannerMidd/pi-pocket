@@ -267,7 +267,12 @@ export class Sandboxes {
      * `lifecycle`: set by a provider change or by start; only a provider change or a reconcile clears it. Any other suspension
      * (a failed release, a failed step) needs an explicit recovery.
      */
-    readonly #phases = new Map<number, { phase: Phase; reason?: string; lifecycle?: true }>();
+    readonly #phases = new Map<
+        number,
+        { phase: Phase; token: number; reason?: string; lifecycle?: true }
+    >();
+    /** Counts the phase records: each write of a phase has a token of its own, which only its writer may end. */
+    #phaseSeq = 0;
     /** The transitions under way (a change, a turn-on or turn-off, a resume, the rules): a provider change waits for them. */
     readonly #active = new Set<Promise<unknown>>();
     /** One release attempt for each tree at a time: a retry joins it, and a late one never follows a recovery. */
@@ -411,16 +416,25 @@ export class Sandboxes {
         await this.#quiet();
         const roots = [...this.#on];
 
+        // Only a tree that is stable, or suspended by a provider change, is suspended here; a suspension that another
+        // transition left (a failed release, the rules) keeps its record, and the VM is stopped all the same.
+        const owned = new Map<number, number>();
+
         for (const root of roots) {
-            this.#setPhase(root, "suspended", why, true);
+            const current = this.#phases.get(root);
+
+            if (current === undefined || current.lifecycle === true) {
+                owned.set(root, this.#setPhase(root, "suspended", why, true));
+            }
         }
 
         try {
             await this.#release(roots, why);
         } catch (error) {
-            for (const root of roots) {
-                this.#setPhase(
+            for (const [root, token] of owned) {
+                this.#setIf(
                     root,
+                    token,
                     "suspended",
                     `it could not be stopped (${describeError(error)})`,
                 );
@@ -574,8 +588,10 @@ export class Sandboxes {
         }
     }
 
-    #setPhase(root: number, phase: Phase, reason?: string, lifecycle = false): void {
+    /** Write a phase, and answer the token of the record (a `stable` one has none: the record goes). */
+    #setPhase(root: number, phase: Phase, reason?: string, lifecycle = false): number {
         this.#epoch++;
+        const token = ++this.#phaseSeq;
 
         if (phase === "stable") {
             this.#phases.delete(root);
@@ -583,6 +599,7 @@ export class Sandboxes {
         } else {
             this.#phases.set(root, {
                 phase,
+                token,
                 ...(reason === undefined ? {} : { reason }),
                 ...(lifecycle ? { lifecycle: true as const } : {}),
             });
@@ -591,6 +608,35 @@ export class Sandboxes {
         for (const listener of [...this.#changed]) {
             listener();
         }
+
+        return token;
+    }
+
+    /**
+     * Write a phase only when the record that its writer made is still the current one (or there was none: `undefined`).
+     * An async step checks this after every await before it writes, so it never clears or replaces a phase that another
+     * transition owns. Answers the new token, or undefined when the record was not its own any more.
+     */
+    #setIf(
+        root: number,
+        token: number | undefined,
+        phase: Phase,
+        reason?: string,
+        lifecycle = false,
+    ): number | undefined {
+        return this.#phases.get(root)?.token === token
+            ? this.#setPhase(root, phase, reason, lifecycle)
+            : undefined;
+    }
+
+    #reserve(reservation: Reservation): void {
+        this.#epoch++;
+        this.#reservations.add(reservation);
+    }
+
+    #unreserve(reservation: Reservation): void {
+        this.#epoch++;
+        this.#reservations.delete(reservation);
     }
 
     /**
@@ -897,6 +943,22 @@ export class Sandboxes {
         return user.role === "owner" || this.provider?.mayChoose(user) === true
             ? undefined
             : "Only the owner can choose the sandbox for a session.";
+    }
+
+    /**
+     * What the folder, the trusted places, and the readiness gate say about `cwd` now, or undefined when the folder may be
+     * shared. A check that cannot finish refuses.
+     */
+    async #folderProblem(cwd: string): Promise<string | undefined> {
+        return (
+            this.unsupported() ??
+            this.#notReady() ??
+            (workspaceScheme(cwd) === undefined
+                ? undefined
+                : "A sandbox does not support a remote workspace.") ??
+            this.provider?.folderProblem?.(cwd) ??
+            (await this.#trusted.check(cwd))
+        );
     }
 
     /** What must hold before a tree may be (or join) sandboxed in `cwd`, or undefined when it may. */
@@ -1210,6 +1272,14 @@ export class Sandboxes {
             return;
         }
 
+        // A tree that gains work joins its group again: a change that reserves the folder (a turn-off of a neighbour, say)
+        // has to be finished first, or the gain could break the rule that change checked.
+        const reserved = this.#reservedProblem(this.#treeFolders(root), this.#reservationOf(root));
+
+        if (reserved !== undefined) {
+            throw new HttpError(409, `${request.what} cannot be added now. ${reserved}`);
+        }
+
         const boxed = await this.#isOn(tx, root);
         const others = await Promise.all(
             this.#overlapping(sessions.items, root, this.#treeFolders(root)).map(async (each) => ({
@@ -1290,6 +1360,22 @@ export class Sandboxes {
             throw new HttpError(403, refused);
         }
 
+        // The overlap that the plan checked is checked again where `off` is stored: nothing may have become live beside it.
+        const sessions = await tx.doc(SessionsDoc);
+        const boxed = (
+            await Promise.all(
+                this.#overlapping(
+                    sessions.items,
+                    Number(request.id),
+                    this.#treeFolders(Number(request.id)),
+                ).map(async (each) => ({ ...each, boxed: await this.#isOn(tx, each.root) })),
+            )
+        ).filter((each) => each.boxed);
+
+        if (boxed.length > 0) {
+            throw new HttpError(409, this.#mixing(boxed, false)!);
+        }
+
         Object.assign(doc, { on: false, by: request.user.id, at: Date.now() });
     }
 
@@ -1365,6 +1451,9 @@ export class Sandboxes {
             what: `#${root}`,
         };
 
+        // The token of this change's phase record: only it may end it.
+        let token: number | undefined;
+
         // (1) Plan, in a short hold: reserve the union of the old and the new group before anything else.
         await this.exclusive(() => {
             const reserved = this.#reservedProblem(reservation.folders);
@@ -1380,8 +1469,8 @@ export class Sandboxes {
                 );
             }
 
-            this.#reservations.add(reservation);
-            this.#setPhase(root, "moving");
+            this.#reserve(reservation);
+            token = this.#setPhase(root, "moving");
 
             return Promise.resolve();
         });
@@ -1423,18 +1512,18 @@ export class Sandboxes {
                 this.#on.delete(root);
             }
 
-            this.#reservations.delete(reservation);
-            this.#setPhase(root, "stable");
+            this.#unreserve(reservation);
+            this.#setIf(root, token, "stable");
 
             return done;
         } catch (error) {
             if (released) {
                 // Section 3: a step that fails after the release leaves the tree suspended, with its old folder and
                 // setting, and its group reserved, until an explicit recovery (`resume`) proves the teardown.
-                this.#setPhase(root, "suspended", describeError(error));
+                this.#setIf(root, token, "suspended", describeError(error));
             } else {
-                this.#reservations.delete(reservation);
-                this.#setPhase(root, "stable");
+                this.#unreserve(reservation);
+                this.#setIf(root, token, "stable");
             }
 
             throw error instanceof HttpError
@@ -1479,6 +1568,20 @@ export class Sandboxes {
         // PiP has no folder in a group: it is plain beside whatever is sandboxed.
         if (this.#app.sessionMeta(root as unknown as ConversationId)?.pip !== undefined) {
             return undefined;
+        }
+
+        // A tree that is not live (archived, no work) gains work with a grant: a change that reserves its folder comes first.
+        const meta = this.#app.sessionMeta(root as unknown as ConversationId);
+
+        if (meta?.archived === true && !this.#hasWork(root)) {
+            const reserved = this.#reservedProblem(
+                this.#treeFolders(root),
+                this.#reservationOf(root),
+            );
+
+            if (reserved !== undefined) {
+                return reserved;
+            }
         }
 
         const known = this.#granted.get(root);
@@ -1747,6 +1850,8 @@ export class Sandboxes {
 
         const reservation: Reservation = { folders: [], roots: new Set([root]), what: `#${root}` };
 
+        let token: number | undefined;
+
         // (1) Plan, in a short hold: the preconditions, a fresh trusted-places check, and the reservation.
         await this.exclusive(async () => {
             const cwd = app.cwdOf(id);
@@ -1771,8 +1876,8 @@ export class Sandboxes {
                 throw new HttpError(409, reserved);
             }
 
-            this.#reservations.add(reservation);
-            this.#setPhase(root, "turning-on");
+            this.#reserve(reservation);
+            token = this.#setPhase(root, "turning-on");
         });
 
         try {
@@ -1799,8 +1904,8 @@ export class Sandboxes {
             );
         } finally {
             // (4) A refusal at any step sets `stable` at once: nothing was revoked, so nothing rolls back.
-            this.#reservations.delete(reservation);
-            this.#setPhase(root, "stable");
+            this.#unreserve(reservation);
+            this.#setIf(root, token, "stable");
             this.#audited();
         }
     }
@@ -1829,6 +1934,7 @@ export class Sandboxes {
         }
 
         const reservation: Reservation = { folders: [], roots: new Set([root]), what: `#${root}` };
+        let token: number | undefined;
 
         // (1) Plan: the overlap check is here, before any revoke.
         await this.exclusive(async () => {
@@ -1871,15 +1977,20 @@ export class Sandboxes {
 
             // A retry from `suspended` replaces the reservation that the failed attempt kept.
             this.#dropReservations(root);
-            this.#reservations.add(reservation);
-            this.#setPhase(root, "turning-off");
+            this.#reserve(reservation);
+            token = this.#setPhase(root, "turning-off");
         });
 
         try {
             // (2) and (3): revoke, drain, prove gone.
             await this.#release([root], "the sandbox is being turned off");
         } catch (error) {
-            this.#setPhase(root, "suspended", `it could not be stopped (${describeError(error)})`);
+            this.#setIf(
+                root,
+                token,
+                "suspended",
+                `it could not be stopped (${describeError(error)})`,
+            );
 
             throw new HttpError(
                 409,
@@ -1893,10 +2004,11 @@ export class Sandboxes {
                 app.harness.commit((tx) => this.admit(tx, { kind: "off", id, user }), context),
             );
             this.#dropReservations(root);
-            this.#setPhase(root, "stable");
+            this.#setIf(root, token, "stable");
         } catch (error) {
-            this.#setPhase(
+            this.#setIf(
                 root,
+                token,
                 "suspended",
                 `the setting could not be stored (${describeError(error)})`,
             );
@@ -1920,19 +2032,31 @@ export class Sandboxes {
             return;
         }
 
-        this.#setPhase(root, "turning-off", at.reason);
+        const token = this.#setPhase(root, "turning-off", at.reason);
 
         try {
             await this.#release([root], "the sandbox is resuming");
         } catch (error) {
-            this.#setPhase(root, "suspended", describeError(error));
+            this.#setIf(root, token, "suspended", describeError(error));
 
             throw new HttpError(409, `It could not be resumed: ${describeError(error)}`);
         }
 
-        // The teardown is proved: the reservation that the failure kept goes, so the group is free again.
-        this.#dropReservations(root);
-        this.#setPhase(root, "stable");
+        // The teardown is proved. Before work is let in again, the folder, the trusted places, and the gate are asked again:
+        // a suspension that the rules made (a trusted place now reaches the folder) stays, with its reason.
+        const problem = await this.#folderProblem(this.#folderOfRoot(root));
+
+        if (problem !== undefined) {
+            this.#setIf(root, token, "suspended", problem);
+
+            throw new HttpError(409, `It could not be resumed: ${problem}`);
+        }
+
+        // The reservation that the failure kept goes, so the group is free again.
+        if (this.#phases.get(root)?.token === token) {
+            this.#dropReservations(root);
+            this.#setPhase(root, "stable");
+        }
     }
 
     #dropReservations(root: number): void {
@@ -1954,34 +2078,45 @@ export class Sandboxes {
     rules(reason: string): Promise<void> {
         // Only the trees that this transition stopped are its own: a tree in another transition, or one a failed release left
         // suspended, is not touched, and not cleared.
-        const tag = `its rules changed (${reason}) #${++this.#rulesCount}`;
-        const mine = [...this.#on].filter((root) => !this.#phases.has(root));
+        const tag = `its rules changed (${reason})`;
+        const mine = new Map<number, number>();
 
-        if (mine.length === 0) {
+        for (const root of this.#on) {
+            if (!this.#phases.has(root)) {
+                mine.set(root, this.#setPhase(root, "suspended", tag));
+            }
+        }
+
+        if (mine.size === 0) {
             return Promise.resolve();
         }
 
-        for (const root of mine) {
-            this.#setPhase(root, "suspended", tag);
-        }
+        // Each step asks whether the record it made is still the current one, and writes only then.
+        const still = (root: number) => this.#phases.get(root)?.token === mine.get(root);
 
-        const still = (root: number) => this.#phases.get(root)?.reason === tag;
+        const write = (root: number, phase: Phase, why?: string) => {
+            const next = this.#setIf(root, mine.get(root), phase, why);
+
+            if (next !== undefined) {
+                mine.set(root, next);
+            }
+        };
 
         return this.#track(() =>
             this.exclusive(async () => {
-                for (const root of mine) {
+                for (const root of [...mine.keys()]) {
                     if (!still(root)) {
                         continue;
                     }
 
-                    const problem = await this.#trusted.check(this.#folderOfRoot(root));
+                    const problem = await this.#folderProblem(this.#folderOfRoot(root));
 
                     if (!still(root)) {
                         continue;
                     }
 
                     if (problem !== undefined) {
-                        this.#setPhase(root, "suspended", problem);
+                        write(root, "suspended", problem);
                         continue;
                     }
 
@@ -1990,18 +2125,14 @@ export class Sandboxes {
                             await this.#release([root], "the rules got stricter");
                         }
 
-                        if (still(root)) {
-                            this.#setPhase(root, "stable");
-                        }
+                        write(root, "stable");
                     } catch (error) {
-                        this.#setPhase(root, "suspended", describeError(error));
+                        write(root, "suspended", describeError(error));
                     }
                 }
             }),
         );
     }
-
-    #rulesCount = 0;
 
     /**
      * The settings of `module` changed. When it serves the sandbox, every call stops at once and the `rules` transition
@@ -2040,12 +2171,17 @@ export class Sandboxes {
                 continue;
             }
 
-            const missing =
-                this.#notReady() ??
-                this.unsupported() ??
-                (await this.#trusted.check(this.#folderOfRoot(root)));
+            const missing = await this.#folderProblem(this.#folderOfRoot(root));
 
-            this.#setPhase(root, missing === undefined ? "stable" : "suspended", missing, true);
+            // The record that was looked at before the wait must still be the current one, or a newer transition owns the
+            // tree: it is left as it is.
+            this.#setIf(
+                root,
+                current?.token,
+                missing === undefined ? "stable" : "suspended",
+                missing,
+                true,
+            );
         }
     }
 
