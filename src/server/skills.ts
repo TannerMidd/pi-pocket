@@ -36,11 +36,12 @@ import {
     CONFIG_DIR_NAME,
     loadSkills,
     loadSkillsFromDir,
+    parseFrontmatter,
     ProjectTrustStore,
     type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { minimatch } from "minimatch";
-import { confines, within } from "./confined.ts";
+import { confines, readInsideSync } from "./confined.ts";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
@@ -291,13 +292,38 @@ export function loadSessionSkills(cwd: string, sources: SkillSources): Skill[] {
     );
 }
 
-/** The skills but those that lie in the session's folder by name and reach a file outside it: the guest may leave links. */
-function inFolder<T extends { filePath: string }>(cwd: string, skills: T[]): T[] {
-    const folder = canonical(cwd);
+/**
+ * The skills, with the description of each skill in the folder of a sandboxed session read again as the host may
+ * read it there (`confined.ts`): Pi's own reader follows links, and the guest may leave one. A skill that cannot be
+ * read so is left out.
+ */
+function inFolder<T extends { filePath: string; description: string }>(
+    cwd: string,
+    skills: T[],
+): T[] {
+    return skills.flatMap((skill) => {
+        if (!confines(cwd, skill.filePath)) {
+            return [skill];
+        }
 
-    return skills.filter(
-        (skill) => !confines(cwd, skill.filePath) || within(folder, canonical(skill.filePath)),
-    );
+        try {
+            const { frontmatter } = parseFrontmatter(
+                readInsideSync(cwd, skill.filePath).toString("utf8"),
+            ) as { frontmatter: Record<string, unknown> };
+
+            return [
+                {
+                    ...skill,
+                    description:
+                        typeof frontmatter.description === "string"
+                            ? frontmatter.description
+                            : skill.description,
+                },
+            ];
+        } catch {
+            return [];
+        }
+    });
 }
 
 /** Whether Pi trusts the project a session in `cwd` works in, and the project skills that wait for it. */

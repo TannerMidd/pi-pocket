@@ -1,25 +1,29 @@
 /**
- * Reading the folder of a sandboxed session as the host, without leaving it. The folder is untrusted, as a cloned
- * repository is: a guest may leave a link in it that names `~/.ssh/id_rsa`, and a host that follows it would show that file to a person
- * or put it in a prompt. A path that lies in the folder is read only when the file it reaches does too, links
- * followed. The check is on the file that was opened (its place on Linux, its identity elsewhere), never only on the
- * path before it, so a link put in the way while the file is opened cannot lead out.
+ * Using the folder of a sandboxed session as the host, without leaving it. The folder is untrusted, as a cloned
+ * repository is: a guest may leave a link in it that names `~/.ssh/id_rsa`, and may swap a folder for a link at any
+ * moment, so a check of a path followed by a use of the path is not safe. Here a path is walked one name at a time,
+ * from the folder's own descriptor, and each name is opened without following a link (`/proc/self/fd/<dir>/<name>` is
+ * `openat` on Linux). A link anywhere on the way fails the call: nothing in such a folder is reached through one.
+ * Where this system has no such primitive, the call fails with a message; it never falls back to the path.
  */
 import {
     closeSync,
     constants,
-    fstatSync,
+    mkdirSync,
     openSync,
     readFileSync,
-    readlinkSync,
     realpathSync,
-    statSync,
+    renameSync,
+    unlinkSync,
+    writeSync,
 } from "node:fs";
-import { open, readlink, realpath, stat, type FileHandle } from "node:fs/promises";
+import { open, type FileHandle } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-const READ = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
-const FD_LINKS = process.platform === "linux";
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+const READ = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | NO_FOLLOW;
+const FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | NO_FOLLOW;
 
 const sandboxedFolders = new Set<(folder: string) => boolean>();
 
@@ -50,54 +54,136 @@ export function within(root: string, path: string): boolean {
     return from === "" || (from !== ".." && !from.startsWith(`..${sep}`) && !isAbsolute(from));
 }
 
-function leadsOut(path: string): NodeJS.ErrnoException {
-    return Object.assign(new Error(`EACCES: ${path} leads out of the folder`), {
-        code: "EACCES",
-        path,
-    });
+function refused(path: string): NodeJS.ErrnoException {
+    return Object.assign(
+        new Error(
+            `EACCES: ${path} is, or passes through, a link, which is not followed in this folder`,
+        ),
+        { code: "EACCES", path },
+    );
 }
 
-/** The real path of `path`; throws when it is not in the real path of `root`. */
-export async function realInside(root: string, path: string): Promise<string> {
-    const [folder, real] = await Promise.all([realpath(root), realpath(path)]);
+/** The entry of the folder that descriptor `dir` holds. */
+const entry = (dir: number, name?: string) =>
+    `/proc/self/fd/${dir}${name === undefined ? "" : `/${name}`}`;
 
-    if (!within(folder, real)) {
-        throw leadsOut(path);
+/** The names from `root` to `path`; throws when `path` is not in `root`. */
+function names(root: string, path: string): string[] {
+    if (!within(root, path)) {
+        throw refused(path);
     }
 
-    return real;
+    const from = relative(resolve(root), resolve(path));
+
+    return from === "" ? [] : from.split(sep);
 }
 
-/** `path` opened for reading: a file that is in `root` once it is open. */
-export async function openInside(root: string, path: string): Promise<FileHandle> {
-    const real = await realInside(root, path);
-    const folder = await realpath(root);
-    const handle = await open(real, READ);
+/** Run `step`, which opens a name without following a link: a link in its place fails as a refusal. */
+function noLink<T>(path: string, step: () => T): T {
+    try {
+        return step();
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+
+        throw code === "ELOOP" || code === "ENOTDIR" ? refused(path) : error;
+    }
+}
+
+/** The folder `root` itself, open: where each walk starts. */
+function pinRoot(root: string): number {
+    if (process.platform !== "linux") {
+        throw Object.assign(
+            new Error(
+                "EOPNOTSUPP: this system cannot open a name inside the folder of a sandboxed session safely, so Pi Pocket does not use it from the host here. Use Linux, or turn the session's sandbox off.",
+            ),
+            { code: "EOPNOTSUPP" },
+        );
+    }
+
+    return openSync(realpathSync(root), FOLDER);
+}
+
+/**
+ * The folder that holds `path` in `root`, open, and the name in it (`make`: the folders on the way are made when they
+ * are missing). The caller closes the descriptor.
+ */
+function pinParent(root: string, path: string, make = false): { dir: number; name: string } {
+    const parts = names(root, path);
+
+    if (parts.length === 0) {
+        throw refused(path);
+    }
+
+    let dir = pinRoot(root);
 
     try {
-        const here = FD_LINKS
-            ? await readlink(`/proc/self/fd/${handle.fd}`).catch(() => undefined)
-            : undefined;
-        const [named, opened] = await Promise.all([
-            stat(real, { bigint: true }),
-            handle.stat({ bigint: true }),
-        ]);
+        for (const part of parts.slice(0, -1)) {
+            const at = entry(dir, part);
+            const next = noLink(path, () => {
+                try {
+                    return openSync(at, FOLDER);
+                } catch (error) {
+                    if (!make || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+                        throw error;
+                    }
 
-        if (
-            here === undefined
-                ? named.dev !== opened.dev || named.ino !== opened.ino
-                : !within(folder, here)
-        ) {
-            throw leadsOut(path);
+                    mkdirSync(at);
+
+                    return openSync(at, FOLDER);
+                }
+            });
+
+            closeSync(dir);
+            dir = next;
         }
+
+        return { dir, name: parts.at(-1)! };
     } catch (error) {
-        await handle.close();
+        closeSync(dir);
 
         throw error;
     }
-
-    return handle;
 }
+
+/** `path` in `root`, open for reading (a file or a folder), as a descriptor: the caller closes it. */
+export function openInsideSync(root: string, path: string): number {
+    if (names(root, path).length === 0) {
+        return pinRoot(root);
+    }
+
+    const { dir, name } = pinParent(root, path);
+
+    try {
+        return noLink(path, () => openSync(entry(dir, name), READ));
+    } finally {
+        closeSync(dir);
+    }
+}
+
+/** What `readFileSync(path)` gives, for a path in `root`. */
+export function readInsideSync(root: string, path: string): Buffer {
+    const fd = openInsideSync(root, path);
+
+    try {
+        return readFileSync(fd);
+    } finally {
+        closeSync(fd);
+    }
+}
+
+/** `path` in `root`, open for reading (a file or a folder). The same file as the descriptor held until it is open. */
+export async function openInside(root: string, path: string): Promise<FileHandle> {
+    const fd = openInsideSync(root, path);
+
+    try {
+        return await open(entry(fd), constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    } finally {
+        closeSync(fd);
+    }
+}
+
+/** Where to list a folder that `handle` holds. */
+export const listing = (handle: FileHandle): string => entry(handle.fd);
 
 /** The bytes of a file in `root`; undefined when it holds more than `max`. */
 export async function readInside(
@@ -114,39 +200,47 @@ export async function readInside(
     }
 }
 
-/** What `readFileSync(path)` gives, for a path that is in `root` by the file it reaches. */
-export function readInsideSync(root: string, path: string): Buffer {
-    const folder = realpathSync(root);
-    const real = realpathSync(path);
-
-    if (!within(folder, real)) {
-        throw leadsOut(path);
-    }
-
-    const fd = openSync(real, READ);
+/** Remove the entry `path` in `root`, a link or a file, never what a link names. */
+export function unlinkInside(root: string, path: string): void {
+    const { dir, name } = pinParent(root, path);
 
     try {
-        let here: string | undefined;
+        unlinkSync(entry(dir, name));
+    } finally {
+        closeSync(dir);
+    }
+}
+
+/** Write `data` as the file `path` in `root` (its folders made), whole or not at all, never through a link. */
+export function writeInside(root: string, path: string, data: Uint8Array, mode: number): void {
+    const { dir, name } = pinParent(root, path, true);
+    const temporary = `.${randomUUID()}.tmp`;
+
+    try {
+        const fd = openSync(
+            entry(dir, temporary),
+            constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW,
+            mode,
+        );
 
         try {
-            here = FD_LINKS ? readlinkSync(`/proc/self/fd/${fd}`) : undefined;
+            for (let done = 0; done < data.length;) {
+                done += writeSync(fd, data, done);
+            }
+        } finally {
+            closeSync(fd);
+        }
+
+        renameSync(entry(dir, temporary), entry(dir, name));
+    } catch (error) {
+        try {
+            unlinkSync(entry(dir, temporary));
         } catch {
-            here = undefined;
+            // Not made, or already renamed.
         }
 
-        const named = statSync(real, { bigint: true });
-        const opened = fstatSync(fd, { bigint: true });
-
-        if (
-            here === undefined
-                ? named.dev !== opened.dev || named.ino !== opened.ino
-                : !within(folder, here)
-        ) {
-            throw leadsOut(path);
-        }
-
-        return readFileSync(fd);
+        throw error;
     } finally {
-        closeSync(fd);
+        closeSync(dir);
     }
 }
