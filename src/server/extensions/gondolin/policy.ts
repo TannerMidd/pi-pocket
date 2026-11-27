@@ -107,10 +107,37 @@ const CHANGES = new Set([
 ]);
 
 /**
+ * Whether `rest`, the path below a git folder, is a file that points Git at another folder: with it the host's `git`
+ * would read the config and hooks of a folder that the guest made. They are `commondir` (where the shared config, hooks,
+ * and objects are) of the repository, of a linked worktree (`worktrees/<name>/`), or of a submodule (`modules/<name>/`,
+ * nested ones too); the `gitdir` of a linked worktree or a submodule; and the lists of other object stores. A branch
+ * or a worktree named like one of them is no such file: only the places Git looks at count.
+ */
+function redirectsGit(rest: string[]): boolean {
+    let inner = rest;
+    let nested = false;
+
+    while ((inner[0] === "worktrees" || inner[0] === "modules") && inner.length >= 3) {
+        inner = inner.slice(2);
+        nested = true;
+    }
+
+    const name = inner.join("/");
+
+    return (
+        name === "commondir" ||
+        (nested && name === "gitdir") ||
+        name === "objects/info/alternates" ||
+        name === "objects/info/http-alternates"
+    );
+}
+
+/**
  * Whether the guest may not write `path` (absolute inside the folder, `/`-separated). The git rule keeps what the
  * host's own `git` runs from the guest's hands: a repository's config (an `fsmonitor`, a `pager`, an `sshCommand` run as
  * the owner when Pi Pocket's Changes panel or the owner's shell uses git), its hooks, its `info` folder, the files that
- * name filters and submodules, and any change to an entry named `.git` (a swap of the whole repository folder). The
+ * name filters and submodules, the files that point Git at another folder (`commondir`, a linked worktree's `gitdir`,
+ * `objects/info/alternates`), and any change to an entry named `.git` (a swap of the whole repository folder). The
  * guest still reads everything except these files, which look missing to it.
  */
 function gitProtected(segments: string[], op: string): boolean {
@@ -137,6 +164,10 @@ function gitProtected(segments: string[], op: string): boolean {
             next === "hooks" ||
             next === "info"
         ) {
+            return true;
+        }
+
+        if (redirectsGit(segments.slice(at + 1))) {
             return true;
         }
 

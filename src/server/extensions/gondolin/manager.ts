@@ -77,6 +77,8 @@ interface Entry {
     stoppedAt?: number;
     note?: string;
     spec?: VmSpec;
+    /** The session's folder or uploads changed since the VM started: it mounts the old ones, so no call may use it. */
+    moved?: boolean;
     envs: Map<string, GuestEnv>;
     /** Chromium's trust in the sandbox network's certificate authority, done once for each VM. */
     trusted?: Promise<void>;
@@ -198,6 +200,11 @@ export class SandboxManager {
             entry.envs.clear();
             entry.trusted = undefined;
 
+            if (entry.vm !== undefined || entry.starting !== undefined) {
+                // Whatever holds the VM (a task, a browser) keeps it up, but the next call replaces it: `#ready`.
+                entry.moved = true;
+            }
+
             if (entry.vm !== undefined && entry.busy === 0) {
                 void this.stop(target.rootId, "the session's folder changed");
             }
@@ -306,6 +313,13 @@ export class SandboxManager {
         }
 
         if (entry.vm !== undefined) {
+            if (entry.moved === true) {
+                // The VM mounts the folder that the session had: it ends (with what runs in it), and a new one starts.
+                await this.stop(rootId, "the session's folder changed");
+
+                return this.#ready(rootId, signal);
+            }
+
             if (
                 entry.spec === undefined ||
                 !looserThanSettings(entry.spec, this.#options.settings())
@@ -379,6 +393,8 @@ export class SandboxManager {
         }
 
         const target = entry.target;
+
+        entry.moved = false;
         const problem = this.#options.folderProblem?.(target.cwd, "folder");
 
         if (problem !== undefined) {
@@ -455,7 +471,12 @@ export class SandboxManager {
                 throw new Error("The sandbox was stopped while it started.");
             }
 
-            if (looserThanSettings(spec, this.#options.settings())) {
+            if (
+                looserThanSettings(spec, this.#options.settings()) ||
+                entry.target.cwd !== target.cwd ||
+                entry.target.uploadDir !== target.uploadDir
+            ) {
+                // The rules got stricter, or the session moved to another folder, while the VM started.
                 await vm.close().catch(() => undefined);
 
                 throw new RulesChanged();

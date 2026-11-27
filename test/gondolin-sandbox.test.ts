@@ -241,6 +241,32 @@ test("host tools are stopped in a sandboxed session, named as host tools, and al
         assert.equal(app.sandboxes.gate("ask", {}), undefined);
         assert.equal(app.sandboxes.gate("artifact", { content: "<p>" }), undefined);
         assert.match(app.sandboxes.gate("artifact", { path: "/etc/passwd" }) ?? "", /host/);
+
+        // An asset's path reads a host file as well, whatever else the call says.
+        for (const args of [
+            { content: "<p>", assets: [{ name: "a.txt", path: "~/.ssh/id_rsa" }] },
+            {
+                content: "<p>",
+                assets: [
+                    { name: "ok.txt", content: "x" },
+                    { name: "b", path: "/etc/hostname" },
+                ],
+            },
+            { edits: [{ oldText: "a", newText: "b" }], assets: [{ name: "c", path: "x.png" }] },
+            { content: "<p>", nested: { deeper: { path: "/etc/passwd" } } },
+        ]) {
+            assert.match(app.sandboxes.gate("artifact", args) ?? "", /host/, JSON.stringify(args));
+        }
+
+        // Assets and content that name no path stay in Pi Pocket.
+        assert.equal(
+            app.sandboxes.gate("artifact", {
+                content: "<p>",
+                path: "",
+                assets: [{ name: "ok.txt", content: "x" }],
+            }),
+            undefined,
+        );
         assert.match(
             app.sandboxes.gate("browser", {}) ?? "",
             /browser of this sandbox is not known/,

@@ -15,6 +15,7 @@ import type { PocketApp } from "./app.ts";
 import type { RemoteBrowser } from "./browser.ts";
 import type { Role, User } from "./config.ts";
 import { SandboxDoc, SubagentsDoc } from "./docs.ts";
+import { LiveDoc } from "@earendil-works/pi-durable";
 import { HttpError } from "./errors.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -132,6 +133,28 @@ const FILE_CALLS = new Set([
     "createTempDir",
     "createTempFile",
 ]);
+
+/**
+ * Whether a tool's arguments name a path anywhere: a `path` field at any depth (an artifact's own, an asset's) that is
+ * not empty. A tool that reads a path reads it on the host.
+ */
+export function namesPath(args: unknown, depth = 0): boolean {
+    if (depth > 8 || typeof args !== "object" || args === null) {
+        return false;
+    }
+
+    for (const [key, value] of Object.entries(args)) {
+        if (key === "path" && value !== undefined && value !== null && value !== "") {
+            return true;
+        }
+
+        if (namesPath(value, depth + 1)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 /** The environment of a sandboxed session that cannot run anything: every call fails, and says why. */
 export function failedEnv(cwd: string, message: string): ExecutionEnv {
@@ -280,6 +303,54 @@ export class Sandboxes {
         }
     }
 
+    /**
+     * What runs on this machine for these conversations, in words: background tasks and `!` commands, and the file and
+     * shell calls that are in the middle of a run. A call that began before the session was sandboxed ran on the host.
+     */
+    async #hostWork(conversations: readonly ConversationId[]): Promise<string[]> {
+        const app = this.#app;
+        const graph = await app.harness.watchTaskGraph(context);
+        let nodes;
+
+        try {
+            nodes = Object.values(graph.value.tasks);
+        } finally {
+            await graph.stop();
+        }
+
+        const ours = new Set(conversations.map(Number));
+        const found: string[] = [];
+
+        for (const node of nodes) {
+            if (!ours.has(Number(node.conversationId))) {
+                continue;
+            }
+
+            const id = node.conversationId;
+
+            if (node.kind === "pocket.background") {
+                const item = await app.background.byTask(id, String(node.id));
+
+                found.push(
+                    `a background task (${item === undefined ? "a command" : app.background.describe(id, item, 80)})`,
+                );
+            } else if (node.kind === "pocket.shell") {
+                found.push(`a ! command (${(await app.shell.describe(node.id)) ?? "a command"})`);
+            } else if (node.kind === "pi.tool") {
+                const name =
+                    (await app.harness.snapshot(LiveDoc, id, context))?.tools?.find(
+                        (each) => each.taskId === node.id,
+                    )?.name ?? "a tool";
+
+                if (name === "a tool" || ROUTED.has(name)) {
+                    found.push(`a ${name} call that is running`);
+                }
+            }
+        }
+
+        return found;
+    }
+
     /** Why a tool call of a sandboxed session may not run, or undefined when it may. */
     gate(tool: string, args: unknown, conversationId?: ConversationId): string | undefined {
         if (ROUTED.has(tool) || INERT.has(tool)) {
@@ -309,13 +380,10 @@ export class Sandboxes {
                 : remote.problem();
         }
 
-        // An artifact made from content stays in Pi Pocket; one made from a path reads a file on the host.
-        if (tool === "artifact") {
-            const path = (args as { path?: unknown } | null)?.path;
-
-            if (path === undefined || path === null || path === "") {
-                return undefined;
-            }
+        // An artifact made from content stays in Pi Pocket; one that names a path (its own, or an asset's) reads a
+        // file on the host.
+        if (tool === "artifact" && !namesPath(args)) {
+            return undefined;
         }
 
         let allow = false;
@@ -466,10 +534,12 @@ export class Sandboxes {
         }
 
         const touched: ConversationId[] = [];
+        const before = new Map<ConversationId, { on: boolean; by?: string; at?: number }>();
         const changed = await app.harness.commit(async (tx) => {
             const current = await tx.doc(SandboxDoc, id);
 
             touched.length = 0;
+            before.clear();
 
             if (current.on === on) {
                 return false;
@@ -500,13 +570,45 @@ export class Sandboxes {
             const at = Date.now();
 
             for (const each of conversations) {
-                Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
+                const doc = await tx.doc(SandboxDoc, each);
+
+                before.set(each, { ...doc });
+                Object.assign(doc, { on, by: user.id, at });
             }
 
             touched.push(...conversations);
 
             return true;
         }, context);
+
+        if (changed && on) {
+            // Work that runs on this machine keeps running there. The setting is stored first: what starts from now on
+            // is the VM's, so what is found now began before it, and the change is refused until it ends.
+            const running = await this.#hostWork(touched);
+
+            if (running.length > 0) {
+                await app.harness.commit(async (tx) => {
+                    for (const [each, was] of before) {
+                        const doc = await tx.doc(SandboxDoc, each);
+
+                        doc.on = was.on;
+
+                        for (const key of ["by", "at"] as const) {
+                            if (was[key] === undefined) {
+                                delete doc[key];
+                            } else {
+                                Object.assign(doc, { [key]: was[key] });
+                            }
+                        }
+                    }
+                }, context);
+
+                throw new HttpError(
+                    409,
+                    `This session still runs work on this machine: ${running.join("; ")}. A sandbox cannot take that work over, and it could go on running files that Pi now changes in the VM. Stop it, or wait until it ends, and then turn the sandbox on.`,
+                );
+            }
+        }
 
         if (changed) {
             // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of

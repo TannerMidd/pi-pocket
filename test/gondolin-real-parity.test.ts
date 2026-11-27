@@ -14,7 +14,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { after, before, test, type TestContext } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { Browsers } from "../src/server/browser.ts";
@@ -621,6 +621,119 @@ test("in a real VM, a task that starts while stricter rules replace the VM runs 
         assert.match(await api.list(), /vm-1: ended/);
         assert.match(await api.list(), /vm-2: running/);
         assert.equal(vms.state(32)?.network, "off");
+    } finally {
+        await vms.stopAll("the test ended").catch(() => undefined);
+    }
+});
+
+test("the files that point Git at another folder cannot be written, so the host's git never reads a folder that the guest made", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("pointers");
+    const main = repository("pointers-main");
+    const tree = `${main}-tree`;
+
+    onHost(main, "worktree", "add", "-q", tree, "-b", "feature");
+    const name = basename(tree);
+    const attempts = [
+        // A folder with a config and a hook of the guest's own: ordinary files, which the guest may write.
+        "mkdir -p evil/hooks && printf '[core]\\n\\thooksPath = hooks\\n' > evil/config && printf '#!/bin/sh\\ntouch HOOK_RAN\\n' > evil/hooks/post-checkout && chmod +x evil/hooks/post-checkout; echo made=$?",
+        "echo ../evil > .git/commondir; echo commondir=$?",
+        "echo /tmp > .git/objects/info/alternates; echo alternates=$?",
+        "echo /tmp > .git/objects/info/http-alternates; echo httpalternates=$?",
+        "mkdir -p .git/worktrees/x && echo ../../evil > .git/worktrees/x/commondir; echo wcommondir=$?",
+        "echo y > .git/worktrees/x/gitdir; echo wgitdir=$?",
+        // The main repository of a worktree session, mounted at its own path.
+        `echo ../../../../evil > ${main}/.git/worktrees/${name}/commondir; echo mcommondir=$?`,
+        `echo x > ${main}/.git/worktrees/${name}/gitdir; echo mgitdir=$?`,
+        `echo ${tree} > ${main}/.git/commondir; echo maincommondir=$?`,
+        `echo /tmp > ${main}/.git/objects/info/alternates; echo malternates=$?`,
+    ];
+
+    const inRepo = await inVm(repo, attempts.slice(0, 6).join("; "));
+    const inTree = await inVm(tree, attempts.join("; "));
+
+    assert.match(inRepo.output, /made=0/, inRepo.output);
+
+    for (const [output, names] of [
+        [inRepo.output, ["commondir", "alternates", "httpalternates", "wcommondir", "wgitdir"]],
+        [
+            inTree.output,
+            [
+                "commondir",
+                "alternates",
+                "wcommondir",
+                "mcommondir",
+                "mgitdir",
+                "maincommondir",
+                "malternates",
+            ],
+        ],
+    ] as const) {
+        for (const each of names) {
+            assert.match(output, new RegExp(`${each}=[1-9]`), `${each}: ${output}`);
+        }
+    }
+
+    assert.equal(existsSync(join(repo, ".git", "commondir")), false);
+    assert.equal(existsSync(join(repo, ".git", "objects", "info", "alternates")), false);
+    assert.equal(existsSync(join(repo, ".git", "worktrees", "x", "commondir")), false);
+    assert.equal(existsSync(join(main, ".git", "commondir")), false);
+    assert.ok(
+        !readFileSync(join(main, ".git", "worktrees", name, "commondir"), "utf8").includes("evil"),
+    );
+
+    // What the owner does next on the host: git works, and the guest's hook does not run.
+    onHost(repo, "checkout", "-q", "-b", "after");
+    onHost(repo, "status", "--short");
+    assert.equal(existsSync(join(repo, "HOOK_RAN")), false);
+    onHost(tree, "checkout", "-q", "-b", "after-tree");
+    assert.equal(existsSync(join(tree, "HOOK_RAN")), false);
+});
+
+test("a session that moves to another folder while a task holds its VM runs in the new folder", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const first = realpathSync(mkdtempSync(join(scratch, "move-a-")));
+    const second = realpathSync(mkdtempSync(join(scratch, "move-b-")));
+
+    writeFileSync(join(first, "only-in-a.txt"), "a");
+    writeFileSync(join(second, "only-in-b.txt"), "b");
+    const vms = new SandboxManager({
+        driver: driver!,
+        log: () => {},
+        pidFile: join(scratch, "move-vms.json"),
+        settings: settings("pocket-base:latest", { idleMinutes: 0, maxVms: 1 }),
+    });
+    const target = (cwd: string) => ({ rootId: 41, cwd, uploadDir: undefined });
+
+    try {
+        const env = vms.envFor(41, target(first));
+        let output = "";
+
+        assert.ok((await env.exec("ls", { onOutput: (text) => (output += text) }, context)).ok);
+        assert.match(output, /only-in-a\.txt/);
+        const release = vms.hold(target(first));
+        const moved = vms.envFor(41, target(second));
+
+        output = "";
+        const result = await moved.exec(
+            "pwd; ls; test -e only-in-a.txt; echo old=$?",
+            { onOutput: (text) => (output += text), timeout: 60 },
+            context,
+        );
+
+        assert.ok(result.ok, output);
+        assert.match(output, new RegExp(`${second}\\n`));
+        assert.match(output, /only-in-b\.txt/);
+        assert.doesNotMatch(output, /only-in-a\.txt\n/);
+        assert.match(output, /old=1/);
+        assert.equal(vms.running, 1);
+        release();
     } finally {
         await vms.stopAll("the test ended").catch(() => undefined);
     }
