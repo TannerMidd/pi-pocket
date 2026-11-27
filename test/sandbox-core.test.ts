@@ -41,11 +41,9 @@ async function boot(options: Parameters<typeof sandboxOptions>[0] = {}, register
 
     apps.push(app);
 
-    if (register) {
-        await app.sandboxes.register(provider, "fake.ts");
-    }
+    const handle = register ? await app.sandboxes.register(provider, "fake.ts") : undefined;
 
-    return { app, provider };
+    return { app, provider, handle };
 }
 
 function folder(name: string): string {
@@ -146,12 +144,13 @@ async function sandboxed(name: string, options: Parameters<typeof sandboxOptions
 }
 
 test("a sandboxed tree with no provider fails every call at once, and says why; it never reaches the host", async () => {
-    const { app, id } = await sandboxed("noprovider");
+    const { app, id, handle } = await sandboxed("noprovider");
 
-    // The module goes: the tree is still sandboxed, and its environment is the one that fails.
-    await app.sandboxes.suspendOwner("fake.ts", true);
+    // The module's own cleanup ran (the server is going away): the tree is still sandboxed, and its environment is the one
+    // that fails.
+    await handle!.unregister();
     assert.equal(app.sandboxes.provider, undefined);
-    assert.match(await runs(app, id), /suspended.*module/);
+    assert.match(await runs(app, id), /module/);
 });
 
 test("a failed release leaves the tree suspended with its setting on; every call fails at once; resume recovers it", async () => {

@@ -4,7 +4,6 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { ExecutionError, FileError } from "@earendil-works/pi-durable/env";
-import { SandboxDoc } from "../src/server/docs.ts";
 import { FILE_CALLS } from "../src/server/sandbox-tools.ts";
 import {
     cleanUp,
@@ -16,7 +15,7 @@ import {
     scriptedModel,
     type App,
 } from "./helpers.ts";
-import { FakeProvider, gate, sandboxOptions } from "./sandbox-fake.ts";
+import { FakeProvider, sandboxOptions } from "./sandbox-fake.ts";
 
 const apps: App[] = [];
 let opened = 0;
@@ -52,45 +51,6 @@ const folder = (name: string) => {
 
     return path;
 };
-
-test("while the provider is torn down nothing new starts under it, and a tree that appeared anyway is stopped too", async () => {
-    const { app, provider } = await boot();
-    const dir = folder("fence");
-    const other = folder("fence-other");
-    const a = await newSession(app, dir);
-    const b = await newSession(app, other);
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    const second = new FakeProvider();
-    const replacing = app.sandboxes.register(second, "other.ts");
-
-    await hold.reached;
-    // A new session joins the sandboxed folder: refused, with the reason.
-    await assert.rejects(app.commands.createSession(owner(app), { cwd: dir }), /being replaced/);
-    // A turn-on of another session: refused too.
-    await assert.rejects(app.sandboxes.turnOn(b, owner(app)), /being replaced/);
-    // A tree that became sandboxed some other way (a commit that began before the fence) is not missed by the teardown.
-    await app.harness.commit(async (tx) => {
-        Object.assign(await tx.doc(SandboxDoc, b), { on: true, by: owner(app).id, at: Date.now() });
-    }, context);
-    assert.equal(app.sandboxes.isOn(b), true);
-    hold.open();
-    await replacing;
-    assert.deepEqual(
-        provider.released.sort(),
-        [Number(a), Number(b)].sort(),
-        "both were proved gone under the old provider",
-    );
-    assert.equal(app.sandboxes.provider, second);
-    // The new provider serves, and the fence is down.
-    assert.equal(app.sandboxes.phaseOf(b), "stable");
-    const joined = await app.commands.createSession(owner(app), { cwd: dir });
-
-    assert.equal(app.sandboxes.isOn(joined.id), true);
-});
 
 test("every intercepted call of a denied handle fails with its own result type, listFiles included", async () => {
     const { app, provider } = await boot();

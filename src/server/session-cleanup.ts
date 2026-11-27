@@ -724,7 +724,10 @@ export class SessionCleanup {
             return { id: Number(id), done: false, why: "Pi is working in it. Stop it first." };
         }
 
-        // A sandboxed session's VM stops before anything is deleted (I5); admission deletes its entry after the body.
+        let bytes = 0;
+
+        // A sandboxed session's VM stops before anything is deleted (I5); admission deletes its entry after the body. The
+        // tree stays reserved until its cleanup ends (`afterCommit`): nothing reaches it meanwhile.
         await app.sandboxes.change(
             { kind: "remove", id },
             {
@@ -820,16 +823,23 @@ export class SessionCleanup {
                         }
                     }
                 },
+                afterCommit: async () => {
+                    try {
+                        for (const task of watchTasks) {
+                            await app.harness.abortTask(task, context).catch(() => undefined);
+                        }
+
+                        const record = (await app.harness.snapshot(DeletedDoc, context))?.items[
+                            String(id)
+                        ];
+
+                        bytes = record === undefined ? 0 : await this.#finish(id, record);
+                    } catch (error) {
+                        app.log(`The cleanup of session ${String(id)} stopped: ${describe(error)}`);
+                    }
+                },
             },
         );
-
-        for (const task of watchTasks) {
-            await app.harness.abortTask(task, context).catch(() => undefined);
-        }
-
-        const record = (await app.harness.snapshot(DeletedDoc, context))?.items[String(id)];
-
-        const bytes = record === undefined ? 0 : await this.#finish(id, record);
 
         return { id: Number(id), done: true, bytes };
     }

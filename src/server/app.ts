@@ -1176,11 +1176,8 @@ export class PocketApp {
             {
                 webs: this.webs,
                 notify: (level, message) => this.ownerNotice(level, message),
-                // A module's sandbox is revoked and proved gone before it is replaced, turned off, or removed.
+                // The module that serves a sandbox is not replaced, turned off, or removed while a sandbox is on.
                 suspend: (file, leave) => this.sandboxes.suspendOwner(file, leave),
-                reloadFailed: (file) => this.sandboxes.reloadFailed(file),
-                reloadCommitted: (file) => this.sandboxes.reloadCommitted(file),
-                registrationScope: (_file, valid, run) => this.sandboxes.inLoad(valid, run),
             },
         );
         await this.themes.load().catch((error: unknown) => {
@@ -4844,7 +4841,7 @@ export class PocketApp {
 
     close(): Promise<void> {
         this.#closing ??= (async () => {
-            // First: every sandbox is fenced, drained, revoked and proved gone, within a bound. The commit listener is still
+            // First: nothing sandboxed starts again, and every VM is released and proved gone, within a bound. The commit listener is still
             // attached, so a sandbox document that lands meanwhile is seen, and the modules are still there.
             await this.sandboxes.shutdown();
 

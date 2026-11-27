@@ -380,14 +380,10 @@ export class ExtensionLoader {
     readonly #generations = new Map<string, number>();
     readonly #loadLimitMs: number;
     /**
-     * Before a module is replaced, turned off, or removed: whatever it serves is revoked and proved gone, and the
-     * replacement or removal waits for it (a sandbox provider, `sandbox.ts`). It rejects when that cannot be proved.
+     * Before a module is replaced, turned off, or removed (a sandbox provider, `sandbox.ts`): it rejects while a sandbox is on,
+     * and the module stays as it is.
      */
     readonly #suspend: (file: string, leave: boolean) => Promise<void>;
-    /** The old version stays after a failed reload: whatever its suspension stopped goes on again. */
-    readonly #reloadFailed: (file: string) => Promise<void>;
-    readonly #reloadCommitted: (file: string) => Promise<void>;
-    readonly #registrationScope: <T>(file: string, valid: () => boolean, run: () => T) => T;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -415,15 +411,6 @@ export class ExtensionLoader {
             loadLimitMs?: number;
             /** `leave`: the module goes (turned off or removed), not replaced by a new version of itself. */
             suspend?: (file: string, leave: boolean) => Promise<void>;
-            /** A new version of a module failed to load after its old one was suspended: the old one stays, and goes on. */
-            reloadFailed?: (file: string) => Promise<void>;
-            /**
-             * Run a module's default export so that what it registers (a sandbox provider) is tied to this load: `valid` is false
-             * once the load failed, ran out of time, or was replaced by a newer one, and then a registration is refused.
-             */
-            registrationScope?: <T>(file: string, valid: () => boolean, run: () => T) => T;
-            /** A new version of a module was installed after its old one was suspended: whatever it staged takes effect. */
-            reloadCommitted?: (file: string) => Promise<void>;
         } = {},
     ) {
         this.#registry = registry;
@@ -435,9 +422,6 @@ export class ExtensionLoader {
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
         this.#suspend = options.suspend ?? (() => Promise.resolve());
-        this.#reloadFailed = options.reloadFailed ?? (() => Promise.resolve());
-        this.#reloadCommitted = options.reloadCommitted ?? (() => Promise.resolve());
-        this.#registrationScope = options.registrationScope ?? ((_file, _valid, run) => run());
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -560,7 +544,7 @@ export class ExtensionLoader {
             return;
         }
 
-        // Revoke, prove gone, then take the module away: a failure keeps it installed. A newer load, turn-on, or removal that
+        // Refused while a sandbox is on: a failure keeps the module installed. A newer load, turn-on, or removal that
         // came while the proof was awaited has this generation behind it, and the module is not taken away under it.
         const generation = this.#generation(file);
 
@@ -696,11 +680,6 @@ export class ExtensionLoader {
             // A failed load is tried again at the next event about its file, even one that leaves the file as it was.
             if (!(error instanceof Overtaken)) {
                 this.#stamps.delete(file);
-
-                // The old version stays installed: what its suspension stopped (a sandbox) is let go on with it.
-                if (this.#installed.has(file)) {
-                    await this.#reloadFailed(file).catch(() => undefined);
-                }
             }
 
             throw error;
@@ -746,8 +725,7 @@ export class ExtensionLoader {
             );
         }
 
-        // What the old version serves is revoked and proved gone before the new version registers anything (the sandbox's
-        // provider): a replacement is serialised after the old teardown.
+        // A module that serves a sandbox is not replaced while one is on: this throws, and the old version stays.
         await this.#suspend(file, false);
         this.#stillLatest(file, generation);
 
@@ -755,16 +733,9 @@ export class ExtensionLoader {
         // and what it set up (its cleanups) goes. The new version starts before the old one's cleanups run.
         const { part, web } = this.#webs.stage(file, module.directory, titleOf(file));
         let committed = false;
-        // The load ends when it fails or runs out of time (a default export that is still going on is not cancelled): a
-        // registration it makes later is refused, as one from a load that a newer one replaced.
-        let ended = false;
 
         try {
-            const returned = this.#registrationScope(
-                file,
-                () => !ended && this.#isLatest(file, generation),
-                () => loaded.default(this.#host, web) as unknown,
-            );
+            const returned = loaded.default(this.#host, web) as unknown;
             // An async default export: it may register until it settles.
             const built = isThenable(returned)
                 ? await this.#within(Promise.resolve(returned), deadline, file)
@@ -817,15 +788,9 @@ export class ExtensionLoader {
             );
             committed = true;
 
-            // The new version is installed: what it staged (a sandbox provider) takes the old one's place.
-            await this.#reloadCommitted(file).catch((error: unknown) =>
-                this.#notify("warning", `${file}: ${describe(error)}`),
-            );
-
             return installed;
         } finally {
             if (!committed) {
-                ended = true;
                 this.#webs.discard(part);
             }
         }
@@ -1109,7 +1074,7 @@ export class ExtensionLoader {
                 (error: unknown) =>
                     this.#notify(
                         "error",
-                        `Kept ${file}, which was removed from its folder: what it runs could not be stopped (${describe(error)}).`,
+                        `Kept ${file}, which was removed from its folder: ${describe(error)}`,
                     ),
             );
 

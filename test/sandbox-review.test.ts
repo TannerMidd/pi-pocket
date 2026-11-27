@@ -60,39 +60,6 @@ async function world(name: string) {
 const exec = async (app: App, id: ConversationId) =>
     (await app.envFor(id).exec("x", undefined, context)).ok;
 
-test("a replacement provider is installed only after the old one is released; a failed teardown keeps the old one", async () => {
-    const w = await world("replace");
-    const hold = gate();
-    const second = new FakeProvider();
-
-    w.provider.holdRelease = hold;
-    let installed = false;
-    const registering = w.app.sandboxes.register(second, "other.ts").then(() => (installed = true));
-
-    await hold.reached;
-    assert.equal(
-        w.app.sandboxes.provider,
-        w.provider,
-        "the old provider serves until it is proved gone",
-    );
-    assert.equal(installed, false);
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "suspended");
-    hold.open();
-    await registering;
-    assert.deepEqual(w.provider.released, [Number(w.a)], "the old VM was released first");
-    assert.equal(w.app.sandboxes.provider, second);
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "stable");
-
-    // Now one that cannot be stopped: the old provider stays, the new one is refused, and the tree stays suspended.
-    const third = new FakeProvider();
-
-    second.failRelease = "the VM would not close";
-    await assert.rejects(w.app.sandboxes.register(third, "third.ts"), /could not be stopped/);
-    assert.equal(w.app.sandboxes.provider, second);
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "suspended");
-    assert.equal(await exec(w.app, w.a), false);
-});
-
 test("a step that fails after the release suspends the tree, also a refusal; resume recovers it and frees the reservation", async () => {
     const w = await world("post-release");
 
@@ -172,7 +139,8 @@ test("a cached environment handle goes to the environment of the current folder,
     await app.commands.configure(id, owner(app), { cwd: to });
     assert.equal(await read(), "to", "a plain move: the cached handle works in the new folder");
 
-    // A sandboxed handle follows the provider: after a replacement it never reaches the old one.
+    // A sandboxed handle follows the provider: the module is replaced only while no sandbox is on, and the handle then goes to
+    // the provider of the next turn-on, never to the old one.
     const dir = join(root, "review-handle-box");
 
     mkdirSync(dir);
@@ -182,9 +150,11 @@ test("a cached environment handle goes to the environment of the current folder,
     const handle = app.envFor(boxed);
 
     assert.ok((await handle.exec("one", undefined, context)).ok);
+    await app.sandboxes.turnOff(boxed, owner(app));
     const next = new FakeProvider();
 
     await app.sandboxes.register(next, "next.ts");
+    await app.sandboxes.turnOn(boxed, owner(app));
     assert.ok((await handle.exec("two", undefined, context)).ok);
     assert.deepEqual(provider.ran, ["one"]);
     assert.deepEqual(next.ran, ["two"], "the new provider served the cached handle");
@@ -393,18 +363,6 @@ test("a change of the rules finishes only its own transition: a suspension that 
     // The rules that were skipped while the tree was held are checked when it is let go: stable again once that ends.
     await until(() => w.app.sandboxes.phaseOf(w.a) === "stable", "the recheck of the rules");
     assert.equal(await exec(w.app, w.a), true);
-
-    // A module teardown under way is not cleared by the rules either.
-    const hold = gate();
-
-    w.provider.holdRelease = hold;
-    const leaving = w.app.sandboxes.suspendOwner("fake.ts", false);
-
-    await hold.reached;
-    await w.app.sandboxes.rules("settings changed again");
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "suspended");
-    hold.open();
-    await leaving;
 });
 
 test("a wait for a deferred delivery leaves no abort listener behind, however often it tries", async () => {

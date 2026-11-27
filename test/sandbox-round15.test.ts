@@ -58,46 +58,6 @@ const ticks = async (count = 20) => {
     }
 };
 
-test("after a replacement took over a change that was releasing, the folder is free: a join succeeds and a later change does not wait", async () => {
-    const made: { resolve: () => void }[] = [];
-    const { app, provider } = await boot({
-        timer: (_ms, signal) =>
-            new Promise<void>((resolve) => {
-                made.push({ resolve });
-                signal.addEventListener("abort", () => resolve());
-            }),
-    });
-    const from = folder("handover");
-    const to = folder("handover-to");
-    const a = await newSession(app, from);
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    const moving = app.commands.configure(a, owner(app), { cwd: to });
-    const failed = assert.rejects(moving, /changed (meanwhile|while)/);
-
-    await hold.reached;
-    const before = made.length;
-    const replacing = app.sandboxes.register(new FakeProvider(), "other.ts");
-
-    await ticks();
-    made[before]!.resolve();
-    await ticks();
-    hold.open();
-    await failed;
-    await replacing;
-    assert.equal(app.sandboxes.phaseOf(a), "stable", "reconciled by the replacement");
-    // The old change's reservation is gone: a session joins the folder at once, as a sandboxed one.
-    const joined = await app.commands.createSession(owner(app), { cwd: from });
-
-    assert.equal(app.sandboxes.isOn(joined.id), true);
-    // And a later change of the folder does not queue behind a reservation that nobody holds.
-    await app.commands.updateSession(joined.id, owner(app), { archived: true });
-    assert.equal(app.sessionMeta(joined.id)?.archived, true);
-});
-
 test("a change that waited for a reservation reads the tree's sandbox state again: it stops the VM it did not know about", async () => {
     const { app, provider } = await boot();
     const c = await newSession(app, folder("wait-c"));

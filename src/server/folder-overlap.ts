@@ -101,3 +101,14 @@ export function foldersOverlap(a: string, b: string): boolean {
         (first === second || passesThrough(a, second) || passesThrough(b, first))
     );
 }
+
+/** Whether `a` and `b` are exactly the same folder: the same path, or the same device and inode. */
+export function sameFolder(a: string, b: string): boolean {
+    if (resolve(a) === resolve(b)) {
+        return true;
+    }
+
+    const first = identity(a);
+
+    return first !== undefined && first === identity(b);
+}

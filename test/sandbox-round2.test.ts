@@ -72,36 +72,6 @@ function timers() {
     };
 }
 
-test("a provider change waits for a transition under way and never overwrites its phase", async () => {
-    const { app, provider } = await boot();
-    const dir = folder("provider-change");
-    const a = await newSession(app, dir);
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    // An archive of the sandboxed session: its VM is stopping, and its phase is `moving`.
-    const archiving = app.commands.updateSession(a, owner(app), { archived: true });
-
-    await hold.reached;
-    assert.equal(app.sandboxes.phaseOf(a), "moving");
-    const second = new FakeProvider();
-    let installed = false;
-    const registering = app.sandboxes.register(second, "other.ts").then(() => (installed = true));
-
-    await ticks();
-    assert.equal(installed, false, "the replacement waits for the transition");
-    assert.equal(app.sandboxes.phaseOf(a), "moving", "the archive's phase was not overwritten");
-    assert.equal(app.sandboxes.deliver(a).ok, false, "no delivery during the pending archive");
-    hold.open();
-    await archiving;
-    await registering;
-    assert.equal(app.sessionMeta(a)?.archived, true);
-    assert.equal(app.sandboxes.provider, second);
-    assert.equal(app.sandboxes.phaseOf(a), "stable");
-});
-
 test("a move on a server with no sandbox reserves and marks its tree before it prepares, so a turn-on cannot slip in", async () => {
     const { app } = await boot();
     const from = folder("no-sandbox-from");

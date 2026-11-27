@@ -5,18 +5,8 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { SandboxDoc } from "../src/server/docs.ts";
-import {
-    cleanUp,
-    context,
-    newSession,
-    openApp,
-    owner,
-    root,
-    scriptedModel,
-    type App,
-} from "./helpers.ts";
-import { FakeProvider, gate, sandboxOptions } from "./sandbox-fake.ts";
+import { cleanUp, newSession, openApp, owner, root, scriptedModel, type App } from "./helpers.ts";
+import { FakeProvider, sandboxOptions } from "./sandbox-fake.ts";
 
 const apps: App[] = [];
 let opened = 0;
@@ -95,61 +85,4 @@ test("a tree whose root is remote stays in the group of the local folders its wo
     app.sandboxes.noteDoc("pocket.background", plain, { items: {} });
     await app.sandboxes.turnOn(neighbour, owner(app));
     assert.equal(app.sandboxes.isOn(neighbour), true);
-});
-
-test("shutdown raises the fence at once, drains, looks again, and keeps the commit listener until it is done", async () => {
-    const { app, provider } = await boot();
-    const a = await newSession(app, folder("shutdown-a"));
-    const b = await newSession(app, folder("shutdown-b"));
-    const c = await newSession(app, folder("shutdown-c"));
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    const closing = app.close();
-
-    await hold.reached;
-    // A turn-on that comes now is refused: the server is stopping.
-    await assert.rejects(app.sandboxes.turnOn(b, owner(app)), /server is stopping/);
-    // A sandbox document that lands during the drain (a commit that began before the fence) is seen: the listener is attached.
-    await app.harness.commit(async (tx) => {
-        Object.assign(await tx.doc(SandboxDoc, c), { on: true, by: owner(app).id, at: Date.now() });
-    }, context);
-    assert.equal(app.sandboxes.isOn(c), true);
-    hold.open();
-    await closing;
-    assert.deepEqual(
-        provider.released.sort(),
-        [Number(a), Number(c)].sort(),
-        "the late tree was stopped too",
-    );
-});
-
-test("a lease grant and an env call are refused while the fence is up", async () => {
-    const { app, provider } = await boot();
-    const a = await newSession(app, folder("fence-grant"));
-    const c = await newSession(app, folder("fence-grant-c"));
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    const replacing = app.sandboxes.register(new FakeProvider(), "other.ts");
-
-    await hold.reached;
-    // A tree that became sandboxed some other way has no phase yet: only the fence stops its first call.
-    await app.harness.commit(async (tx) => {
-        Object.assign(await tx.doc(SandboxDoc, c), { on: true, by: owner(app).id, at: Date.now() });
-    }, context);
-    assert.equal(app.sandboxes.phaseOf(c), "stable");
-    await assert.rejects(
-        app.sandboxes.lease(c, { kind: "call", revoke: () => {} }),
-        /being replaced or turned off/,
-    );
-    const result = await app.envFor(c).exec("x", undefined, context);
-
-    assert.ok(!result.ok && /being replaced or turned off/.test(result.error.message));
-    hold.open();
-    await replacing;
 });

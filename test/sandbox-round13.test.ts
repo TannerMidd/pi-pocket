@@ -1,15 +1,10 @@
 // Threads of the Greptile review at 4aaa1682: an open that a release revoked is closed; sessions of one folder archived together
-// all change; a stopped subagent clears the refusal; a provider teardown takes the tree over from a change that waited; a failed
-// reload lets the kept provider go on; a handle of a moved session goes to its new folder.
+// all change; a stopped subagent clears the refusal; a handle of a moved session goes to its new folder.
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { createRegistry } from "@earendil-works/pi-durable";
 import { SubagentsDoc } from "../src/server/docs.ts";
-import { ExtensionWebs } from "../src/server/extension-web.ts";
-import type { PocketHost } from "../src/server/host.ts";
-import { ExtensionLoader } from "../src/server/reload.ts";
 import {
     cleanUp,
     context,
@@ -137,85 +132,6 @@ test("a stopped subagent outside the folder no longer blocks the turn-on, and is
     assert.equal(app.sandboxes.deliver(stray.id).ok, false);
 });
 
-test("a provider teardown takes the tree over from a change that waited: that change commits nothing", async () => {
-    const clock = timers();
-    const { app, provider } = await boot({ timer: clock.timer });
-    const from = folder("takeover");
-    const to = folder("takeover-to");
-    const a = await newSession(app, from);
-
-    await app.sandboxes.turnOn(a, owner(app));
-    const hold = gate();
-
-    provider.holdRelease = hold;
-    const moving = app.commands.configure(a, owner(app), { cwd: to });
-    const refused = assert.rejects(moving, /changed meanwhile/);
-
-    await hold.reached;
-    assert.equal(app.sandboxes.phaseOf(a), "moving");
-    const before = clock.made.length;
-    const replacing = app.sandboxes.register(new FakeProvider(), "other.ts");
-
-    await ticks();
-    // The wait for the transition runs out: the teardown goes on, and owns the tree from here.
-    clock.made[before]!.resolve();
-    await ticks();
-    assert.equal(app.sandboxes.phaseOf(a), "suspended");
-    hold.open();
-    await refused;
-    await replacing;
-    assert.equal(app.cwdOf(a), from, "the move did not commit over the teardown");
-});
-
-const module = (version: number) => `/** Sandbox module, version ${version}. */
-export default async () => {
-	if (${version} === 2) throw new Error("the new version is broken");
-	await globalThis.registerSandbox();
-	return { name: "t-sandbox-reload" };
-};
-`;
-
-test("a reload that fails keeps the old module and its provider, and the sandbox goes on without a recovery", async () => {
-    const { app, provider } = await boot();
-    const directory = join(root, "round13-loader");
-    const dropIn = join(directory, "drop-ins");
-
-    mkdirSync(join(directory, "built-in"), { recursive: true });
-    mkdirSync(dropIn, { recursive: true });
-    const shared = globalThis as unknown as { registerSandbox?: () => Promise<unknown> };
-
-    // The module registers the provider under its own file name, as a sandbox module does.
-    shared.registerSandbox = () => app.sandboxes.register(provider, "box.ts");
-    const loader = new ExtensionLoader(
-        createRegistry(),
-        { notice: () => {} } as unknown as PocketHost,
-        { builtIn: join(directory, "built-in"), dropIn },
-        () => true,
-        {
-            webs: new ExtensionWebs({}),
-            notify: () => {},
-            suspend: (file, leave) => app.sandboxes.suspendOwner(file, leave),
-            reloadFailed: (file) => app.sandboxes.reloadFailed(file),
-        },
-    );
-
-    writeFileSync(join(dropIn, "box.ts"), module(1));
-    await loader.loadAll();
-    const a = await newSession(app, folder("reload"));
-
-    await app.sandboxes.turnOn(a, owner(app));
-    assert.ok((await app.envFor(a).exec("x", undefined, context)).ok);
-    writeFileSync(join(dropIn, "box.ts"), module(2));
-    await assert.rejects(loader.reload("box.ts"), /new version is broken/);
-    assert.equal(app.sandboxes.provider, provider, "the old provider is kept");
-    assert.equal(app.sandboxes.phaseOf(a), "stable", "the tree went on");
-    assert.ok(
-        (await app.envFor(a).exec("y", undefined, context)).ok,
-        "and its calls run: no fence is left up",
-    );
-    shared.registerSandbox = undefined;
-});
-
 test("a handle of a session that moved goes to its new folder, though another session now sandboxes the old one", async () => {
     const { app } = await boot();
     const from = folder("moved-from");
@@ -244,17 +160,3 @@ test("a handle of a session that moved goes to its new folder, though another se
         "the stale handle is resolved again first, and the call runs in the new folder",
     );
 });
-
-/** Timers that a test fires by hand, in the order they were made; every one ends early when its signal aborts. */
-function timers() {
-    const made: { resolve: () => void }[] = [];
-
-    return {
-        made,
-        timer: (_ms: number, signal: AbortSignal) =>
-            new Promise<void>((resolve) => {
-                made.push({ resolve });
-                signal.addEventListener("abort", () => resolve());
-            }),
-    };
-}

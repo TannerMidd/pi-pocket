@@ -756,37 +756,6 @@ test("row: settings of the module serving the sandbox run the rules transition b
     assert.deepEqual(heard, ["other", "fake after 1 releases"]);
 });
 
-test("row: a module that comes on reconciles: registration waits for the old teardown and lets suspended trees go on", async () => {
-    const w = await world("enable");
-    const hold = gate();
-
-    w.provider.holdRelease = hold;
-    const leaving = w.app.sandboxes.suspendOwner("fake.ts", false);
-
-    await hold.reached;
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "suspended");
-    assert.match(
-        (await w.app.envFor(w.a).exec("x", undefined, context)).ok ? "ran" : "failed at once",
-        /failed at once/,
-    );
-    const second = new FakeProvider();
-    let registered = false;
-    const registering = w.app.sandboxes.register(second, "fake.ts").then(() => (registered = true));
-
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(registered, false, "the new provider waits for the old one's teardown");
-    hold.open();
-    await leaving;
-    await registering;
-    // A reload's registration is only staged: the loader commits it once the new version is installed.
-    assert.equal(w.app.sandboxes.provider, w.provider, "staged, not installed yet");
-    await w.app.sandboxes.reloadCommitted("fake.ts");
-    assert.equal(w.app.sandboxes.provider, second);
-    assert.equal(w.app.sandboxes.phaseOf(w.a), "stable", "reconciled");
-    assert.equal((await w.app.envFor(w.a).exec("x", undefined, context)).ok, true);
-    assert.deepEqual(second.ran, ["x"], "the newest registration serves");
-});
-
 test("row: server start audits stored sandboxes: not ready means suspended, and a mixed group blocks every VM", async () => {
     const data = join(root, `data-races-${++opened}`);
     const dir = join(root, "races-restart");

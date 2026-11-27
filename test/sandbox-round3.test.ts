@@ -52,67 +52,6 @@ const folder = (name: string) => {
     return path;
 };
 
-const ticks = async (count = 20) => {
-    for (let turn = 0; turn < count; turn++) {
-        await new Promise((resolve) => setImmediate(resolve));
-    }
-};
-
-test("a reconcile that waited does not overwrite the phase of a transition that began meanwhile", async () => {
-    const check = gate();
-    let first = true;
-    const { app, provider } = await boot({
-        trustedPlaces: {
-            check: async () => {
-                if (first) {
-                    first = false;
-
-                    return undefined;
-                }
-
-                // The first check after the setup is the reconcile's: it waits here.
-                if (!held) {
-                    held = true;
-                    await check.wait();
-                }
-
-                return undefined;
-            },
-        },
-    } as never);
-    let held = false;
-    const a = await newSession(app, folder("reconcile"));
-
-    await app.sandboxes.turnOn(a, owner(app));
-    // A provider change left the tree suspended: this module's to clear.
-    await app.sandboxes.suspendOwner("fake.ts", false);
-    assert.equal(app.sandboxes.phaseOf(a), "suspended");
-    const reconciling = app.sandboxes.reconcile();
-
-    await check.reached;
-    // Another transition begins while the reconcile waits: a turn-off, whose teardown is under way.
-    const release = gate();
-
-    provider.holdRelease = release;
-    const resuming = app.sandboxes.turnOff(a, owner(app));
-
-    await release.reached;
-    assert.equal(app.sandboxes.phaseOf(a), "turning-off");
-    check.open();
-    await reconciling;
-    await ticks();
-    assert.equal(
-        app.sandboxes.phaseOf(a),
-        "turning-off",
-        "the reconcile left the newer transition's phase alone",
-    );
-    assert.equal(app.sandboxes.deliver(a).ok, false);
-    release.open();
-    await resuming;
-    assert.equal(app.sandboxes.phaseOf(a), "stable");
-    assert.equal(app.sandboxes.isOn(a), false);
-});
-
 test("a tree that is not live gains no work or lease while a neighbour's turn-off reserves the folder, and `off` is checked again at the commit", async () => {
     const { app, provider } = await boot();
     const dir = folder("neighbour");
