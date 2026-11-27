@@ -113,7 +113,7 @@ export default function setup(pocket) {
             row = pocket.menu({
                 id: "sandbox",
                 label: "Sandbox",
-                hint: "Run this session's tools in a micro-VM",
+                hint: "Run this session's tools in a micro-VM. A folder is all in a sandbox, or none.",
                 group: "session",
                 sheet: "sandbox",
             });
@@ -206,6 +206,11 @@ export default function setup(pocket) {
         return { conversation, state, owner, hostOk };
     }
 
+    const FOLDER_NOTE =
+        "While any session is sandboxed, no session may use the same folder, or one inside it or around it, without a sandbox: a new session there starts in the sandbox.";
+    const FOLDER_RULE =
+        "https://tannermidd.github.io/pi-pocket/docs/sandbox/#one-folder-all-in-the-sandbox-or-none";
+
     function Switcher({ close }) {
         const { conversation: id, state: mine } = useSandbox();
         const [busy, setBusy] = useState(false);
@@ -255,6 +260,9 @@ export default function setup(pocket) {
                     />
                 </div>
                 ${why === null ? null : html`<p class="muted small">${why}</p>`}
+                <p class="muted small">
+                    ${FOLDER_NOTE} <a href=${FOLDER_RULE} target="_blank" rel="noopener">Why</a>
+                </p>
                 ${problem === null ? null : html`<div class="error-box">${problem}</div>`}
                 ${mine.session.on ? html`<p class="muted small">${SWITCH_NOTE}</p>` : null}
             </div>

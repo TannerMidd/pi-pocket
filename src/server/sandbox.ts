@@ -8,17 +8,18 @@
  * and comes in through `host.sandbox.register`.
  */
 import { realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { ExecutionError, FileError, type ExecutionEnv, err } from "@earendil-works/pi-durable/env";
 import type { PocketApp } from "./app.ts";
 import type { RemoteBrowser } from "./browser.ts";
 import type { Role, User } from "./config.ts";
-import { SandboxDoc, SubagentsDoc } from "./docs.ts";
+import { SandboxDoc, type SessionMeta, SessionsDoc, SubagentsDoc } from "./docs.ts";
 import { LiveDoc } from "@earendil-works/pi-durable";
-import { linkInto, within } from "./confined.ts";
+import { foldersOverlap, linkInto, within } from "./confined.ts";
 import { HttpError } from "./errors.ts";
+import { workspaceScheme } from "./paths.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -365,6 +366,238 @@ export class Sandboxes {
         return looking;
     }
 
+    // ─── One folder, all sandboxed or none ──────────────────────────────────
+
+    #exclusive: Promise<unknown> = Promise.resolve();
+
+    /**
+     * Run `work` alone among the changes that decide which sessions share a folder with a sandboxed one: making a
+     * session, moving it to a folder, bringing it back from the archive, and turning its sandbox on or off. Each of them
+     * reads the sessions that use an overlapping folder, and stores its own change, in one commit inside this.
+     */
+    exclusive<T>(work: () => Promise<T>): Promise<T> {
+        const run = this.#exclusive.then(work, work);
+
+        this.#exclusive = run.then(
+            () => undefined,
+            () => undefined,
+        );
+
+        return run;
+    }
+
+    /**
+     * The other sessions that use `cwd`, a folder inside it, or one around it (by name and by place: `foldersOverlap`).
+     * An archived session is not counted until it is brought back; PiP and a session on another machine's workspace use
+     * no folder here.
+     */
+    #overlapping(
+        items: Readonly<Record<string, SessionMeta>>,
+        id: ConversationId,
+        cwd: string,
+    ): { id: number; label: string }[] {
+        const found: { id: number; label: string }[] = [];
+
+        if (workspaceScheme(cwd) !== undefined) {
+            return found;
+        }
+
+        for (const [key, meta] of Object.entries(items)) {
+            let there = meta.cwd;
+
+            try {
+                there = this.#app.cwdOf(Number(key) as unknown as ConversationId);
+            } catch {
+                // Its own entry is what there is.
+            }
+
+            if (
+                Number(key) === Number(id) ||
+                meta.archived === true ||
+                meta.pip !== undefined ||
+                workspaceScheme(there) !== undefined ||
+                !foldersOverlap(cwd, there)
+            ) {
+                continue;
+            }
+
+            found.push({ id: Number(key), label: `#${key} (${meta.title ?? basename(there)})` });
+        }
+
+        return found;
+    }
+
+    /** Those sessions, and whether each runs in a sandbox, as `sandboxed` says. */
+    async #sharing(
+        items: Readonly<Record<string, SessionMeta>>,
+        id: ConversationId,
+        cwd: string,
+        sandboxed: (other: ConversationId) => Promise<boolean>,
+    ): Promise<{ id: number; label: string; sandboxed: boolean }[]> {
+        const found = this.#overlapping(items, id, cwd);
+
+        return Promise.all(
+            found.map(async (each) => ({
+                ...each,
+                sandboxed: await sandboxed(each.id as unknown as ConversationId),
+            })),
+        );
+    }
+
+    /** The sessions that share a folder with a sandboxed one without a sandbox, from before the rule; undefined when none. */
+    mixedNotice(): string | undefined {
+        const catalogue = this.#app.sessionCatalogue();
+        const plain = new Map<number, string>();
+
+        for (const id of this.#on) {
+            const cwd = this.#cwdOf(id);
+
+            if (
+                cwd === undefined ||
+                catalogue[String(id)] === undefined ||
+                catalogue[String(id)]!.archived === true
+            ) {
+                continue;
+            }
+
+            for (const each of this.#overlapping(catalogue, id as unknown as ConversationId, cwd)) {
+                if (!this.#on.has(each.id)) {
+                    plain.set(each.id, each.label);
+                }
+            }
+        }
+
+        return plain.size === 0
+            ? undefined
+            : `Sessions without a sandbox share a folder with sessions in a sandbox, which is not allowed any more: ${this.#named([...plain.values()].map((label) => ({ label })))}. No sandbox starts for those folders until they are put in the sandbox or archived, or the sandboxed ones are turned off.`;
+    }
+
+    #cwdOf(id: number): string | undefined {
+        try {
+            return this.#app.cwdOf(id as unknown as ConversationId);
+        } catch {
+            return undefined;
+        }
+    }
+
+    /** `mixedNotice` for one session's folder, for a call that needs the sandbox: looked at again every few seconds. */
+    readonly #mixedKnown = new Map<number, { at: number; problem: string | undefined }>();
+
+    #mixedProblem(id: ConversationId, cwd: string): string | undefined {
+        const root = Number(this.#app.rootOf(id));
+        const known = this.#mixedKnown.get(root);
+
+        if (known !== undefined && Date.now() - known.at < 5_000) {
+            return known.problem;
+        }
+
+        const plain = this.#overlapping(this.#app.sessionCatalogue(), id, cwd).filter(
+            (each) => !this.#on.has(each.id),
+        );
+        const problem =
+            plain.length === 0
+                ? undefined
+                : `Sessions without a sandbox share this folder with a sandboxed one (${this.#named(plain)}), which is not allowed: put them in the sandbox, or archive them, or turn this one off. No sandbox starts for the folder until then.`;
+
+        this.#mixedKnown.set(root, { at: Date.now(), problem });
+
+        return problem;
+    }
+
+    /** `#1 (a), #2 (b), #3 (c) and 4 more`: up to three, and how many. */
+    #named(sharing: readonly { label: string }[]): string {
+        const first = sharing
+            .slice(0, 3)
+            .map((each) => each.label)
+            .join(", ");
+
+        return sharing.length > 3 ? `${first} and ${sharing.length - 3} more` : first;
+    }
+
+    /**
+     * What stops `id`, with its folder `cwd`, from being in the sandbox state `on` beside the sessions that share the
+     * folder, or undefined. While any session is sandboxed, no session may use an overlapping folder without a sandbox:
+     * a guest writes the folder, and a session on the host would trust what it wrote.
+     */
+    #mixing(
+        sharing: readonly { label: string; sandboxed: boolean }[],
+        on: boolean,
+    ): string | undefined {
+        const plain = sharing.filter((each) => !each.sandboxed);
+        const boxed = sharing.filter((each) => each.sandboxed);
+
+        if (on && plain.length > 0) {
+            return `${plain.length} other ${plain.length === 1 ? "session uses" : "sessions use"} this folder, or one inside it or around it, without a sandbox: ${this.#named(plain)}. While any session is sandboxed, no session may share its folder without one. Put them in the sandbox, or archive them, and then turn it on.`;
+        }
+
+        if (!on && boxed.length > 0) {
+            return `${this.#named(boxed)} ${boxed.length === 1 ? "is" : "are"} in a sandbox and use${boxed.length === 1 ? "s" : ""} this folder, or one inside it or around it: turning this one off would put a session without a sandbox beside them. Turn those off first, or archive them.`;
+        }
+
+        return undefined;
+    }
+
+    /**
+     * In the commit that gives a session its folder, or its state: the session is put in the sandbox, as the same
+     * person's choice, when it uses a folder that a sandboxed session uses, or it is refused with the reason, and a
+     * session that is sandboxed is refused while one without a sandbox shares its folder. `tx` holds the session's own
+     * setting (copied from its parent, or set for a new session) and its entry in the session list. Call inside
+     * `exclusive`.
+     */
+    async admit(
+        tx: Tx,
+        { id, cwd, user }: { id: ConversationId; cwd: string; user: User },
+    ): Promise<void> {
+        const doc = await tx.doc(SandboxDoc, id);
+        const items = (await tx.doc(SessionsDoc)).items;
+        const sharing = await this.#sharing(
+            items,
+            id,
+            cwd,
+            async (other) => (await tx.doc(SandboxDoc, other)).on === true,
+        );
+        const joins = doc.on !== true && sharing.some((each) => each.sandboxed);
+
+        if (!joins) {
+            const refused = this.#mixing(sharing, doc.on === true);
+
+            if (refused !== undefined) {
+                throw new HttpError(409, refused);
+            }
+
+            return;
+        }
+
+        const provider = this.provider;
+        const boxed = sharing.filter((each) => each.sandboxed);
+        const because = `${this.#named(boxed)} ${boxed.length === 1 ? "is" : "are"} in a sandbox and use${boxed.length === 1 ? "s" : ""} this folder, or one inside it or around it, so a session here must run in a sandbox too`;
+        const problem =
+            provider === undefined
+                ? "the sandbox is turned off in Extensions"
+                : (this.unsupported() ??
+                  reloadedFolderProblem(cwd, this.#app.codeFolders, this.#app.dataDir) ??
+                  provider.folderProblem?.(cwd));
+
+        if (!(user.role === "owner" || provider?.mayChoose(user) === true)) {
+            throw new HttpError(
+                409,
+                `${because}, and you cannot choose the sandbox: ask the owner to put it in the sandbox, or to archive those sessions.`,
+            );
+        }
+
+        if (problem !== undefined) {
+            throw new HttpError(409, `${because}, but it cannot be put in one: ${problem}`);
+        }
+
+        const refused = this.#mixing(sharing, true);
+
+        if (refused !== undefined) {
+            throw new HttpError(409, refused);
+        }
+
+        Object.assign(doc, { on: true, by: user.id, at: Date.now() });
+    }
+
     /** A session and the subagents under it, to any depth, as `agentsOf` lists them. */
     async #tree(
         id: ConversationId,
@@ -471,7 +704,7 @@ export class Sandboxes {
             );
         }
 
-        const problem = this.#folderProblem(app.cwdOf(id));
+        const problem = this.#folderProblem(app.cwdOf(id)) ?? this.#mixedProblem(id, app.cwdOf(id));
 
         if (problem !== undefined) {
             return none(problem);
@@ -499,7 +732,9 @@ export class Sandboxes {
                         }
 
                         // What was asked when the launcher was made may have changed (the look for links ended).
-                        const problem = this.#folderProblem(app.cwdOf(id));
+                        const problem =
+                            this.#folderProblem(app.cwdOf(id)) ??
+                            this.#mixedProblem(id, app.cwdOf(id));
 
                         if (problem !== undefined) {
                             throw new Error(problem);
@@ -538,7 +773,7 @@ export class Sandboxes {
             );
         }
 
-        const problem = this.#folderProblem(cwd);
+        const problem = this.#folderProblem(cwd) ?? this.#mixedProblem(id, cwd);
 
         if (problem !== undefined) {
             return failedEnv(
@@ -565,7 +800,7 @@ export class Sandboxes {
                     }
 
                     return (...args: unknown[]) => {
-                        const now = this.#folderProblem(cwd);
+                        const now = this.#folderProblem(cwd) ?? this.#mixedProblem(id, cwd);
 
                         return now === undefined
                             ? (value as (...call: unknown[]) => unknown).apply(target, args)
@@ -730,7 +965,7 @@ export class Sandboxes {
             throw new HttpError(409, "A sandbox does not support a remote workspace.");
         }
 
-        const problem = this.#folderProblem(cwd);
+        const problem = this.#folderProblem(cwd) ?? this.#mixedProblem(id, cwd);
 
         if (problem !== undefined) {
             throw new HttpError(409, problem);
@@ -746,7 +981,7 @@ export class Sandboxes {
         return {
             ...jobs,
             start: async (request) => {
-                const now = this.#folderProblem(cwd);
+                const now = this.#folderProblem(cwd) ?? this.#mixedProblem(id, cwd);
 
                 if (now !== undefined) {
                     throw new HttpError(409, now);
@@ -951,6 +1186,18 @@ export class Sandboxes {
             );
         }
 
+        const cwd = app.cwdOf(id);
+        const early = this.#mixing(
+            await this.#sharing(app.sessionCatalogue(), id, cwd, async (other) =>
+                this.#on.has(Number(other)),
+            ),
+            on,
+        );
+
+        if (early !== undefined) {
+            throw new HttpError(409, early);
+        }
+
         const looked = await this.#tree(
             id,
             async (each) => (await app.harness.snapshot(SubagentsDoc, each, context))?.agents,
@@ -988,19 +1235,36 @@ export class Sandboxes {
 
         // The subagents are found in the commit that changes them: one that is being started has its own commit, which
         // copies the setting it reads, so it is in this list or it copies the new setting.
-        const conversations = await app.harness.commit(async (tx) => {
-            const tree = await this.#tree(
-                id,
-                async (each) => (await tx.doc(SubagentsDoc, each)).agents,
-            );
-            const at = Date.now();
+        const conversations = await this.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                // Asked again where it is stored: a session may have come to the folder meanwhile.
+                const refused = this.#mixing(
+                    await this.#sharing(
+                        (await tx.doc(SessionsDoc)).items,
+                        id,
+                        cwd,
+                        async (other) => (await tx.doc(SandboxDoc, other)).on === true,
+                    ),
+                    on,
+                );
 
-            for (const each of tree) {
-                Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
-            }
+                if (refused !== undefined) {
+                    throw new HttpError(409, refused);
+                }
 
-            return tree;
-        }, context);
+                const tree = await this.#tree(
+                    id,
+                    async (each) => (await tx.doc(SubagentsDoc, each)).agents,
+                );
+                const at = Date.now();
+
+                for (const each of tree) {
+                    Object.assign(await tx.doc(SandboxDoc, each), { on, by: user.id, at });
+                }
+
+                return tree;
+            }, context),
+        );
 
         // Pages of this machine's browser end now, not when someone next looks: a sandboxed session has none of its
         // own (and the other way round: a page of the VM's browser ends when the sandbox goes off).

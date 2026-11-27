@@ -380,10 +380,15 @@ test("a sandboxed session messages only sandboxed linked sessions and the one th
         const lead = await newSession(app, folder("send"));
 
         await say(app, lead, "hello");
-        const { session: child } = await app.linkedSessions.start(lead, { message: "work" }, "c1");
+        // In folders of their own: one folder is all in a sandbox, or none.
+        const { session: child } = await app.linkedSessions.start(
+            lead,
+            { message: "work", cwd: folder("send-child") },
+            "c1",
+        );
         const { session: sibling } = await app.linkedSessions.start(
             lead,
-            { message: "work" },
+            { message: "work", cwd: folder("send-sibling") },
             "c2",
         );
 

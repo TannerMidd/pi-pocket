@@ -20,6 +20,7 @@ import { after, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { changesIn, diffOf } from "../src/server/changes.ts";
+import { SandboxDoc } from "../src/server/docs.ts";
 import { onSandboxedFolders, openInside, sandboxedFolder } from "../src/server/confined.ts";
 import { APP_ROOT } from "../src/server/config.ts";
 import { viewFile } from "../src/server/files.ts";
@@ -288,17 +289,23 @@ test(
             assert.doesNotMatch(await sent(sandboxed), new RegExp(SECRET));
             assert.deepEqual(names(sandboxedPath), ["fine"]);
 
-            // A folder that a sandboxed session shares with an ordinary one is confined for both.
-            const shared = await newSession(app, sharedPath);
-            const guestShared = await newSession(app, sharedPath);
+            // A folder that a sandboxed session shares with an ordinary one is confined for both. The rule against it
+            // (`one-folder.test.ts`) keeps new sessions from making it, so the state is written as an older version did.
+            const first = await newSession(app, sharedPath);
+            const next = await newSession(app, sharedPath);
+            const boxed = await newSession(app, sharedPath);
+            const mark = (on: boolean) =>
+                app.harness.commit(async (tx) => {
+                    Object.assign(await tx.doc(SandboxDoc, boxed), { on });
+                }, context);
 
-            assert.match(await sent(shared), new RegExp(SECRET));
-            await app.sandboxes.set(guestShared, owner(app), true);
-            assert.doesNotMatch(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
+            assert.match(await sent(first), new RegExp(SECRET));
+            await mark(true);
+            assert.doesNotMatch(await sent(next), new RegExp(SECRET));
             assert.deepEqual(names(sharedPath), ["fine"]);
 
             // Turned off again, the folder is ordinary again.
-            await app.sandboxes.set(guestShared, owner(app), false);
+            await mark(false);
             assert.match(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
 
             const second = await newSession(app, honest);

@@ -147,6 +147,36 @@ function place(root: string): Place | undefined {
         : undefined;
 }
 
+/**
+ * Whether two folders are the same, or one holds the other: by their stated paths, and by the folders they really are,
+ * found by walking each path (`walk`) with the other known by its device and inode, so an alias, a link, or a mount of
+ * the same folder counts. A folder that is not there overlaps only by its stated path.
+ */
+export function foldersOverlap(a: string, b: string): boolean {
+    if (within(a, b) || within(b, a)) {
+        return true;
+    }
+
+    const key = (path: string): Folder[] => {
+        try {
+            const { dev, ino } = statSync(path, { bigint: true });
+
+            return [{ path, key: `${dev}:${ino}` }];
+        } catch {
+            return [];
+        }
+    };
+
+    const first = key(a);
+    const second = key(b);
+
+    return (
+        first.length > 0 &&
+        second.length > 0 &&
+        ("entered" in walk(a, second) || "entered" in walk(b, first))
+    );
+}
+
 /** Whether `path` is in a folder that a sandboxed session works in, as the walk finds it: a guest may write it. */
 export function inSandboxedFolder(path: string): boolean {
     const folders = listed();

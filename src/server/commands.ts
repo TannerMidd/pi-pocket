@@ -543,48 +543,52 @@ export class Commands {
                     undefined,
                     projectDefaults && model === undefined && !remote ? cwd : undefined,
                 );
-                const conversation = await app.harness.createConversation(
-                    {
-                        ownership: { kind: "ownerless" },
-                        agent: {
-                            cwd,
-                            ...(model !== undefined
-                                ? { model }
-                                : initial.model === undefined
-                                  ? {}
-                                  : { model: initial.model }),
-                            ...(thinkingLevel !== undefined
-                                ? { thinkingLevel }
-                                : initial.thinkingLevel === undefined
-                                  ? {}
-                                  : { thinkingLevel: initial.thinkingLevel }),
-                        },
-                        init: async (tx, id) => {
-                            const sessions = await tx.doc(SessionsDoc);
-
-                            sessions.items[String(id)] = {
+                const conversation = await app.sandboxes.exclusive(() =>
+                    app.harness.createConversation(
+                        {
+                            ownership: { kind: "ownerless" },
+                            agent: {
                                 cwd,
-                                createdAt: now,
-                                updatedAt: now,
-                                createdBy: user.id,
-                                ...(title === undefined ? {} : { title }),
-                                ...(worktree === undefined ? {} : { worktree }),
-                            };
+                                ...(model !== undefined
+                                    ? { model }
+                                    : initial.model === undefined
+                                      ? {}
+                                      : { model: initial.model }),
+                                ...(thinkingLevel !== undefined
+                                    ? { thinkingLevel }
+                                    : initial.thinkingLevel === undefined
+                                      ? {}
+                                      : { thinkingLevel: initial.thinkingLevel }),
+                            },
+                            init: async (tx, id) => {
+                                const sessions = await tx.doc(SessionsDoc);
 
-                            // New sessions start in the sandbox when the sandbox module says so: in this commit, so
-                            // no message can run on the host in between.
-                            if (!remote && app.sandboxes.newSessions) {
-                                Object.assign(await tx.doc(SandboxDoc, id), {
-                                    on: true,
-                                    by: user.id,
-                                    at: now,
-                                });
-                            }
+                                sessions.items[String(id)] = {
+                                    cwd,
+                                    createdAt: now,
+                                    updatedAt: now,
+                                    createdBy: user.id,
+                                    ...(title === undefined ? {} : { title }),
+                                    ...(worktree === undefined ? {} : { worktree }),
+                                };
 
-                            await init?.(tx, id);
+                                // New sessions start in the sandbox when the sandbox module says so: in this commit, so
+                                // no message can run on the host in between.
+                                if (!remote && app.sandboxes.newSessions) {
+                                    Object.assign(await tx.doc(SandboxDoc, id), {
+                                        on: true,
+                                        by: user.id,
+                                        at: now,
+                                    });
+                                }
+
+                                // One folder, all sandboxed or none: this session joins the sandbox, or is refused.
+                                await app.sandboxes.admit(tx, { id, cwd, user });
+                                await init?.(tx, id);
+                            },
                         },
-                    },
-                    context,
+                        context,
+                    ),
                 );
 
                 return { id: conversation.id };
@@ -613,33 +617,36 @@ export class Commands {
         const start = this.#defaultModel(session);
         const title = session.title.slice(0, MAX_TITLE);
         const now = Date.now();
-        const conversation = await app.harness.createConversation(
-            {
-                ownership: { kind: "ownerless" },
-                agent: {
-                    cwd,
-                    ...(start.model === undefined ? {} : { model: start.model }),
-                    ...(start.thinkingLevel === undefined
-                        ? {}
-                        : { thinkingLevel: start.thinkingLevel }),
-                },
-                init: async (tx, id) => {
-                    (await tx.doc(SessionsDoc)).items[String(id)] = {
+        const conversation = await app.sandboxes.exclusive(() =>
+            app.harness.createConversation(
+                {
+                    ownership: { kind: "ownerless" },
+                    agent: {
                         cwd,
-                        title,
-                        createdAt: now,
-                        updatedAt: now,
-                        createdBy: user.id,
-                        fromPi: { session: session.id, count: session.count },
-                    };
-                    await writePiSession(tx, id, session, {
-                        session: session.id,
-                        title: session.title,
-                        file: path,
-                    });
+                        ...(start.model === undefined ? {} : { model: start.model }),
+                        ...(start.thinkingLevel === undefined
+                            ? {}
+                            : { thinkingLevel: start.thinkingLevel }),
+                    },
+                    init: async (tx, id) => {
+                        (await tx.doc(SessionsDoc)).items[String(id)] = {
+                            cwd,
+                            title,
+                            createdAt: now,
+                            updatedAt: now,
+                            createdBy: user.id,
+                            fromPi: { session: session.id, count: session.count },
+                        };
+                        await app.sandboxes.admit(tx, { id, cwd, user });
+                        await writePiSession(tx, id, session, {
+                            session: session.id,
+                            title: session.title,
+                            file: path,
+                        });
+                    },
                 },
-            },
-            context,
+                context,
+            ),
         );
 
         return { id: conversation.id };
@@ -740,29 +747,42 @@ export class Commands {
             .filter((each) => inside(app.cwdOf(each)))
             .map((each) => ({ id: each, cwd: back(app.cwdOf(each)) }));
 
-        await removeWorktree(worktree, force === true, () => this.#checkWorktree(worktree));
+        // The session goes back to the folder the worktree came from: it joins the sandbox there, or is refused, before
+        // anything is removed.
+        await app.sandboxes.exclusive(async () => {
+            const home = moves.find((move) => move.id === id)?.cwd;
 
-        // The session and its subagents go back to the folders the worktree came from.
-        for (const move of moves) {
-            await (await app.conversation(move.id)).configure({ cwd: move.cwd }, context);
-        }
-
-        const cwd = app.cwdOf(id);
-
-        await app.harness.commit(async (tx) => {
-            const meta = (await tx.doc(SessionsDoc)).items[String(id)];
-
-            if (meta === undefined) {
-                return;
+            if (home !== undefined) {
+                await app.harness.commit(
+                    (tx) => app.sandboxes.admit(tx, { id, cwd: home, user }),
+                    context,
+                );
             }
 
-            delete meta.worktree;
-            meta.cwd = cwd;
-        }, context);
+            await removeWorktree(worktree, force === true, () => this.#checkWorktree(worktree));
+
+            // The session and its subagents go back to the folders the worktree came from.
+            for (const move of moves) {
+                await (await app.conversation(move.id)).configure({ cwd: move.cwd }, context);
+            }
+
+            const cwd = app.cwdOf(id);
+
+            await app.harness.commit(async (tx) => {
+                const meta = (await tx.doc(SessionsDoc)).items[String(id)];
+
+                if (meta === undefined) {
+                    return;
+                }
+
+                delete meta.worktree;
+                meta.cwd = cwd;
+            }, context);
+        });
         await app.collab.activity(
             id,
             user,
-            `removed the worktree; the branch ${worktree.branch} stays, and Pi works in ${homePath(cwd)} again`,
+            `removed the worktree; the branch ${worktree.branch} stays, and Pi works in ${homePath(app.cwdOf(id))} again`,
         );
     }
 
@@ -865,24 +885,31 @@ export class Commands {
 
         const before = app.sessionMeta(id);
 
-        await app.harness.commit(async (tx) => {
-            const sessions = await tx.doc(SessionsDoc);
-            const meta = sessions.items[String(id)];
+        await app.sandboxes.exclusive(() =>
+            app.harness.commit(async (tx) => {
+                const sessions = await tx.doc(SessionsDoc);
+                const meta = sessions.items[String(id)];
 
-            if (meta === undefined) {
-                throw new HttpError(404, "Not a session");
-            }
+                if (meta === undefined) {
+                    throw new HttpError(404, "Not a session");
+                }
 
-            // A rename moves the session up the list. Archiving does not: brought back, or undone, it returns to where it was.
-            if (patch.title !== undefined) {
-                meta.title = oneLine(patch.title) || undefined;
-                meta.updatedAt = Date.now();
-            }
+                // Brought back from the archive, it uses its folder again: it joins the sandbox there, or is refused.
+                if (patch.archived === false && meta.archived === true) {
+                    await app.sandboxes.admit(tx, { id, cwd: app.cwdOf(id), user });
+                }
 
-            if (patch.archived !== undefined) {
-                meta.archived = patch.archived;
-            }
-        }, context);
+                // A rename moves the session up the list. Archiving does not: brought back, or undone, it returns to where it was.
+                if (patch.title !== undefined) {
+                    meta.title = oneLine(patch.title) || undefined;
+                    meta.updatedAt = Date.now();
+                }
+
+                if (patch.archived !== undefined) {
+                    meta.archived = patch.archived;
+                }
+            }, context),
+        );
         const title = patch.title === undefined ? undefined : oneLine(patch.title);
 
         if (title !== undefined && title !== "" && title !== before?.title) {
@@ -2291,30 +2318,49 @@ export class Commands {
             ...(cwd === undefined ? {} : { cwd }),
         };
 
-        if (request.pipPanel === true) {
-            // Check and save together: a turn may have started while the picker was open.
-            await app.harness.commit(async (tx) => {
-                const live = await tx.doc(LiveDoc, id);
+        // A move to another folder joins the sandbox of that folder, or is refused, before anything changes: one folder,
+        // all sandboxed or none.
+        const moves =
+            cwd !== undefined && app.sessionMeta(id) !== undefined && cwd !== current?.cwd;
 
-                if (live.run !== undefined || (live.compactions?.length ?? 0) > 0) {
-                    throw new HttpError(409, "PiP is working. Change its model when it is idle.");
-                }
+        const apply = async () => {
+            if (moves) {
+                await app.harness.commit(
+                    (tx) => app.sandboxes.admit(tx, { id, cwd, user }),
+                    context,
+                );
+            }
 
-                Object.assign(await tx.doc(AgentDoc, id), change);
-            }, context);
-        } else {
-            await conversation.configure(change, context);
-        }
+            if (request.pipPanel === true) {
+                // Check and save together: a turn may have started while the picker was open.
+                await app.harness.commit(async (tx) => {
+                    const live = await tx.doc(LiveDoc, id);
 
-        if (cwd !== undefined && app.sessionMeta(id) !== undefined) {
-            await app.harness.commit(async (tx) => {
-                const meta = (await tx.doc(SessionsDoc)).items[String(id)];
+                    if (live.run !== undefined || (live.compactions?.length ?? 0) > 0) {
+                        throw new HttpError(
+                            409,
+                            "PiP is working. Change its model when it is idle.",
+                        );
+                    }
 
-                if (meta !== undefined) {
-                    meta.cwd = cwd;
-                }
-            }, context);
-        }
+                    Object.assign(await tx.doc(AgentDoc, id), change);
+                }, context);
+            } else {
+                await conversation.configure(change, context);
+            }
+
+            if (cwd !== undefined && app.sessionMeta(id) !== undefined) {
+                await app.harness.commit(async (tx) => {
+                    const meta = (await tx.doc(SessionsDoc)).items[String(id)];
+
+                    if (meta !== undefined) {
+                        meta.cwd = cwd;
+                    }
+                }, context);
+            }
+        };
+
+        await (moves ? app.sandboxes.exclusive(apply) : apply());
 
         if (ref !== undefined && request.pipPanel !== true) {
             app.config.lastModel = { provider: ref.provider, modelId: ref.modelId, thinkingLevel };
@@ -3214,7 +3260,7 @@ export class Commands {
         const notes =
             at === undefined ? await app.harness.snapshot(NotesDoc, id, context) : undefined;
 
-        const init: ConversationCreateOptions["init"] = async (tx, forked) => {
+        const populate: ConversationCreateOptions["init"] = async (tx, forked) => {
             // Removed while the fork was made: its uploads may be on their way out (`session-cleanup.ts`).
             if ((await tx.doc(DeletedDoc)).items[String(id)] !== undefined) {
                 throw new HttpError(409, "That session was removed.");
@@ -3284,8 +3330,14 @@ export class Commands {
             }
         };
 
+        // One folder, all sandboxed or none: the fork joins the sandbox of the folder, or is refused.
+        const init: ConversationCreateOptions["init"] = async (tx, forkedId) => {
+            await populate?.(tx, forkedId);
+            await app.sandboxes.admit(tx, { id: forkedId, cwd: place.cwd, user });
+        };
+
         const ownership = { kind: "ownerless" } as const;
-        const forked =
+        const forked = await app.sandboxes.exclusive(async () =>
             at === undefined
                 ? // Before the first message there is nothing to fork: a new session that runs like this one.
                   await app.harness.createConversation(
@@ -3308,7 +3360,8 @@ export class Commands {
                   )
                 : await (
                       await app.conversation(id)
-                  ).fork(at as unknown as EntryId, { ownership, agent, init }, context);
+                  ).fork(at as unknown as EntryId, { ownership, agent, init }, context),
+        );
         const where =
             place.worktree === undefined
                 ? ""

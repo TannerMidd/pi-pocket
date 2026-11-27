@@ -1274,6 +1274,11 @@ export class PocketApp {
 
         this.#openingStorage = undefined;
         const conversations = await this.#recover(storage);
+        const mixed = this.sandboxes.mixedNotice();
+
+        if (mixed !== undefined) {
+            this.notice("warning", mixed);
+        }
 
         this.background.startSweeping();
         await this.spend.load(conversations);
@@ -2143,6 +2148,14 @@ export class PocketApp {
 
         if (client.user.role === "owner" && this.themes.failure !== undefined) {
             client.send("notice", { level: "warning", message: this.themes.failure });
+        }
+
+        // Sessions that share a folder with a sandboxed one without a sandbox, from before the rule against it: the owner is
+        // told which, each time they connect, until it is mended.
+        const mixed = client.user.role === "owner" ? this.sandboxes.mixedNotice() : undefined;
+
+        if (mixed !== undefined) {
+            client.send("notice", { level: "warning", message: mixed });
         }
 
         if (arriving) {

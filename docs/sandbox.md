@@ -39,6 +39,24 @@ A linked session that a sandboxed session starts with `team` is **sandboxed too*
 
 The sandbox sheet (tap **Sandbox**) shows this table, the state of the VM, and the settings that apply.
 
+## One folder: all in the sandbox, or none
+
+**While any session is sandboxed, no session without a sandbox may use an overlapping folder**: the same folder, a folder inside it, or one around it. Folders are compared by their stated paths and by the folders they really are (device and inode, walking each path), so an alias, a link, or a mount of the same folder counts. Archived sessions do not count until they are brought back. Why: the guest writes the folder, and a session on this machine would trust what it wrote (`AGENTS.md`, skills, prompts, settings, scripts).
+
+Core keeps the rule in one place (`Sandboxes.admit` and `Sandboxes.exclusive` in `src/server/sandbox.ts`), in the same commit that changes a session, one change at a time:
+
+| What happens                                                                                                                                                   | Result                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Turning the sandbox **on**                                                                                                                                     | Refused while a session without a sandbox, not archived, uses an overlapping folder. It names up to 3, and says how many.                                                                                                                               |
+| Turning it **off**                                                                                                                                             | Refused while another sandboxed session uses an overlapping folder: it would put a session without a sandbox beside it. It names them.                                                                                                                  |
+| A **new session**, a fork, a linked session, a Pi session continued from the terminal, or a session PiP or an extension starts, in such a folder               | It **starts in the sandbox**, as the choice of the person who makes it, when that person may choose the sandbox. Otherwise it is refused, with the reason. A session that starts in a sandbox is refused while a session without one shares its folder. |
+| **Moving** a session to such a folder, **bringing it back** from the archive, or removing its worktree so that it returns to the folder the worktree came from | The same: it joins the sandbox, or is refused.                                                                                                                                                                                                          |
+| **Server start** with sessions already mixed (from before the rule)                                                                                            | No sandbox starts for those folders; each call says why, and the owner gets a notice that names the sessions each time they connect, until it is mended (put them in the sandbox, archive them, or turn the sandboxed ones off).                        |
+
+A subagent, and a linked session that a sandboxed session starts, are already sandboxed.
+
+**After a sandbox ends, what it wrote is untrusted**, like a cloned repository: `AGENTS.md`, skills, prompts, settings, scripts, and every other file that the guest could change, including in the folders of sessions that ran in it. Read them before you trust them, and do not run what you did not write.
+
 ## What the VM sees
 
 - **The session's folder**, at the same path as on the host, read and write by default (**The session's folder**: read only is a choice). A file that Pi writes there is on the host at once.
