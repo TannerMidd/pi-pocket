@@ -30,6 +30,7 @@ import {
     promptBefore,
     resendable,
 } from "../entry-presentation.js";
+import { parseAgentMessage } from "../agent-messages.js";
 import { memoryAvailable } from "./memory.js";
 
 /** What each mode is called where a person chooses it. */
@@ -186,7 +187,7 @@ export function MessageSheet({ entryId }) {
         actions.fullEntry(entryId).then(
             (full) => {
                 if (!gone && full?.kind === "user") {
-                    setWhole(writtenText(full));
+                    setWhole({ written: writtenText(full), raw: full.text });
                 }
             },
             () => {},
@@ -209,7 +210,21 @@ export function MessageSheet({ entryId }) {
     const toPi = entry.kind === "user";
     // An input a module stored as its own kind is shown, copied, and remembered, never sent again.
     const again = !toPi || resendable(entry);
-    const text = toPi ? (whole ?? writtenText(entry)) : replyText(entry);
+    // What an agent or the app sent shows as a card; here is the exact text Pi received.
+    const fromAgent =
+        toPi &&
+        parseAgentMessage({
+            text: entry.text,
+            written: writtenText(entry),
+            named: entry.from !== undefined,
+            authored: view.authors?.[entry.id] !== undefined,
+        }) !== null;
+    // The exact text for a card's Show raw: nothing cut, not even after a heading that looks like an attachment list.
+    const text = !toPi
+        ? replyText(entry)
+        : fromAgent
+          ? (whole?.raw ?? entry.text)
+          : (whole?.written ?? writtenText(entry));
     // Until its whole text is here, a clipped input has nothing to copy or remember.
     const waiting = clipped && whole === undefined;
     // A message of files alone has no words: its preview says so, and there is nothing to copy or remember.
@@ -247,9 +262,16 @@ export function MessageSheet({ entryId }) {
         <//>`;
     }
 
-    return html`<${Sheet} title=${toPi ? "Message" : "Reply"} onClose=${closeSheet}>
+    return html`<${Sheet}
+        title=${fromAgent ? "As Pi received it" : toPi ? "Message" : "Reply"}
+        onClose=${closeSheet}
+    >
         <div class="message-preview">${filesAlone ? "(attachments)" : text}</div>
-        ${toPi && entry.presentation && html`<${PresentationChoice} presentation=${entry.presentation} />`}
+        ${
+            toPi &&
+            entry.presentation &&
+            html`<${PresentationChoice} presentation=${entry.presentation} />`
+        }
         ${
             canBranch &&
             view.conversation.inRepository &&

@@ -86,7 +86,7 @@ const filter = (name: string) =>
     `[...document.querySelectorAll('.library-filters button')].find(button => button.textContent.trim().startsWith('${name}'))`;
 
 async function menu(hub: Awaited<ReturnType<typeof openHub>>) {
-    await hub.click("Menu");
+    await hub.click("Tools");
     await hub.click("Extensions");
     await hub.see(`document.querySelector('.library-row') !== null`, "the installed library");
     await hub.settle();
@@ -332,8 +332,8 @@ test(
         );
         await page.evaluate(`history.back()`);
         await see(
-            `(await import('/store.js')).store.state.sheet?.type === 'menu'`,
-            "Back to the menu",
+            `[...document.querySelectorAll('button')].some(item => item.innerText.trim() === 'All places' && item.checkVisibility())`,
+            "Back to Tools",
         );
         await click("Extensions");
         await see(
@@ -478,10 +478,8 @@ test(
 
         await enter(VIEWPORTS.mobile);
         await click("Menu");
-        await see(
-            `[...document.querySelectorAll('.list-item')].some((item) => item.firstElementChild?.textContent === 'Extensions')`,
-            "the Extensions menu item",
-        );
+        await click("App settings");
+        await click("Extensions and integrations");
         await click("Extensions");
         await see(
             `document.querySelector('.extension-hub [role="tab"][aria-selected="true"]')?.textContent.includes('Installed')`,

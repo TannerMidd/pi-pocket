@@ -2585,7 +2585,8 @@ export type SessionActionSpec = (
      */
     access?: "steer" | "view";
     /**
-     * The name of one of the app's icons. An action with an icon is also a button on rows, where a mouse hovers.
+     * The name of one of the app's icons. Rows draw no buttons on hover (since 0.31.0): the action shows by its label
+     * in the row's menu, its long-press sheet, and the selection bar.
      * @since 0.20.0
      * @experimental
      */

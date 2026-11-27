@@ -210,6 +210,8 @@ export interface Client {
     pipSeq?: number;
     /** The JSON of the PiP state this tab last got (`pip` events), so an unchanged one is not sent again. */
     pipSent?: string;
+    /** The JSON of the usage providers this tab last got (`usage` events, the owner's only), so an unchanged one is not sent again. */
+    usageSent?: string;
 }
 
 export type TypingPlace = "chat" | "pi";

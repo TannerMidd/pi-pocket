@@ -3,7 +3,15 @@
 import { folderColor } from "./avatar.js";
 import { useEffect, useRef } from "preact/hooks";
 import { sessionMark } from "./sessions.js";
-import { canSteer, navigate, openSheet, scoped, store, workspaceOrder } from "./store.js";
+import {
+    canSteer,
+    navigate,
+    openSheet,
+    scoped,
+    store,
+    toggleNavigation,
+    workspaceOrder,
+} from "./store.js";
 import { lookLabel, prefs } from "./theme.js";
 import { html, Icon, Keys, shortPath, timeAgo } from "./ui.js";
 
@@ -99,15 +107,14 @@ export function Splash() {
 
     return html`<div class="splash" data-part="home" ref=${splash}>
         <button
-            class="icon-button splash-menu"
+            class="icon-button splash-menu navigation-trigger"
             data-part="home-menu"
             aria-label="Menu"
             title="Menu"
-            aria-haspopup="dialog"
-            aria-expanded=${store.state.sheet?.type === "menu"}
-            onClick=${() => openSheet({ type: "menu" })}
+            aria-expanded=${store.state.sheet?.type === "menu" && !store.state.sheet.section}
+            onClick=${() => toggleNavigation({ type: "menu" })}
         >
-            <${Icon} name="more" />
+            <${Icon} name="sidebar" size=${16} /><span>Menu</span>
         </button>
         <div class="fetch" data-part="home-facts">
             <pre class="fetch-logo" data-part="home-logo" aria-hidden="true">${LOGO}</pre>

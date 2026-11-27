@@ -42,7 +42,7 @@ function Tabs() {
                 data-state=${state}
                 aria-current=${open ? "page" : undefined}
                 aria-label=${`${title}${STATE_WORDS[state]}`}
-                title=${`${title}${number <= TAB_MAX ? ` (Alt+${number})` : ""}`}
+                title=${`${title}${number > 0 && number <= TAB_MAX ? ` (Alt+${number})` : ""}`}
                 style=${`--folder:${folderColor(session.cwd)}`}
                 onClick=${() => navigate(session.id)}
             >
@@ -53,7 +53,7 @@ function Tabs() {
     </nav>`;
 }
 
-const KEYS = ["sessions", "pinned", "unread", "conversationId", "over", "foldedLinked"];
+const KEYS = ["sessions", "pinned", "unread", "conversationId", "over"];
 
 /** Drawn again only when the sessions, the open one, or what is unread changes: not as an answer streams. */
 export const SessionTabs = drawnFor(KEYS, Tabs);

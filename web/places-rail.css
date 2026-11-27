@@ -1,0 +1,259 @@
+.places-rail {
+    --place-rail-width: 64px;
+    width: var(--place-rail-width);
+    gap: calc(4px * var(--space-y));
+    padding-inline: calc(6px * var(--space-x));
+    background: var(--bg);
+}
+
+.places-rail .rail-brand {
+    width: 32px;
+    height: 32px;
+    margin-bottom: calc(4px * var(--space-y));
+    color: var(--brand);
+    font:
+        22px/1 Georgia,
+        serif;
+}
+
+@media (pointer: coarse) {
+    .places-rail .rail-brand {
+        width: 44px;
+        height: 44px;
+    }
+}
+
+.places-rail .rail-place {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(2px * var(--space-y));
+    width: 100%;
+    min-height: calc(32px + 12px * var(--space-y));
+    height: auto;
+    border-radius: var(--r-control);
+    color: var(--muted);
+    font: 500 11px/1.3 var(--sans);
+}
+
+.places-rail .rail-place.on {
+    color: var(--text);
+    background: var(--accent-soft);
+}
+
+.places-rail .rail-place.on::before {
+    content: "";
+    position: absolute;
+    left: calc(-6px * var(--space-x));
+    height: 16px;
+    width: 3px;
+    border-radius: 0 var(--r-pill) var(--r-pill) 0;
+    background: var(--accent);
+}
+
+.places-rail .rail-account {
+    margin-top: auto;
+}
+
+.places-rail .rail-place:focus-visible {
+    outline-offset: -2px;
+}
+
+.places-rail .rail-place .rail-trouble,
+.places-rail .rail-place .rail-news {
+    bottom: auto;
+    top: 4px;
+    right: 4px;
+}
+
+.places-rail .rail-place:has(.rail-count) .rail-trouble {
+    right: auto;
+    left: 4px;
+}
+
+@media (min-width: 960px) {
+    .sidebar {
+        width: min(var(--sidebar-w, 432px), max(432px, 40vw));
+    }
+
+    /* A saved narrower width still gives the list all of the room next to the new rail. */
+    .sidebar-clip > .sessions {
+        min-width: min(204px, calc(var(--sidebar-w, 432px) - 64px - 2 * var(--border)));
+    }
+
+    :root[data-rail="on"] .sidebar {
+        width: calc(65px + env(safe-area-inset-left));
+    }
+
+    :root[data-tiling="on"][data-rail="on"] .sidebar {
+        width: calc(64px + 2 * var(--border));
+    }
+}
+
+/* Leave chip and approval rows at their measured heights. Fixed space for two lines keeps
+   adjacent rows still when keyboard or hover actions temporarily narrow a title. */
+@container sessions (min-width: 280px) {
+    :root[data-density="comfortable"] .sidebar .session-row:not(.with-chips, .needs-you) {
+        --row-line: 48px;
+        contain-intrinsic-size: auto 48px;
+    }
+
+    :root[data-density="comfortable"]
+        .sidebar
+        .session-row:not(.with-chips, .needs-you)
+        > .session {
+        height: 48px;
+    }
+
+    :root[data-density="comfortable"]
+        .sidebar
+        .session-row:not(.with-chips, .needs-you)
+        .session-title:not(.with-hit, .with-crumb) {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        line-height: 1.4;
+    }
+}
+
+@media (max-width: 959px) {
+    .layout:has(> .mobile-rail) {
+        flex-direction: column;
+    }
+
+    .layout:has(> .mobile-rail) > .pane {
+        height: auto;
+        min-height: 0;
+    }
+
+    .places-rail.mobile-rail {
+        order: 1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        width: 100%;
+        padding: 4px calc(8px + var(--inset-r)) max(4px, env(safe-area-inset-bottom))
+            calc(8px + var(--inset-l));
+        border-right: 0;
+        border-top: 1px solid var(--hair);
+    }
+
+    .mobile-rail .rail-place {
+        margin: 0;
+        min-height: 44px;
+        gap: 2px;
+    }
+
+    .mobile-rail .rail-place.on::before {
+        display: none;
+    }
+
+    .drawer > .sessions,
+    .home-list > .sessions {
+        padding-left: calc(12px + var(--inset-l));
+    }
+}
+
+/* The old short-screen rule hides icon rails. The four primary destinations must remain available. */
+@media (max-height: 500px) {
+    .places-rail > .rail-place {
+        display: flex;
+    }
+}
+
+/* Slot items keep their place labels, badges and handlers when displayed as rows. */
+.grouped-menu .tool-place-row .place:not(.on) {
+    background: transparent;
+}
+
+.grouped-menu .tool-place-row .place,
+.grouped-menu .menu-group .tool-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: row;
+    gap: 12px;
+    width: calc(100% + 16px * var(--space-x));
+    min-height: calc(32px + 12px * var(--space-y));
+    height: auto;
+    margin: 0 calc(-8px * var(--space-x));
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x));
+    flex-wrap: nowrap;
+    font-size: 13.5px;
+    text-align: left;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    border-radius: var(--r-control);
+}
+
+@media (max-width: 959px), (pointer: coarse) {
+    .places-rail .rail-place,
+    .grouped-menu .tool-place-row .place,
+    .grouped-menu .menu-group .tool-row {
+        min-height: 44px;
+    }
+}
+
+.grouped-menu .tool-place-row .place-label,
+.grouped-menu .menu-group .tool-label {
+    min-width: 0;
+    font: inherit;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.tool-place-row .place-icon,
+.grouped-menu .tool-row > .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.tool-place-row .place::after,
+.grouped-menu .tool-row::after {
+    content: "";
+    flex: none;
+    margin-left: auto;
+    margin-right: 4px;
+    width: 6px;
+    height: 6px;
+    color: var(--muted);
+    border: solid currentColor;
+    border-width: 1.5px 1.5px 0 0;
+    transform: rotate(45deg);
+}
+
+.tool-place-row .place-icon :is(.badge, .browser-dot) {
+    right: 28px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.grouped-menu .tool-row .rail-count {
+    position: static;
+    flex: none;
+    box-shadow: none;
+}
+
+.grouped-menu .tool-row .rail-news {
+    position: static;
+    flex: none;
+}
+
+.grouped-menu .tool-place-row .place.on,
+.grouped-menu .menu-group .tool-row.open {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+@media (hover: hover) {
+    .grouped-menu .tool-place-row .place:not(.on):hover,
+    .grouped-menu .tool-place-row .place:hover,
+    .grouped-menu .menu-group .tool-row:hover {
+        color: var(--text);
+        background: var(--hover);
+    }
+}
