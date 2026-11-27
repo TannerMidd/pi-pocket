@@ -192,6 +192,8 @@ export interface SandboxProvider {
     problem(): string | undefined;
     /** Why a folder may not be the working folder of a sandboxed session (it holds sign-ins or keys), or undefined. */
     folderProblem?(cwd: string): string | undefined;
+    /** Whether the guest may write the session's folder: "ro" for read only. Without it, it may (core asks the worst). */
+    mount?(): "rw" | "ro";
     /** Whether a session that a sandboxed session starts may work in another folder than its parent's. */
     otherFolders?(): boolean;
     /** The session's commands that run in its VM. Without it, a sandboxed session has no background tasks. */

@@ -12,6 +12,7 @@ import {
     lstatSync,
     mkdirSync,
     openSync,
+    readdirSync,
     readFileSync,
     readlinkSync,
     realpathSync,
@@ -46,17 +47,10 @@ function real(path: string): string {
 }
 
 type Place = { start: string; names: string[] };
+type Folder = { path: string; key: string };
 
-/**
- * How a session's folder `root` stands to the folders that sandboxed sessions work in: inside one (then `start` is that
- * folder, and `names` lead from it to `root`), holding one (then `start` is `root`), or neither (undefined). The path
- * is walked from `/`, one name at a time. A link is followed only while the walk is outside every sandboxed folder,
- * where the guest cannot have put it; the walk is inside as soon as it reaches one of them, known by the device and the
- * inode of the folder and not by any path to it, so an alias, or a mount of the same folder, finds it too. The names
- * after that are not looked at: the walk of `pinParent` takes them without following a link, and refuses one.
- */
-function place(root: string): Place | undefined {
-    const folders = [...sandboxedFolders]
+function listed(): Folder[] {
+    return [...sandboxedFolders]
         .flatMap((list) => [...list()])
         .flatMap((path) => {
             try {
@@ -67,8 +61,20 @@ function place(root: string): Place | undefined {
                 return [];
             }
         });
-    const top = parse(resolve(root)).root;
-    const pending = resolve(root).slice(top.length).split(sep).filter(Boolean);
+}
+
+/**
+ * Walk `path` from `/`, one name at a time, following links, until the walk is in one of `folders`, known by the device
+ * and the inode of the folder and not by any path to it, so an alias, or a mount of the same folder, finds it too. It
+ * answers where it entered, and the names still to go; or, when it never did, the real path it came to (undefined when
+ * a name is not there). Every folder on the way counts, so a link that passes through a folder is found as well.
+ */
+function walk(
+    path: string,
+    folders: readonly Folder[],
+): { entered: Place } | { at: string | undefined } {
+    const top = parse(resolve(path)).root;
+    const pending = resolve(path).slice(top.length).split(sep).filter(Boolean);
     let at = top;
 
     for (let links = 0; pending.length > 0;) {
@@ -89,12 +95,12 @@ function place(root: string): Place | undefined {
         try {
             info = lstatSync(next, { bigint: true });
         } catch {
-            return undefined;
+            return { at: undefined };
         }
 
         if (info.isSymbolicLink()) {
             if (++links > 40) {
-                return undefined;
+                return { at: undefined };
             }
 
             const target = readlinkSync(next);
@@ -114,13 +120,107 @@ function place(root: string): Place | undefined {
         const inside = folders.find((each) => each.key === `${info.dev}:${info.ino}`);
 
         if (inside !== undefined) {
-            return { start: inside.path, names: pending };
+            return { entered: { start: inside.path, names: pending } };
         }
     }
 
-    return folders.some((each) => within(at, real(each.path)))
-        ? { start: at, names: [] }
+    return { at };
+}
+
+/**
+ * How a session's folder `root` stands to the folders that sandboxed sessions work in: inside one (then `start` is that
+ * folder, and `names` lead from it to `root`), holding one (then `start` is `root`), or neither (undefined). A link is
+ * followed only while the walk is outside every sandboxed folder, where the guest cannot have put it; the names after
+ * the walk is inside are not looked at: the walk of `pinParent` takes them without following a link, and refuses one.
+ */
+function place(root: string): Place | undefined {
+    const folders = listed();
+    const found = walk(root, folders);
+
+    if ("entered" in found) {
+        return found.entered;
+    }
+
+    return found.at !== undefined && folders.some((each) => within(found.at!, real(each.path)))
+        ? { start: found.at, names: [] }
         : undefined;
+}
+
+/** Whether `path` is in a folder that a sandboxed session works in, as the walk finds it: a guest may write it. */
+export function inSandboxedFolder(path: string): boolean {
+    const folders = listed();
+
+    return folders.length > 0 && "entered" in walk(path, folders);
+}
+
+/**
+ * A link under `roots` (or a root that is one) that leads into `folder`, or through it; undefined when none does. These are the places that the server, or Pi, loads code and trusted settings from: a guest that can write the
+ * folder would write there. Each link is walked, every name on its way, with the folder known by its inode. Real
+ * folders are entered to `depth` levels, and at most `limit` entries are looked at, so a large tree costs little.
+ */
+export function linkInto(
+    roots: readonly string[],
+    folder: string,
+    { depth = 3, limit = 20_000 } = {},
+): string | undefined {
+    let key: string;
+
+    try {
+        const { dev, ino } = statSync(folder, { bigint: true });
+
+        key = `${dev}:${ino}`;
+    } catch {
+        return undefined;
+    }
+
+    const folders = [{ path: folder, key }];
+    let looked = 0;
+
+    const scan = (path: string, level: number): string | undefined => {
+        if (level >= depth) {
+            return undefined;
+        }
+
+        let entries;
+
+        try {
+            entries = readdirSync(path, { withFileTypes: true });
+        } catch {
+            return undefined;
+        }
+
+        for (const entry of entries) {
+            if (++looked > limit) {
+                return undefined;
+            }
+
+            const child = join(path, entry.name);
+
+            if (entry.isSymbolicLink()) {
+                if ("entered" in walk(child, folders)) {
+                    return child;
+                }
+            } else if (entry.isDirectory()) {
+                const found = scan(child, level + 1);
+
+                if (found !== undefined) {
+                    return found;
+                }
+            }
+        }
+
+        return undefined;
+    };
+
+    for (const root of roots) {
+        const found = "entered" in walk(root, folders) ? root : scan(root, 0);
+
+        if (found !== undefined) {
+            return found;
+        }
+    }
+
+    return undefined;
 }
 
 /** Whether a sandboxed session works in `folder`, in a folder that holds it, or in one inside it (`place`). */

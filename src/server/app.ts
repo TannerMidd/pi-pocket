@@ -430,6 +430,13 @@ export class PocketApp {
      * with a guest would let the guest change what the server runs (`sandbox.ts`).
      */
     readonly codeFolders: readonly string[];
+    /**
+     * Every place whose content this server or Pi loads as code or as trusted settings, for any session: `codeFolders`,
+     * Pi's own folder (settings, models, skills, prompts, extensions, the global AGENTS.md), the home folder's
+     * `.agents` (skills), and the data folder's `mcp`. A link under one that leads into a folder a guest can write hands
+     * the guest those (`Sandboxes`).
+     */
+    readonly trustedFolders: readonly string[];
     readonly defaultCwd: string;
     readonly supervised: boolean;
     readonly startedAt = Date.now();
@@ -602,6 +609,12 @@ export class PocketApp {
                 join(options.dataDir, "extensions"),
                 join(options.dataDir, "themes"),
             ]),
+        ];
+        this.trustedFolders = [
+            ...this.codeFolders,
+            getAgentDir(),
+            join(this.#home, ".agents"),
+            join(options.dataDir, "mcp"),
         ];
         this.defaultCwd = options.defaultCwd;
         this.supervised = options.supervised;

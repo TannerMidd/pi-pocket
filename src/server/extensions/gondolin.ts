@@ -366,6 +366,7 @@ function createGondolin(
                 : `The sandbox is not ready: ${failed?.name}: ${failed?.detail} The owner sets it up in the Sandbox sheet (Menu → Sandbox, or Gondolin sandbox in Menu → Extensions).`;
         },
         folderProblem: (cwd) => folderProblem(cwd, places()),
+        mount: () => settings().mount,
         otherFolders: () => web.setting("teamFolders") === true,
         jobs: (target) =>
             jobs.for({

@@ -17,7 +17,7 @@ import type { RemoteBrowser } from "./browser.ts";
 import type { Role, User } from "./config.ts";
 import { SandboxDoc, SubagentsDoc } from "./docs.ts";
 import { LiveDoc } from "@earendil-works/pi-durable";
-import { within } from "./confined.ts";
+import { linkInto, within } from "./confined.ts";
 import { HttpError } from "./errors.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -74,6 +74,8 @@ export interface SandboxProvider {
     problem(): string | undefined;
     /** Why a folder may not be the working folder of a sandboxed session (it holds sign-ins or keys), or undefined. */
     folderProblem?(cwd: string): string | undefined;
+    /** Whether the guest may write the session's folder: "ro" for read only. Without it, it may (core asks the worst). */
+    mount?(): "rw" | "ro";
     /** Whether a session that a sandboxed session starts may work in a folder other than its parent's. */
     otherFolders?(): boolean;
     /** The commands of this session that run in its VM. Without it, a sandboxed session has no background tasks. */
@@ -278,13 +280,45 @@ export class Sandboxes {
     }
 
     /** Why `cwd` may not be a sandbox's folder: the server's own (`reloadedFolderProblem`), or the module's. */
-    #folderProblem(cwd: string): string | undefined {
+    #folderProblem(cwd: string, fresh = false): string | undefined {
         const app = this.#app;
 
         return (
             reloadedFolderProblem(cwd, app.codeFolders, app.dataDir) ??
-            this.provider?.folderProblem?.(cwd)
+            this.provider?.folderProblem?.(cwd) ??
+            this.#trustedLink(cwd, fresh)
         );
+    }
+
+    /** The links found under the trusted folders, by session folder: looked for again after a few seconds. */
+    readonly #linked = new Map<string, { at: number; problem: string | undefined }>();
+
+    /**
+     * Why a folder that the guest may write cannot be shared: a link under a place that the server or Pi loads code or
+     * trusted settings from leads into it, or through it (`app.trustedFolders`), so a guest could change what runs
+     * there. A folder shared read only is not written. Asked each time a call needs the sandbox, but the folders are
+     * walked at most once in a few seconds for one folder; `fresh` (turning it on) walks them now.
+     */
+    #trustedLink(cwd: string, fresh: boolean): string | undefined {
+        if (this.provider?.mount?.() === "ro") {
+            return undefined;
+        }
+
+        const known = this.#linked.get(cwd);
+
+        if (!fresh && known !== undefined && Date.now() - known.at < 5_000) {
+            return known.problem;
+        }
+
+        const link = linkInto(this.#app.trustedFolders, cwd);
+        const problem =
+            link === undefined
+                ? undefined
+                : `${link} reaches into ${cwd} (it lies there, or it is a link that leads there), and this server or Pi loads code or settings from it: a sandbox that can write the folder could change what runs on this machine. Remove the link, or choose Read only for the session's folder.`;
+
+        this.#linked.set(cwd, { at: Date.now(), problem });
+
+        return problem;
     }
 
     /** A session and the subagents under it, to any depth, as `agentsOf` lists them. */
@@ -714,7 +748,7 @@ export class Sandboxes {
                 throw new HttpError(409, "A sandbox does not support a remote workspace.");
             }
 
-            const folder = this.#folderProblem(app.cwdOf(id));
+            const folder = this.#folderProblem(app.cwdOf(id), true);
 
             if (folder !== undefined) {
                 throw new HttpError(409, folder);

@@ -3,9 +3,11 @@
  * TypeBox's `Type` from `@earendil-works/pi-ai` as before Pi 1.5. A package a drop-in does not have of its own comes
  * from Pi Pocket's, with no `node_modules` link.
  */
+import { existsSync, realpathSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
 import { sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { inSandboxedFolder } from "./confined.ts";
 
 const compatUrl = new URL("./extension-document-compat.ts", import.meta.url).href;
 const piAiUrl = new URL("./extension-pi-ai-compat.ts", import.meta.url).href;
@@ -52,6 +54,27 @@ export function documentImports(directory: string, report: (message: string) => 
     scopes.set(folder, scope);
 
     if (!registered) {
+        // Nothing is loaded from a folder that a sandboxed session works in: a guest may have written it, and a module
+        // runs here with this server's rights. This holds for what a module imports as well, and for a drop-in that is
+        // a link to such a file (the real path is looked at). It sits below the hook that follows: that one asks it.
+        registerHooks({
+            resolve(specifier, context, nextResolve) {
+                const resolved = nextResolve(specifier, context);
+
+                if (resolved.url.startsWith("file:")) {
+                    const path = fileURLToPath(resolved.url);
+                    const real = existsSync(path) ? realpathSync(path) : path;
+
+                    if (inSandboxedFolder(real)) {
+                        throw new Error(
+                            `${real} is in a folder that a sandboxed session works in, so a guest may have written it: it is not loaded.`,
+                        );
+                    }
+                }
+
+                return resolved;
+            },
+        });
         registerHooks({
             resolve(specifier, context, nextResolve) {
                 const parent =
