@@ -377,3 +377,59 @@ test("a goal's check in a sandboxed session runs in the VM", async () => {
         await app.close();
     }
 });
+
+test("a browser launch that comes while the sandbox is turned off waits for it, and starts no VM", async () => {
+    const { app, driver, id } = await session("browser-off");
+    const held = gate();
+
+    try {
+        driver.checkResult = {
+            ...driver.checkResult,
+            images: [{ name: "alpine-base:latest", browser: true }],
+        };
+        await app.sandboxes.set(id, owner(app), true);
+        await say(app, id, "run it");
+        await until(() => driver.vms.length === 1, "the VM to start");
+
+        const vm = driver.vms[0]!;
+        const close = vm.close.bind(vm);
+
+        vm.close = async () => {
+            await held.wait();
+            await close();
+        };
+
+        const calls = watchCalls(app, driver);
+        const change = app.sandboxes.set(id, owner(app), false);
+
+        await held.reached;
+        let answered = false;
+        const launch = app.sandboxes
+            .browserFor(Number(id))!
+            .launch([])
+            .then(
+                () => {
+                    answered = true;
+
+                    return undefined;
+                },
+                (error: unknown) => {
+                    answered = true;
+
+                    return error;
+                },
+            );
+
+        await Promise.race([calls.either, launch]);
+        assert.equal(answered, false, "the launch was answered before the VM was gone");
+        assert.equal(driver.log.started.length, 1, "the launch started a VM");
+        held.open();
+        await change;
+        assert.match(String(await launch), /sandbox was turned off/);
+        assert.equal(driver.log.started.length, 1);
+    } finally {
+        useDriver(undefined);
+        held.open();
+        await app.close();
+    }
+});
