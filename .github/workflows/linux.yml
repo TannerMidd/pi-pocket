@@ -35,6 +35,11 @@ jobs:
 
             - run: npm run check
 
+            # Ubuntu 24.04 stops unprivileged user namespaces with AppArmor, and Chrome's sandbox needs them: it aborts
+            # at start otherwise. Some tests start Chromium themselves, so a --no-sandbox flag would not reach all.
+            - name: Let Chrome's sandbox run
+              run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
             # The tests find the browser as Pi Pocket does. The runner has Google Chrome; this fails at once if it does
             # not, or if the browser cannot start, instead of letting every browser test skip.
             - name: Find the browser, and check that it starts
