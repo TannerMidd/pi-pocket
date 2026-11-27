@@ -553,6 +553,7 @@ test(
                 async () => (await shown("the previous person's rows")).rows,
                 "the early view",
             );
+            await page.evaluate(`window.beforeTheChange = true`);
             meUser = { ...app.config.users[0]!, id: "another-person" };
             me.release();
             await until(
@@ -576,6 +577,16 @@ test(
             events.release();
             poll.release();
         }
+
+        // The held stream and poll now answer as the signed-in person, not the one this page took: the page reloads
+        // itself to start again. Wait for that, or it can come in the next test's own navigation and take its place.
+        await until(
+            async () =>
+                await inPage<boolean>(`return JSON.stringify(window.beforeTheChange !== true)`),
+            "the page's reload for the change of person",
+            15_000,
+        );
+        await ready();
     },
 );
 
