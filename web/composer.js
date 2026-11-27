@@ -986,9 +986,39 @@ export function Composer() {
     // The request id kept for the box's words: a change ends the wait of what was taken back.
     const request = keptRequest(conversationId)?.requestId;
 
+    // What the person typed or attached in this box, as the last render has it: not the textarea, which an update made in
+    // an effect does not change until the next render.
+    const sinceDrawn = useRef({ text, files });
+    // The box was drawn before the person was known (the device's copy of the session shows first on a reload), so it
+    // read nothing from the person's storage, which is theirs only once /api/me says who they are.
+    const drawnUnknown = useRef(personId === null);
+
+    sinceDrawn.current = { text, files };
+
     // The queued messages of this conversation taken back (`keepBack`) go before the box's words,
-    // once no send is on its way.
+    // once no send is on its way. When the person becomes known, what the device keeps for the box (draft, files, pasted
+    // text, quotes) is read first, in this one pass, unless something was typed or attached meanwhile, and the taken-back
+    // messages go on top of it.
     useEffect(() => {
+        const late = personId !== null && drawnUnknown.current;
+        const fresh =
+            late && sinceDrawn.current.text === "" && sinceDrawn.current.files.length === 0;
+
+        if (personId !== null) {
+            drawnUnknown.current = false;
+        }
+
+        let words = sinceDrawn.current.text;
+        let chips = [];
+
+        if (fresh) {
+            words = drafts.get(conversationId);
+            chips = loadAttached(conversationId);
+            setPastes(loadPastes(conversationId));
+            keepPieces(loadPieces(conversationId), conversationId, words);
+            setStrips(loadStrips(conversationId));
+        }
+
         // Read now, not at the render: a send can begin between the two.
         const all = onTheWay.has(conversationId) ? [] : keptBack(conversationId);
         const now = keptRequest(conversationId)?.requestId;
@@ -996,6 +1026,12 @@ export function Composer() {
         const list = all.filter(ready);
 
         if (list.length === 0) {
+            if (fresh) {
+                setText(words);
+                setCaret(words.length);
+                setFiles(chips);
+            }
+
             return;
         }
 
@@ -1005,8 +1041,7 @@ export function Composer() {
             backKey(conversationId),
             waiting.length === 0 ? null : JSON.stringify(waiting),
         );
-        let words = drafts.get(conversationId);
-        let chips = [];
+        words = fresh ? words : drafts.get(conversationId);
 
         for (const back of list) {
             words = words.trim() === "" ? back.text : `${back.text}\n${words}`;
@@ -1037,31 +1072,6 @@ export function Composer() {
         setBrowsing(null);
         setSearching(false);
     }, [conversationId]);
-    // A box drawn before the person is known (the device's copy of the session shows first on a reload) read nothing:
-    // what the person keeps on this device (draft, pasted text, quotes, files) is theirs only once /api/me says who
-    // they are. Read it then, unless something was typed meanwhile.
-    const drawnUnknown = useRef(personId === null);
-
-    useEffect(() => {
-        if (personId === null || !drawnUnknown.current) {
-            return;
-        }
-
-        drawnUnknown.current = false;
-
-        if ((box.current?.value ?? "") !== "") {
-            return;
-        }
-
-        const draft = drafts.get(conversationId);
-
-        setText(draft);
-        setCaret(draft.length);
-        setFiles(loadAttached(conversationId));
-        setPastes(loadPastes(conversationId));
-        keepPieces(loadPieces(conversationId), conversationId, draft);
-        setStrips(loadStrips(conversationId));
-    }, [personId]);
     // A session opens with the caret in its message box, ready to type: not on a touch screen, where the keyboard would
     // come up over the conversation, nor after an Alt shortcut on an Apple keyboard (`openingByAlt`), nor while another
     // text field has the focus (the docked chat a mention opened, the session search): words typed there stay there.
