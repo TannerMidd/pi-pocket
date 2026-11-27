@@ -635,3 +635,51 @@ test(
         assert.ok(outside);
     },
 );
+
+test(
+    "a copy is streamed and counted: a file that grows during it is refused, and the part written is removed",
+    { skip: !linux },
+    async (t) => {
+        const { root, host } = lab(t);
+        const folder = host.folder(root);
+        const source = join(root, "source.bin");
+
+        writeFileSync(source, "x".repeat(100));
+
+        // The bytes that are there fit the budget.
+        await hostfs.copyFileAsync(folder.at("source.bin"), folder.at("copy.bin"), 100);
+        assert.equal(readFileSync(join(root, "copy.bin"), "utf8"), "x".repeat(100));
+
+        // It grows after the first chunk was read: the next chunk is past the budget, whatever the size said first.
+        let chunks = 0;
+
+        const grow = () => {
+            if (++chunks === 1) {
+                appendFileSync(source, "y".repeat(5000));
+            }
+        };
+
+        await assert.rejects(
+            hostfs.copyFileAsync(folder.at("source.bin"), folder.at("grown.bin"), 100, grow),
+            { code: "EFBIG" },
+        );
+        assert.equal(existsSync(join(root, "grown.bin")), false);
+        // A source in a plain place copied into a sandboxed one is bounded the same.
+        const plainSource = join(root, "..", "plain.bin");
+
+        writeFileSync(plainSource, "z".repeat(100));
+        chunks = 0;
+
+        const grewPlain = () => {
+            if (++chunks === 1) {
+                appendFileSync(plainSource, "w".repeat(5000));
+            }
+        };
+
+        await assert.rejects(
+            hostfs.copyFileAsync(host.at(plainSource), folder.at("from-plain.bin"), 100, grewPlain),
+            { code: "EFBIG" },
+        );
+        assert.equal(existsSync(join(root, "from-plain.bin")), false);
+    },
+);

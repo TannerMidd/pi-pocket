@@ -1136,29 +1136,79 @@ export async function renameAsync(from: Place, to: Place): Promise<void> {
 /** The most that a copy out of a sandboxed folder reads, unless the caller says less. */
 export const MAX_COPY = 256 * 1024 * 1024;
 
-export function copyFile(from: Place, to: Place, mode?: number, max = MAX_COPY): void {
+/**
+ * Copy a file. Between two plain places it is the plain copy. Otherwise the bytes are streamed, a chunk at a time, from
+ * the source's checked descriptor to the target, and counted as they are read: more than `max` (whatever the size
+ * said when it was looked at) is `EFBIG`, and the part written is removed. `onChunk` is a test hook.
+ */
+export function copyFile(
+    from: Place,
+    to: Place,
+    mode?: number,
+    max = MAX_COPY,
+    onChunk?: () => void,
+): void {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         copyFileSync(from.located.path, to.located.path);
 
         return;
     }
 
-    // The source is read through its own descriptor, so a link swapped in is refused, not followed.
-    writeFile(to, readFile(from, { max }));
+    const source = openSync(from, "r");
+
+    try {
+        const target = openSync(to, "w", mode ?? 0o666);
+        let total = 0;
+
+        try {
+            const buffer = Buffer.allocUnsafe(64 * 1024);
+
+            for (;;) {
+                const got = source.read(buffer, 0, buffer.length, null);
+
+                if (got === 0) {
+                    break;
+                }
+
+                total += got;
+
+                if (total > max) {
+                    throw tooBig(max);
+                }
+
+                target.write(buffer.subarray(0, got));
+                onChunk?.();
+            }
+        } catch (error) {
+            target.close();
+            rm(to, { force: true });
+
+            throw error;
+        }
+
+        target.close();
+    } finally {
+        source.close();
+    }
 
     if (mode !== undefined) {
         use(to, (path) => chmodSync(path, mode));
     }
 }
 
-export async function copyFileAsync(from: Place, to: Place, max = MAX_COPY): Promise<void> {
+export async function copyFileAsync(
+    from: Place,
+    to: Place,
+    max = MAX_COPY,
+    onChunk?: () => void,
+): Promise<void> {
     if (from.located.kind === "plain" && to.located.kind === "plain") {
         await fsp.copyFile(from.located.path, to.located.path);
 
         return;
     }
 
-    copyFile(from, to, undefined, max);
+    copyFile(from, to, undefined, max, onChunk);
 }
 
 /** Write a file (`flag` `w` by default; `wx` makes it fail if it is there). A sandboxed place is never opened through a link. */
