@@ -5,7 +5,7 @@ import { actions, api, attempt, closeSheet, openSheet, store } from "../store.js
 import { useDragToClose } from "../gestures.js";
 import { favoriteModels } from "../model-favorites.js";
 import { openUsage, serverNow, sessionUsage, UsageMeter } from "./usage.js";
-import { summary, USAGE_ICONS } from "../usage.js";
+import { summary, USAGE_ICONS, usedShare } from "../usage.js";
 import {
     anchorStyle,
     BOTTOM_SHEETS,
@@ -96,7 +96,7 @@ function UsageRow() {
         <span class="model-usage-what">
             ${state === "limited" && html`<${Icon} name="clock" size=${12} />`}
             ${state === "low" && html`<${Icon} path=${USAGE_ICONS.warn} size=${12} />`}
-            ${numbers && html`<${UsageMeter} state=${state} left=${window.left} />`}
+            ${numbers && html`<${UsageMeter} state=${state} used=${usedShare(window)} />`}
             <span>${usageWords(view, now)}</span>
         </span>
         <span class="model-usage-all">All providers <${Icon} name="chevron" size=${12} /></span>

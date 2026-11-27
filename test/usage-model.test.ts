@@ -111,10 +111,10 @@ test("the words", () => {
 
     const ok = providerView(provider("Anthropic", [win("7d", 41, "ok", 3000 * MIN)]), NOW);
 
-    assert.equal(summary(ok, NOW)?.text, "7d 41% left");
+    assert.equal(summary(ok, NOW)?.text, "7d 59% used");
     assert.match(
         summary(ok, NOW)?.aria ?? "",
-        /^Anthropic usage: 41% left in the 7d window\. It resets in 2 d 2 h\.$/,
+        /^Anthropic usage: 59% used in the 7d window\. It resets in 2 d 2 h\.$/,
     );
 
     const limited = providerView(provider("OpenAI", [win("5h", 0, "limited", 72 * MIN)]), NOW);
@@ -167,7 +167,7 @@ test("a model's hold limits the provider only for that model, and is a detail fo
     const same = providerView(reported, NOW, "claude-fable");
 
     assert.equal(other.state, "ok");
-    assert.equal(summary(other, NOW)?.text, "5h 68% left");
+    assert.equal(summary(other, NOW)?.text, "5h 32% used");
     assert.deepEqual(modelHoldWords(other, NOW), ["claude-fable limited · 1:12"]);
     assert.equal(providerView(reported, NOW).state, "ok");
     assert.equal(same.state, "limited");
@@ -181,11 +181,11 @@ test("a model's hold limits the provider only for that model, and is a detail fo
     );
 });
 
-test("less than one percent left says <1%, and is not limited", () => {
+test("less than one percent left says >99% used, and is not limited", () => {
     const tiny = { ...win("tokens", 0, "low", 6 * MIN, "tok"), tiny: true };
     const view = providerView(provider("A", [tiny]), NOW);
 
     assert.equal(view.state, "low");
-    assert.equal(summary(view, NOW)?.text, "tok <1% left");
-    assert.match(summary(view, NOW)?.aria ?? "", /low, <1% left/);
+    assert.equal(summary(view, NOW)?.text, "tok >99% used");
+    assert.match(summary(view, NOW)?.aria ?? "", /low, >99% used/);
 });

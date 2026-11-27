@@ -5059,9 +5059,9 @@ pre.diff .del {
     margin-right: 1ch;
 }
 
-/* ─── Usage left: the status line's item, the popover or sheet it opens, and the model sheet's row ───────────────── */
+/* ─── Usage: the status line's item, the popover or sheet it opens, and the model sheet's row ───────────────── */
 
-/* A meter of how much is left. The shape says the state, not only the color: solid, striped, hollow. */
+/* A meter of how much is used. The shape says the state, not only the color: solid, striped, hollow. */
 .usage-meter {
     display: inline-flex;
     flex: none;
@@ -5074,12 +5074,16 @@ pre.diff .del {
 
 .usage-meter > i {
     display: block;
-    width: var(--left, 0%);
+    width: var(--used, 0%);
     background: var(--accent);
 }
 
 .usage-meter[data-state="low"] > i {
     background: repeating-linear-gradient(135deg, var(--warn) 0 3px, var(--warn-line) 3px 6px);
+}
+
+.usage-meter[data-state="limited"] > i {
+    background: var(--err);
 }
 
 .usage-meter[data-state="limited"] {
@@ -5172,8 +5176,8 @@ pre.diff .del {
 }
 
 .status-line[data-short~="window"] .usage-now .tag,
-.status-line[data-short~="left"] .usage-now .left,
-.status-line[data-short~="left"] .usage-now:not(.no-count) .word {
+.status-line[data-short~="used"] .usage-now .used,
+.status-line[data-short~="used"] .usage-now:not(.no-count) .word {
     display: none;
 }
 

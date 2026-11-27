@@ -190,7 +190,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `send-button`                             | Send                                                                                                                                      |
 | `status-line`                             | The line under the box: who is here, context, cost                                                                                        |
 | `status-item`                             | An extension's item in it, with `data-module` naming its module (since 0.19.0)                                                            |
-| `status-usage`                            | The usage item in it (Usage left: a meter and the tightest window's percent), a button that opens the usage list                          |
+| `status-usage`                            | The usage item in it (Usage: a meter and the tightest window's percent), a button that opens the usage list                               |
 
 ### Layers over the app
 

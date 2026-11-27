@@ -170,7 +170,7 @@ test(
     real,
     async () => {
         await wait(`return document.querySelector(".usage-now")`, "the item");
-        assert.equal(await itemText(), "7d 41% left");
+        assert.equal(await itemText(), "7d 59% used");
         assert.equal(
             await ev<string>(`return document.querySelector(".usage-now").dataset.part`),
             "status-usage",
@@ -190,7 +190,7 @@ test(
             "just before the spend",
         );
 
-        // The fitting steps hide words, in the order SHORTER takes them: the window, then "left", then the meter.
+        // The fitting steps hide words, in the order SHORTER takes them: the window, then "used", then the meter.
         const form = (short: string) =>
             ev<{ text: string; meter: boolean; gauge: boolean }>(`
             const line = document.querySelector(".status-line");
@@ -205,19 +205,19 @@ test(
         `);
         const full = "words here ext guard context";
 
-        assert.deepEqual(await form(""), { text: "7d 41% left", meter: true, gauge: false });
+        assert.deepEqual(await form(""), { text: "7d 59% used", meter: true, gauge: false });
         assert.deepEqual(await form(`${full} window`), {
-            text: "41% left",
+            text: "59% used",
             meter: true,
             gauge: false,
         });
-        assert.deepEqual(await form(`${full} window cache left wait`), {
-            text: "41%",
+        assert.deepEqual(await form(`${full} window cache used wait`), {
+            text: "59%",
             meter: true,
             gauge: false,
         });
-        assert.deepEqual(await form(`${full} window cache left wait bare`), {
-            text: "41%",
+        assert.deepEqual(await form(`${full} window cache used wait bare`), {
+            text: "59%",
             meter: false,
             gauge: true,
         });
@@ -244,7 +244,7 @@ test("the item fits a status line of a phone, and a narrow one, on one row", rea
         `);
 
         assert.equal(row.one, true, `one row at ${width}`);
-        assert.match(row.text, /41%/);
+        assert.match(row.text, /59%/);
     }
 
     await page.setViewport(DESKTOP);
@@ -253,7 +253,7 @@ test("the item fits a status line of a phone, and a narrow one, on one row", rea
 test("low and limited keep an icon and a word; no numbers means no item", real, async () => {
     record("faux", unified("0.32", "0.93"));
     await wait(`return document.querySelector(".usage-now")?.dataset.state === "low"`, "low");
-    assert.equal(await itemText(), "Low 7d 7% left");
+    assert.equal(await itemText(), "Low 7d 93% used");
     assert.equal(await ev<boolean>(`return !!document.querySelector(".usage-now svg")`), true);
 
     record(
@@ -277,7 +277,7 @@ test("low and limited keep an icon and a word; no numbers means no item", real, 
     // Narrowest: the word goes when there is a count; the icon and the count stay.
     const narrow = await ev<string>(`
         const line = document.querySelector(".status-line");
-        line.dataset.short = "words here ext guard context window cache left wait bare";
+        line.dataset.short = "words here ext guard context window cache used wait bare";
         return line.querySelector(".usage-now").innerText.replace(/\\s+/g, " ").trim();
     `);
 
@@ -329,11 +329,11 @@ test(
 
         assert.equal(popover.above, true, "above the status line");
         assert.equal(popover.within, true);
-        assert.equal(popover.head, "Usage left From each provider’s last response. Sends nothing.");
+        assert.equal(popover.head, "Usage From each provider’s last response. Sends nothing.");
         assert.match(popover.current, /^\S+ (Subscription|API key)/);
         assert.match(popover.current, /as of (just now|\d+ (s|min) ago)/);
-        assert.match(popover.current, /5-hour window 68% left/);
-        assert.match(popover.current, /Weekly window 41% left/);
+        assert.match(popover.current, /5-hour window 32% used/);
+        assert.match(popover.current, /Weekly window 59% used/);
         assert.match(popover.current, /Resets in 3 d 18 h/);
         // Limited, low, then the least left.
         assert.deepEqual(popover.rows, [
@@ -516,7 +516,7 @@ test(
                 `return document.querySelector(".model-usage").innerText.replace(/\\s+/g, " ").trim()`,
             );
 
-        assert.match(await text(), /^\S+ 7d 41% left All providers$/);
+        assert.match(await text(), /^\S+ 7d 59% used All providers$/);
 
         if (shots) {
             writeFileSync(
@@ -548,18 +548,20 @@ test(
         );
         await wait(`return document.querySelector('[data-sheet="appearance"]')`, "Appearance");
         await settle();
-        await ev<void>(`document.querySelector('[aria-label="Show Usage left"]').scrollIntoView()`);
+        await ev<void>(
+            `document.querySelector('[aria-label="Show Provider usage"]').scrollIntoView()`,
+        );
 
         const listed = await ev<{ detail: string; before: string }>(`
-        const row = [...document.querySelectorAll(".setting-row")].find((each) => each.innerText.includes("Usage left"));
+        const row = [...document.querySelectorAll(".setting-row")].find((each) => each.innerText.includes("Provider usage"));
         const names = [...row.parentElement.querySelectorAll(".setting-row")].map((each) => each.innerText.split("\\n")[0]);
 
-        return { detail: row.innerText.replace(/\\s+/g, " "), before: names[names.indexOf("Usage left") + 1] };
+        return { detail: row.innerText.replace(/\\s+/g, " "), before: names[names.indexOf("Provider usage") + 1] };
     `);
 
-        assert.match(listed.detail, /Usage left.*owner/i);
+        assert.match(listed.detail, /Provider usage.*owner/i);
         assert.equal(listed.before, "Spend", "listed just before the spend");
-        await page.click({ selector: '[aria-label="Show Usage left"]' });
+        await page.click({ selector: '[aria-label="Show Provider usage"]' });
         await page.press("Escape");
         await wait(`return !document.querySelector(".sheet-host")`, "closed");
         await settle();
@@ -645,7 +647,7 @@ test(
         gates.push(gate("faux", "model", "claude-fable"));
         record("faux", unified("0.32", "0.60"));
         await wait(
-            `return document.querySelector(".usage-now")?.innerText.includes("40%")`,
+            `return document.querySelector(".usage-now")?.innerText.includes("60%")`,
             "the new numbers",
         );
         assert.notEqual(

@@ -35,8 +35,12 @@ export function tightestWindow(provider, now) {
     );
 }
 
-/** The percent as it is said: `41%`, and `<1%` for a window with less than one percent left but not none. */
-export const percent = (window) => (window.tiny ? "<1%" : `${window.left}%`);
+/** The percent used as it is said: `59%`, and `>99%` for a window with less than one percent left but not none. */
+export const percent = (window) => (window.tiny ? ">99%" : `${100 - window.left}%`);
+
+/** How much of a window is used, for a meter: the rest of what is left; all of it when under one percent is left. */
+export const usedShare = (window) =>
+    window?.left === undefined ? undefined : window.tiny ? 100 : 100 - window.left;
 
 const latest = (holds) => holds.reduce((a, b) => (b.until > a.until ? b : a), holds[0]);
 
@@ -181,8 +185,8 @@ export function summary(view, now) {
             window.resetAt === undefined ? "" : `. It resets in ${inWords(window.resetAt - now)}`;
 
         return {
-            text: `${window.tag === "" ? "" : `${window.tag} `}${percent(window)} left`,
-            aria: `${provider.name} usage: ${view.state === "low" ? "low, " : ""}${percent(window)} left in the ${window.label.toLowerCase()}${reset}.`,
+            text: `${window.tag === "" ? "" : `${window.tag} `}${percent(window)} used`,
+            aria: `${provider.name} usage: ${view.state === "low" ? "low, " : ""}${percent(window)} used in the ${window.label.toLowerCase()}${reset}.`,
         };
     }
 

@@ -1,4 +1,4 @@
-// Usage left: how much of each provider's limits remains, from its last response (the owner's `usage` events). Sends
+// Usage: how much of each provider's limits remains, from its last response (the owner's `usage` events). Sends
 // nothing. A popover above the status line on wide screens, a bottom sheet on phones. The status line's item
 // (`core:usage`, composer.js) and the model sheet's row open it.
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -14,6 +14,7 @@ import {
     sortProviders,
     summary,
     USAGE_ICONS,
+    usedShare,
     windowState,
 } from "../usage.js";
 
@@ -37,12 +38,12 @@ export const openUsage = (from) => openSheet({ type: "usage", from });
 
 const KIND = { subscription: "Subscription", key: "API key" };
 
-/** A short meter: how much is left, in a shape that says the state without color (solid, striped, hollow). */
-export function UsageMeter({ state, left, big = false }) {
+/** A short meter: how much is used, in a shape that says the state without color (solid, striped, hollow). */
+export function UsageMeter({ state, used, big = false }) {
     return html`<span
         class=${`usage-meter ${big ? "big" : ""}`}
         data-state=${state}
-        style=${`--left:${left ?? 0}%`}
+        style=${`--used:${used ?? 0}%`}
         aria-hidden="true"
     >
         <i></i>
@@ -86,9 +87,9 @@ function WindowRow({ window, now }) {
             <span class="usage-window-state" data-state=${state}>
                 <${StateMark} state=${state} />
             </span>
-            <span class="usage-window-left">${stale || window.left === undefined ? "—" : `${percent(window)} left`}</span>
+            <span class="usage-window-left">${stale || window.left === undefined ? "—" : `${percent(window)} used`}</span>
         </div>
-        <${UsageMeter} state=${state} left=${stale ? 0 : window.left} big />
+        <${UsageMeter} state=${state} used=${stale ? 0 : usedShare(window)} big />
         ${sub && html`<div class="usage-window-sub">${sub}</div>`}
     </div>`;
 }
@@ -175,7 +176,7 @@ function Row({ view, now, open, onToggle }) {
                 <span class="usage-row-title">${provider.name}</span>
                 <span class="usage-row-kind">${KIND[provider.kind]}${age}${models === "" ? "" : ` · ${models}`}</span>
             </span>
-            ${!none && html`<${UsageMeter} state=${view.state} left=${window?.left} />`}
+            ${!none && html`<${UsageMeter} state=${view.state} used=${usedShare(window)} />`}
             <span class="usage-row-left num">
                 ${
                     none
@@ -183,8 +184,8 @@ function Row({ view, now, open, onToggle }) {
                         : view.state === "limited"
                           ? (words?.text ?? "").replace("Limited ", "")
                           : view.state === "reset"
-                            ? "— left"
-                            : `${percent(window)} left`
+                            ? "— used"
+                            : `${percent(window)} used`
                 }
             </span>
             <span class="usage-row-state" data-state=${view.state}>
@@ -272,7 +273,7 @@ function Panel({ onClose }) {
     return html`<header class="usage-head">
             <div class="grip" aria-hidden="true"></div>
             <div class="usage-head-text">
-                <h2 id="usage-title">Usage left</h2>
+                <h2 id="usage-title">Usage</h2>
                 <p>From each provider’s last response. Sends nothing.</p>
             </div>
             <button class="icon-button" onClick=${onClose} aria-label="Close usage">
