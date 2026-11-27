@@ -12,7 +12,7 @@ import { basename, join, resolve } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
-import { openInside, realInside, within } from "./confined.ts";
+import { confines, openInside, realInside } from "./confined.ts";
 import { git } from "./git.ts";
 import { type ReadableFile, withUploadBytes } from "./upload-content.ts";
 
@@ -566,8 +566,8 @@ export async function viewFile(
         return withUploadBytes(file, async (bytes) => viewBytes(file.path, bytes));
     }
 
-    // In the session's folder a link that leads out of it is not followed (`confined.ts`).
-    const confined = folder !== undefined && within(folder, file);
+    // In the folder of a sandboxed session a link that leads out of it is not followed (`confined.ts`).
+    const confined = folder !== undefined && confines(folder, file);
     const real = confined ? await realInside(folder, file) : file;
     const info = await stat(real);
 

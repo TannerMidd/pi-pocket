@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { readInsideSync, within } from "./confined.ts";
+import { confines, readInsideSync } from "./confined.ts";
 import { expandHome } from "./paths.ts";
 
 export type PromptTemplate = {
@@ -33,7 +33,7 @@ function readTemplate(path: string, folder: string): PromptTemplate | undefined 
     let body: string;
 
     try {
-        const text = within(folder, path)
+        const text = confines(folder, path)
             ? readInsideSync(folder, path).toString("utf8")
             : readFileSync(path, "utf8");
 

@@ -40,7 +40,7 @@ import {
     type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { minimatch } from "minimatch";
-import { within } from "./confined.ts";
+import { confines, within } from "./confined.ts";
 
 /** What, besides the session's folder, says where skills are. */
 export type SkillSources = {
@@ -296,7 +296,7 @@ function inFolder<T extends { filePath: string }>(cwd: string, skills: T[]): T[]
     const folder = canonical(cwd);
 
     return skills.filter(
-        (skill) => !within(cwd, skill.filePath) || within(folder, canonical(skill.filePath)),
+        (skill) => !confines(cwd, skill.filePath) || within(folder, canonical(skill.filePath)),
     );
 }
 

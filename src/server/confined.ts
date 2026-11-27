@@ -1,6 +1,6 @@
 /**
- * Reading a session's folder as the host, without leaving it. The folder is untrusted, as a cloned repository is: a
- * guest may leave a link in it that names `~/.ssh/id_rsa`, and a host that follows it would show that file to a person
+ * Reading the folder of a sandboxed session as the host, without leaving it. The folder is untrusted, as a cloned
+ * repository is: a guest may leave a link in it that names `~/.ssh/id_rsa`, and a host that follows it would show that file to a person
  * or put it in a prompt. A path that lies in the folder is read only when the file it reaches does too, links
  * followed. The check is on the file that was opened (its place on Linux, its identity elsewhere), never only on the
  * path before it, so a link put in the way while the file is opened cannot lead out.
@@ -20,6 +20,28 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const READ = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
 const FD_LINKS = process.platform === "linux";
+
+const sandboxedFolders = new Set<(folder: string) => boolean>();
+
+/** A server says which folders a sandboxed session uses. Returns how to stop. */
+export function onSandboxedFolders(uses: (folder: string) => boolean): () => void {
+    sandboxedFolders.add(uses);
+
+    return () => void sandboxedFolders.delete(uses);
+}
+
+/** Whether a sandboxed session uses `folder`, so that a guest may have written what is in it. */
+export function sandboxedFolder(folder: string): boolean {
+    return [...sandboxedFolders].some((uses) => uses(folder));
+}
+
+/**
+ * Whether a read of `path` must stay in `folder`: it lies there, and a sandboxed session uses the folder. Of a folder
+ * that only ordinary sessions use, Pi has the whole machine anyway, and links in it (a shared `AGENTS.md`) work.
+ */
+export function confines(folder: string, path: string): boolean {
+    return within(folder, path) && sandboxedFolder(folder);
+}
 
 /** Whether `path` is `root` or lies in it, by name. */
 export function within(root: string, path: string): boolean {

@@ -85,7 +85,7 @@ import {
     type UploadContent,
     withUploadBytes,
 } from "./upload-content.ts";
-import { readInside, within } from "./confined.ts";
+import { confines, readInside } from "./confined.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
@@ -1414,7 +1414,7 @@ export class Commands {
                             }
                         } else {
                             const folder = app.cwdOf(id);
-                            const source = within(folder, file)
+                            const source = confines(folder, file)
                                 ? await readInside(folder, file, MAX_INLINE_IMAGE)
                                 : statSync(file).size <= MAX_INLINE_IMAGE
                                   ? file

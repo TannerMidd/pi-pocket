@@ -260,6 +260,28 @@ export class Sandboxes {
         );
     }
 
+    /**
+     * Whether a sandboxed session uses `folder`, or a folder that holds it or lies in it: what a guest wrote can be
+     * there. A folder shared by a sandboxed and an ordinary session counts, as the guest writes it all the same.
+     */
+    usesFolder(folder: string): boolean {
+        const here = canonical(folder);
+
+        for (const id of this.#on) {
+            try {
+                const used = canonical(this.#app.cwdOf(id as unknown as ConversationId));
+
+                if (within(here, used) || within(used, here)) {
+                    return true;
+                }
+            } catch {
+                // A session that is gone uses no folder.
+            }
+        }
+
+        return false;
+    }
+
     /** Which conversations are sandboxed, kept in step with their documents: the browser asks without waiting. */
     readonly #on = new Set<number>();
 

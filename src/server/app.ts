@@ -139,6 +139,7 @@ import type { Surface } from "./surfaces/types.ts";
 import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
+import { onSandboxedFolders } from "./confined.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
 import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
@@ -505,6 +506,9 @@ export class PocketApp {
     /** No variables for a sandboxed session's commands: what extensions add to host commands are secrets of the host. */
     readonly #noCommandEnvs = new CommandEnvs((line) => this.#log(line));
     readonly sandboxes = new Sandboxes(this);
+    readonly #stopSandboxedFolders = onSandboxedFolders((folder) =>
+        this.sandboxes.usesFolder(folder),
+    );
     readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);
@@ -4836,6 +4840,7 @@ export class PocketApp {
             this.spend.close();
             this.limits.close();
             this.background.close();
+            this.#stopSandboxedFolders();
             this.#unsetComponents?.();
             this.#unsubscribeCommits?.();
             this.#unsubscribeRunEnds?.();

@@ -5,10 +5,12 @@
  * git commands, with paths taken literally, and in English, so a failure can be told from another by what git says.
  * Git is told the repository (`GIT_DIR`, `GIT_WORK_TREE`), never finds one by itself in a folder a guest can write
  * (`safe.bareRepository=explicit`, `GIT_CEILING_DIRECTORIES`), and runs none of the clean, smudge, and process filters
- * that the configuration defines: a `.gitattributes` in the work tree chooses a filter, and a filter is a program.
+ * that the configuration defines in the folder of a sandboxed session: a `.gitattributes` there, which a guest writes,
+ * chooses a filter, and a filter is a program.
  */
 import { execFile } from "node:child_process";
 import { dirname } from "node:path";
+import { sandboxedFolder } from "./confined.ts";
 
 export type GitOptions = {
     /** Exit codes besides 0 that still mean success. */
@@ -185,9 +187,12 @@ export async function git(cwd: string, args: string[], options: GitOptions = {})
         return run(cwd, args, {}, options);
     }
 
+    // Only the folder of a sandboxed session holds what a guest wrote: in any other, Pi has the whole machine anyway.
+    const filters = sandboxedFolder(repository.workTree) ? await withoutFilters(repository) : [];
+
     return run(
         cwd,
-        [...(await withoutFilters(repository)), ...args],
+        [...filters, ...args],
         {
             GIT_DIR: repository.gitDir,
             GIT_WORK_TREE: repository.workTree,

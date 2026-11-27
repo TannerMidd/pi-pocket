@@ -19,7 +19,7 @@ import { after, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { changesIn, diffOf } from "../src/server/changes.ts";
-import { openInside } from "../src/server/confined.ts";
+import { onSandboxedFolders, openInside } from "../src/server/confined.ts";
 import { APP_ROOT } from "../src/server/config.ts";
 import { viewFile } from "../src/server/files.ts";
 import { serveImage } from "../src/server/http/assets.ts";
@@ -120,7 +120,7 @@ test("the sandbox cannot be chosen for a folder of the server's own code or data
     }
 });
 
-test("the viewer and the file route never follow a link out of the session's folder", async () => {
+test("in a sandboxed session's folder the viewer and the file route never follow a link out of it", async () => {
     const work = folder("view-work");
     const beyond = folder("view-beyond");
 
@@ -139,20 +139,6 @@ test("the viewer and the file route never follow a link out of the session's fol
 
         return view.kind === "text" ? view.text : view.kind;
     };
-
-    assert.equal(await text("plain.txt"), "plain\n");
-    assert.equal(await text("inner.txt"), "plain\n", "a link inside the folder is followed");
-
-    for (const path of ["AGENTS.md", "link.txt", "linked-dir/other.txt", "linked-dir"]) {
-        await assert.rejects(text(path), /leads out of the folder/, path);
-    }
-
-    await assert.rejects(openInside(work, join(work, "link.txt")), /leads out of the folder/);
-
-    // A path outside the folder that someone names is theirs to read, as before.
-    const named = await viewFile(secret, undefined, work);
-
-    assert.equal(named.kind === "text" && named.text, `${SECRET}\n`);
 
     const status = async (name: string) => {
         const server = createServer((request, response) => {
@@ -174,8 +160,32 @@ test("the viewer and the file route never follow a link out of the session's fol
         }
     };
 
-    assert.equal(await status("real.png"), 200);
-    assert.equal(await status("pic.png"), 404);
+    // No sandboxed session uses the folder: Pi has the whole machine here anyway, and a shared file linked in works.
+    assert.equal(await text("link.txt"), `${SECRET}\n`);
+    assert.equal(await text("linked-dir/other.txt"), `${SECRET}\n`);
+    assert.equal(await status("pic.png"), 200);
+
+    const stop = onSandboxedFolders((used) => used === work);
+
+    try {
+        assert.equal(await text("plain.txt"), "plain\n");
+        assert.equal(await text("inner.txt"), "plain\n", "a link inside the folder is followed");
+
+        for (const path of ["AGENTS.md", "link.txt", "linked-dir/other.txt", "linked-dir"]) {
+            await assert.rejects(text(path), /leads out of the folder/, path);
+        }
+
+        await assert.rejects(openInside(work, join(work, "link.txt")), /leads out of the folder/);
+
+        // A path outside the folder that someone names is theirs to read, as before.
+        const named = await viewFile(secret, undefined, work);
+
+        assert.equal(named.kind === "text" && named.text, `${SECRET}\n`);
+        assert.equal(await status("real.png"), 200);
+        assert.equal(await status("pic.png"), 404);
+    } finally {
+        stop();
+    }
 });
 
 /** Send `@mentioned.txt` with its file, as the message box does. */
@@ -189,7 +199,8 @@ async function mention(app: App, id: ConversationId): Promise<void> {
     await (await app.harness.submission(submissionId, context))!.wait(context);
 }
 
-test("a link in the folder puts no host file in the prompt, a mention, or a prompt template", async () => {
+test("a link in a sandboxed session's folder puts no host file in the prompt, a mention, or a template", async () => {
+    (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
     const seen: string[] = [];
     const app = await openApp(
         scriptedModel((request) => {
@@ -200,37 +211,73 @@ test("a link in the folder puts no host file in the prompt, a mention, or a prom
         join(root, "data-prompts"),
     );
 
+    const linkedFolder = (name: string) => {
+        const path = folder(name);
+
+        symlinkSync(secret, join(path, "AGENTS.md"));
+        symlinkSync(secret, join(path, "mentioned.txt"));
+        mkdirSync(join(path, ".pi", "prompts"), { recursive: true });
+        symlinkSync(secret, join(path, ".pi", "prompts", "evil.md"));
+        writeFileSync(join(path, ".pi", "prompts", "fine.md"), "Fine $1");
+
+        return path;
+    };
+
+    const names = (path: string) =>
+        loadPromptTemplates(path, join(root, "agent"), []).map((each) => each.name);
+
+    const sent = async (id: ConversationId) => {
+        seen.length = 0;
+        await mention(app, id);
+
+        return seen.join("\n");
+    };
+
     try {
-        const linked = folder("prompt-linked");
+        await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
+
+        const sandboxedPath = linkedFolder("prompt-sandboxed");
+        const ordinaryPath = linkedFolder("prompt-ordinary");
+        const sharedPath = linkedFolder("prompt-shared");
         const honest = folder("prompt-honest");
 
-        symlinkSync(secret, join(linked, "AGENTS.md"));
-        symlinkSync(secret, join(linked, "mentioned.txt"));
-        mkdirSync(join(linked, ".pi", "prompts"), { recursive: true });
-        symlinkSync(secret, join(linked, ".pi", "prompts", "evil.md"));
-        writeFileSync(join(linked, ".pi", "prompts", "fine.md"), "Fine $1");
         writeFileSync(join(honest, "AGENTS.md"), "HONEST_INSTRUCTIONS");
         writeFileSync(join(honest, "mentioned.txt"), "HONEST_MENTION");
 
-        const first = await newSession(app, linked);
+        // An ordinary session: links work as before, so a shared AGENTS.md outside the repository is read.
+        const ordinary = await newSession(app, ordinaryPath);
+        const before = await sent(ordinary);
 
-        await mention(app, first);
-        assert.ok(seen.length > 0);
-        assert.doesNotMatch(seen.join("\n"), new RegExp(SECRET), "a linked file is in a request");
+        assert.match(before, new RegExp(SECRET));
+        assert.deepEqual(names(ordinaryPath).sort(), ["evil", "fine"]);
 
-        const templates = loadPromptTemplates(linked, join(root, "agent"), []).map(
-            (each) => each.name,
-        );
+        // A sandboxed session: no host file reaches the prompt, a mention, or a template.
+        const sandboxed = await newSession(app, sandboxedPath);
 
-        assert.deepEqual(templates, ["fine"]);
+        await app.sandboxes.set(sandboxed, owner(app), true);
+        assert.doesNotMatch(await sent(sandboxed), new RegExp(SECRET));
+        assert.deepEqual(names(sandboxedPath), ["fine"]);
 
-        seen.length = 0;
+        // A folder that a sandboxed session shares with an ordinary one is confined for both.
+        const shared = await newSession(app, sharedPath);
+        const guestShared = await newSession(app, sharedPath);
+
+        assert.match(await sent(shared), new RegExp(SECRET));
+        await app.sandboxes.set(guestShared, owner(app), true);
+        assert.doesNotMatch(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
+        assert.deepEqual(names(sharedPath), ["fine"]);
+
+        // Turned off again, the folder is ordinary again.
+        await app.sandboxes.set(guestShared, owner(app), false);
+        assert.match(await sent(await newSession(app, sharedPath)), new RegExp(SECRET));
+
         const second = await newSession(app, honest);
+        const text = await sent(second);
 
-        await mention(app, second);
-        assert.match(seen.join("\n"), /HONEST_INSTRUCTIONS/);
-        assert.match(seen.join("\n"), /HONEST_MENTION/);
+        assert.match(text, /HONEST_INSTRUCTIONS/);
+        assert.match(text, /HONEST_MENTION/);
     } finally {
+        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
         await app.close();
     }
 });
@@ -269,7 +316,7 @@ function repository(name: string, files: Record<string, string>, config = ""): s
     return realpathSync(path);
 }
 
-test("a filter the configuration defines never runs for Changes, whatever .gitattributes says", async () => {
+test("in a sandboxed session's folder no filter the configuration defines runs for Changes, whatever .gitattributes says", async () => {
     const marker = join(folder("git-marker"), "ran");
     const path = repository(
         "filter",
@@ -281,18 +328,29 @@ test("a filter the configuration defines never runs for Changes, whatever .gitat
         writeFileSync(join(path, "a.txt"), "two\n");
         writeFileSync(join(path, "b.txt"), "new\n");
 
-        const changes = await changesIn(path, []);
+        // An ordinary folder: its filters run, as in any git command there.
+        await changesIn(path, []);
+        assert.equal(existsSync(marker), true, "an ordinary folder's filter did not run");
+        rmSync(marker);
 
-        assert.deepEqual(changes.files.map((file) => file.path).sort(), ["a.txt", "b.txt"]);
-        assert.match(await diffOf(path, "a.txt"), /\+two/);
-        assert.match(await diffOf(path, "b.txt"), /\+new/);
-        assert.equal(existsSync(marker), false, "a configured filter ran");
+        const stop = onSandboxedFolders((used) => used === path);
+
+        try {
+            const changes = await changesIn(path, []);
+
+            assert.deepEqual(changes.files.map((file) => file.path).sort(), ["a.txt", "b.txt"]);
+            assert.match(await diffOf(path, "a.txt"), /\+two/);
+            assert.match(await diffOf(path, "b.txt"), /\+new/);
+            assert.equal(existsSync(marker), false, "a configured filter ran");
+        } finally {
+            stop();
+        }
     } finally {
         rmSync(path, { recursive: true, force: true });
     }
 });
 
-test("Changes shows a repository whose filter is required, as git-lfs's is, by its pointers", async () => {
+test("in a sandboxed session's folder Changes shows a repository whose filter is required, as git-lfs's is, by its pointers", async () => {
     const marker = join(folder("lfs-marker"), "ran");
     const pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 4\n";
     const path = repository(
@@ -300,6 +358,8 @@ test("Changes shows a repository whose filter is required, as git-lfs's is, by i
         { "big.bin": pointer, ".gitattributes": "*.bin filter=lfs\n" },
         `[filter "lfs"]\n\tclean = "sh -c 'touch ${marker}; exit 1'"\n\tsmudge = "sh -c 'touch ${marker}; exit 1'"\n\tprocess = "sh -c 'touch ${marker}; exit 1'"\n\trequired = true\n`,
     );
+
+    const stop = onSandboxedFolders((used) => used === path);
 
     try {
         writeFileSync(join(path, "big.bin"), "real big content\n");
@@ -313,6 +373,7 @@ test("Changes shows a repository whose filter is required, as git-lfs's is, by i
         assert.match(await diffOf(path, "big.bin"), /-oid sha256:abc/);
         assert.equal(existsSync(marker), false, "the LFS filter ran");
     } finally {
+        stop();
         rmSync(path, { recursive: true, force: true });
     }
 });

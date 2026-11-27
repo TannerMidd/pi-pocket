@@ -6,7 +6,7 @@ import { extname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type FileHandle, open } from "node:fs/promises";
-import { openInside, within } from "../confined.ts";
+import { confines, openInside } from "../confined.ts";
 import { type ReadableFile, withUploadBytes } from "../upload-content.ts";
 import { APP_ROOT, modulesWith } from "../config.ts";
 import { HttpError } from "../errors.ts";
@@ -443,7 +443,7 @@ async function serveImageFile(
 
     try {
         handle =
-            folder !== undefined && within(folder, file)
+            folder !== undefined && confines(folder, file)
                 ? await openInside(folder, file)
                 : await open(file, "r");
     } catch {

@@ -9,7 +9,7 @@ import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
 import { readJobSupervision } from "../job-supervision.ts";
-import { openInside, within } from "../confined.ts";
+import { confines, openInside } from "../confined.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
@@ -524,7 +524,7 @@ export async function conversationRoutes(
         try {
             const folder = app.cwdOf(id);
 
-            handle = within(folder, file)
+            handle = confines(folder, file)
                 ? await openInside(folder, file)
                 : await openNoFollow(file);
         } catch {
