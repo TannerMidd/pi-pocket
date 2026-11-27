@@ -1,6 +1,57 @@
 // Omarchy's themes as palettes: each theme's colors.toml, keys as Omarchy names them. Generated from
-// /usr/share/omarchy/themes; "Follow desktop" reads the theme in use from the server instead.
+// /usr/share/omarchy/themes; "Follow desktop" reads the theme in use from the server instead. The first two are
+// Pocket's own (not Omarchy's): the greys of the Bold look, which are the colors a browser starts with.
 export const THEMES = {
+    "pocket-neutral": {
+        name: "Pocket neutral",
+        colors: {
+            mode: "dark",
+            accent: "#339cff",
+            selection: "#2b2b2b",
+            muted: "#8a8a8a",
+            background: "#151515",
+            dark_background: "#101010",
+            darker_background: "#070707",
+            lighter_background: "#1f1f1f",
+            foreground: "#cdcdcd",
+            dark_foreground: "#8a8a8a",
+            light_foreground: "#e6e6e6",
+            bright_foreground: "#ffffff",
+            red: "#ff6764",
+            yellow: "#f5b544",
+            orange: "#fa994c",
+            green: "#40c977",
+            cyan: "#6dcbf4",
+            blue: "#3d8dff",
+            magenta: "#b06dff",
+            bright_yellow: "#f5b544",
+        },
+    },
+    "pocket-neutral-light": {
+        name: "Pocket neutral light",
+        colors: {
+            mode: "light",
+            accent: "#0b6fd6",
+            selection: "#cfe4fb",
+            muted: "#6b6c6e",
+            background: "#ffffff",
+            dark_background: "#f8f8f8",
+            darker_background: "#f6f6f6",
+            lighter_background: "#f9f9f9",
+            foreground: "#1a1c1f",
+            dark_foreground: "#6b6c6e",
+            light_foreground: "#1a1c1f",
+            bright_foreground: "#1a1c1f",
+            red: "#e02e2a",
+            yellow: "#b7791f",
+            orange: "#bd5800",
+            green: "#00a240",
+            cyan: "#0071ea",
+            blue: "#001bcb",
+            magenta: "#751ed9",
+            bright_yellow: "#b7791f",
+        },
+    },
     catppuccin: {
         name: "Catppuccin",
         colors: {

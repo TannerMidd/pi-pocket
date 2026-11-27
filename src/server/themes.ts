@@ -45,8 +45,11 @@ import {
     ThemeProblem,
 } from "./themes/format.ts";
 
-/** The app's own look, which every theme builds on: choosing it loads no stylesheet. */
+/** The app's own look, which every theme builds on. It comes with a stylesheet of its own (`web/themes/pocket/`); other themes load theirs instead. */
 export const BASE_THEME = "pocket";
+
+/** The colors browsers start with until their person chooses: Pocket's own greys, a palette of `web/themes.js`. */
+export const DEFAULT_COLORS = "pocket-neutral";
 
 /** A theme as the web app lists it. */
 export interface ThemeInfo {
@@ -57,7 +60,7 @@ export interface ThemeInfo {
     version?: string;
     /** In `web/themes/`, with the app: it cannot be changed or removed here. */
     builtIn: boolean;
-    /** The stylesheets to load; none for the base theme and for colors alone. */
+    /** The stylesheets to load; none for colors alone. */
     css: string[];
     /** Its palette, by `colors.toml`'s keys, when it has one. */
     colors?: Record<string, string>;
@@ -417,7 +420,7 @@ export class Themes {
                 ...(manifest?.author === undefined ? {} : { author: manifest.author }),
                 ...(manifest?.version === undefined ? {} : { version: manifest.version }),
                 builtIn,
-                css: good === undefined || id === BASE_THEME ? [] : this.#chain(good),
+                css: good === undefined ? [] : this.#chain(good),
                 ...(good?.colors === undefined ? {} : { colors: good.colors }),
                 ...(good?.colorsLight === undefined ? {} : { colorsLight: good.colorsLight }),
                 fonts: good === undefined || id === BASE_THEME ? [] : this.#fonts(good),
