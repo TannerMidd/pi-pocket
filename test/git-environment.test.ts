@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { git } from "../src/server/git.ts";
+import { runGh } from "../src/server/github.ts";
 
 const folder = realpathSync(mkdtempSync(join(tmpdir(), "pocket-git-env-")));
 const config = join(folder, "host.cfg");
@@ -64,3 +65,33 @@ for (const [name, variables] of VARIABLES) {
         }
     });
 }
+
+test(
+    "gh, which runs git in a session's folder, gets no GIT_* variable that Pocket was started with",
+    { skip: process.platform === "win32" && "a shell script stands in for gh" },
+    async () => {
+        const bin = realpathSync(mkdtempSync(join(tmpdir(), "pocket-gh-bin-")));
+        const saved = { path: process.env.PATH, config: process.env.GIT_CONFIG_GLOBAL };
+
+        writeFileSync(join(bin, "gh"), "#!/bin/sh\nenv\n", { mode: 0o755 });
+        process.env.PATH = `${bin}:${saved.path}`;
+        process.env.GIT_CONFIG_GLOBAL = config;
+
+        try {
+            const seen = await runGh([], folder);
+
+            assert.doesNotMatch(seen, /^GIT_CONFIG_GLOBAL=/m);
+            assert.match(seen, /^GIT_TERMINAL_PROMPT=0$/m, "Pocket's own setting stays");
+        } finally {
+            process.env.PATH = saved.path;
+
+            if (saved.config === undefined) {
+                delete process.env.GIT_CONFIG_GLOBAL;
+            } else {
+                process.env.GIT_CONFIG_GLOBAL = saved.config;
+            }
+
+            rmSync(bin, { recursive: true, force: true });
+        }
+    },
+);

@@ -320,6 +320,32 @@ export class Sandboxes {
         return found;
     }
 
+    /** What runs for a session outside a tool call and may run on this machine (a goal's check), until it ends. */
+    readonly #running = new Set<{ root: number; what: string }>();
+
+    /**
+     * Run `work`, which executes for the session and is not a tool call, as a tool call runs: it waits for a change of
+     * the session's sandbox, and while it runs a turn-on is refused (`#hostWork` names it). `work` finds its
+     * environment inside, so that it is the one the setting gives after the change.
+     */
+    async tracked<T>(id: ConversationId, what: string, work: () => Promise<T>): Promise<T> {
+        const root = Number(this.#app.rootOf(id));
+
+        do {
+            await this.settled(id);
+        } while (this.#changes.has(root));
+
+        const mine = { root, what };
+
+        this.#running.add(mine);
+
+        try {
+            return await work();
+        } finally {
+            this.#running.delete(mine);
+        }
+    }
+
     /** The change of each session's sandbox that is under way, by the session's number. */
     readonly #changes = new Map<number, Promise<void>>();
 
@@ -472,6 +498,12 @@ export class Sandboxes {
                 if (!INERT.has(name)) {
                     found.push(`a ${name} call that is running`);
                 }
+            }
+        }
+
+        for (const { root, what } of this.#running) {
+            if (ours.has(root)) {
+                found.push(`${what} that is running`);
             }
         }
 

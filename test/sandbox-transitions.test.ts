@@ -326,3 +326,54 @@ test("the sandbox is not turned on while a background call has not made its reco
         await app.close();
     }
 });
+
+test("the sandbox is not turned on while a goal's check runs on this machine", async () => {
+    const { app, driver, id } = await session("goal-check");
+    const held = gate();
+
+    try {
+        await app.goals.set(id, owner(app).id, "true");
+        const environment = app.envForRun.bind(app);
+
+        // The check has been told to run, and has not found its environment: it is under way, not a tool call.
+        app.envForRun = async (conversation) => {
+            await held.wait();
+
+            return environment(conversation);
+        };
+
+        const run = say(app, id, "go");
+
+        await held.reached;
+        await assert.rejects(
+            app.sandboxes.set(id, owner(app), true),
+            /still runs work on this machine: a goal check that is running/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, false);
+        held.open();
+        await run;
+        assert.equal(driver.log.started.length, 0);
+    } finally {
+        useDriver(undefined);
+        held.open();
+        await app.close();
+    }
+});
+
+test("a goal's check in a sandboxed session runs in the VM", async () => {
+    const { app, driver, id } = await session("goal-vm");
+
+    try {
+        await app.sandboxes.set(id, owner(app), true);
+        await app.goals.set(id, owner(app).id, "true");
+        await say(app, id, "go");
+        assert.ok(
+            driver.log.commands.some((argv) => argv.join(" ").endsWith("true")),
+            "the check did not run in the VM",
+        );
+        assert.equal((await app.goals.get(id))?.status, "met");
+    } finally {
+        useDriver(undefined);
+        await app.close();
+    }
+});

@@ -111,37 +111,43 @@ export class Goals {
         return why === undefined;
     }
 
-    /** Run a goal's check in the conversation's folder. */
+    /** Run a goal's check in the conversation's folder: in its sandbox when it has one, as a tool call would. */
     async run(
         id: ConversationId,
         command: string,
         context: Context,
     ): Promise<Omit<GoalCheck, "at">> {
-        let output = "";
-        const env = await this.#app.envForRun(id);
-        const result = await env.exec(
-            command,
-            {
-                timeout: CHECK_TIMEOUT_SECONDS,
-                onOutput: (text) => (output = (output + text).slice(-TAIL_CHARS)),
-            },
-            context,
-        );
+        return this.#app.sandboxes.tracked(id, "a goal check", async () => {
+            let output = "";
+            const env = await this.#app.envForRun(id);
+            const result = await env.exec(
+                command,
+                {
+                    timeout: CHECK_TIMEOUT_SECONDS,
+                    onOutput: (text) => (output = (output + text).slice(-TAIL_CHARS)),
+                },
+                context,
+            );
 
-        if (!result.ok) {
-            const why =
-                result.error.code === "timeout"
-                    ? `It did not finish within ${CHECK_TIMEOUT_SECONDS / 60} minutes.`
-                    : result.error.message;
+            if (!result.ok) {
+                const why =
+                    result.error.code === "timeout"
+                        ? `It did not finish within ${CHECK_TIMEOUT_SECONDS / 60} minutes.`
+                        : result.error.message;
 
-            return { passed: false, code: -1, tail: `${output}\n${why}`.trim().slice(-TAIL_CHARS) };
-        }
+                return {
+                    passed: false,
+                    code: -1,
+                    tail: `${output}\n${why}`.trim().slice(-TAIL_CHARS),
+                };
+            }
 
-        return {
-            passed: result.value.exitCode === 0,
-            code: result.value.exitCode,
-            tail: output.trim(),
-        };
+            return {
+                passed: result.value.exitCode === 0,
+                code: result.value.exitCode,
+                tail: output.trim(),
+            };
+        });
     }
 
     /**
