@@ -3,12 +3,13 @@
 // runs the same in `gondolin-real-parity.test.ts`.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import {
     execPathsOf,
+    execPlan,
     GitExecGuard,
     gitExecPaths,
     parseConfigList,
@@ -41,6 +42,9 @@ const entry = (key: string, value: string, origin = "file:.git/config"): ConfigE
 });
 const held = (paths: { path: string; tree: boolean }[], root: string) =>
     paths.map((each) => each.path.slice(root.length)).sort();
+/** What a hooks path alone holds: not the config file that it comes from. */
+const hooksOnly = (paths: { path: string; tree: boolean }[], root: string) =>
+    held(paths, root).filter((each) => !each.startsWith("/.git"));
 
 test("git's own list is read as entries", () => {
     const list =
@@ -271,6 +275,190 @@ test("a call that was meant for a folder the session has left does not run in th
         assert.equal(driver.log.started.length, 1, "no VM started for it");
         assert.ok((await moved.exec("true", undefined, context)).ok);
         assert.equal(driver.log.started.at(-1)!.cwd, second);
+    } finally {
+        await vms.stopAll("the test ended");
+    }
+});
+
+test("a hooks folder that is the folder itself cannot be held, and the way it is written does not matter", () => {
+    const root = temp();
+
+    mkdirSync(join(root, ".git"));
+    mkdirSync(join(root, "sub"));
+
+    for (const value of [
+        ".",
+        "./",
+        "",
+        ".//",
+        "sub/..",
+        "./sub/../.",
+        root,
+        `${root}/`,
+        `${root}/sub/..`,
+    ]) {
+        const plan = execPlan([entry("core.hookspath", value)], {
+            cwd: root,
+            top: root,
+            gitDir: join(root, ".git"),
+            mounts: [root],
+        });
+
+        assert.equal(plan.problems.length, 1, JSON.stringify(value));
+        assert.match(plan.problems[0]!, /core\.hooksPath .* is the folder .* itself/);
+        assert.deepEqual(hooksOnly(plan.paths, root), []);
+    }
+
+    // Other places are held, or are not the guest's: nothing to refuse.
+    for (const value of [".githooks", ".githooks/", "sub", "../elsewhere", "/etc/hooks"]) {
+        const plan = execPlan([entry("core.hookspath", value)], {
+            cwd: root,
+            top: root,
+            gitDir: join(root, ".git"),
+            mounts: [root],
+        });
+
+        assert.deepEqual(plan.problems, [], value);
+    }
+});
+
+test("a hooks folder at the top of the tree is refused for a session in a folder below it only when it is that folder", () => {
+    const top = temp();
+    const cwd = join(top, "app");
+
+    mkdirSync(cwd);
+    mkdirSync(join(top, ".git"));
+    const context = { cwd, top, gitDir: join(top, ".git"), mounts: [cwd] };
+
+    assert.deepEqual(
+        execPlan([entry("core.hookspath", ".")], context).problems,
+        [],
+        "the top is not mounted",
+    );
+    assert.equal(execPlan([entry("core.hookspath", "app")], context).problems.length, 1);
+    assert.deepEqual(hooksOnly(execPathsOf([entry("core.hookspath", "app/hooks")], context), cwd), [
+        "/hooks",
+    ]);
+});
+
+test("a link on the way to a hooks folder is held too, so it cannot be pointed at a folder that the guest made", () => {
+    const root = temp();
+
+    mkdirSync(join(root, ".git"));
+    mkdirSync(join(root, "real", "hooks"), { recursive: true });
+    symlinkSync("real", join(root, "alias"));
+    symlinkSync("real/hooks", join(root, "hooks"));
+    const context = { cwd: root, top: root, gitDir: join(root, ".git"), mounts: [root] };
+
+    assert.deepEqual(hooksOnly(execPathsOf([entry("core.hookspath", "hooks")], context), root), [
+        "/hooks",
+        "/real/hooks",
+    ]);
+    assert.deepEqual(
+        hooksOnly(execPathsOf([entry("core.hookspath", "alias/hooks")], context), root),
+        ["/alias", "/real/hooks"],
+    );
+});
+
+test("a VM does not start when git runs hooks from the folder itself, and one that runs stops when the owner sets it so", async () => {
+    const root = temp();
+
+    execFileSync("git", ["init", "-q", root]);
+    const driver = new FakeDriver();
+    const vms = new SandboxManager({
+        driver,
+        log: () => {},
+        pidFile: join(root, "..", `vms-root-${process.pid}.json`),
+        settings: () => ({
+            backend: "auto",
+            mount: "rw",
+            network: "off",
+            allowedHosts: [],
+            cpus: 1,
+            memoryMb: 512,
+            diskMb: 1024,
+            idleMinutes: 30,
+            maxVms: 2,
+            image: "alpine-base:latest",
+        }),
+    });
+    const env = vms.envFor(1, { rootId: 1, cwd: root, uploadDir: undefined });
+
+    try {
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        execFileSync("git", ["config", "core.hooksPath", "."], { cwd: root });
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        const refused = await env.exec("true", undefined, context);
+
+        assert.ok(!refused.ok);
+        assert.match(
+            String((refused as { error: Error }).error.message),
+            /core\.hooksPath .* itself/,
+        );
+        assert.equal(vms.running, 0, "the VM that ran was stopped");
+        const again = await env.exec("true", undefined, context);
+
+        assert.ok(!again.ok, "and none starts while it is so");
+        assert.equal(driver.log.started.length, 1);
+        assert.match(
+            String((again as { error: Error }).error.message),
+            /Point core\.hooksPath at a folder inside/,
+        );
+        execFileSync("git", ["config", "core.hooksPath", ".githooks"], { cwd: root });
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        assert.equal(driver.log.started.length, 2);
+    } finally {
+        await vms.stopAll("the test ended");
+    }
+});
+
+test("a call that waits for git's configuration does not lose its VM to the idle timer or to a stop", async () => {
+    const root = temp();
+
+    execFileSync("git", ["init", "-q", root]);
+    const driver = new FakeDriver();
+    const vms = new SandboxManager({
+        driver,
+        log: () => {},
+        pidFile: join(root, "..", `vms-race-${process.pid}.json`),
+        settings: () => ({
+            backend: "auto",
+            mount: "rw",
+            network: "off",
+            allowedHosts: [],
+            cpus: 1,
+            memoryMb: 512,
+            diskMb: 1024,
+            idleMinutes: 0.02,
+            maxVms: 2,
+            image: "alpine-base:latest",
+        }),
+    });
+    const env = vms.envFor(3, { rootId: 3, cwd: root, uploadDir: undefined });
+
+    try {
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        const guard = driver.log.started[0]!.gitExec!;
+        const slow = guard.refresh.bind(guard);
+
+        // The idle timer (1.2 s) fires while git is asked.
+        await new Promise((resolve) => setTimeout(resolve, 900));
+
+        guard.refresh = async () => {
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            await slow(true);
+        };
+
+        assert.ok((await env.exec("true", undefined, context)).ok, "the idle timer stopped it");
+        assert.equal(driver.log.started.length, 1, "the same VM served the call");
+
+        // A stop that comes while git is asked: the call starts a new VM, not a TypeError.
+        guard.refresh = async () => {
+            await vms.stop(3, "stopped meanwhile");
+        };
+
+        assert.ok((await env.exec("true", undefined, context)).ok);
+        assert.equal(driver.log.started.length, 2);
     } finally {
         await vms.stopAll("the test ended");
     }

@@ -117,6 +117,10 @@ export interface ManagerOptions {
     readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
 }
 
+/** What a person reads when git is set up so that its hooks cannot be held (`git-exec.ts`). */
+const HOOKS_ROOT = (problem: string) =>
+    `${problem}. Point core.hooksPath at a folder inside the project (for example .githooks), or unset it, and try again.`;
+
 const STRICTER = "the owner made the sandbox's rules stricter";
 
 function sessionLabel(rootId: number, cwd: string): string {
@@ -344,8 +348,27 @@ export class SandboxManager {
                 entry.spec === undefined ||
                 !looserThanSettings(entry.spec, this.#options.settings())
             ) {
-                // The owner may have changed the git configuration since the last call: what it names is held now.
-                await entry.guard?.refresh();
+                // The owner may have changed the git configuration since the last call: what it names is held now. The
+                // VM stays up while git is asked (the idle timer must not stop it), and may still be gone after.
+                const done = this.#busy(rootId);
+
+                try {
+                    await entry.guard?.refresh();
+                } finally {
+                    done();
+                }
+
+                if (entry.guard?.problem !== undefined) {
+                    const problem = entry.guard.problem;
+
+                    await this.stop(rootId, "git's configuration cannot be held");
+
+                    throw new Error(HOOKS_ROOT(problem));
+                }
+
+                if (entry.vm === undefined || this.#entries.get(rootId)?.moved === true) {
+                    return this.#ready(rootId, signal, expect);
+                }
 
                 return entry.vm;
             }
@@ -474,6 +497,11 @@ export class SandboxManager {
         try {
             // What the repository's configuration names is held before the first call, not after it.
             await guard.refresh(true);
+
+            if (guard.problem !== undefined) {
+                throw new Error(HOOKS_ROOT(guard.problem));
+            }
+
             const vm = await this.#options.driver.start(spec);
             let shell = "/bin/sh";
 

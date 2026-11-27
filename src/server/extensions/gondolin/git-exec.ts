@@ -7,9 +7,9 @@
  * (`policy.ts` protects `.git`'s own files; this protects what the config adds.)
  */
 import { execFile } from "node:child_process";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** A path of this machine that the guest may not write: the path itself, and, for a folder (`tree`), all below it. */
 export interface ExecPath {
@@ -170,17 +170,57 @@ function protect(
         held = true;
     }
 
-    if (target !== mount) {
+    if (target.toLowerCase() !== mount.toLowerCase()) {
         out.set(target.toLowerCase(), { path: target, tree: held });
     }
+
+    // A link on the way (`hooks -> ../x`, or a folder that is one) is held too: the guest could point it elsewhere in
+    // the folder, at a path that it made.
+    const down = relative(mount, path);
+
+    if (!down.startsWith("..") && !isAbsolute(down)) {
+        let at = mount;
+
+        for (const part of down.split(sep).filter((each) => each !== "")) {
+            at = join(at, part);
+
+            try {
+                if (lstatSync(at).isSymbolicLink()) {
+                    out.set(at.toLowerCase(), { path: at, tree: false });
+                }
+            } catch {
+                break;
+            }
+        }
+    }
+}
+
+/** The mount that `path` is, and not only inside: a hooks folder that is the whole folder cannot be held. */
+function mountItself(path: string, mounts: readonly string[]): string | undefined {
+    const named = resolve(path).toLowerCase();
+    const real = canonical(path).toLowerCase();
+
+    return mounts.find((mount) => mount.toLowerCase() === named || mount.toLowerCase() === real);
+}
+
+/** What the host's git would read or run inside the mounts, and what makes holding it impossible. */
+export interface ExecPlan {
+    readonly paths: ExecPath[];
+    /** Why the folder cannot be shared at all: git runs hooks from the folder itself, and every file of it could be one. */
+    readonly problems: string[];
 }
 
 /** The files of the folder that git would read as configuration, or run, given its configuration. */
 export function execPathsOf(entries: readonly ConfigEntry[], context: ExecContext): ExecPath[] {
+    return execPlan(entries, context).paths;
+}
+
+export function execPlan(entries: readonly ConfigEntry[], context: ExecContext): ExecPlan {
     const home = context.home ?? homedir();
     const mounts = context.mounts.map(canonical);
     const bases = [...new Set([context.top, context.cwd].filter((base) => base !== undefined))];
     const out = new Map<string, ExecPath>();
+    const problems: string[] = [];
 
     for (const entry of entries) {
         const key = entry.key;
@@ -206,10 +246,22 @@ export function execPathsOf(entries: readonly ConfigEntry[], context: ExecContex
 
         if (key === "core.hookspath") {
             // Relative to where hooks run (the top of the working tree), and, in a bare repository, to the git dir.
-            const hooks = [...bases, ...(context.gitDir === undefined ? [] : [context.gitDir])];
+            const hooks = [
+                context.top ?? context.cwd,
+                ...(context.gitDir === undefined ? [] : [context.gitDir]),
+            ];
 
             for (const path of candidates(entry.value, hooks, home)) {
-                protect(path, true, mounts, out);
+                const whole = mountItself(path, mounts);
+
+                if (whole !== undefined) {
+                    // Every file of the folder could be a hook, and the folder is the guest's to write: no way to hold it.
+                    problems.push(
+                        `git's core.hooksPath (${JSON.stringify(entry.value)}${originFile === undefined ? "" : `, set in ${originFile}`}) is the folder ${whole} itself, so any file in it could be a hook that git runs on this machine`,
+                    );
+                } else {
+                    protect(path, true, mounts, out);
+                }
             }
 
             continue;
@@ -232,7 +284,7 @@ export function execPathsOf(entries: readonly ConfigEntry[], context: ExecContex
         }
     }
 
-    return [...out.values()];
+    return { paths: [...out.values()], problems };
 }
 
 /** Git's own list of what the configuration says here, as entries: `git config --list --show-origin -z`. */
@@ -281,15 +333,15 @@ function git(cwd: string, args: string[]): Promise<string | undefined> {
  * What the host's git reads or runs inside `mounts` for a session in `cwd`: asked of git itself, so that what the
  * owner's configuration says now is what counts. A folder that is no repository still has the global configuration.
  */
-export async function gitExecPaths(
+export async function gitExecPlan(
     cwd: string,
     mounts: readonly string[],
     home?: string,
-): Promise<ExecPath[]> {
+): Promise<ExecPlan> {
     const listed = await git(cwd, ["config", "--list", "--show-origin", "-z"]);
 
     if (listed === undefined) {
-        return [];
+        return { paths: [], problems: [] };
     }
 
     const where = (await git(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]))?.split(
@@ -298,7 +350,7 @@ export async function gitExecPaths(
     const top = where?.[0] === undefined || where[0] === "" ? undefined : where[0];
     const gitDir = where?.[1] === undefined || where[1] === "" ? undefined : where[1];
 
-    return execPathsOf(parseConfigList(listed), {
+    return execPlan(parseConfigList(listed), {
         cwd,
         ...(top === undefined ? {} : { top }),
         ...(gitDir === undefined ? {} : { gitDir }),
@@ -312,12 +364,21 @@ export async function gitExecPaths(
  * `every` ms and only when a VM is used. A path that the configuration names after the VM started is held from then on;
  * what the guest wrote there before is not undone.
  */
+export async function gitExecPaths(
+    cwd: string,
+    mounts: readonly string[],
+    home?: string,
+): Promise<ExecPath[]> {
+    return (await gitExecPlan(cwd, mounts, home)).paths;
+}
+
 export class GitExecGuard {
     readonly #cwd: string;
     readonly #mounts: readonly string[];
     readonly #every: number;
     readonly #home: string | undefined;
     #paths: readonly ExecPath[] = [];
+    #problem: string | undefined;
     #at = 0;
     #loading: Promise<void> | undefined;
 
@@ -332,6 +393,11 @@ export class GitExecGuard {
         return this.#paths;
     }
 
+    /** Why the folder cannot be shared as git is set up now (its hooks folder is the folder itself), or undefined. */
+    get problem(): string | undefined {
+        return this.#problem;
+    }
+
     /** Read git's list again when it is older than `every` ms; `force` reads it now. */
     refresh(force = false): Promise<void> {
         if (this.#loading !== undefined) {
@@ -342,8 +408,9 @@ export class GitExecGuard {
             return Promise.resolve();
         }
 
-        this.#loading = gitExecPaths(this.#cwd, this.#mounts, this.#home)
-            .then((paths) => {
+        this.#loading = gitExecPlan(this.#cwd, this.#mounts, this.#home)
+            .then(({ paths, problems }) => {
+                this.#problem = problems[0];
                 const known = new Map(this.#paths.map((each) => [each.path.toLowerCase(), each]));
 
                 // A path stays held after the configuration stops naming it: the guest cannot gain a write by a

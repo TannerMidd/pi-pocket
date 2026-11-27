@@ -12,6 +12,7 @@ import {
     readFileSync,
     realpathSync,
     rmSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -933,4 +934,65 @@ test("a rebase in the sandbox fails with a clear word, and the rest of git works
     assert.doesNotMatch(output, /fatal: not a git/);
     assert.equal(existsSync(join(repo, ".git", "rebase-merge")), false);
     assert.equal(existsSync(join(repo, ".git", "sequencer")), false);
+});
+
+test("git's hooks folder that is the folder itself keeps the VM from starting, and a link to a hooks folder cannot be moved", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("hooks-root");
+
+    writeFileSync(join(repo, "post-checkout"), "#!/bin/sh\ntouch OWNER_ROOT_HOOK\n", {
+        mode: 0o755,
+    });
+    onHost(repo, "config", "core.hooksPath", ".");
+    const rootId = ++numbers;
+    const env = manager!.envFor(rootId, { rootId, cwd: repo, uploadDir: undefined });
+    const refused = await env.exec("echo hi > post-checkout; echo ran", { timeout: 60 }, context);
+
+    assert.ok(!refused.ok, "the VM did not start");
+    assert.match(
+        String((refused as { error: Error }).error.message),
+        /core\.hooksPath \("\.", set in .*\) is the folder .* itself.*Point core\.hooksPath at a folder inside/,
+    );
+    assert.equal(manager!.state(rootId)?.phase, "error", "no VM for this session");
+    assert.ok(!readFileSync(join(repo, "post-checkout"), "utf8").includes("echo hi"));
+
+    // A link: the hooks folder is a link to another folder of the project. Neither can be changed.
+    onHost(repo, "config", "core.hooksPath", "hooks");
+    mkdirSync(join(repo, "real-hooks"));
+    writeFileSync(join(repo, "real-hooks", "post-checkout"), "#!/bin/sh\ntouch OWNER_LINK_HOOK\n", {
+        mode: 0o755,
+    });
+    mkdirSync(join(repo, "evil-hooks"));
+    symlinkSync("real-hooks", join(repo, "hooks"));
+    const second = ++numbers;
+    const output: string[] = [];
+    const again = manager!.envFor(second, { rootId: second, cwd: repo, uploadDir: undefined });
+
+    await again.exec(
+        [
+            "echo 'touch EVIL_LINK_HOOK' > evil-hooks/post-checkout; chmod +x evil-hooks/post-checkout; echo made=$?",
+            "ln -sfn evil-hooks hooks; echo relink=$?",
+            "rm hooks; echo remove=$?",
+            "echo 'touch EVIL_LINK_HOOK' >> real-hooks/post-checkout; echo write=$?",
+            "echo ok > notes.txt; echo notes=$?",
+        ].join("; "),
+        { onOutput: (text) => output.push(text), timeout: 60 },
+        context,
+    );
+    await manager!.stop(second, "the test ended");
+    const text = output.join("");
+
+    assert.match(text, /made=0/);
+
+    for (const name of ["relink", "remove", "write"]) {
+        assert.match(text, new RegExp(`${name}=[1-9]`), `${name}: ${text}`);
+    }
+
+    assert.match(text, /notes=0/);
+    onHost(repo, "checkout", "-q", "-b", "elsewhere");
+    assert.equal(existsSync(join(repo, "OWNER_LINK_HOOK")), true);
+    assert.equal(existsSync(join(repo, "EVIL_LINK_HOOK")), false);
 });
