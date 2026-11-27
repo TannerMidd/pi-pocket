@@ -22,10 +22,10 @@ import {
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import { GIT_WRAPPER, guestGitConfig } from "./git.ts";
-import { gitDirMatcher, protectedMatcher } from "./policy.ts";
+import { gitProtected, holdsGitDir, within } from "./policy.ts";
 import type {
     Backend,
     CheckLine,
@@ -82,146 +82,114 @@ export function resolveImage(
         : choice;
 }
 
-const NO_WRITE = new Set([
-    "mkdir",
-    "mkdirSync",
-    "rmdir",
-    "rmdirSync",
-    "unlink",
-    "unlinkSync",
-    "rename",
-    "renameSync",
-    "link",
-    "linkSync",
-    "chmod",
-    "chmodSync",
-    "symlink",
-    "symlinkSync",
-    "copyFile",
-    "copyFileSync",
-    "open",
-    "openSync",
-]);
+/**
+ * The calls of a provider that change something, and which of their arguments name an entry that they change: `follow`
+ * when a link at the end of the name is followed (a file that is opened, the source of a hard link), `moves` when the
+ * entry goes away from where it is (a folder that holds a git directory may not).
+ */
+const WRITES: Record<string, { at: number; follow: boolean; moves?: true }[]> = {
+    open: [{ at: 0, follow: true }],
+    mkdir: [{ at: 0, follow: false }],
+    rmdir: [{ at: 0, follow: false }],
+    unlink: [{ at: 0, follow: false }],
+    rename: [
+        { at: 0, follow: false, moves: true },
+        { at: 1, follow: false, moves: true },
+    ],
+    link: [
+        { at: 0, follow: true },
+        { at: 1, follow: false },
+    ],
+    symlink: [{ at: 1, follow: false }],
+    chmod: [{ at: 0, follow: true }],
+    copyFile: [{ at: 1, follow: true }],
+};
 
 /**
- * `backend` with the writes that `deny` names refused (`EACCES`), and every read as it is: the guest reads `.git/config`
- * and hooks, and cannot change them. (Gondolin's own `ShadowProvider` hides such files, which would hide a
- * repository's remotes and settings from git in the guest.) A path is checked as named and as its link resolves, so a
- * link inside the folder is no way to write the file.
+ * `backend` with every write into a git directory refused (`EROFS`), and every read as it is: the guest reads `.git`
+ * and cannot change it. A write is refused when the path it names, or the place that path leads to, is protected
+ * (`gitProtected`); renaming a folder that holds a git directory is refused too, since the directory would then lie
+ * where nothing guards it. A hard link needs its source checked as well as its name: both are.
  */
 function refuseWrites(
     library: Library,
     backend: any,
-    deny: (context: { op: string; path: string }) => boolean,
+    root: string,
+    gitDirs: readonly string[],
 ): unknown {
     const { isWriteFlag, normalizeVfsPath, ERRNO } = library;
+    const guarded = gitProtected(root, gitDirs);
 
     const refuse = (op: string, path: string): never => {
-        const error = new Error(`EACCES: ${op} '${path}' (protected by the sandbox)`) as Error & {
+        const error = new Error(
+            `EROFS: ${op} '${path}' (git metadata is read only here)`,
+        ) as Error & {
             code: string;
             errno: number;
             syscall: string;
             path: string;
         };
 
-        error.code = "EACCES";
-        error.errno = ERRNO.EACCES;
+        error.code = "EROFS";
+        error.errno = ERRNO.EROFS;
         error.syscall = op;
         error.path = path;
 
         throw error;
     };
 
-    const protectedPath = (op: string, path: string): boolean => {
-        const named = normalizeVfsPath(path);
+    // Where a path leads, a link followed as the file system follows it: the real path of what exists, then the names
+    // that do not exist yet. `follow` false leaves the last name alone (it is the entry that the call changes).
+    const leadsTo = (path: string, follow: boolean): string => {
+        const rest = follow || path === "/" ? [] : [posix.basename(path)];
+        let at = follow || path === "/" ? path : posix.dirname(path);
 
-        if (deny({ op, path: named })) {
-            return true;
-        }
-
-        try {
-            return deny({ op, path: normalizeVfsPath(backend.realpathSync?.(named) ?? named) });
-        } catch {
-            return false;
-        }
-    };
-
-    // Moving a folder moves what is under it: a nested repository (`sub/.git`) moved away, written, and moved back
-    // would be a way round the rule. A folder that holds a protected entry (or too many entries to look through) stays.
-    const holdsProtected = (path: string): boolean => {
-        const root = backend.rootPath as string | undefined;
-
-        if (typeof root !== "string") {
-            return false;
-        }
-
-        let budget = 20_000;
-
-        const look = (vfs: string, real: string): boolean => {
-            let entries: import("node:fs").Dirent[];
-
+        for (;;) {
             try {
-                entries = readdirSync(real, { withFileTypes: true });
+                return posix.join(backend.realpathSync(at), ...rest);
             } catch {
-                return false;
-            }
-
-            for (const entry of entries) {
-                const child = `${vfs === "/" ? "" : vfs}/${entry.name}`;
-
-                if (--budget < 0 || deny({ op: "write", path: child })) {
-                    return true;
+                if (at === "/") {
+                    return path;
                 }
 
-                if (entry.isDirectory() && look(child, join(real, entry.name))) {
-                    return true;
-                }
+                rest.unshift(posix.basename(at));
+                at = posix.dirname(at);
             }
-
-            return false;
-        };
-
-        return look(normalizeVfsPath(path), join(root, normalizeVfsPath(path)));
+        }
     };
+
+    const protectedPath = (path: string, follow: boolean, moves: boolean): boolean =>
+        [normalizeVfsPath(path), leadsTo(normalizeVfsPath(path), follow)].some((vfs) => {
+            const host = join(root, vfs);
+
+            return guarded(host) || (moves && holdsGitDir(host, gitDirs));
+        });
 
     return new Proxy(backend, {
         get(target, property) {
             const value = Reflect.get(target, property, target);
+            const name = String(property);
+            const base = name.replace(/Sync$/, "");
 
             if (typeof value !== "function") {
                 return value;
             }
 
-            const name = String(property);
-
-            if (!NO_WRITE.has(name)) {
+            if (!Object.hasOwn(WRITES, base)) {
                 return value.bind(target);
             }
 
             return (...args: unknown[]) => {
-                const base = name.replace(/Sync$/, "");
-                const paths: unknown[] =
-                    base === "open"
-                        ? isWriteFlag(String(args[1] ?? "r"))
-                            ? [args[0]]
-                            : []
-                        : base === "symlink" || base === "copyFile"
-                          ? [args[1]]
-                          : base === "rename" || base === "link"
-                            ? [args[0], args[1]]
-                            : [args[0]];
+                const reads = base === "open" && !isWriteFlag(String(args[1] ?? "r"));
 
-                for (const path of paths) {
-                    if (
-                        typeof path === "string" &&
-                        (protectedPath("write", path) ||
-                            (base === "rename" && holdsProtected(path)))
-                    ) {
+                for (const { at, follow, moves } of reads ? [] : WRITES[base]!) {
+                    const path = args[at];
+
+                    if (typeof path === "string" && protectedPath(path, follow, moves === true)) {
                         refuse(base, path);
                     }
                 }
 
-                // A change to the entry named `.git` itself is a change too (the check above names it `write`).
                 return value.apply(target, args);
             };
         },
@@ -807,42 +775,22 @@ export class GondolinDriver implements SandboxDriver {
             return readOnly ? new ReadonlyProvider(base) : base;
         };
 
-        // What the repository's configuration names inside a mount (a hooks folder, a script) is as protected as `.git`.
-        const guard = spec.gitExec;
-        const held =
-            (root: string, inner: (context: { op: string; path: string }) => boolean) =>
-            (context: { op: string; path: string }) =>
-                inner(context) || guard?.protects(root, context.path) === true;
-
-        const realRoot = (path: string) => {
-            try {
-                return realpathSync(path);
-            } catch {
-                return path;
-            }
+        // A git directory is read only to the guest, wherever it lies. Inside the folder, the folder's own provider
+        // refuses the writes; outside it, the directory is a read only mount at its host path.
+        const root = realpathSync(spec.cwd);
+        const mounts: Record<string, unknown> = {
+            [spec.cwd]:
+                spec.mount === "rw"
+                    ? refuseWrites(library, real(spec.cwd, false), root, spec.gitDirs)
+                    : real(spec.cwd, true),
         };
 
-        const matcher = held(realRoot(spec.cwd), protectedMatcher(spec.protect));
-        const gitMatcher = gitDirMatcher(spec.protect);
-        const folder =
-            spec.mount === "rw" && spec.protect.length > 0
-                ? refuseWrites(library, real(spec.cwd, false), matcher)
-                : real(spec.cwd, spec.mount === "ro");
-        const mounts: Record<string, unknown> = { [spec.cwd]: folder };
-
-        for (const extra of spec.readOnlyMounts) {
+        for (const extra of [
+            ...spec.readOnlyMounts,
+            ...spec.gitDirs.filter((dir) => !within(dir, root) && !within(root, dir)),
+        ]) {
             if (extra !== spec.cwd && existsSync(extra)) {
                 mounts[extra] = real(extra, true);
-            }
-        }
-
-        // A worktree's main repository: its objects, index, and refs are as writable as the folder, so git works.
-        for (const dir of spec.gitDirs) {
-            if (dir !== spec.cwd && existsSync(dir)) {
-                mounts[dir] =
-                    spec.mount === "rw" && spec.protect.length > 0
-                        ? refuseWrites(library, real(dir, false), held(realRoot(dir), gitMatcher))
-                        : real(dir, spec.mount === "ro");
             }
         }
 
@@ -863,7 +811,7 @@ export class GondolinDriver implements SandboxDriver {
             rootfs: { size: spec.diskMb * 1024 * 1024 },
             vfs: { mounts },
             ...(spec.network.mode === "off" ? {} : { httpHooks: network.httpHooks }),
-            env: {},
+            env: { GIT_OPTIONAL_LOCKS: "0" },
             sessionLabel: spec.label,
         });
 
@@ -885,13 +833,13 @@ export class GondolinDriver implements SandboxDriver {
             // without it git in the guest says "dubious ownership": the call that needs it says so
         }
 
-        // The guest's `git`: the real one, with a clear word for a rebase, which the sandbox may not do.
+        // The guest's `git`: the real one, with one clear word when it could not write a git directory.
         try {
             await vm.fs.mkdir("/usr/local/bin", { recursive: true });
             await vm.fs.writeFile("/usr/local/bin/git", Buffer.from(GIT_WRAPPER, "utf8"));
             await vm.exec(["/bin/sh", "-c", "chmod 755 /usr/local/bin/git"]);
         } catch {
-            // without it a rebase fails with git's own words: the state is held either way
+            // without it a write to a git directory fails with git's own words: it is refused either way
         }
 
         return new GondolinVm(vm);

@@ -118,7 +118,7 @@ test("the VM has no secrets: none of the host's variables, none of its files out
     assert.match(output, /No such file|can't open/);
 });
 
-test("git config, hooks, and new files of a git folder cannot be written from the VM; other files can", async (t) => {
+test("a .git folder cannot be written from the VM, whatever it holds; the rest of the folder can", async (t) => {
     if (unavailable(t)) {
         return;
     }
@@ -130,9 +130,8 @@ test("git config, hooks, and new files of a git folder cannot be written from th
     assert.match(hook.output, /rc=[1-9]/);
     assert.equal(readFileSync(join(work, ".git", "config"), "utf8"), "[core]\n");
     assert.equal(existsSync(join(work, ".git", "hooks", "pre-commit")), false);
-    // Only what git writes is the guest's in a git folder: a new file there is not.
     assert.match((await run("echo ok > .git/other; echo rc=$?")).output, /rc=[1-9]/);
-    assert.match((await run("echo ok > .git/.githooks; echo rc=$?")).output, /rc=[1-9]/);
+    assert.match((await run("mkdir .Git; echo rc=$?")).output, /rc=[1-9]/);
     assert.ok((await run("echo ok > notes.txt && echo fine")).output.includes("fine"));
 });
 

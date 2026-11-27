@@ -573,7 +573,7 @@ test("the background tool of a sandboxed session never starts a host process", a
 
 // ─── Git, worktrees, skills ─────────────────────────────────────────────────
 
-test("a worktree's main repository is mounted at its host path, and a forged .git file mounts nothing", () => {
+test("a worktree's main repository is mounted at its host path, and a forged .git file mounts nothing", async () => {
     const base = realpathSync(mkdtempSync(join(root, "git-")));
     const main = join(base, "main");
     const tree = join(base, "tree");
@@ -586,21 +586,25 @@ test("a worktree's main repository is mounted at its host path, and a forged .gi
     git(main, "commit", "-q", "-m", "first");
     git(main, "worktree", "add", "-q", tree, "-b", "feature");
 
-    const mounts = gitMounts(tree);
+    const mounts = await gitMounts(tree);
 
     assert.deepEqual(mounts.gitDirs, [join(main, ".git")]);
     assert.deepEqual(mounts.safeDirectories, [tree, main]);
-    assert.deepEqual(gitMounts(main).gitDirs, [], "a plain repository is inside its own folder");
+    assert.deepEqual(
+        (await gitMounts(main)).gitDirs,
+        [join(main, ".git")],
+        "a plain repository's own directory is inside its folder",
+    );
 
     // A `.git` file that names something else (not written by git, no back-pointer) mounts nothing.
     mkdirSync(forged);
     writeFileSync(join(forged, ".git"), `gitdir: ${join(main, ".git")}\n`);
-    assert.deepEqual(gitMounts(forged).gitDirs, []);
+    assert.deepEqual((await gitMounts(forged)).gitDirs, []);
     writeFileSync(join(forged, ".git"), `gitdir: ${home}\n`);
-    assert.deepEqual(gitMounts(forged).gitDirs, []);
+    assert.deepEqual((await gitMounts(forged)).gitDirs, []);
     writeFileSync(join(forged, ".git"), `gitdir: ${join(main, ".git", "worktrees", "tree")}\n`);
     assert.deepEqual(
-        gitMounts(forged).gitDirs,
+        (await gitMounts(forged)).gitDirs,
         [],
         "the worktree's back-pointer names another folder",
     );

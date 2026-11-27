@@ -8,8 +8,7 @@ import { dirname } from "node:path";
 import { Readable, Writable } from "node:stream";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { GuestEnv } from "./guest-env.ts";
-import { gitMounts } from "./git.ts";
-import { GitExecGuard } from "./git-exec.ts";
+import { gitConfigProblem, gitMounts } from "./git.ts";
 import type {
     Backend,
     GuestExecOptions,
@@ -78,8 +77,6 @@ interface Entry {
     stoppedAt?: number;
     note?: string;
     spec?: VmSpec;
-    /** What the host's git runs inside the VM's mounts, read from git's configuration (`git-exec.ts`). */
-    guard?: GitExecGuard;
     /** The session's folder or uploads changed since the VM started: it mounts the old ones, so no call may use it. */
     moved?: boolean;
     /** The folder and uploads that the VM mounts: the target it started with. */
@@ -117,9 +114,9 @@ export interface ManagerOptions {
     readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
 }
 
-/** What a person reads when git is set up so that what it runs cannot be held (`git-exec.ts`). */
-const HOOKS_ROOT = (problem: string) =>
-    `${problem}. Change that setting so that it names a plain file or folder inside the project (not a link, and not the whole folder), or unset it, and try again.`;
+/** What a person reads when git would run code that the sandbox can write (`git.ts`). */
+const WRITABLE_CODE = (problem: string) =>
+    `The sandbox did not start. ${problem} Make the sandbox folder read only (Menu → Sandbox: a read only folder works with git, hooks included), or point the setting at a place outside the project.`;
 
 const STRICTER = "the owner made the sandbox's rules stricter";
 
@@ -348,28 +345,6 @@ export class SandboxManager {
                 entry.spec === undefined ||
                 !looserThanSettings(entry.spec, this.#options.settings())
             ) {
-                // The owner may have changed the git configuration since the last call: what it names is held now. The
-                // VM stays up while git is asked (the idle timer must not stop it), and may still be gone after.
-                const done = this.#busy(rootId);
-
-                try {
-                    await entry.guard?.refresh();
-                } finally {
-                    done();
-                }
-
-                if (entry.guard?.problem !== undefined) {
-                    const problem = entry.guard.problem;
-
-                    await this.stop(rootId, "git's configuration cannot be held");
-
-                    throw new Error(HOOKS_ROOT(problem));
-                }
-
-                if (entry.vm === undefined || this.#entries.get(rootId)?.moved === true) {
-                    return this.#ready(rootId, signal, expect);
-                }
-
                 return entry.vm;
             }
 
@@ -451,55 +426,54 @@ export class SandboxManager {
             throw new Error(entry.note);
         }
 
-        const git = gitMounts(target.cwd);
-        const usable = (folders: readonly string[], kind: "folder" | "skill") =>
-            folders.filter((folder) => {
-                const why = this.#options.folderProblem?.(folder, kind);
-
-                if (why !== undefined) {
-                    this.#options.log(`sandbox: ${folder} is not mounted: ${why}`);
-                }
-
-                return why === undefined;
-            });
-        const gitDirs = usable(git.gitDirs, "folder");
-        const guard = new GitExecGuard(target.cwd, [target.cwd, ...gitDirs]);
-        const spec: VmSpec = {
-            label: sessionLabel(rootId, target.cwd),
-            backend: settings.backend,
-            cwd: target.cwd,
-            mount: settings.mount,
-            protect: ["git"],
-            readOnlyMounts: [
-                ...(target.uploadDir === undefined ? [] : [target.uploadDir]),
-                ...usable(target.skillDirs ?? [], "skill"),
-            ],
-            gitDirs,
-            safeDirectories: [
-                ...git.safeDirectories.filter(
-                    (path) => path === target.cwd || gitDirs.some((dir) => dir.startsWith(path)),
-                ),
-            ],
-            network: { mode: settings.network, allowedHosts: [...settings.allowedHosts] },
-            cpus: settings.cpus,
-            memoryMb: settings.memoryMb,
-            diskMb: settings.diskMb,
-            image: settings.image,
-            gitExec: guard,
-        };
-
         entry.phase = "starting";
-        entry.guard = guard;
         entry.note = undefined;
-        entry.spec = spec;
         this.#changed(rootId);
 
         try {
-            // What the repository's configuration names is held before the first call, not after it.
-            await guard.refresh(true);
+            const git = await gitMounts(target.cwd);
+            const usable = (folders: readonly string[], kind: "folder" | "skill") =>
+                folders.filter((folder) => {
+                    const why = this.#options.folderProblem?.(folder, kind);
 
-            if (guard.problem !== undefined) {
-                throw new Error(HOOKS_ROOT(guard.problem));
+                    if (why !== undefined) {
+                        this.#options.log(`sandbox: ${folder} is not mounted: ${why}`);
+                    }
+
+                    return why === undefined;
+                });
+            const spec: VmSpec = {
+                label: sessionLabel(rootId, target.cwd),
+                backend: settings.backend,
+                cwd: target.cwd,
+                mount: settings.mount,
+                readOnlyMounts: [
+                    ...(target.uploadDir === undefined ? [] : [target.uploadDir]),
+                    ...usable(target.skillDirs ?? [], "skill"),
+                ],
+                gitDirs: usable(git.gitDirs, "folder"),
+                safeDirectories: git.safeDirectories,
+                network: { mode: settings.network, allowedHosts: [...settings.allowedHosts] },
+                cpus: settings.cpus,
+                memoryMb: settings.memoryMb,
+                diskMb: settings.diskMb,
+                image: settings.image,
+            };
+
+            entry.spec = spec;
+
+            // Git runs hooks, and reads configuration, with the user's rights: a place the guest can write must not
+            // hold them. Nothing is assumed when git cannot be asked.
+            const problem =
+                settings.mount === "rw"
+                    ? await gitConfigProblem(target.cwd, git.trees, git.gitDirs).catch(
+                          (error: unknown) =>
+                              `Pi Pocket could not ask git about this folder's hooks and configuration (${error instanceof Error ? error.message : String(error)}).`,
+                      )
+                    : undefined;
+
+            if (problem !== undefined) {
+                throw new Error(WRITABLE_CODE(problem));
             }
 
             const vm = await this.#options.driver.start(spec);

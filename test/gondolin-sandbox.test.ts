@@ -128,7 +128,6 @@ test("a sandboxed session runs bash in the VM, not on the host", async () => {
         assert.equal(driver.log.started.length, 1);
         assert.equal(driver.log.started[0]!.cwd, work);
         assert.equal(driver.log.started[0]!.mount, "rw");
-        assert.deepEqual(driver.log.started[0]!.protect, ["git"]);
         assert.ok(driver.log.commands.some((argv) => argv.join(" ").includes("echo in-vm")));
         assert.ok(
             driver.log.envs.every(

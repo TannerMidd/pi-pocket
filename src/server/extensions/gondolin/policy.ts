@@ -1,6 +1,6 @@
 /**
- * What the sandbox allows, as data and small functions: which files of the folder the guest may not write, which hosts
- * the network allows by default, and what runs where. The sheet shows the same table that the gate uses.
+ * What the sandbox allows, as data and small functions: which paths the guest may not write (a `.git` entry, a git
+ * directory), which hosts the network allows by default, and what runs where. The sheet shows the same table that the gate uses.
  */
 import { realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -40,7 +40,7 @@ function canonical(path: string): string {
     }
 }
 
-function within(child: string, parent: string): boolean {
+export function within(child: string, parent: string): boolean {
     return child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 }
 
@@ -92,147 +92,51 @@ export function folderProblem(
     return undefined;
 }
 
-/** Operations that change an entry, as Gondolin's file system names them. */
-const CHANGES = new Set([
-    "mkdir",
-    "rmdir",
-    "unlink",
-    "rename",
-    "link",
-    "symlink",
-    "chmod",
-    "truncate",
-    "open-write",
-    "write",
-]);
-
-/** `rest` without the `worktrees/<name>/` and `modules/<name>/` that lead to a git folder of its own (nested ones too). */
-function ownFiles(rest: string[]): { inner: string[]; nested: boolean } {
-    let inner = rest;
-    let nested = false;
-
-    while ((inner[0] === "worktrees" || inner[0] === "modules") && inner.length >= 3) {
-        inner = inner.slice(2);
-        nested = true;
-    }
-
-    return { inner, nested };
-}
+/** Code points that HFS+ ignores when it compares names: `.g\u200cit` is `.git` there. */
+const HFS_IGNORABLE = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
 
 /**
- * What the guest may write in a git folder, and nothing else: the files that the promised git commands (`status`,
- * `diff`, `add`, `commit`, `branch`, `tag`, `log`, `stash`, `merge` without conflicts, a single `cherry-pick`, `checkout`,
- * `switch`, `reset`, `restore`) write. These are data: objects, refs, reflogs, the index, and the files that name a
- * commit or a merge. Every other file of a git folder, a new one too, is the host's: the host's `git` reads it as
- * configuration or runs it (`config`, `hooks`, `info`, a hooks folder under another name, `commondir`, `gitdir`,
- * `objects/info/alternates`, the state of a rebase: its todo list is run by `git rebase --continue`, `modules`,
- * `worktrees`, and what a later git adds). A list of what to deny kept missing files; this one lists what to allow.
+ * Whether a file name is `.git` under Git's own equivalence rules (`verify_path`, `is_ntfs_dotgit`, `is_hfs_dotgit`):
+ * any case, NTFS trailing dots and spaces and data streams, the NTFS short name `git~1`, and HFS+ ignorable code points.
  */
-const GIT_FILES = new Set([
-    "head",
-    "orig_head",
-    "fetch_head",
-    "commit_editmsg",
-    "merge_head",
-    "merge_msg",
-    "merge_mode",
-    "merge_rr",
-    "auto_merge",
-    "squash_msg",
-    "cherry_pick_head",
-    "revert_head",
-    "tag_editmsg",
-    "packed-refs",
-    "index",
-]);
-
-/** The folders of a git folder that hold data only: all below them is the guest's, except the lists of other stores. */
-const GIT_TREES = new Set(["objects", "refs", "logs"]);
-
-/** Whether `rest`, the path below a git folder (a repository's, a linked worktree's, a submodule's), is the guest's. */
-function writableInGitDir(rest: string[]): boolean {
-    const [top, ...below] = ownFiles(rest).inner;
-
-    if (top === undefined) {
-        return false;
-    }
-
-    if (GIT_TREES.has(top)) {
-        return !(
-            top === "objects" &&
-            below[0] === "info" &&
-            (below[1] === "alternates" || below[1] === "http-alternates")
-        );
-    }
-
-    // A file, or the lock file that git writes before it renames it into place; and the temporary indexes of `stash`
-    // and of `commit <paths>`, which are copies of the index.
-    const name = top.endsWith(".lock") ? top.slice(0, -5) : top;
-
+export function isDotGit(name: string): boolean {
     return (
-        below.length === 0 &&
-        (GIT_FILES.has(name) || /^(index\.stash|next-index-)\.?\d+$/.test(name))
+        name.replace(HFS_IGNORABLE, "").toLowerCase() === ".git" ||
+        /^(\.git|git~\d+)[ .]*(:.*)?$/i.test(name)
     );
 }
 
-/**
- * Whether the guest may not write `path` (absolute inside the folder, `/`-separated). The git rule keeps what the
- * host's own `git` runs from the guest's hands: everything in a `.git` folder but the data that the promised git
- * commands write (`writableInGitDir`), the files that name filters and submodules (`.gitmodules`, `.gitattributes`), and
- * any change to an entry named `.git` (a swap of the whole repository folder). The guest still reads all of them.
- */
-function gitProtected(segments: string[], op: string): boolean {
-    const last = segments.at(-1);
-
-    if (last === ".gitmodules" || last === ".gitattributes") {
-        return true;
-    }
-
-    if (last === ".git" && CHANGES.has(op)) {
-        return true;
-    }
-
-    const at = segments.indexOf(".git");
-
-    return at !== -1 && at < segments.length - 1 && !writableInGitDir(segments.slice(at + 1));
+/** Whether any component of `path` (separated by `/` or `\`) is a `.git` entry. */
+export function hasDotGit(path: string): boolean {
+    return path.split(/[\\/]/).some(isDotGit);
 }
 
-/** A predicate for the paths the guest may not write: it still reads them (`real-driver.ts` refuses the writes). */
-export function protectedMatcher(
-    rules: readonly string[],
-): (context: { op: string; path: string; flags?: string }) => boolean {
-    const git = rules.includes("git");
+function lower(path: string): string {
+    return path.toLowerCase();
+}
 
-    return ({ op, path }) => {
-        if (!git) {
-            return false;
-        }
+/**
+ * What the guest may never write, as a predicate on host paths: every git directory (`gitDirs`, real paths), and, in
+ * the folder `root`, every entry below a name that is `.git`. The guest reads all of it. Case is ignored, so a file
+ * system that folds case gives no way round.
+ */
+export function gitProtected(root: string, gitDirs: readonly string[]): (path: string) => boolean {
+    const dirs = gitDirs.map(lower);
+    const top = lower(root);
 
-        // Case-insensitive file systems (macOS, Windows) must not give a way round it.
-        const segments = path
-            .toLowerCase()
-            .split("/")
-            .filter((part) => part !== "" && part !== ".");
+    return (path) => {
+        const here = lower(path);
 
-        return gitProtected(segments, op);
+        return (
+            dirs.some((dir) => within(here, dir)) ||
+            (within(here, top) && hasDotGit(here.slice(top.length)))
+        );
     };
 }
 
-/**
- * The same rules for a mount whose root is a `.git` folder itself (the main repository's, for a session on a worktree):
- * its `config`, `hooks`, and `info` are as protected as those of a `.git` folder inside the session's folder.
- */
-export function gitDirMatcher(
-    rules: readonly string[],
-): (context: { op: string; path: string; flags?: string }) => boolean {
-    const inner = protectedMatcher(rules);
-
-    return ({ op, path, flags }) =>
-        inner({
-            op,
-            path: `/.git/${path.replace(/^\/+/, "")}`,
-            ...(flags === undefined ? {} : { flags }),
-        });
+/** Whether `path` holds a git directory: moving it would move the directory to a name that nothing guards. */
+export function holdsGitDir(path: string, gitDirs: readonly string[]): boolean {
+    return gitDirs.some((dir) => within(lower(dir), lower(path)));
 }
 
 /** The hosts a sandbox may reach by default: package registries and GitHub. The owner edits the list. */

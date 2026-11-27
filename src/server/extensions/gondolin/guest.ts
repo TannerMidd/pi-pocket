@@ -68,8 +68,6 @@ export interface GuestVm {
     close(): Promise<void>;
 }
 
-import type { GitExecGuard } from "./git-exec.ts";
-
 export type NetworkMode = "off" | "allowlist" | "open";
 export type MountMode = "rw" | "ro";
 export type Backend = "auto" | "krun" | "qemu";
@@ -82,22 +80,15 @@ export interface VmSpec {
     /** The session's folder: mounted in the guest at this same path. */
     readonly cwd: string;
     readonly mount: MountMode;
-    /** Rule sets that keep files of the folder from the guest's writes (see `policy.ts`): `git`. */
-    readonly protect: readonly "git"[];
     /** More folders mounted read-only at their own paths (the session's uploads, the skills it uses). */
     readonly readOnlyMounts: readonly string[];
     /**
-     * Git directories outside the folder (a worktree's main repository) mounted at their own paths: as writable as the
-     * folder is (`mount`), with the same protections for `config`, `hooks`, and `info`.
+     * Every git directory that the folder reaches (`git.ts`). The guest reads them and never writes them: the ones
+     * outside the folder are read only mounts at their own paths, the ones inside are refused in the folder's provider.
      */
     readonly gitDirs: readonly string[];
     /** Folders that git in the guest trusts (`safe.directory`). */
     readonly safeDirectories: readonly string[];
-    /**
-     * The files of the mounted folders that the host's git reads as configuration or runs, as its configuration names
-     * them (`git-exec.ts`): the guest reads them and may not write them. Kept up to date by the module while the VM runs.
-     */
-    readonly gitExec?: GitExecGuard;
     readonly network: { readonly mode: NetworkMode; readonly allowedHosts: readonly string[] };
     readonly cpus: number;
     readonly memoryMb: number;

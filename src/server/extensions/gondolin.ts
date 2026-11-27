@@ -103,7 +103,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
             type: "choice",
             default: "rw",
             description:
-                "Read and write: Pi's changes reach the folder. Read only: Pi can run and read, and cannot change it. Either way a repository's git config and hooks cannot be written from the VM.",
+                "Read and write: Pi's changes reach the folder. Read only: Pi can run and read, and cannot change it. Either way git directories are read only to the VM. A repository whose git hooks or included config lie inside the folder needs the read only choice.",
             choices: [
                 { value: "rw", label: "Read and write" },
                 { value: "ro", label: "Read only" },
@@ -454,7 +454,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
                         : network === "open"
                           ? "The sandbox reaches public hosts only."
                           : "The sandbox reaches only a list of hosts (package registries and GitHub, unless the owner changed it); other hosts fail."
-                } A server that you start listens inside the sandbox only: the browser in the sandbox reaches it at localhost. Your background tasks run inside the sandbox too, and end with it. Git works in the folder for status, diff, add, commit, branch, tag, log, stash, checkout, switch, reset, restore, merge without conflicts, and a single cherry-pick; the sandbox has no credentials, so push, and fetch from a private repository, fail: ask the person to push from the host. A rebase, git am, and a cherry-pick or revert of several commits fail too, because the sandbox may not write the state that git keeps for them (git runs commands from it). Git's configuration, hooks, remotes, worktrees, submodules, and maintenance are the host's too, and so is any new file in a .git folder: ask the person to run those on the host.`;
+                } A server that you start listens inside the sandbox only: the browser in the sandbox reaches it at localhost. Your background tasks run inside the sandbox too, and end with it. Git reads work in the folder (status, diff, log, show, blame), but every git directory is read only: add, commit, branch, checkout, stash, merge, rebase, config, remote, and every other command that writes the repository fail, and so does creating or changing any entry named .git. Edit the files and ask the person to commit (or change branches, config, remotes) on the host. The sandbox has no credentials, so push, and fetch from a private repository, fail too: ask the person to push from the host.`;
             }),
         ],
     });

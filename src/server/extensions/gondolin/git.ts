@@ -1,15 +1,60 @@
 /**
- * Git for the sandbox: which repository folders a session's VM needs besides its own folder, and the guest's own git
- * configuration. A session on a git worktree has a `.git` file that names a folder of the main repository, outside the
- * session's folder: the VM mounts that folder too, at its host path, with the same protections as a `.git` folder
- * inside the session's folder (`policy.ts`).
+ * Git for the sandbox, by Git's own trust model: the work tree is untrusted, as a cloned repository is, and every git
+ * directory is trusted. The guest may write the work tree and never a git directory. This file finds the git
+ * directories that a folder reaches, checks (before a VM starts with the folder writable) that git cannot be made to
+ * run code that lies in the work tree, and holds the guest's own git settings.
  */
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+import { gitProtected } from "./policy.ts";
+
+const run = promisify(execFile);
 
 /** What the guest's git says when someone pushes or fetches with credentials: the VM has none. */
 export const NO_CREDENTIALS =
     "pi-pocket sandbox: this sandbox has no credentials, so git cannot sign in to a remote. Push, or fetch from a private repository, from the host.";
+
+/** What the guest's git says when it needs to write a git directory: the guest may not. */
+export const NO_GIT_WRITE =
+    "pi-pocket sandbox: Git metadata is read only here. Ask the person to commit (or change branches, config, remotes) on the host.";
+
+/** The guest's `git`, in `/usr/local/bin` before the real one: the real git, and one word more when it could not write. */
+export const GIT_WRAPPER = [
+    "#!/bin/sh",
+    "real=/usr/bin/git",
+    '[ -x "$real" ] || { echo "git: not found" >&2; exit 127; }',
+    'log=$(mktemp) || exec "$real" "$@"',
+    '"$real" "$@" 2>"$log"; code=$?',
+    'cat "$log" >&2',
+    'if [ "$code" -ne 0 ] && grep -qiE "read-only file system|permission denied|insufficient permission|unable to (create|write|append)|could not (lock|create|write)" "$log"; then',
+    `  echo ${JSON.stringify(NO_GIT_WRITE)} >&2`,
+    "fi",
+    'rm -f "$log"',
+    'exit "$code"',
+    "",
+].join("\n");
+
+/** What the VM's `/etc/gitconfig` holds: trust for the mounted folders, a default author, and no way to sign in. */
+export function guestGitConfig(safeDirectories: readonly string[]): string {
+    const quote = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;
+    const message = `echo ${JSON.stringify(NO_CREDENTIALS)} >&2; exit 1`;
+
+    return [
+        "[safe]",
+        ...safeDirectories.map((path) => `\tdirectory = ${quote(path)}`),
+        "[user]",
+        "\tname = Pi (sandbox)",
+        "\temail = pi-sandbox@localhost",
+        "[credential]",
+        `\thelper = ${quote(`!f() { ${message}; }; f`)}`,
+        "[core]",
+        `\tsshCommand = ${quote(`f() { ${message}; }; f`)}`,
+        "",
+    ].join("\n");
+}
 
 function isDirectory(path: string): boolean {
     try {
@@ -47,165 +92,299 @@ function inside(child: string, parent: string): boolean {
     return child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 }
 
-/** The first line of a `.git` file: `gitdir: <path>`. */
-function gitdirOf(file: string, cwd: string): string | undefined {
-    const text = read(file);
-    const match = text === undefined ? null : /^gitdir:\s*(.+?)\s*$/m.exec(text);
+/**
+ * The git directories of one work tree: its own, and the common one of a linked worktree; undefined when the tree is
+ * no repository. Only a `.git` file that git itself wrote counts: the folder it names must hold a repository whose own
+ * record points back at the tree (a worktree's `gitdir` file, or a separate git directory's `core.worktree`), so a
+ * `.git` file cannot make the sandbox share another folder.
+ */
+function gitDirsOf(tree: string): string[] | undefined {
+    const dotGit = join(tree, ".git");
+    let stat;
 
-    return match === null ? undefined : resolve(cwd, match[1]!);
+    try {
+        stat = statSync(dotGit);
+    } catch {
+        return undefined;
+    }
+
+    if (stat.isDirectory()) {
+        const own = real(dotGit);
+
+        return own !== undefined && looksLikeGitDir(own) ? [own] : undefined;
+    }
+
+    const text = read(dotGit);
+    const match = text === undefined ? null : /^gitdir:\s*(.+?)\s*$/m.exec(text);
+    const own = match === null ? undefined : real(resolve(tree, match[1]!));
+
+    if (own === undefined || !looksLikeGitDir(own)) {
+        return undefined;
+    }
+
+    const commondir = read(join(own, "commondir"));
+
+    if (commondir === undefined) {
+        const config = read(join(own, "config"));
+        const worktree =
+            config === undefined ? undefined : /^\s*worktree\s*=\s*(.+?)\s*$/m.exec(config)?.[1];
+
+        return worktree !== undefined && real(resolve(own, worktree)) === real(tree)
+            ? [own]
+            : undefined;
+    }
+
+    const back = read(join(own, "gitdir"))?.trim();
+
+    if (back === undefined || real(isAbsolute(back) ? back : resolve(own, back)) !== real(dotGit)) {
+        return undefined;
+    }
+
+    const common = real(resolve(own, commondir.trim()));
+
+    if (common === undefined || !looksLikeGitDir(common) || !isDirectory(join(common, "refs"))) {
+        return undefined;
+    }
+
+    return inside(own, common) ? [common] : [common, own];
+}
+
+/** Runs host Git in `tree`. A failure rejects with what git said. */
+async function git(tree: string, args: string[]): Promise<string> {
+    try {
+        const { stdout } = await run("git", ["-C", tree, ...args], {
+            encoding: "utf8",
+            maxBuffer: 64 * 1024 * 1024,
+            timeout: 30_000,
+            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+        });
+
+        return stdout;
+    } catch (error) {
+        const detail = (error as { stderr?: string }).stderr?.trim();
+
+        throw new Error(
+            `git ${args.slice(0, 2).join(" ")} failed in ${tree}: ${detail || (error as Error).message}`,
+        );
+    }
+}
+
+/** The paths of the submodules that the index of `tree` records (git's own list: entries of mode 160000). */
+async function submodulesOf(tree: string): Promise<string[]> {
+    const list = await git(tree, ["-c", "core.fsmonitor=false", "ls-files", "--stage", "-z"]);
+
+    return list
+        .split("\0")
+        .flatMap((line) =>
+            line.startsWith("160000 ") ? [line.slice(line.indexOf("\t") + 1)] : [],
+        );
 }
 
 export interface GitMounts {
-    /** Git directories outside the session's folder to mount at their own host paths, with the `.git` protections. */
+    /** Every git directory that the folder reaches, as real paths: inside the folder, outside it, or around it. */
     readonly gitDirs: readonly string[];
-    /** Folders that git in the guest must trust (`safe.directory`): the session's folder and these repositories. */
+    /** The work trees that use them: the folder, and each submodule of it. Git runs hooks and configuration for these. */
+    readonly trees: readonly string[];
+    /** Folders that git in the guest must trust (`safe.directory`). */
     readonly safeDirectories: readonly string[];
 }
 
 /**
- * The git directories a VM needs for a session working in `cwd`. Only a `.git` file that git itself wrote counts: the
- * folder it names must hold a repository whose own record points back at `cwd` (a worktree's `gitdir` file, or a
- * separate git directory's `core.worktree`). A `.git` file that names anything else mounts nothing, so a file in the
- * folder cannot make the sandbox share another folder.
+ * The git directories that a VM for `cwd` reaches: the repository's own, the common directory and the `worktrees/<n>`
+ * of a linked worktree, and those of each submodule (found as git lists them, and only when the submodule lies inside
+ * the folder). It rejects when git cannot answer: a repository that cannot be inspected is not shared.
  */
-export function gitMounts(cwd: string): GitMounts {
-    const safe = [cwd];
-    const none = { gitDirs: [], safeDirectories: safe };
-    const dotGit = join(cwd, ".git");
-    let kind: "file" | "other";
-
-    try {
-        kind = statSync(dotGit).isFile() ? "file" : "other";
-    } catch {
-        return none;
-    }
-
-    if (kind !== "file") {
-        return none;
-    }
-
-    const named = gitdirOf(dotGit, cwd);
-    const own = named === undefined ? undefined : real(named);
+export async function gitMounts(cwd: string): Promise<GitMounts> {
     const here = real(cwd);
+    const gitDirs = new Set<string>();
+    const trees: string[] = [];
 
-    if (own === undefined || here === undefined || !looksLikeGitDir(own)) {
-        return none;
+    const visit = async (tree: string): Promise<void> => {
+        const own = gitDirsOf(tree);
+
+        if (own === undefined || trees.includes(tree)) {
+            return;
+        }
+
+        trees.push(tree);
+        own.forEach((dir) => gitDirs.add(dir));
+
+        for (const path of await submodulesOf(tree)) {
+            const child = join(tree, path);
+            const found = real(child);
+
+            if (here !== undefined && found !== undefined && inside(found, here)) {
+                await visit(child);
+            }
+        }
+    };
+
+    if (here !== undefined) {
+        await visit(cwd);
     }
 
-    const found = new Set<string>();
-    const commondir = read(join(own, "commondir"));
-
-    if (commondir !== undefined) {
-        // A linked worktree: `<main>/.git/worktrees/<name>`, whose `gitdir` file names this folder's `.git` file.
-        const back = read(join(own, "gitdir"))?.trim();
-
-        if (
-            back === undefined ||
-            real(isAbsolute(back) ? back : resolve(own, back)) !== real(dotGit)
-        ) {
-            return none;
-        }
-
-        const common = real(resolve(own, commondir.trim()));
-
-        if (
-            common === undefined ||
-            !looksLikeGitDir(common) ||
-            !isDirectory(join(common, "refs"))
-        ) {
-            return none;
-        }
-
-        found.add(common);
-
-        if (!inside(own, common)) {
-            found.add(own);
-        }
-    } else {
-        // A repository whose git directory is kept elsewhere (a submodule's): its config names this folder.
-        const config = read(join(own, "config"));
-        const tree =
-            config === undefined ? undefined : /^\s*worktree\s*=\s*(.+?)\s*$/m.exec(config)?.[1];
-
-        if (tree === undefined || real(resolve(own, tree)) !== here) {
-            return none;
-        }
-
-        found.add(own);
-    }
-
-    const gitDirs = [...found].filter((path) => !inside(path, here) && !inside(here, path));
+    const outside = [...gitDirs].filter((dir) => here === undefined || !inside(dir, here));
 
     return {
-        gitDirs,
+        gitDirs: [...gitDirs],
+        trees,
         safeDirectories: [
-            cwd,
-            ...gitDirs.flatMap((path) => (path.endsWith(`${sep}.git`) ? [dirname(path)] : [])),
+            ...(trees.length === 0 ? [cwd] : trees),
+            ...outside.flatMap((dir) => (dir.endsWith(`${sep}.git`) ? [dirname(dir)] : [])),
         ],
     };
 }
 
-/** What the guest's git says when someone rebases: the state of a rebase is held (`policy.ts`). */
-export const NO_REBASE =
-    "pi-pocket sandbox: git keeps the state of a rebase, of git am, and of a cherry-pick or revert of several commits in files that git runs commands from, so this sandbox may not write them. Rebase from the host: ask the person to run it there.";
+function missing(error: unknown): boolean {
+    const code = (error as { code?: string }).code;
 
-/** What the guest's git says when it needs to write a part of the repository that is the host's. */
-export const NO_GIT_WRITE =
-    "pi-pocket sandbox: git may write only objects, refs, logs, the index, HEAD, and the files of a commit or a merge in a repository folder. Its configuration, hooks, remotes, worktrees, submodules, and maintenance are the host's: ask the person to change them from the host.";
+    return code === "ENOENT" || code === "ENOTDIR";
+}
 
 /**
- * The guest's `git`, in `/usr/local/bin` before the real one: `rebase` and `am` say at once what they cannot do, and
- * `pull`, `cherry-pick`, and `revert` add it when they fail because of the held state. Everything else is the real git.
+ * Where `path` leads, as the kernel would follow it: the real path of what exists, a link at the end of it that leads
+ * nowhere yet followed too, and then the names that do not exist yet. `..` is never taken out of the text first.
  */
-export const GIT_WRAPPER = [
-    "#!/bin/sh",
-    "# pi-pocket sandbox: git, with a clear word for what the sandbox cannot do.",
-    "real=/usr/bin/git",
-    '[ -x "$real" ] || { echo "git: not found" >&2; exit 127; }',
-    "cmd=",
-    "skip=0",
-    'for arg in "$@"; do',
-    '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
-    '  case "$arg" in',
-    "    -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env) skip=1 ;;",
-    "    -*) ;;",
-    '    *) cmd="$arg"; break ;;',
-    "  esac",
-    "done",
-    'case "$cmd" in',
-    `  rebase|am) echo ${JSON.stringify(NO_REBASE)} >&2; exit 1 ;;`,
-    "  pull|cherry-pick|revert|config|remote|worktree|submodule|init|clone|gc|maintenance|repack|prune|notes|sparse-checkout|branch|checkout|switch)",
-    '    log=$(mktemp) || exec "$real" "$@"',
-    '    "$real" "$@" 2>"$log"; code=$?',
-    '    cat "$log" >&2',
-    '    if grep -qiE "rebase-merge|rebase-apply|sequencer" "$log"; then',
-    `      echo ${JSON.stringify(NO_REBASE)} >&2`,
-    '      [ "$code" -eq 0 ] && code=1',
-    '    elif [ "$code" -ne 0 ] && grep -qiE "permission denied|could not lock config|could not create|read-only" "$log"; then',
-    `      echo ${JSON.stringify(NO_GIT_WRITE)} >&2`,
-    "    fi",
-    '    rm -f "$log"',
-    '    exit "$code" ;;',
-    "esac",
-    'exec "$real" "$@"',
-    "",
-].join("\n");
+function leadsTo(path: string, links = 0): string {
+    const rest: string[] = [];
+    let at = path;
 
-/** What the VM's `/etc/gitconfig` holds: trust for the mounted folders, a default author, and no way to sign in. */
-export function guestGitConfig(safeDirectories: readonly string[]): string {
-    const quote = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;
-    const message = `echo ${JSON.stringify(NO_CREDENTIALS)} >&2; exit 1`;
+    for (;;) {
+        try {
+            return join(realpathSync.native(at), ...rest);
+        } catch (error) {
+            if (!missing(error)) {
+                throw error;
+            }
+        }
 
-    return [
-        "[safe]",
-        ...safeDirectories.map((path) => `\tdirectory = ${quote(path)}`),
-        "[user]",
-        "\tname = Pi (sandbox)",
-        "\temail = pi-sandbox@localhost",
-        "[credential]",
-        `\thelper = ${quote(`!f() { ${message}; }; f`)}`,
-        "[core]",
-        `\tsshCommand = ${quote(`f() { ${message}; }; f`)}`,
-        "",
-    ].join("\n");
+        let target: string | undefined;
+
+        try {
+            target = readlinkSync(at);
+        } catch {
+            // not a link: a name that does not exist
+        }
+
+        if (target !== undefined) {
+            if (links >= 40) {
+                throw new Error(`too many links on the way to ${path}`);
+            }
+
+            const base = realpathSync.native(dirname(at));
+
+            return leadsTo(
+                [isAbsolute(target) ? target : `${base}/${target}`, ...rest].join("/"),
+                links + 1,
+            );
+        }
+
+        const parent = dirname(at);
+
+        if (parent === at) {
+            return path;
+        }
+
+        rest.unshift(basename(at));
+        at = parent;
+    }
+}
+
+interface ConfigValue {
+    readonly origin: string;
+    readonly key: string;
+    readonly value: string;
+}
+
+/** Git's `config --list --show-origin --show-scope --null`: `scope NUL origin NUL key NL value NUL`. */
+function parseConfig(list: string): ConfigValue[] {
+    const parts = list.split("\0");
+    const values: ConfigValue[] = [];
+
+    for (let at = 0; at + 2 < parts.length; at += 3) {
+        const text = parts[at + 2]!;
+        const newline = text.indexOf("\n");
+
+        values.push({
+            origin: parts[at + 1]!,
+            key: newline === -1 ? text : text.slice(0, newline),
+            value: newline === -1 ? "" : text.slice(newline + 1),
+        });
+    }
+
+    return values;
+}
+
+/**
+ * Why git, run on this machine, could run what the guest writes: the effective hooks folder, or a configuration file
+ * that git reads or may read (an `include` or `includeIf` target, whether it exists or not), lies in the folder where
+ * the guest may write. Git runs hooks and reads configuration with the user's rights. Only what the guest cannot
+ * write (the git directories) may hold them. Undefined when there is nothing to say. A read only folder has no such
+ * risk. It rejects when git cannot answer: nothing is assumed.
+ */
+export async function gitConfigProblem(
+    cwd: string,
+    trees: readonly string[],
+    gitDirs: readonly string[],
+): Promise<string | undefined> {
+    const root = real(cwd) ?? cwd;
+    const guarded = gitProtected(root, gitDirs);
+    const home = process.env.HOME ?? homedir();
+
+    const exposed = (path: string): string | undefined => {
+        const target = leadsTo(path);
+
+        return inside(target.toLowerCase(), root.toLowerCase()) && !guarded(target)
+            ? target
+            : undefined;
+    };
+
+    for (const tree of trees) {
+        const hooks = (
+            await git(tree, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"])
+        ).trim();
+        const found = exposed(hooks);
+
+        if (found !== undefined) {
+            return `Git would run hooks from ${found}, which lies inside the sandbox folder, where the sandbox can write them.`;
+        }
+
+        const list = await git(tree, [
+            "config",
+            "--list",
+            "--show-origin",
+            "--show-scope",
+            "--null",
+        ]);
+
+        for (const { origin, key, value } of parseConfig(list)) {
+            if (!origin.startsWith("file:")) {
+                continue;
+            }
+
+            const file = origin.slice(5);
+            const from = isAbsolute(file) ? file : `${tree}/${file}`;
+            const files = [from];
+
+            if (/^include(if\..+)?\.path$/i.test(key)) {
+                files.push(
+                    value.startsWith("~/")
+                        ? join(home, value.slice(2))
+                        : isAbsolute(value)
+                          ? value
+                          : `${dirname(from)}/${value}`,
+                );
+            }
+
+            for (const path of files) {
+                const target = exposed(path);
+
+                if (target !== undefined) {
+                    return `Git reads ${target} as configuration (${key} in ${from}), and it lies inside the sandbox folder, where the sandbox can write it.`;
+                }
+            }
+        }
+    }
+
+    return undefined;
 }

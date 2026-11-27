@@ -49,7 +49,7 @@ web.onDispose(
 
 - Give the environment **only** the folder of the session (and its uploads, read only). Give it no sign-ins, no token, no keys, and none of the server's variables.
 - A path outside the mounted folder is a path in the sandbox, never on this machine.
-- A file the guest may not write because the host runs programs from it (git's config and hooks) stays out of its reach.
+- A file the guest may not write because the host runs programs from it (every git directory) stays out of its reach, and a writable folder that holds git's hooks or included configuration does not start.
 - Never fall back to the host. A call that cannot run fails, with the reason.
 - Tell people what runs where. Core stops host tools, but a provider's own words are what people read.
 

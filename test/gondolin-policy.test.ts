@@ -1,4 +1,4 @@
-// The small, pure parts of the sandbox: the files of the folder that the guest may not write, the environment of a
+// The small, pure parts of the sandbox: the names and paths that the guest may not write, the environment of a
 // sandboxed session that cannot run, the idle stop and the left-behind runners of the VM manager.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -6,7 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { context } from "./helpers.ts";
-import { protectedMatcher, whereTable } from "../src/server/extensions/gondolin/policy.ts";
+import {
+    gitProtected,
+    hasDotGit,
+    holdsGitDir,
+    isDotGit,
+    whereTable,
+} from "../src/server/extensions/gondolin/policy.ts";
 import { SandboxManager } from "../src/server/extensions/gondolin/manager.ts";
 import { failedEnv } from "../src/server/sandbox.ts";
 import { FakeDriver } from "./gondolin-fake.ts";
@@ -27,130 +33,99 @@ after(() => {
     }
 });
 
-test("git's config, hooks, info, and the files that name filters are out of the guest's writes", () => {
-    const protectedPath = protectedMatcher(["git"]);
-    const is = (path: string, op = "open") => protectedPath({ op, path });
+test("a name is .git by Git's own rules: case, trailing dots and spaces, NTFS short names and streams, HFS ignorables", () => {
+    for (const name of [
+        ".git",
+        ".GIT",
+        ".Git",
+        ".gIt",
+        ".git.",
+        ".git ",
+        ".git. .",
+        ".git...",
+        "git~1",
+        "GIT~1",
+        "git~1.",
+        "git~2",
+        ".git::$INDEX_ALLOCATION",
+        ".git:stream",
+        ".g\u200cit",
+        ".gi\u200ft",
+        "\u200e.git",
+        ".git\ufeff",
+        ".\u202agit",
+    ]) {
+        assert.equal(isDotGit(name), true, JSON.stringify(name));
+    }
+
+    for (const name of [
+        "",
+        ".",
+        "..",
+        ".gitignore",
+        ".gitmodules",
+        ".gitattributes",
+        ".github",
+        ".git2",
+        ".gitx",
+        "git",
+        "git~",
+        "git~x",
+        "a.git",
+        "x.git",
+        ".gi",
+        "..git",
+        "git~1.txt",
+        ".git.txt",
+        ".g it",
+        ".get",
+    ]) {
+        assert.equal(isDotGit(name), false, JSON.stringify(name));
+    }
+
+    assert.equal(hasDotGit("/a/.Git/config"), true);
+    assert.equal(hasDotGit("/a/b\\.git"), true, "a backslash separates names on NTFS");
+    assert.equal(hasDotGit("/a/git~1/hooks"), true);
+    assert.equal(hasDotGit("/src/.github/workflows/ci.yml"), false);
+});
+
+test("the guest may not write a git directory, a .git entry of the folder, or a folder that holds a git directory", () => {
+    const guarded = gitProtected("/work", ["/work/gitdata", "/other/.git"]);
 
     for (const path of [
-        "/.git/config",
-        "/.git/hooks",
-        "/.git/hooks/pre-commit",
-        "/.git/info/attributes",
-        "/.git/config.worktree",
-        "/pkg/.git/config",
-        "/pkg/.git/hooks/post-merge",
-        "/.git/modules/sub/config",
-        "/.git/modules/sub/hooks/pre-push",
-        "/.git/worktrees/w/config.worktree",
-        // The files that point Git at another folder, and the files they would select.
-        "/.git/commondir",
-        "/pkg/.git/commondir",
-        "/.git/worktrees/w/commondir",
-        "/.git/worktrees/w/gitdir",
-        "/.git/modules/sub/commondir",
-        "/.git/modules/sub/gitdir",
-        "/.git/modules/sub/modules/deep/commondir",
-        "/.git/objects/info/alternates",
-        "/.git/objects/info/http-alternates",
-        "/.git/modules/sub/objects/info/alternates",
-        "/.GIT/CommonDir",
-        // The state of a rebase, `am`, and a sequence of picks: git runs commands from it.
-        "/.git/rebase-merge",
-        "/.git/rebase-merge/git-rebase-todo",
-        "/pkg/.git/rebase-merge/git-rebase-todo",
-        "/.git/rebase-apply/head-name",
-        "/.git/sequencer/todo",
-        "/.git/worktrees/w/rebase-merge/git-rebase-todo",
-        "/.git/modules/sub/rebase-merge/git-rebase-todo",
-        "/.GIT/Rebase-Merge/Git-Rebase-Todo",
-        "/.gitmodules",
-        "/a/b/.gitattributes",
-        // Case-insensitive file systems.
-        "/.GIT/CONFIG",
-        "/.Git/Hooks/pre-commit",
-        // Everything that is not on the list of what git writes, a new file or folder too: the host's git may read or run it.
-        "/.git/.githooks/pre-receive",
-        "/.git/anything-new",
-        "/.git/anything-new/file",
-        "/.git/hooks.d/pre-commit",
-        "/.git/lfs/objects/ab/cd",
-        "/.git/rr-cache/x",
-        "/.git/gc.log",
-        "/.git/shallow",
-        "/.git/modules/sub",
-        "/.git/worktrees/w",
-        "/.git/worktrees/w/hooks.d/pre-commit",
-        "/.git/worktrees/w/new-file",
-        "/.git/modules/sub/.githooks/pre-receive",
-        "/.git/config.lock",
-        "/.git/hooks.lock",
-        "/.git/head/x",
-        "/.git/index/x",
+        "/work/.git",
+        "/work/.git/config",
+        "/work/.GIT/hooks/pre-commit",
+        "/work/pkg/.git/index",
+        "/work/pkg/.git",
+        "/work/a/git~1/x",
+        "/work/gitdata",
+        "/work/gitdata/objects/ab/cd",
+        "/WORK/GitData/HEAD",
+        "/other/.git/refs/heads/main",
     ]) {
-        assert.equal(is(path), true, path);
+        assert.equal(guarded(path), true, path);
     }
 
     for (const path of [
-        "/.git/HEAD",
-        "/.git/objects/ab/cdef",
-        "/.git/objects/pack/pack-1.pack",
-        "/.git/index",
-        "/.git/index.lock",
-        "/.git/HEAD.lock",
-        "/.git/packed-refs",
-        "/.git/packed-refs.lock",
-        "/.git/refs/heads/main",
-        "/.git/refs/heads/main.lock",
-        "/.git/refs/stash",
-        "/.git/logs/HEAD",
-        "/.git/logs/refs/heads/main",
-        "/.git/COMMIT_EDITMSG",
-        "/.git/MERGE_MSG",
-        "/.git/MERGE_MODE",
-        "/.git/AUTO_MERGE",
-        "/.git/FETCH_HEAD",
-        "/.git/REVERT_HEAD",
-        "/.git/worktrees/w/HEAD",
-        "/.git/worktrees/w/index",
-        "/.git/worktrees/w/logs/HEAD",
-        "/.git/modules/sub/objects/ab/cd",
-        "/.git/modules/sub/refs/heads/main",
-        "/.git/modules/sub/HEAD",
-        "/pkg/.git/index",
-        // A branch or a worktree with such a name is no pointer file.
-        "/.git/refs/heads/commondir",
-        "/.git/refs/heads/rebase-merge",
-        "/.git/MERGE_HEAD",
-        "/.git/CHERRY_PICK_HEAD",
-        "/.git/ORIG_HEAD",
-        "/src/rebase-merge/a.ts",
-        "/.git/refs/heads/gitdir",
-        "/.git/worktrees/commondir/HEAD",
-        "/.git/worktrees/refs/index",
-        "/.git/objects/info/commit-graph",
-        "/.gitignore",
-        "/src/config",
-        "/hooks/pre-commit",
-        "/src/hooks.ts",
-        "/.github/workflows/ci.yml",
+        "/work",
+        "/work/src/index.ts",
+        "/work/.gitignore",
+        "/work/.github/ci.yml",
+        "/work/gitdata2/x",
+        "/other",
+        "/other/readme",
     ]) {
-        assert.equal(is(path), false, path);
+        assert.equal(guarded(path), false, path);
     }
 
-    // The entry named `.git` itself: reading it is fine, a swap of the whole repository folder is not.
-    assert.equal(is("/.git", "stat"), false);
-    assert.equal(is("/.git", "readdir"), false);
+    // A folder that lies inside a git directory is wholly the git directory's.
+    assert.equal(gitProtected("/repo/.git/sub", ["/repo/.git"])("/repo/.git/sub/file"), true);
 
-    for (const op of ["rename", "mkdir", "unlink", "rmdir", "symlink", "link"]) {
-        assert.equal(is("/.git", op), true, op);
-        assert.equal(is("/pkg/.git", op), true, op);
-    }
-
-    assert.equal(
-        protectedMatcher([])({ op: "open", path: "/.git/config" }),
-        false,
-        "no rule, no protection",
-    );
+    assert.equal(holdsGitDir("/work", ["/work/gitdata"]), true);
+    assert.equal(holdsGitDir("/work/gitdata", ["/work/gitdata"]), true);
+    assert.equal(holdsGitDir("/work/src", ["/work/gitdata"]), false);
+    assert.equal(holdsGitDir("/work/gitdata/objects", ["/work/gitdata"]), false);
 });
 
 test("an environment that cannot run answers every call with the reason, and is not a promise", async () => {
