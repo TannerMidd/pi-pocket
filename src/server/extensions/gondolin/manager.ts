@@ -154,6 +154,13 @@ function looserThanSettings(spec: VmSpec, settings: SandboxSettings): boolean {
     );
 }
 
+/** A runner on record: its process id, the VM, and the session it belongs to (a record from an older version has none). */
+interface PidRecord {
+    pid: number;
+    vm: string;
+    session?: number;
+}
+
 /** A VM that finished starting with rules the settings made stricter meanwhile: it ends and starts again. */
 class RulesChanged extends Error {}
 
@@ -531,6 +538,9 @@ export class SandboxManager {
             const vm = await this.#options.driver.start(spec);
             let shell = "/bin/sh";
 
+            // The runner is on record from the moment it exists, so a close that fails below cannot lose it.
+            this.#remember(vm, rootId);
+
             if (!live()) {
                 await this.#discard(entry, vm);
 
@@ -578,7 +588,6 @@ export class SandboxManager {
             entry.startedAt = this.#now();
             entry.stoppedAt = undefined;
             entry.note = undefined;
-            this.#remember(vm);
             vm.onExit((reason) => {
                 if (entry.vm === vm) {
                     entry.vm = undefined;
@@ -695,6 +704,7 @@ export class SandboxManager {
     async #discard(entry: Entry, vm: GuestVm): Promise<void> {
         try {
             await vm.close();
+            this.#forget(vm);
         } catch (error) {
             entry.stuck = { vm, error: String(error) };
             this.#options.log(`sandbox: closing a VM failed: ${String(error)}`);
@@ -788,23 +798,23 @@ export class SandboxManager {
     async release(rootId: number, why: string): Promise<void> {
         const entry = this.#entries.get(rootId);
 
-        if (entry === undefined) {
-            // This manager holds no VM of the session. A runner of an earlier one (a module that loaded again) may be
-            // its VM: it ends now, or the release fails.
-            await this.reapStale();
-            const left = this.#orphans();
-
-            if (left.length > 0) {
-                throw new Error(
-                    `a runner that an earlier sandbox started (process ${left.join(", ")}) could not be ended`,
-                );
-            }
-
-            return;
+        if (entry !== undefined) {
+            entry.revoked = true;
+            await this.#end(rootId, entry, why);
         }
 
-        entry.revoked = true;
-        await this.#end(rootId, entry, why);
+        // A runner of the session that an earlier sandbox started (a module that loaded again, a crash) is not in
+        // this manager's entry: it ends now, or the release fails.
+        const { left } = await this.#reap(
+            (item) => item.session === undefined || item.session === rootId,
+        );
+
+        if (left.length > 0) {
+            throw new Error(
+                `a runner of this session's earlier sandbox (process ${left.join(", ")}) could not be ended`,
+            );
+        }
+
         this.#entries.delete(rootId);
     }
 
@@ -922,13 +932,13 @@ export class SandboxManager {
 
     // ─── Runners that a crash left behind ───────────────────────────────────
 
-    #pids(): { pid: number; vm: string }[] {
+    #pids(): PidRecord[] {
         try {
             const list = JSON.parse(readFileSync(this.#options.pidFile, "utf8")) as unknown;
 
             return Array.isArray(list)
                 ? list.filter(
-                      (item): item is { pid: number; vm: string } =>
+                      (item): item is PidRecord =>
                           typeof item?.pid === "number" && typeof item?.vm === "string",
                   )
                 : [];
@@ -937,7 +947,7 @@ export class SandboxManager {
         }
     }
 
-    #writePids(list: { pid: number; vm: string }[]): void {
+    #writePids(list: PidRecord[]): void {
         try {
             mkdirSync(dirname(this.#options.pidFile), { recursive: true });
             writeFileSync(this.#options.pidFile, JSON.stringify(list));
@@ -948,13 +958,13 @@ export class SandboxManager {
         }
     }
 
-    #remember(vm: GuestVm): void {
+    #remember(vm: GuestVm, session: number): void {
         const pid = vm.hostPid();
 
         if (pid !== null) {
             this.#writePids([
                 ...this.#pids().filter((item) => item.pid !== pid),
-                { pid, vm: vm.id },
+                { pid, vm: vm.id, session },
             ]);
         }
     }
@@ -968,12 +978,12 @@ export class SandboxManager {
     }
 
     /**
-     * End runners of VMs that no entry holds: an earlier server left them running (it crashed, or was killed), or a
-     * VM of an earlier module could not be closed. A process counts only when its command line still names Gondolin's
-     * runner or QEMU: a number that another program reuses is left alone. A runner that is still there after the kill
-     * stays in the pid file (`#orphans`).
+     * End the runners on record that `wanted` picks and that no entry holds (an earlier server's, a module that loaded
+     * again, a VM that could not be closed), and take each off the record once it is shown gone. A process counts only
+     * when its command line still names Gondolin's runner or QEMU: a number that another program reuses is left alone.
+     * Returns the process ids that are still there after the kill, which stay on record.
      */
-    async reapStale(): Promise<number> {
+    async #reap(wanted: (item: PidRecord) => boolean): Promise<{ ended: number; left: number[] }> {
         const inspect = this.#options.inspect ?? psInspect;
         const kill =
             this.#options.kill ??
@@ -987,16 +997,14 @@ export class SandboxManager {
                 .flatMap((entry) => [entry.vm, entry.stuck?.vm])
                 .map((vm) => vm?.hostPid()),
         );
-        const kept: { pid: number; vm: string }[] = [];
-        let reaped = 0;
+        const gone = new Set<number>();
+        const left: number[] = [];
+        let ended = 0;
 
-        for (const item of this.#pids()) {
-            if (held.has(item.pid)) {
-                kept.push(item);
-            } else if (await named(item.pid)) {
+        for (const item of this.#pids().filter((each) => wanted(each) && !held.has(each.pid))) {
+            if (await named(item.pid)) {
                 try {
                     kill(item.pid);
-                    reaped++;
                 } catch {
                     // gone already
                 }
@@ -1010,27 +1018,26 @@ export class SandboxManager {
                 }
 
                 if (alive) {
-                    kept.push(item);
+                    left.push(item.pid);
+
+                    continue;
                 }
+
+                ended++;
             }
+
+            gone.add(item.pid);
         }
 
-        this.#writePids(kept);
+        // What another start recorded meanwhile stays: only what was shown gone comes off.
+        this.#writePids(this.#pids().filter((item) => !gone.has(item.pid)));
 
-        return reaped;
+        return { ended, left };
     }
 
-    /** The runners that no entry holds and that are still there: a session's VM may be among them. */
-    #orphans(): number[] {
-        const held = new Set(
-            [...this.#entries.values()]
-                .flatMap((entry) => [entry.vm, entry.stuck?.vm])
-                .map((vm) => vm?.hostPid()),
-        );
-
-        return this.#pids()
-            .map((item) => item.pid)
-            .filter((pid) => !held.has(pid));
+    /** End the runners that an earlier server left running. Returns how many it ended. */
+    async reapStale(): Promise<number> {
+        return (await this.#reap(() => true)).ended;
     }
 
     async check(): Promise<HostCheck> {

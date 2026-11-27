@@ -294,20 +294,28 @@ function wrapFs(
 
 /** What a VM's close needs to know about its runner process. Tests give their own. */
 export interface RunnerControl {
-    /** Whether `pid` is still a Gondolin runner or QEMU (a number that another program reuses is not). */
-    alive(pid: number): boolean;
+    /**
+     * Who `pid` is right now: its start time and command line, when it is a Gondolin runner or QEMU that still runs.
+     * Undefined when there is no such process, it has ended, or another program has the number.
+     */
+    identity(pid: number): string | undefined;
     /** End the runner and its process group, as hard as there is. */
     kill(pid: number): void;
 }
 
 const hostRunner: RunnerControl = {
-    alive(pid) {
+    identity(pid) {
         try {
-            return /gondolin-krun-runner|qemu-system/.test(
-                readFileSync(`/proc/${pid}/cmdline`, "utf8"),
-            );
+            const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+            // `pid (name) state ...`: the name may hold spaces and brackets, so read from its last bracket.
+            const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+            const line = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+
+            return fields[0] !== "Z" && /gondolin-krun-runner|qemu-system/.test(line)
+                ? `${fields[19]}:${line}`
+                : undefined;
         } catch {
-            return false;
+            return undefined;
         }
     },
     kill(pid) {
@@ -327,6 +335,9 @@ export class GondolinVm implements GuestVm {
     readonly #vm: any;
     readonly #runner: RunnerControl;
     readonly #graceMs: number;
+    /** The runner, as it was when the VM started: asked once, since the package forgets it while it closes. */
+    readonly #pid: number | null;
+    readonly #identity: string | undefined;
     #closed = false;
     #closing: Promise<void> | undefined;
     readonly #exits: ((reason: string) => void)[] = [];
@@ -336,6 +347,8 @@ export class GondolinVm implements GuestVm {
         this.#vm = vm;
         this.#runner = runner;
         this.#graceMs = graceMs;
+        this.#pid = vm.getHostPid();
+        this.#identity = this.#pid === null ? undefined : runner.identity(this.#pid);
         this.id = String(vm.id);
 
         // The runner went away (a crash, a kill): say so, so the manager drops this VM and the next call starts another.
@@ -361,7 +374,7 @@ export class GondolinVm implements GuestVm {
     }
 
     hostPid(): number | null {
-        return this.#vm.getHostPid();
+        return this.#pid;
     }
 
     onExit(listener: (reason: string) => void): void {
@@ -457,8 +470,6 @@ export class GondolinVm implements GuestVm {
             return;
         }
 
-        // Before the close: the package answers null once its runner is closed.
-        const pid: number | null = this.#vm.getHostPid();
         let failure: unknown;
 
         try {
@@ -467,14 +478,18 @@ export class GondolinVm implements GuestVm {
             failure = error;
         }
 
-        if (pid !== null && this.#runner.alive(pid)) {
-            this.#runner.kill(pid);
+        // The runner is the one that started, or it is gone: a number that another program has since is not it.
+        const here = () =>
+            this.#pid !== null && this.#runner.identity(this.#pid) === this.#identity;
+
+        if (this.#identity !== undefined && here()) {
+            this.#runner.kill(this.#pid!);
             const until = Date.now() + this.#graceMs;
 
-            while (this.#runner.alive(pid)) {
+            while (here()) {
                 if (Date.now() >= until) {
                     throw new Error(
-                        `the VM's runner (process ${pid}) is still running${failure === undefined ? "" : `: ${String(failure)}`}`,
+                        `the VM's runner (process ${this.#pid}) is still running${failure === undefined ? "" : `: ${String(failure)}`}`,
                     );
                 }
 
@@ -919,7 +934,13 @@ export class GondolinDriver implements SandboxDriver {
         }
 
         // Make the VM boot now, so the first call does not pay for it unseen and a broken VM shows here.
-        await vm.start();
+        try {
+            await vm.start();
+        } catch (error) {
+            await vm.close().catch(() => undefined);
+
+            throw error;
+        }
 
         // The guest's own git settings: trust for the mounted folders, an author, and no way to sign in.
         try {
