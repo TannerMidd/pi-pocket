@@ -472,7 +472,9 @@ test("past its spend limit, an idle parent starts no turn for a report: it waits
 });
 
 test("reports taken out of the queue by something other than a person go again, and reach Pi once", async () => {
-    const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 8 });
+    // The parent's call outlasts the test: the Stop below ends it, so how long the subagents take to answer (longer on
+    // a loaded machine) cannot let the run end first and take the reports at its pause.
+    const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 600 });
 
     await until(
         async () => (await queued(id)) === 1,
