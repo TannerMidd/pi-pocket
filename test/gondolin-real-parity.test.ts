@@ -975,7 +975,7 @@ test("git's hooks folder that is the folder itself keeps the VM from starting, a
     assert.ok(!linked.ok, "the VM did not start");
     assert.match(
         String((linked as { error: Error }).error.message),
-        /through a link \(.*hooks leads to/,
+        /goes through a link in the folder \(.*hooks\), which the guest may change/,
     );
     assert.equal(existsSync(join(repo, "evil.txt")), false);
     rmSync(join(repo, "hooks"));
@@ -1048,4 +1048,33 @@ test("git's hooks folder that is the folder itself keeps the VM from starting, a
     onHost(repo, "checkout", "-q", "-b", "elsewhere");
     assert.equal(existsSync(join(repo, "OWNER_LINK_HOOK")), true);
     assert.equal(existsSync(join(repo, "EVIL_LINK_HOOK")), false);
+});
+
+test("a link that leads through .. into the project is refused: the guest cannot make a hook that the owner's git runs by the kernel's reading", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("dotdot");
+    const outside = realpathSync(mkdtempSync(join(scratch, "outside-")));
+
+    mkdirSync(join(repo, "sub"));
+    // `outside/alias` is `outside/pivot/../hook.sh`; the kernel reads `pivot/..` as the parent of `repo/sub`: `repo/hook.sh`.
+    symlinkSync(join(repo, "sub"), join(outside, "pivot"));
+    symlinkSync(`${outside}/pivot/../hook.sh`, join(outside, "alias"));
+    onHost(repo, "config", "core.fsmonitor", `sh ${outside}/alias`);
+    const rootId = ++numbers;
+    const refused = await manager!
+        .envFor(rootId, { rootId, cwd: repo, uploadDir: undefined })
+        .exec("echo 'touch EVIL_DOTDOT' > hook.sh; echo ran", { timeout: 60 }, context);
+
+    assert.ok(!refused.ok, "the VM did not start");
+    assert.match(String((refused as { error: Error }).error.message), /link/);
+    assert.equal(existsSync(join(repo, "hook.sh")), false);
+
+    // The plain setting stays allowed.
+    onHost(repo, "config", "core.fsmonitor", "sh ./tools/hook.sh");
+    const allowed = await inVm(repo, "echo fine > notes.txt; echo notes=$?");
+
+    assert.match(allowed.output, /notes=0/);
 });

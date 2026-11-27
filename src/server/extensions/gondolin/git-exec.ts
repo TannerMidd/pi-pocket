@@ -146,6 +146,13 @@ function candidates(path: string, bases: readonly string[], home: string): Where
         : bases.map((base) => ({ path: resolve(base, path), raw: `${base}${sep}${path}` }));
 }
 
+/** The file that an entry comes from, as git wrote it and made absolute, with nothing taken out of the text. */
+function originText(cwd: string, entry: ConfigEntry): string {
+    const path = entry.origin.slice(5);
+
+    return isAbsolute(path) ? path : `${cwd}${sep}${path}`;
+}
+
 /** What a value of the configuration is: the key, its text, and where it was set, for what a person reads. */
 function describe(entry: ConfigEntry, origin: string | undefined): string {
     return `git's ${entry.key} (${JSON.stringify(entry.value)}${origin === undefined ? "" : `, set in ${origin}`})`;
@@ -156,101 +163,117 @@ function below(path: string, roots: readonly string[]): boolean {
     return roots.some((root) => inside(path, root) && path.toLowerCase() !== root.toLowerCase());
 }
 
+/** What `follow` says: where a path ends, and why it may not be used when it passes through a mount in a way that cannot be held. */
+export interface Followed {
+    readonly physical: string;
+    readonly problem?: string;
+}
+
 /**
- * Follow `raw` as the file system does, one part at a time, and say where it ends. A link on the way that lies below a
- * mount, or leads below one, is refused: the guest may make a link there, or point one elsewhere, and the folder that git
- * uses would be one it made. A link outside the mounts (`/tmp` on macOS) is only followed.
+ * Follow `raw` as the kernel does, one component at a time, and say where it ends. Nothing is taken out of the text
+ * first: `..` is the parent of the place reached so far, which has no link in it (so `link/..` is the parent of what the
+ * link leads to), a relative link is read from the folder that holds it, an absolute one from the root, and a link that
+ * leads nowhere is read as written. At most 40 links are followed, as the kernel allows. A component that is missing
+ * ends the walk as written; `..` after one inside a mount is refused (the guest could make that component a link).
+ *
+ * A path is refused (`problem`) when a mount is passed by way of a link:
+ * - a link that lies in a mount (the guest may make it, or point it elsewhere);
+ * - a link that leads into a mount, or whose target text goes through one (a link outside, to a place inside).
+ * A plain path that enters a mount, such as `.githooks`, and a link of the owner's outside the mounts that leads to a
+ * folder above or beside them (`/tmp` on macOS), are followed without a word.
  */
-function follow(raw: string, roots: readonly string[]): { physical: string; problem?: string } {
-    let at: string = sep;
-    const parts = raw.split(sep);
+export function follow(raw: string, roots: readonly string[]): Followed {
     let hops = 0;
+    let problem: string | undefined;
 
-    while (parts.length > 0) {
-        const part = parts.shift()!;
+    /** Walk `text` from `start` (a place with no link in it); `through`: any step into a mount is a problem. */
+    const walk = (text: string, start: string, through: boolean): string => {
+        let at = start;
+        let missing = false;
+        const parts = text.split(sep);
 
-        if (part === "" || part === ".") {
-            continue;
-        }
+        while (parts.length > 0 && problem === undefined) {
+            const part = parts.shift()!;
 
-        if (part === "..") {
-            at = dirname(at);
-
-            continue;
-        }
-
-        const next = join(at, part);
-        let link = false;
-
-        try {
-            link = lstatSync(next).isSymbolicLink();
-        } catch {
-            // missing: the rest is read as written
-            at = next;
-
-            continue;
-        }
-
-        if (!link) {
-            at = next;
-
-            continue;
-        }
-
-        if (++hops > 40) {
-            return {
-                physical: next,
-                problem: `reaches into the folder through too many links (${next})`,
-            };
-        }
-
-        let real: string | undefined;
-
-        try {
-            real = realpathSync(next);
-        } catch {
-            // A link that leads nowhere: where it points is read as written, and followed like any other path.
-            real = undefined;
-        }
-
-        if (real === undefined) {
-            let target: string;
-
-            try {
-                target = resolve(dirname(next), readlinkSync(next));
-            } catch {
-                return {
-                    physical: next,
-                    problem: `reaches into the folder through a link that cannot be read (${next})`,
-                };
+            if (part === "" || part === ".") {
+                continue;
             }
 
-            // The guest may change a link that lies in a mount, whatever it points at.
-            if (below(next, roots)) {
-                return {
-                    physical: target,
-                    problem: `reaches into the folder through a link that leads nowhere (${next})`,
-                };
+            if (part === "..") {
+                if (missing && roots.some((root) => inside(at, root))) {
+                    problem = `uses .. after a place that is not there (${at}), which the guest could make a link`;
+
+                    break;
+                }
+
+                at = dirname(at);
+            } else {
+                const next = join(at, part);
+                let target: string | undefined;
+
+                try {
+                    target = lstatSync(next).isSymbolicLink() ? readlinkSync(next) : undefined;
+                } catch (error) {
+                    if (
+                        (error as { code?: string }).code === "ENOENT" ||
+                        (error as { code?: string }).code === "ENOTDIR"
+                    ) {
+                        missing = true;
+                        at = next;
+
+                        continue;
+                    }
+
+                    problem = `cannot be read (${next})`;
+
+                    break;
+                }
+
+                if (target === undefined) {
+                    at = next;
+                } else {
+                    if (++hops > 40) {
+                        problem = `goes through too many links (${next})`;
+
+                        break;
+                    }
+
+                    if (below(next, roots)) {
+                        problem = `goes through a link in the folder (${next}), which the guest may change`;
+
+                        break;
+                    }
+
+                    // Where the link leads: its text, read from the folder that holds it (or from the root).
+                    const end = walk(target, isAbsolute(target) ? sep : at, true);
+
+                    if (problem !== undefined) {
+                        break;
+                    }
+
+                    if (roots.some((root) => inside(end, root))) {
+                        problem = `reaches into the folder through a link (${next} leads to ${end})`;
+
+                        break;
+                    }
+
+                    at = end;
+                }
             }
 
-            // A link outside the mounts is the owner's: a target inside a mount is held like a path that is missing.
-            parts.unshift(...target.split(sep));
-            at = sep;
+            if (through && roots.some((root) => inside(at, root))) {
+                problem = `goes through the folder by way of a link (${at})`;
 
-            continue;
+                break;
+            }
         }
 
-        if (below(next, roots) || below(real, roots)) {
-            return {
-                physical: real,
-                problem: `reaches into the folder through a link (${next} leads to ${real})`,
-            };
-        }
+        return at;
+    };
 
-        at = real;
-    }
+    const physical = walk(raw, sep, false);
 
-    return { physical: at };
+    return problem === undefined ? { physical } : { physical, problem };
 }
 
 /** The first link inside `dir` that leads below a mount but out of `dir`, or that leads nowhere; undefined when none. */
@@ -436,7 +459,7 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
             hold(
                 {
                     path: resolve(context.cwd, entry.origin.slice(5)),
-                    raw: resolve(context.cwd, entry.origin.slice(5)),
+                    raw: originText(context.cwd, entry),
                 },
                 false,
                 entry,
@@ -453,7 +476,8 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
 
         if (/^(include|includeif\..+)\.path$/.test(key)) {
             // Relative to the file that holds the directive; a missing file is read when it appears.
-            const from = originFile === undefined ? context.cwd : dirname(originFile);
+            const from =
+                originFile === undefined ? context.cwd : dirname(originText(context.cwd, entry));
 
             for (const where of candidates(entry.value, [from], home)) {
                 hold(where, false, entry, originFile);
@@ -463,11 +487,9 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
         }
 
         if (key === "core.hookspath") {
-            // Relative to where hooks run (the top of the working tree), and, in a bare repository, to the git dir.
-            const hooks = [
-                context.top ?? context.cwd,
-                ...(context.gitDir === undefined ? [] : [context.gitDir]),
-            ];
+            // Relative to where hooks run: the top of the working tree, or the git directory of a bare repository.
+            const hooks =
+                context.top !== undefined ? [context.top] : [context.gitDir ?? context.cwd];
 
             for (const where of candidates(entry.value, hooks, home)) {
                 hold(where, true, entry, originFile, true);

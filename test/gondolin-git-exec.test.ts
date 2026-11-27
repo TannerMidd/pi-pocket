@@ -10,6 +10,7 @@ import { after, test } from "node:test";
 import {
     execPathsOf,
     execPlan,
+    follow,
     GitExecGuard,
     gitExecPaths,
     parseConfigList,
@@ -88,7 +89,6 @@ test("what the configuration names inside the folder is held: hooks folder, incl
 
     assert.deepEqual(held(paths, root), [
         "/.git",
-        "/.git/.githooks",
         "/.git/config",
         "/.git/more.cfg",
         "/.githooks",
@@ -369,16 +369,16 @@ test("a path that reaches the folder through a link is refused, whatever the cha
         execPlan([entry(key, value)], context).problems;
 
     for (const value of ["hooks", "alias/hooks", "chain", "./chain/", "alias/../real/hooks"]) {
-        assert.match(plan(value)[0] ?? "", /through a link/, value);
+        assert.match(plan(value)[0] ?? "", /(through|by way of) a link/, value);
     }
 
     // The same for a script, an include, and an attributes file.
-    assert.match(plan("./chain", "core.fsmonitor")[0] ?? "", /through a link/);
-    assert.match(plan("../alias/x.cfg", "include.path")[0] ?? "", /through a link/);
-    assert.match(plan("alias/attrs", "core.attributesfile")[0] ?? "", /through a link/);
+    assert.match(plan("./chain", "core.fsmonitor")[0] ?? "", /(through|by way of) a link/);
+    assert.match(plan("../alias/x.cfg", "include.path")[0] ?? "", /(through|by way of) a link/);
+    assert.match(plan("alias/attrs", "core.attributesfile")[0] ?? "", /(through|by way of) a link/);
 
-    // A link of the owner's outside the folder that leads to a plain folder in it is followed, and the folder is held.
-    assert.deepEqual(plan(`${base}/into-root/real/hooks`), []);
+    // A link of the owner's outside the folder that leads into it is refused too: it is a way into the folder by a link.
+    assert.match(plan(`${base}/into-root/real/hooks`)[0] ?? "", /(through|by way of) a link/);
 
     // A link that leads out of the folder, and a plain folder, are no problem; the plain one is held with its way.
     assert.deepEqual(plan(`${base}/outside-link/hooks`), []);
@@ -544,7 +544,7 @@ test("a call that waits for git's configuration does not lose its VM to the idle
     }
 });
 
-test("a link that leads nowhere and lies outside the folder does not block it, unless it points into it", () => {
+test("a link that leads nowhere and lies outside the folder does not block it, and one that points into it is refused", () => {
     const base = temp();
     const root = join(base, "proj");
     const home = join(base, "home");
@@ -565,16 +565,162 @@ test("a link that leads nowhere and lies outside the folder does not block it, u
         assert.deepEqual(plan(value).paths, [], value);
     }
 
-    // A link in the owner's home that points into the folder, at a file that is not there yet: the guest could make
-    // it, so it is held.
+    // A link in the owner's home that points into the folder, even at a file that is not there yet, is refused: the
+    // guest could make the target.
     for (const value of [join(home, "into-folder"), "~/into-folder", join(home, "via-link")]) {
-        const result = plan(value);
-
-        assert.deepEqual(result.problems, [], value);
-        assert.deepEqual(hooksOnly(result.paths, root), ["/not-yet.txt"], value);
+        assert.match(plan(value).problems[0] ?? "", /(through|by way of) a link/, value);
     }
 
     // A link inside the folder that leads nowhere is the guest's to change: refused.
     symlinkSync(join(base, "gone"), join(root, "dangling"));
-    assert.match(plan(join(root, "dangling")).problems[0] ?? "", /link that leads nowhere/);
+    assert.match(
+        plan(join(root, "dangling")).problems[0] ?? "",
+        /link in the folder .*which the guest may change/,
+    );
+});
+
+// ─── The resolver walks as the kernel does ──────────────────────────────────
+
+/** What the kernel says a path is: `realpath` when the path is there, else `readlink -f` (a missing last part). */
+function kernel(path: string): string | undefined {
+    try {
+        return realpathSync.native(path);
+    } catch {
+        // missing, or a loop
+    }
+
+    try {
+        return (
+            execFileSync("readlink", ["-f", path], { encoding: "utf8", stdio: "pipe" }).trim() ||
+            undefined
+        );
+    } catch {
+        return undefined;
+    }
+}
+
+test("the resolver ends where the kernel does, for links, .. after links, relative targets, loops, and missing parts", () => {
+    const base = temp();
+    const at = (...parts: string[]) => join(base, ...parts);
+    const link = (target: string, ...name: string[]) => symlinkSync(target, at(...name));
+
+    mkdirSync(at("a", "b"), { recursive: true });
+    mkdirSync(at("dd", "ee", "ff"), { recursive: true });
+    writeFileSync(at("a", "b", "file"), "x");
+    link("a", "l1");
+    link("a/b", "rel");
+    link(at("a", "b"), "abs");
+    link("a/b/..", "up");
+    link("pivot/../hook.sh", "alias");
+    link("a/b", "pivot");
+    link("loop2", "loop1");
+    link("loop1", "loop2");
+    link("/", "root");
+    link("../a", "dd", "back");
+    link("../back/b", "dd", "ee", "chain");
+    link("../../../a/b", "dd", "ee", "ff", "deep");
+    link("l1", "l2");
+    link("l2/b/..", "l3");
+    link("dd/ee/ff/deep/..", "l4");
+
+    const cases = [
+        "a/b/file",
+        "a//b/./file",
+        "l1/b/file",
+        "l1/b/..",
+        "l1/b/../b/file",
+        "l1/../a/b",
+        "l2/b/file",
+        "l3/b/file",
+        "l4/x",
+        "rel/file",
+        "abs/file",
+        "up/b/file",
+        "pivot/..",
+        "pivot/../a",
+        "pivot/../hook.sh",
+        "alias",
+        "alias/x",
+        "dd/back/b/file",
+        "dd/ee/chain/file",
+        "dd/ee/ff/deep/file",
+        "dd/ee/ff/deep/../file",
+        "root/etc",
+        "root/..",
+        "root/../etc",
+        "a/missing",
+        "a/missing/",
+        "a/b/missing/more",
+        "l1/missing",
+        "l1/nope/x/y",
+    ];
+    let compared = 0;
+
+    for (const text of cases) {
+        const raw = `${base}/${text}`;
+        const want = kernel(raw);
+        const got = follow(raw, []);
+
+        assert.equal(got.problem, undefined, text);
+
+        if (want !== undefined) {
+            assert.equal(got.physical, want, `${text}: the kernel says ${want}`);
+            compared++;
+        }
+    }
+
+    // Most of the table is there on disk: the kernel is the judge. The rest is a missing middle part, which no tool
+    // resolves, and the walk keeps as written.
+    assert.ok(
+        compared >= cases.length - 6,
+        `${compared} of ${cases.length} compared with the kernel`,
+    );
+    assert.equal(follow(`${base}/a/b/missing/more`, []).physical, at("a", "b", "missing", "more"));
+
+    // A loop is an error for the kernel, and for the walk.
+    assert.match(follow(`${base}/loop1/x`, []).problem ?? "", /too many links/);
+    assert.equal(kernel(`${base}/loop1/x`), undefined);
+});
+
+test("a link that is followed by .. is read as the kernel reads it: a hook that is missing in the project is held or refused", () => {
+    const base = temp();
+    const project = join(base, "project");
+    const outside = join(base, "outside");
+
+    mkdirSync(join(project, ".git"), { recursive: true });
+    mkdirSync(join(project, "sub"));
+    mkdirSync(outside);
+    symlinkSync(join(project, "sub"), join(outside, "pivot"));
+    symlinkSync(`${outside}/pivot/../hook.sh`, join(outside, "alias"));
+    symlinkSync("pivot/../hook.sh", join(outside, "relalias"));
+    const context = {
+        cwd: project,
+        top: project,
+        gitDir: join(project, ".git"),
+        mounts: [project],
+    };
+    const plan = (value: string, key = "core.fsmonitor") => execPlan([entry(key, value)], context);
+
+    // `alias` leads to `outside/pivot/../hook.sh`, which the kernel reads as `project/hook.sh`: not there yet, and the
+    // guest could make it. The old reading, `outside/hook.sh`, held nothing.
+    for (const value of [
+        `sh ${outside}/alias`,
+        `sh ${outside}/relalias`,
+        `${outside}/pivot/../hook.sh`,
+    ]) {
+        const result = plan(value);
+
+        assert.match(result.problems[0] ?? "", /(through|by way of) a link|leads to/, value);
+    }
+
+    // `..` that climbs out of the folder by way of a link, and `..` after a place that is not there.
+    assert.match(plan(`${outside}/pivot/../x`).problems[0] ?? "", /link/);
+    assert.match(
+        execPlan([entry("core.hookspath", "missing/../.githooks")], context).problems[0] ?? "",
+        /after a place that is not there/,
+    );
+
+    // A plain path stays allowed and is held.
+    assert.deepEqual(plan("sh ./tools/hook.sh").problems, []);
+    assert.ok(held(plan("sh ./tools/hook.sh").paths, project).includes("/tools"));
 });
