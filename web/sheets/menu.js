@@ -473,6 +473,12 @@ function overview(places) {
         conversation &&
             menuGroup("This session", [
                 ...quickRows(),
+                // A module's session rows (`pocket.menu` with `group: "session"`) show here, one tap from the menu.
+                ...(conversation.kind === "session"
+                    ? extensionMenuItems("session").map((each) =>
+                          menuRow(each.label, each.run, { hint: each.hint }),
+                      )
+                    : []),
                 sectionRow("commands", "more", "More session commands"),
             ]),
         menuGroup("Application", [
@@ -537,8 +543,6 @@ function workspaceGroups() {
                         ? "anyone here can send to Pi again"
                         : "one person drives Pi at a time",
                 ),
-            session &&
-                extensionMenuItems("session").map((each) => item(each.label, each.run, each.hint)),
         ]),
         menuGroup(
             "Subagents",

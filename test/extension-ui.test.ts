@@ -453,7 +453,7 @@ test(
             `globalThis.appMenu = pocket.menu({ id: "app-row", label: "App row", hint: "default", run: () => { globalThis.menuRan = "app"; } }); globalThis.sessionMenu = pocket.menu({ id: "session-row", label: "Session row", group: "session", run: () => { globalThis.menuRan = "session"; } }); return "null";`,
         );
 
-        const openMenu = (section: "ext" | "manage") =>
+        const openMenu = (section: "ext" | "menu") =>
             inPage(
                 `(await import("/store.js")).openSheet({ type: "menu", section: ${JSON.stringify(section)} }); return "null";`,
             );
@@ -482,8 +482,8 @@ test(
 
         await inPage(`(await import("/store.js")).navigate(${session}); return "null";`);
         await until(() => has(".composer"), "the session opens");
-        await openMenu("manage");
-        await until(() => hasLabel("Session row"), "the session extension row");
+        await openMenu("menu");
+        await until(() => hasLabel("Session row"), "the session extension row in the session menu");
         assert.equal(await hasLabel("App row"), false);
         await inPage(
             `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Session row")).click(); return "null";`,
@@ -498,7 +498,7 @@ test(
         await withMeter(
             `globalThis.sessionMenu.update({ label: "Session updated", hint: "changed" }); return "null";`,
         );
-        await openMenu("manage");
+        await openMenu("menu");
         await until(() => hasLabel("Session updated"), "the updated Session row");
         assert.equal(await hasLabel("Session row"), false);
         await withMeter(`globalThis.sessionMenu.remove(); return "null";`);
