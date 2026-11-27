@@ -7,9 +7,11 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { sandboxedFolder } from "../src/server/confined.ts";
+import { SandboxDoc, SubagentsDoc } from "../src/server/docs.ts";
 import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
+    context,
     newSession,
     openApp,
     owner,
@@ -221,6 +223,38 @@ test("the folder stays confined, and the setting on, until the VM is gone when t
         assert.equal((await app.sandboxes.get(id)).on, false);
         assert.equal(sandboxedFolder(folder), false);
         assert.equal(driver.log.started.length, 1, "the call that waited started a VM");
+    } finally {
+        useDriver(undefined);
+        held.open();
+        await app.close();
+    }
+});
+
+test("a subagent that is made after the sandbox looked for them, and before it is stored, is in the sandbox", async () => {
+    const { app, id } = await session("late-child");
+    const held = gate();
+
+    try {
+        holdHostWork(app, held);
+        const change = app.sandboxes.set(id, owner(app), true);
+
+        await held.reached;
+
+        // What a spawn that was already running commits: the child, listed under its parent, with the setting it read.
+        const child = await app.harness.commit(async (tx) => {
+            const made = await tx.createConversation({ ownership: { kind: "ownerless" } });
+
+            (await tx.doc(SubagentsDoc, id)).agents.helper = {
+                conversationId: made.id,
+                reported: [],
+            };
+
+            return made.id;
+        }, context);
+
+        held.open();
+        await change;
+        assert.equal((await app.harness.snapshot(SandboxDoc, child, context))?.on, true);
     } finally {
         useDriver(undefined);
         held.open();

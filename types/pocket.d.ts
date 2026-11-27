@@ -199,6 +199,12 @@ export interface SandboxProvider {
     env(target: SandboxTarget): ExecutionEnv;
     /** The browser in the conversation's VM: a Chromium whose DevTools pipe only this server holds. */
     browser?(target: SandboxTarget): SandboxBrowser;
+    /**
+     * A session's sandbox is about to go off: stop its VM and what runs in it, and resolve only when they are gone. Core
+     * stores the setting after this, and keeps the session confined until then. A rejection keeps the sandbox on.
+     */
+    release?(conversationId: ConversationId): Promise<void>;
+    /** A session's setting changed. Runs after the change is stored; it cannot stop it. */
     changed?(conversationId: ConversationId, on: boolean): void;
 }
 

@@ -511,9 +511,7 @@ export class PocketApp {
     /** No variables for a sandboxed session's commands: what extensions add to host commands are secrets of the host. */
     readonly #noCommandEnvs = new CommandEnvs((line) => this.#log(line));
     readonly sandboxes: Sandboxes;
-    readonly #stopSandboxedFolders = onSandboxedFolders((folder) =>
-        this.sandboxes.usesFolder(folder),
-    );
+    readonly #stopSandboxedFolders = onSandboxedFolders(() => this.sandboxes.folders());
     readonly turnNotes = new TurnNotes(this);
     /** Other people's drop-ins, from a reviewed index: found, installed off, read, updated, removed (`gallery.ts`). */
     readonly gallery = new Gallery(this);

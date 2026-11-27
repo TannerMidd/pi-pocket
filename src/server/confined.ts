@@ -25,18 +25,49 @@ const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 const READ = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | NO_FOLLOW;
 const FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | NO_FOLLOW;
 
-const sandboxedFolders = new Set<(folder: string) => boolean>();
+const sandboxedFolders = new Set<() => Iterable<string>>();
 
-/** A server says which folders a sandboxed session uses. Returns how to stop. */
-export function onSandboxedFolders(uses: (folder: string) => boolean): () => void {
-    sandboxedFolders.add(uses);
+/** A server says which folders sandboxed sessions work in, as their stated paths. Returns how to stop. */
+export function onSandboxedFolders(list: () => Iterable<string>): () => void {
+    sandboxedFolders.add(list);
 
-    return () => void sandboxedFolders.delete(uses);
+    return () => void sandboxedFolders.delete(list);
 }
 
-/** Whether a sandboxed session uses `folder`, so that a guest may have written what is in it. */
+function real(path: string): string {
+    try {
+        return realpathSync(path);
+    } catch {
+        return resolve(path);
+    }
+}
+
+/**
+ * Whether a sandboxed session works in `folder`, in a folder that holds it, or in one inside it: a guest may have
+ * written what is in it. The paths are compared as stated, and as they are really: a guest can make a folder that
+ * lies in the project a link to another place, and that must not take it out of the project's reach.
+ */
 export function sandboxedFolder(folder: string): boolean {
-    return [...sandboxedFolders].some((uses) => uses(folder));
+    const here = resolve(folder);
+    const overlap = (a: string, b: string) => within(a, b) || within(b, a);
+
+    return [...sandboxedFolders].some((list) =>
+        [...list()].some((used) => overlap(here, used) || overlap(real(here), real(used))),
+    );
+}
+
+/**
+ * Where a walk to something in `root` starts: the outermost sandboxed folder that holds `root` by name, else `root`. A
+ * session's folder that lies in a sandboxed one is reached from there, one name at a time, so that a link where the
+ * guest has put it in place of a folder on the way is refused, and not followed to its end.
+ */
+function anchor(root: string): string {
+    const here = resolve(root);
+    const holders = [...sandboxedFolders]
+        .flatMap((list) => [...list()].map((used) => resolve(used)))
+        .filter((used) => within(used, here));
+
+    return holders.sort((a, b) => a.length - b.length)[0] ?? here;
 }
 
 /**
@@ -108,13 +139,14 @@ function pinRoot(root: string): number {
  * are missing). The caller closes the descriptor.
  */
 function pinParent(root: string, path: string, make = false): { dir: number; name: string } {
-    const parts = names(root, path);
+    const start = anchor(root);
+    const parts = names(start, path);
 
     if (parts.length === 0) {
         throw refused(path);
     }
 
-    let dir = pinRoot(root);
+    let dir = pinRoot(start);
 
     try {
         for (const part of parts.slice(0, -1)) {
@@ -147,8 +179,10 @@ function pinParent(root: string, path: string, make = false): { dir: number; nam
 
 /** `path` in `root`, open for reading (a file or a folder), as a descriptor: the caller closes it. */
 export function openInsideSync(root: string, path: string): number {
-    if (names(root, path).length === 0) {
-        return pinRoot(root);
+    const start = anchor(root);
+
+    if (names(start, path).length === 0) {
+        return pinRoot(start);
     }
 
     const { dir, name } = pinParent(root, path);
