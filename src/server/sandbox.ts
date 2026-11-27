@@ -19,7 +19,7 @@ import {
 import { type ExecutionEnv, ok } from "@earendil-works/pi-durable/env";
 import type { PocketApp } from "./app.ts";
 import type { Role, User } from "./config.ts";
-import { type SessionMeta, SandboxDoc, SessionsDoc } from "./docs.ts";
+import { type SessionMeta, SandboxDoc, SessionsDoc, SubagentsDoc } from "./docs.ts";
 import { HttpError } from "./errors.ts";
 import { foldersOverlap, within } from "./folder-overlap.ts";
 import {
@@ -267,12 +267,13 @@ export class Sandboxes {
      * `lifecycle`: set by a provider change or by start; only a provider change or a reconcile clears it. Any other suspension
      * (a failed release, a failed step) needs an explicit recovery.
      */
-    readonly #phases = new Map<
-        number,
-        { phase: Phase; token: number; reason?: string; lifecycle?: true }
-    >();
-    /** Counts the phase records: each write of a phase has a token of its own, which only its writer may end. */
-    #phaseSeq = 0;
+    readonly #phases = new Map<number, { phase: Phase; reason?: string; lifecycle?: true }>();
+    /**
+     * The revision of each tree's phase: it counts every write, `stable` ones too, and never goes back or goes away (a
+     * record that is deleted at `stable` could be told from a later one by nothing). A step that waits keeps the revision it
+     * saw, or the one its own write made, and writes only while it is still the current one.
+     */
+    readonly #revisions = new Map<number, number>();
     /** The transitions under way (a change, a turn-on or turn-off, a resume, the rules): a provider change waits for them. */
     readonly #active = new Set<Promise<unknown>>();
     /** One release attempt for each tree at a time: a retry joins it, and a late one never follows a recovery. */
@@ -453,7 +454,12 @@ export class Sandboxes {
 
     /** A document changed (`app.ts` calls this as documents commit, and while it recovers). */
     noteDoc(kind: string, id: ConversationId | undefined, value: unknown): void {
-        if (kind === SessionsDoc.definition.kind || kind === AgentDoc.definition.kind) {
+        // The sessions, their folders, and their subagents (a tree's folders are its conversations') change groups.
+        if (
+            kind === SessionsDoc.definition.kind ||
+            kind === AgentDoc.definition.kind ||
+            kind === SubagentsDoc.definition.kind
+        ) {
             this.#epoch++;
         }
 
@@ -588,10 +594,16 @@ export class Sandboxes {
         }
     }
 
-    /** Write a phase, and answer the token of the record (a `stable` one has none: the record goes). */
+    #revision(root: number): number {
+        return this.#revisions.get(root) ?? 0;
+    }
+
+    /** Write a phase, and answer the tree's new revision. */
     #setPhase(root: number, phase: Phase, reason?: string, lifecycle = false): number {
         this.#epoch++;
-        const token = ++this.#phaseSeq;
+        const token = this.#revision(root) + 1;
+
+        this.#revisions.set(root, token);
 
         if (phase === "stable") {
             this.#phases.delete(root);
@@ -599,7 +611,6 @@ export class Sandboxes {
         } else {
             this.#phases.set(root, {
                 phase,
-                token,
                 ...(reason === undefined ? {} : { reason }),
                 ...(lifecycle ? { lifecycle: true as const } : {}),
             });
@@ -613,9 +624,9 @@ export class Sandboxes {
     }
 
     /**
-     * Write a phase only when the record that its writer made is still the current one (or there was none: `undefined`).
-     * An async step checks this after every await before it writes, so it never clears or replaces a phase that another
-     * transition owns. Answers the new token, or undefined when the record was not its own any more.
+     * Write a phase only when the tree's revision is still `token`: the one its writer made, or the one it saw before it
+     * waited. An async step checks this after every await before it writes, so it never clears or replaces a phase that
+     * another transition owns, also one that began and ended while it waited. Answers the new revision, or undefined.
      */
     #setIf(
         root: number,
@@ -624,7 +635,7 @@ export class Sandboxes {
         reason?: string,
         lifecycle = false,
     ): number | undefined {
-        return this.#phases.get(root)?.token === token
+        return this.#revision(root) === token
             ? this.#setPhase(root, phase, reason, lifecycle)
             : undefined;
     }
@@ -922,6 +933,7 @@ export class Sandboxes {
 
         if (now !== this.#blocked) {
             this.#blocked = now;
+            this.#epoch++;
 
             if (now !== undefined) {
                 this.#app.ownerNotice(
@@ -959,6 +971,15 @@ export class Sandboxes {
             this.provider?.folderProblem?.(cwd) ??
             (await this.#trusted.check(cwd))
         );
+    }
+
+    /** `#folderProblem`, with a check that throws taken as a refusal that says so. */
+    async #problemOf(cwd: string): Promise<string | undefined> {
+        try {
+            return await this.#folderProblem(cwd);
+        } catch (error) {
+            return `The folder could not be checked (${describeError(error)}), so it is not known to be safe to share.`;
+        }
     }
 
     /** What must hold before a tree may be (or join) sandboxed in `cwd`, or undefined when it may. */
@@ -1650,13 +1671,16 @@ export class Sandboxes {
             finish,
         };
 
-        this.#leases.add(record);
-
-        // A lease in the folder its conversation works in changes no group: only one bound elsewhere does.
+        // What a cached admission depends on: the settings, the sessions and their folders, the subagents, the live work,
+        // the leases, the reservations, the phases, and the audit. Each of them advances the epoch when it changes. A lease
+        // changes it when it makes its tree live (the first one), or is bound outside its conversation's folder.
+        const wasLive = this.#hasWork(root);
         const elsewhere =
             record.folder !== this.#app.cwdOf(conversation as unknown as ConversationId);
 
-        if (elsewhere) {
+        this.#leases.add(record);
+
+        if (!wasLive || elsewhere) {
             this.#epoch++;
         }
 
@@ -1665,7 +1689,8 @@ export class Sandboxes {
             sandboxed: this.#on.has(root),
             end: () => {
                 if (this.#leases.delete(record)) {
-                    if (elsewhere) {
+                    // The last one ends: the tree may stop being live.
+                    if (elsewhere || !this.#hasWork(root)) {
                         this.#epoch++;
                     }
 
@@ -2043,8 +2068,9 @@ export class Sandboxes {
         }
 
         // The teardown is proved. Before work is let in again, the folder, the trusted places, and the gate are asked again:
-        // a suspension that the rules made (a trusted place now reaches the folder) stays, with its reason.
-        const problem = await this.#folderProblem(this.#folderOfRoot(root));
+        // a suspension that the rules made (a trusted place now reaches the folder) stays, with its reason. A check that
+        // throws is a refusal too: the tree is never left half way.
+        const problem = await this.#problemOf(this.#folderOfRoot(root));
 
         if (problem !== undefined) {
             this.#setIf(root, token, "suspended", problem);
@@ -2053,7 +2079,7 @@ export class Sandboxes {
         }
 
         // The reservation that the failure kept goes, so the group is free again.
-        if (this.#phases.get(root)?.token === token) {
+        if (this.#revision(root) === token) {
             this.#dropReservations(root);
             this.#setPhase(root, "stable");
         }
@@ -2092,7 +2118,7 @@ export class Sandboxes {
         }
 
         // Each step asks whether the record it made is still the current one, and writes only then.
-        const still = (root: number) => this.#phases.get(root)?.token === mine.get(root);
+        const still = (root: number) => this.#revision(root) === mine.get(root);
 
         const write = (root: number, phase: Phase, why?: string) => {
             const next = this.#setIf(root, mine.get(root), phase, why);
@@ -2109,7 +2135,7 @@ export class Sandboxes {
                         continue;
                     }
 
-                    const problem = await this.#folderProblem(this.#folderOfRoot(root));
+                    const problem = await this.#problemOf(this.#folderOfRoot(root));
 
                     if (!still(root)) {
                         continue;
@@ -2171,17 +2197,20 @@ export class Sandboxes {
                 continue;
             }
 
-            const missing = await this.#folderProblem(this.#folderOfRoot(root));
+            // The revision seen before the wait must still be the current one afterwards: a transition that began, or began
+            // and ended, meanwhile owns the tree, and it is left as it is.
+            const seen = this.#revision(root);
+            const missing = await this.#problemOf(this.#folderOfRoot(root));
 
-            // The record that was looked at before the wait must still be the current one, or a newer transition owns the
-            // tree: it is left as it is.
-            this.#setIf(
-                root,
-                current?.token,
-                missing === undefined ? "stable" : "suspended",
-                missing,
-                true,
-            );
+            if (this.#on.has(root)) {
+                this.#setIf(
+                    root,
+                    seen,
+                    missing === undefined ? "stable" : "suspended",
+                    missing,
+                    true,
+                );
+            }
         }
     }
 
