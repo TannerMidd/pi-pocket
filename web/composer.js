@@ -853,6 +853,7 @@ function WatchBar() {
 
 export function Composer() {
     const { view, conversationId } = store.state;
+    const personId = store.state.me?.id ?? null;
     const historyScope = { person: store.state.me?.id, conversation: conversationId };
     const [text, setText] = useState(() => drafts.get(conversationId));
     const [files, setFiles] = useState(() => loadAttached(conversationId));
@@ -1021,7 +1022,7 @@ export function Composer() {
             box.current?.focus();
             box.current?.setSelectionRange(at, at);
         });
-    }, [conversationId, sending, takenBack, request]);
+    }, [conversationId, sending, takenBack, request, personId]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -1039,7 +1040,6 @@ export function Composer() {
     // A box drawn before the person is known (the device's copy of the session shows first on a reload) read nothing:
     // what the person keeps on this device (draft, pasted text, quotes, files) is theirs only once /api/me says who
     // they are. Read it then, unless something was typed meanwhile.
-    const personId = store.state.me?.id ?? null;
     const drawnUnknown = useRef(personId === null);
 
     useEffect(() => {
