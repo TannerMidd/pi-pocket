@@ -275,6 +275,54 @@ test(
 );
 
 test(
+    "a draft shows in the box after a reload whose /api/me comes after the device's rows",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(app, id, "rows beside a draft");
+        await openOn(id, "rows beside a draft");
+        await saved(id);
+        await page.evaluate(`
+            const box = document.querySelector('.composer textarea');
+
+            box.value = 'keep me';
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+            "null";
+        `);
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(Object.keys(localStorage).some((key) => key.endsWith('draft.${id}')))`,
+                ),
+            "the draft kept on the device",
+        );
+        const me = hold("/api/me");
+
+        try {
+            await page.reload();
+            await until(
+                async () => (await shown("rows beside a draft")).rows,
+                "cached rows",
+                15_000,
+            );
+        } finally {
+            me.release();
+        }
+
+        // Drawn before the person was known, the box read no draft; it reads it once /api/me says who they are.
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.composer textarea')?.value === 'keep me')`,
+                ),
+            "the draft in the box",
+        );
+        await leave();
+    },
+);
+
+test(
     "a reload with no device copy keeps the boot screen until /api/me, then shows rows",
     real,
     async () => {
