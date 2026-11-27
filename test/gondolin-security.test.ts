@@ -110,6 +110,50 @@ test("the sandbox is refused while the session runs a background task or a ! com
     }
 });
 
+test("a daemon that a finished background task left running still counts as host work", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(scriptedModel());
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = await newSession(app, folder("daemon"));
+        const person = owner(app);
+        const task = await app.background.start(id, {
+            requestedBy: person.id,
+            command: "setsid tail -f /dev/null > /dev/null 2>&1 < /dev/null & echo started",
+            quietMinutes: 0,
+            notify: false,
+        });
+
+        await until(
+            async () =>
+                (await app.background.list(id)).some(
+                    (item) => item.status !== "running" && (item.left?.length ?? 0) > 0,
+                ),
+            "the task to end and leave its daemon",
+            20_000,
+        );
+        await assert.rejects(
+            app.sandboxes.set(id, person, true),
+            /a background task \(.*which left a process running\)/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, false);
+        await app.background.stop(id, task.id);
+        await until(
+            async () =>
+                (await app.background.list(id)).every((item) => (item.left?.length ?? 0) === 0),
+            "the daemon to end",
+            20_000,
+        );
+        await app.sandboxes.set(id, person, true);
+        assert.equal((await app.sandboxes.get(id)).on, true);
+    } finally {
+        await app.close();
+    }
+});
+
 // ─── Host files that an artifact names ──────────────────────────────────────
 
 test("an artifact of a sandboxed session cannot read a host file through an asset", async () => {

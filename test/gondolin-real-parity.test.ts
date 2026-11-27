@@ -738,3 +738,72 @@ test("a session that moves to another folder while a task holds its VM runs in t
         await vms.stopAll("the test ended").catch(() => undefined);
     }
 });
+
+test("what the repository's configuration names in the folder cannot be written, so the host's git runs only the owner's hooks", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("exec");
+    const rootId = ++numbers;
+    const env = manager!.envFor(rootId, { rootId, cwd: repo, uploadDir: undefined });
+
+    const inside = async (command: string) => {
+        let output = "";
+
+        await env.exec(command, { onOutput: (text) => (output += text), timeout: 90 }, context);
+
+        return output;
+    };
+
+    mkdirSync(join(repo, ".githooks"));
+    writeFileSync(join(repo, ".githooks", "post-checkout"), "#!/bin/sh\ntouch OWNER_HOOK_RAN\n", {
+        mode: 0o755,
+    });
+    writeFileSync(join(repo, "watch.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(repo, "clean.sh"), "#!/bin/sh\ncat\n", { mode: 0o755 });
+    mkdirSync(join(repo, ".newhooks"));
+    writeFileSync(join(repo, ".newhooks", "post-checkout"), "#!/bin/sh\ntrue\n", { mode: 0o755 });
+    onHost(repo, "config", "core.hooksPath", ".githooks");
+    onHost(repo, "config", "include.path", "../extra.cfg");
+    onHost(repo, "config", "core.fsmonitor", "./watch.sh");
+    onHost(repo, "config", "filter.x.clean", "./clean.sh");
+    onHost(repo, "config", "alias.go", "!sh ./go.sh");
+
+    const first = await inside(
+        [
+            "echo 'touch EVIL_HOOK_RAN' >> .githooks/post-checkout; echo hook=$?",
+            "echo x > .githooks/new-hook; echo newhook=$?",
+            "printf '[core]\\n\\thooksPath = evil\\n' > extra.cfg; echo include=$?",
+            "echo 'exit 1' > watch.sh; echo fsmonitor=$?",
+            "echo 'touch EVIL_FILTER' > clean.sh; echo filter=$?",
+            "echo 'touch EVIL_ALIAS' > go.sh; echo alias=$?",
+            "mkdir -p evil && printf '#!/bin/sh\\ntouch EVIL_EVIL\\n' > evil/post-checkout; echo evildir=$?",
+            "echo fine > notes.txt; echo notes=$?",
+        ].join("; "),
+    );
+
+    for (const name of ["hook", "newhook", "include", "fsmonitor", "filter", "alias"]) {
+        assert.match(first, new RegExp(`${name}=[1-9]`), `${name}: ${first}`);
+    }
+
+    assert.match(first, /evildir=0/, "an ordinary folder is the guest's");
+    assert.match(first, /notes=0/);
+
+    // The owner's next git command on the host: their hook runs, and the guest's does not.
+    onHost(repo, "config", "--unset", "core.fsmonitor");
+    onHost(repo, "checkout", "-q", "-b", "other");
+    assert.equal(existsSync(join(repo, "OWNER_HOOK_RAN")), true);
+
+    for (const marker of ["EVIL_HOOK_RAN", "EVIL_FILTER", "EVIL_ALIAS", "EVIL_EVIL"]) {
+        assert.equal(existsSync(join(repo, marker)), false, marker);
+    }
+
+    // The owner points git at another hooks folder while the VM runs: it is held from the next call on.
+    onHost(repo, "config", "core.hooksPath", ".newhooks");
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const later = await inside("echo evil >> .newhooks/post-checkout; echo newpath=$?");
+
+    assert.match(later, /newpath=[1-9]/, later);
+    assert.ok(!readFileSync(join(repo, ".newhooks", "post-checkout"), "utf8").includes("evil"));
+});

@@ -328,13 +328,7 @@ export class Sandboxes {
 
             const id = node.conversationId;
 
-            if (node.kind === "pocket.background") {
-                const item = await app.background.byTask(id, String(node.id));
-
-                found.push(
-                    `a background task (${item === undefined ? "a command" : app.background.describe(id, item, 80)})`,
-                );
-            } else if (node.kind === "pocket.shell") {
+            if (node.kind === "pocket.shell") {
                 found.push(`a ! command (${(await app.shell.describe(node.id)) ?? "a command"})`);
             } else if (node.kind === "pi.tool") {
                 const name =
@@ -344,6 +338,22 @@ export class Sandboxes {
 
                 if (name === "a tool" || ROUTED.has(name)) {
                     found.push(`a ${name} call that is running`);
+                }
+            }
+        }
+
+        // Background tasks come from their own records: a task counts while it runs, and after it ended when a process
+        // of it (a daemon) still runs.
+        for (const conversation of conversations) {
+            for (const item of await app.background.list(conversation)) {
+                if (
+                    item.status === "starting" ||
+                    item.status === "running" ||
+                    (item.left?.length ?? 0) > 0
+                ) {
+                    found.push(
+                        `a background task (${app.background.describe(conversation, item, 80)}${item.status === "starting" || item.status === "running" ? "" : ", which left a process running"})`,
+                    );
                 }
             }
         }

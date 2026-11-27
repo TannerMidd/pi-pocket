@@ -9,6 +9,7 @@ import { Readable, Writable } from "node:stream";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { GuestEnv } from "./guest-env.ts";
 import { gitMounts } from "./git.ts";
+import { GitExecGuard } from "./git-exec.ts";
 import type {
     Backend,
     GuestExecOptions,
@@ -77,8 +78,12 @@ interface Entry {
     stoppedAt?: number;
     note?: string;
     spec?: VmSpec;
+    /** What the host's git runs inside the VM's mounts, read from git's configuration (`git-exec.ts`). */
+    guard?: GitExecGuard;
     /** The session's folder or uploads changed since the VM started: it mounts the old ones, so no call may use it. */
     moved?: boolean;
+    /** The folder and uploads that the VM mounts: the target it started with. */
+    mounted?: VmTarget;
     envs: Map<string, GuestEnv>;
     /** Chromium's trust in the sandbox network's certificate authority, done once for each VM. */
     trusted?: Promise<void>;
@@ -169,7 +174,7 @@ export class SandboxManager {
                 `gondolin:${rootId}`,
                 target.cwd,
                 {
-                    ready: (signal) => this.#ready(rootId, signal),
+                    ready: (signal) => this.#ready(rootId, signal, target),
                     busy: () => this.#busy(rootId),
                     touch: () => this.#touch(rootId),
                 },
@@ -301,11 +306,21 @@ export class SandboxManager {
         entry.timer.unref?.();
     }
 
-    async #ready(rootId: number, signal?: AbortSignal): Promise<GuestVm> {
+    async #ready(rootId: number, signal?: AbortSignal, expect?: VmTarget): Promise<GuestVm> {
         const entry = this.#entries.get(rootId);
 
         if (entry === undefined) {
             throw new Error("The sandbox for this session is gone. Try again.");
+        }
+
+        // A call made for a folder that the session has left must not run in the VM of the one it works in now.
+        if (
+            expect !== undefined &&
+            (expect.cwd !== entry.target.cwd || expect.uploadDir !== entry.target.uploadDir)
+        ) {
+            throw new Error(
+                `This call was meant for ${expect.cwd}, but the session works in ${entry.target.cwd} now, so it did not run. Try it again.`,
+            );
         }
 
         if (this.#stopped) {
@@ -313,7 +328,12 @@ export class SandboxManager {
         }
 
         if (entry.vm !== undefined) {
-            if (entry.moved === true) {
+            if (
+                entry.moved === true ||
+                (entry.mounted !== undefined &&
+                    (entry.mounted.cwd !== entry.target.cwd ||
+                        entry.mounted.uploadDir !== entry.target.uploadDir))
+            ) {
                 // The VM mounts the folder that the session had: it ends (with what runs in it), and a new one starts.
                 await this.stop(rootId, "the session's folder changed");
 
@@ -324,6 +344,9 @@ export class SandboxManager {
                 entry.spec === undefined ||
                 !looserThanSettings(entry.spec, this.#options.settings())
             ) {
+                // The owner may have changed the git configuration since the last call: what it names is held now.
+                await entry.guard?.refresh();
+
                 return entry.vm;
             }
 
@@ -417,6 +440,7 @@ export class SandboxManager {
                 return why === undefined;
             });
         const gitDirs = usable(git.gitDirs, "folder");
+        const guard = new GitExecGuard(target.cwd, [target.cwd, ...gitDirs]);
         const spec: VmSpec = {
             label: sessionLabel(rootId, target.cwd),
             backend: settings.backend,
@@ -438,14 +462,18 @@ export class SandboxManager {
             memoryMb: settings.memoryMb,
             diskMb: settings.diskMb,
             image: settings.image,
+            gitExec: guard,
         };
 
         entry.phase = "starting";
+        entry.guard = guard;
         entry.note = undefined;
         entry.spec = spec;
         this.#changed(rootId);
 
         try {
+            // What the repository's configuration names is held before the first call, not after it.
+            await guard.refresh(true);
             const vm = await this.#options.driver.start(spec);
             let shell = "/bin/sh";
 
@@ -483,6 +511,7 @@ export class SandboxManager {
             }
 
             entry.vm = vm;
+            entry.mounted = target;
             entry.trusted = undefined;
             entry.shell = shell;
             entry.phase = "running";
@@ -530,7 +559,7 @@ export class SandboxManager {
     async launchBrowser(target: VmTarget, flags: readonly string[]): Promise<BrowserLink> {
         const rootId = target.rootId;
         const entry = this.#entry(target);
-        const vm = await this.#ready(rootId);
+        const vm = await this.#ready(rootId, undefined, target);
 
         entry.trusted ??= (async () => {
             const done = this.#busy(rootId);
@@ -742,7 +771,7 @@ export class SandboxManager {
     /** Start a command in a session's VM, as its shell runs it; the VM starts first when it is not there. */
     async spawnShell(target: VmTarget, command: string, options: GuestExecOptions = {}) {
         this.#entry(target);
-        const vm = await this.#ready(target.rootId);
+        const vm = await this.#ready(target.rootId, undefined, target);
         const shell = this.#entries.get(target.rootId)?.shell ?? "/bin/sh";
 
         return vm.exec([shell, "-lc", command], options);

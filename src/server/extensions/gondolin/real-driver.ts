@@ -14,6 +14,7 @@ import {
     mkdtempSync,
     readFileSync,
     readdirSync,
+    realpathSync,
     rmSync,
     statfsSync,
     writeFileSync,
@@ -806,7 +807,22 @@ export class GondolinDriver implements SandboxDriver {
             return readOnly ? new ReadonlyProvider(base) : base;
         };
 
-        const matcher = protectedMatcher(spec.protect);
+        // What the repository's configuration names inside a mount (a hooks folder, a script) is as protected as `.git`.
+        const guard = spec.gitExec;
+        const held =
+            (root: string, inner: (context: { op: string; path: string }) => boolean) =>
+            (context: { op: string; path: string }) =>
+                inner(context) || guard?.protects(root, context.path) === true;
+
+        const realRoot = (path: string) => {
+            try {
+                return realpathSync(path);
+            } catch {
+                return path;
+            }
+        };
+
+        const matcher = held(realRoot(spec.cwd), protectedMatcher(spec.protect));
         const gitMatcher = gitDirMatcher(spec.protect);
         const folder =
             spec.mount === "rw" && spec.protect.length > 0
@@ -825,7 +841,7 @@ export class GondolinDriver implements SandboxDriver {
             if (dir !== spec.cwd && existsSync(dir)) {
                 mounts[dir] =
                     spec.mount === "rw" && spec.protect.length > 0
-                        ? refuseWrites(library, real(dir, false), gitMatcher)
+                        ? refuseWrites(library, real(dir, false), held(realRoot(dir), gitMatcher))
                         : real(dir, spec.mount === "ro");
             }
         }
