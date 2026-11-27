@@ -264,6 +264,8 @@ export class Sandboxes {
     #serial: Promise<unknown> = Promise.resolve();
     /** Set while the provider is being torn down: nothing starts under it (`#fenceProblem`). */
     #fence: string | undefined;
+    /** Set when the server starts to stop, and never cleared: no registration, reconcile, or start may undo a shutdown. */
+    #stopping = false;
     /** Counts every change of the provider: an environment handle made under another generation is stale. */
     #generation = 0;
     /**
@@ -360,6 +362,14 @@ export class Sandboxes {
         owner?: string,
     ): Promise<{ unregister: () => Promise<void> }> {
         return this.#serialised(async () => {
+            // A server that is stopping takes no provider: nothing may install one, clear a fence, or reopen a tree.
+            if (this.#stopping) {
+                throw new HttpError(
+                    409,
+                    "The server is stopping, so no sandbox provider is installed now.",
+                );
+            }
+
             const old = this.#provider;
 
             // A live provider is stopped first: its trees are suspended, its calls revoked, its VMs proved gone. When that
@@ -494,6 +504,10 @@ export class Sandboxes {
 
     /** Why nothing may start under the provider now: its teardown has begun, and the new one is not installed yet. */
     #fenceProblem(): string | undefined {
+        if (this.#stopping) {
+            return "The server is stopping, so no sandbox starts now.";
+        }
+
         return this.#fence === undefined
             ? undefined
             : `The sandbox module is being replaced or turned off (${this.#fence}), so no sandbox starts now. Try again once the new one is in.`;
@@ -1711,7 +1725,7 @@ export class Sandboxes {
     // ─── Leases ─────────────────────────────────────────────────────────────
 
     /** Why a lease may not be granted for `root` now (I1 at this moment, and a blocked audit), or undefined. */
-    #grantProblem(root: number): string | undefined {
+    #grantProblem(root: number, candidate?: string): string | undefined {
         const boxed = this.#on.has(root);
 
         if (boxed && this.#blocked !== undefined) {
@@ -1741,6 +1755,26 @@ export class Sandboxes {
             }
         }
 
+        // A folder that the grant would add to the tree is part of the candidate membership: its group is looked at, and any
+        // reservation that covers it, before the grant (and not after it has joined).
+        if (
+            candidate !== undefined &&
+            workspaceScheme(candidate) === undefined &&
+            !this.#treeFolders(root).includes(candidate)
+        ) {
+            const reserved = this.#reservedProblem([candidate], this.#reservationOf(root));
+
+            if (reserved !== undefined) {
+                return reserved;
+            }
+
+            const mixed = this.#groupProblem(root, boxed, [candidate]);
+
+            if (mixed !== undefined) {
+                return mixed;
+            }
+        }
+
         const known = this.#granted.get(root);
         const now = Date.now();
 
@@ -1755,9 +1789,9 @@ export class Sandboxes {
         return problem;
     }
 
-    #groupProblem(root: number, boxed: boolean): string | undefined {
+    #groupProblem(root: number, boxed: boolean, extra: readonly string[] = []): string | undefined {
         const items = this.#app.sessionCatalogue();
-        const folders = this.#treeFolders(root);
+        const folders = [...this.#treeFolders(root), ...extra];
         const wrong = this.#overlapping(items, root, folders).filter(
             (each) => this.#on.has(each.root) !== boxed,
         );
@@ -1780,7 +1814,7 @@ export class Sandboxes {
         const root = this.#rootOfNumber(Number(conversation));
 
         return this.#whenStable(root, () => {
-            const problem = this.#grantProblem(root);
+            const problem = this.#grantProblem(root, request.folder);
 
             if (problem !== undefined) {
                 throw new HttpError(409, problem);
@@ -2479,6 +2513,11 @@ export class Sandboxes {
      * folder check refuses it. The runner ledger that reaps old VMs is a later PR's.
      */
     async reconcile(): Promise<void> {
+        // A server that is stopping reopens nothing.
+        if (this.#stopping) {
+            return;
+        }
+
         this.#audited();
 
         for (const root of [...this.#on]) {
@@ -2539,7 +2578,9 @@ export class Sandboxes {
 
     /** The server stops: every tree is suspended and every VM is stopped, within a bound. */
     async shutdown(): Promise<void> {
-        // The fence goes up now, in this tick: no sandboxed admission, turn-on, lease grant, or VM launch from here on.
+        // The flag and the fence go up now, in this tick: no sandboxed admission, turn-on, lease grant, VM launch, or
+        // registration from here on. The flag is never cleared; the fence is the teardown's, which a registration clears.
+        this.#stopping = true;
         this.#fence = "the server is stopping";
 
         await this.#serialised(async () => {
