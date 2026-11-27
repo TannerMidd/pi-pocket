@@ -1,0 +1,479 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { after, test } from "node:test";
+import {
+    existsSync,
+    lstatSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, posix } from "node:path";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { cleanUp, openApp, root, scriptedModel } from "./helpers.ts";
+import {
+    parseAllowedHosts,
+    type GuestChunk,
+    type GuestExecOptions,
+    type GuestFs,
+    type GuestProcess,
+    type GuestVm,
+    type HostCheck,
+    type SandboxDriver,
+    type VmSpec,
+} from "../src/server/extensions/gondolin/guest.ts";
+import {
+    applyPatchToNewBranch,
+    inspectPatch,
+    validBranchName,
+} from "../src/server/extensions/gondolin/patch.ts";
+import { validateGitUrl, validateSeedSource } from "../src/server/extensions/gondolin/seed.ts";
+import {
+    parseSandboxUri,
+    SandboxManager,
+    sandboxUri,
+} from "../src/server/extensions/gondolin/manager.ts";
+import createGondolin from "../src/server/extensions/gondolin.ts";
+
+after(cleanUp);
+
+/** Minimal in-memory/tempdir fake VM driver so tests run deterministically on every OS without KVM/QEMU. */
+class FakeVm implements GuestVm {
+    readonly id: string;
+    readonly rootDir: string;
+    readonly fs: GuestFs;
+    closed = false;
+    readonly #exits: ((reason: string) => void)[] = [];
+
+    constructor(id: string) {
+        this.id = id;
+        this.rootDir = mkdtempSync(join(tmpdir(), `fake-gondolin-${id}-`));
+        mkdirSync(join(this.rootDir, "workspace"), { recursive: true });
+        mkdirSync(join(this.rootDir, "tmp"), { recursive: true });
+
+        const map = (guestPath: string): string => {
+            const norm = posix.normalize(guestPath.startsWith("/") ? guestPath : `/${guestPath}`);
+            const rel = norm.replace(/^\/+/, "");
+
+            return join(this.rootDir, rel);
+        };
+
+        this.fs = {
+            readFile: async (p) => new Uint8Array(readFileSync(map(p))),
+            writeFile: async (p, data) => {
+                const target = map(p);
+
+                mkdirSync(join(target, ".."), { recursive: true });
+                writeFileSync(target, data);
+            },
+            stat: async (p) => {
+                const s = lstatSync(map(p));
+
+                return {
+                    kind: s.isSymbolicLink()
+                        ? "symlink"
+                        : s.isDirectory()
+                          ? "directory"
+                          : s.isFile()
+                            ? "file"
+                            : "other",
+                    size: s.size,
+                    mtimeMs: s.mtimeMs,
+                };
+            },
+            list: async (p) => readdirSync(map(p)),
+            mkdir: async (p, recursive) => {
+                mkdirSync(map(p), { recursive });
+            },
+            remove: async (p, opts) => {
+                rmSync(map(p), { recursive: opts.recursive, force: opts.force });
+            },
+            rename: async (from, to) => {
+                renameSync(map(from), map(to));
+            },
+        };
+    }
+
+    hostPid(): number | null {
+        return null;
+    }
+
+    onExit(listener: (reason: string) => void): void {
+        this.#exits.push(listener);
+    }
+
+    exec(argv: string[], options: GuestExecOptions = {}): GuestProcess {
+        const guestCwd = options.cwd ?? "/workspace";
+        const hostCwd = join(this.rootDir, guestCwd.replace(/^\/+/, ""));
+        const rewrite = (arg: string) =>
+            arg
+                .replace(/\/workspace/g, join(this.rootDir, "workspace"))
+                .replace(/\/tmp\/pocket-/g, join(this.rootDir, "tmp", "pocket-"));
+
+        const rewritten = argv.map(rewrite);
+        let stdout = "";
+        let stderr = "";
+        let exitCode = 0;
+
+        try {
+            stdout = execFileSync(rewritten[0]!, rewritten.slice(1), {
+                cwd: existsSync(hostCwd) ? hostCwd : this.rootDir,
+                encoding: "utf8",
+                env: { ...process.env, ...options.env },
+                stdio: ["pipe", "pipe", "pipe"],
+            });
+        } catch (error) {
+            const err = error as { status?: number; stdout?: string; stderr?: string };
+
+            exitCode = err.status ?? 1;
+            stdout = String(err.stdout ?? "");
+            stderr = String(err.stderr ?? "");
+        }
+
+        const chunks: GuestChunk[] = [];
+
+        if (stdout !== "") {
+            chunks.push({ stream: "stdout", data: Buffer.from(stdout, "utf8") });
+        }
+
+        if (stderr !== "") {
+            chunks.push({ stream: "stderr", data: Buffer.from(stderr, "utf8") });
+        }
+
+        return {
+            output: async function* () {
+                for (const c of chunks) {
+                    yield c;
+                }
+            },
+            result: Promise.resolve({ exitCode }),
+            write: () => {},
+            end: () => {},
+        };
+    }
+
+    async close(): Promise<void> {
+        this.closed = true;
+        rmSync(this.rootDir, { recursive: true, force: true });
+    }
+}
+
+class FakeDriver implements SandboxDriver {
+    starts = 0;
+    lastSpec: VmSpec | undefined;
+
+    installed(): boolean {
+        return true;
+    }
+
+    async check(): Promise<HostCheck> {
+        return {
+            ok: true,
+            backend: "krun",
+            lines: [{ name: "Fake", ok: true, detail: "Ready" }],
+            images: [{ name: "alpine-base:latest", git: true }],
+        };
+    }
+
+    async setup(progress: (line: string) => void): Promise<void> {
+        progress("Fake setup done.");
+    }
+
+    async start(spec: VmSpec, _signal?: AbortSignal, onRunner?: (vm: GuestVm) => void) {
+        this.starts++;
+        this.lastSpec = spec;
+        const vm = new FakeVm(`${spec.sandboxId}-${this.starts}`);
+
+        onRunner?.(vm);
+
+        return vm;
+    }
+}
+
+function makeTempGitRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "pocket-gondolin-repo-"));
+
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+    writeFileSync(join(dir, "README.md"), "# Demo\nhello\n");
+    writeFileSync(join(dir, ".env"), "SECRET_KEY=do-not-copy\n");
+    execFileSync("git", ["add", "README.md"], { cwd: dir });
+    execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: dir });
+
+    return dir;
+}
+
+test("parseAllowedHosts strips schemes/ports and drops loopback and private addresses", () => {
+    const hosts = parseAllowedHosts(
+        "https://Registry.NPMJS.org/path, github.com:443, localhost, 127.0.0.1, 10.0.0.1, 192.168.1.5, 169.254.169.254, [::1], foo.local, api.github.com",
+    );
+
+    assert.deepEqual(hosts, ["registry.npmjs.org", "github.com", "api.github.com"]);
+});
+
+test("inspectPatch rejects symlinks, submodules, binary patches, .git paths, and traversals, and flags risky files", () => {
+    const clean = inspectPatch(
+        [
+            "diff --git a/src/app.ts b/src/app.ts",
+            "index 1111111..2222222 100644",
+            "--- a/src/app.ts",
+            "+++ b/src/app.ts",
+            "@@ -1 +1,2 @@",
+            " const x = 1;",
+            "+const y = 2;",
+            "diff --git a/package.json b/package.json",
+            "--- a/package.json",
+            "+++ b/package.json",
+            "@@ -1 +1 @@",
+            '-{"name":"a"}',
+            '+{"name":"a","scripts":{"postinstall":"echo hi"}}',
+        ].join("\n"),
+    );
+
+    assert.equal(clean.ok, true);
+    assert.equal(clean.files.length, 2);
+    assert.equal(clean.totalAdded, 2);
+    assert.equal(clean.totalRemoved, 1);
+    assert.equal(clean.riskyFiles.length, 1);
+    assert.equal(clean.riskyFiles[0]!.path, "package.json");
+
+    // Symlink creation (120000) is blocked.
+    const symlinkPatch = inspectPatch(
+        [
+            "diff --git a/evil b/evil",
+            "new file mode 120000",
+            "--- /dev/null",
+            "+++ b/evil",
+            "@@ -0,0 +1 @@",
+            "+/etc/passwd",
+        ].join("\n"),
+    );
+
+    assert.equal(symlinkPatch.ok, false);
+    assert.ok(symlinkPatch.blocked.some((b) => /120000/.test(b)));
+
+    // Submodule (160000) is blocked.
+    const subPatch = inspectPatch(
+        "diff --git a/sub b/sub\nnew file mode 160000\n--- /dev/null\n+++ b/sub\n",
+    );
+
+    assert.equal(subPatch.ok, false);
+    assert.ok(subPatch.blocked.some((b) => /160000/.test(b)));
+
+    // `.git/` paths and traversals are blocked.
+    for (const badPath of [
+        ".git/hooks/pre-commit",
+        ".GIT./config",
+        "../outside.txt",
+        "/etc/hosts",
+    ]) {
+        const res = inspectPatch(
+            `diff --git a/${badPath} b/${badPath}\n--- /dev/null\n+++ b/${badPath}\n`,
+        );
+
+        assert.equal(res.ok, false, `expected ${badPath} to be blocked`);
+    }
+
+    // Binary patches are blocked.
+    const binPatch = inspectPatch("diff --git a/a.bin b/a.bin\nGIT binary patch\nliteral 0\n");
+
+    assert.equal(binPatch.ok, false);
+});
+
+test("applyPatchToNewBranch commits onto a fresh branch without touching the live working tree", async () => {
+    const repo = makeTempGitRepo();
+
+    try {
+        // Create an uncommitted edit in the user's live working tree.
+        writeFileSync(join(repo, "README.md"), "# Dirty local edit\n");
+
+        const patch = [
+            "diff --git a/README.md b/README.md",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -1,2 +1,3 @@",
+            " # Demo",
+            " hello",
+            "+from sandbox",
+            "",
+        ].join("\n");
+
+        const result = await applyPatchToNewBranch({
+            repoPath: repo,
+            branchName: "sandbox/test-apply",
+            patch,
+            commitMessage: "Add sandbox line",
+        });
+
+        assert.equal(result.branch, "sandbox/test-apply");
+        assert.equal(result.filesChanged, 1);
+
+        // Live working tree was NEVER touched!
+        assert.equal(readFileSync(join(repo, "README.md"), "utf8"), "# Dirty local edit\n");
+
+        // New branch contains the applied change cleanly.
+        const onBranch = execFileSync("git", ["show", "sandbox/test-apply:README.md"], {
+            cwd: repo,
+            encoding: "utf8",
+        });
+
+        assert.equal(onBranch, "# Demo\nhello\nfrom sandbox\n");
+
+        // Refuses overwriting an existing branch.
+        await assert.rejects(
+            applyPatchToNewBranch({
+                repoPath: repo,
+                branchName: "sandbox/test-apply",
+                patch,
+            }),
+            /already exists/,
+        );
+
+        assert.equal(validBranchName("sandbox/ok-1"), true);
+        assert.equal(validBranchName("--evil"), false);
+        assert.equal(validBranchName("a..b"), false);
+    } finally {
+        rmSync(repo, { recursive: true, force: true });
+    }
+});
+
+test("validateSeedSource and validateGitUrl refuse sensitive roots and non-https URLs", () => {
+    const dataDir = join(root, "fake-data");
+
+    mkdirSync(dataDir, { recursive: true });
+    assert.throws(() => validateSeedSource("/", dataDir), /Refusing to seed/);
+    assert.throws(() => validateSeedSource(homedir(), dataDir), /Refusing to seed/);
+    assert.throws(() => validateSeedSource(dataDir, dataDir), /Refusing to seed/);
+
+    assert.throws(() => validateGitUrl("file:///etc/passwd"), /https:\/\//);
+    assert.throws(() => validateGitUrl("--upload-pack=sh"), /valid https:\/\//);
+    assert.equal(
+        validateGitUrl("https://github.com/TannerMidd/pi-pocket.git"),
+        "https://github.com/TannerMidd/pi-pocket.git",
+    );
+});
+
+test("SandboxManager seeds a repo one-way, persists workspace across stop/restart, and produces a valid diff", async () => {
+    const repo = makeTempGitRepo();
+    const mgrDir = mkdtempSync(join(tmpdir(), "pocket-gondolin-mgr-"));
+    const driver = new FakeDriver();
+    const manager = new SandboxManager({
+        dir: mgrDir,
+        dataDir: join(root, "data-mgr"),
+        driver,
+        settings: () => ({
+            backend: "auto",
+            image: "alpine-base:latest",
+            networkMode: "allowlist",
+            allowedHosts: ["registry.npmjs.org"],
+            memoryMb: 1024,
+            cpus: 2,
+            diskMb: 4096,
+            idleMinutes: 30,
+        }),
+    });
+
+    try {
+        const created = manager.create({
+            name: "demo",
+            source: { kind: "repo", sourcePath: repo },
+        });
+        const uri = sandboxUri(created.id);
+
+        assert.equal(parseSandboxUri(uri), created.id);
+        assert.equal(await manager.resolveCwd(uri), uri);
+
+        const env = manager.env(uri);
+
+        // First read lazily boots the VM and seeds from the repo (without host .env!).
+        const readme = await env.readTextFile("README.md", BACKGROUND_CONTEXT);
+
+        assert.equal(readme.ok, true);
+        assert.equal(readme.ok ? readme.value : "", "# Demo\nhello\n");
+        assert.equal(driver.starts, 1);
+
+        const dotEnv = await env.exists(".env", BACKGROUND_CONTEXT);
+
+        assert.equal(dotEnv.ok, true);
+        assert.equal(dotEnv.ok ? dotEnv.value : true, false);
+
+        // Write a change inside the VM; host repo must remain untouched.
+        const written = await env.writeFile(
+            "README.md",
+            "# Demo\nhello\nfrom vm\n",
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.equal(written.ok, true);
+        assert.equal(readFileSync(join(repo, "README.md"), "utf8"), "# Demo\nhello\n");
+
+        // Stop (snapshots /workspace) and verify persistence on next boot.
+        await manager.stop(created.id, { saveSnapshot: true });
+        const afterStop = manager.list().find((s) => s.id === created.id);
+
+        assert.equal(afterStop?.state, "stopped");
+        assert.equal(afterStop?.hasSnapshot, true);
+
+        const readmeAfterRestart = await env.readTextFile("README.md", BACKGROUND_CONTEXT);
+
+        assert.equal(driver.starts, 2);
+        assert.equal(
+            readmeAfterRestart.ok ? readmeAfterRestart.value : "",
+            "# Demo\nhello\nfrom vm\n",
+        );
+
+        // Extract and inspect the diff from inside the VM.
+        const inspection = await manager.diff(created.id);
+
+        assert.equal(inspection.ok, true);
+        assert.equal(inspection.files.length, 1);
+        assert.equal(inspection.files[0]!.path, "README.md");
+        assert.match(inspection.patch, /\+from vm/);
+    } finally {
+        await manager.closeAll();
+        rmSync(repo, { recursive: true, force: true });
+        rmSync(mgrDir, { recursive: true, force: true });
+    }
+});
+
+test("createGondolin registers an isolated workspace provider with core", async () => {
+    const app = await openApp(scriptedModel());
+    const driver = new FakeDriver();
+    let disposeFn: (() => Promise<void> | void) | undefined;
+
+    try {
+        const fakeHost = {
+            dataDir: app.dataDir,
+            registerWorkspaceProvider: (
+                scheme: string,
+                provider: Parameters<typeof app.registerWorkspaceProvider>[1],
+            ) => app.registerWorkspaceProvider(scheme, provider),
+            notice: () => {},
+            text: { quoted: (t: string) => t, defang: (t: string) => t },
+        };
+        const fakeWeb = {
+            settings: () => {},
+            setting: () => undefined,
+            onDispose: (fn: () => Promise<void> | void) => {
+                disposeFn = fn;
+            },
+            client: () => {},
+            route: () => {},
+            send: () => {},
+            error: (status: number, message: string) =>
+                Object.assign(new Error(message), { status }),
+        };
+
+        createGondolin(fakeHost as never, fakeWeb as never, { driver });
+        assert.equal(app.isIsolatedWorkspace("gondolin://sb-123456/workspace"), true);
+    } finally {
+        await disposeFn?.();
+        await app.close();
+    }
+});
