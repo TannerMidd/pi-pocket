@@ -403,7 +403,18 @@ export class Sandboxes {
             return {
                 key: `vm:${root}`,
                 problem: () => browser.problem(),
-                launch: (flags) => browser.launch(flags),
+                // A launch starts the VM when there is none, so it is one more way to run work for the session: it waits
+                // for a change of the sandbox, and refuses when the change turned the sandbox off.
+                launch: (flags) =>
+                    this.tracked(id, "a browser launch", async () => {
+                        if (!this.#on.has(conversationId)) {
+                            throw new Error(
+                                "This session's sandbox was turned off, so its browser did not start.",
+                            );
+                        }
+
+                        return browser.launch(flags);
+                    }),
             };
         } catch (error) {
             return none(error instanceof Error ? error.message : String(error));
@@ -578,6 +589,8 @@ export class Sandboxes {
      * cannot run tasks, this throws.
      */
     async jobs(id: ConversationId): Promise<SandboxJobs | undefined> {
+        await this.settled(id);
+
         if (!(await this.get(id)).on) {
             return undefined;
         }
