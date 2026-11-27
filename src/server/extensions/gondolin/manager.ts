@@ -111,7 +111,7 @@ export interface ManagerOptions {
     /** Called when a VM ends, for whatever reason, with its session and the reason: what ran in it ended too. */
     readonly onEnded?: (rootId: number, reason: string) => void;
     /** Why a folder may not be mounted (`policy.ts`), or undefined. A session's own folder that fails never starts. */
-    readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
+    readonly folderProblem?: (path: string, kind: "folder" | "git" | "skill") => string | undefined;
 }
 
 /** What a person reads when git would run code that the sandbox can write (`git.ts`). */
@@ -432,7 +432,7 @@ export class SandboxManager {
 
         try {
             const git = await gitMounts(target.cwd);
-            const usable = (folders: readonly string[], kind: "folder" | "skill") =>
+            const usable = (folders: readonly string[], kind: "git" | "skill") =>
                 folders.filter((folder) => {
                     const why = this.#options.folderProblem?.(folder, kind);
 
@@ -451,7 +451,7 @@ export class SandboxManager {
                     ...(target.uploadDir === undefined ? [] : [target.uploadDir]),
                     ...usable(target.skillDirs ?? [], "skill"),
                 ],
-                gitDirs: usable(git.gitDirs, "folder"),
+                gitDirs: usable(git.gitDirs, "git"),
                 safeDirectories: git.safeDirectories,
                 network: { mode: settings.network, allowedHosts: [...settings.allowedHosts] },
                 cpus: settings.cpus,
@@ -465,12 +465,14 @@ export class SandboxManager {
             // Git runs hooks, and reads configuration, with the user's rights: a place the guest can write must not
             // hold them. Nothing is assumed when git cannot be asked.
             const problem =
-                settings.mount === "rw"
-                    ? await gitConfigProblem(target.cwd, git.trees, git.gitDirs).catch(
-                          (error: unknown) =>
-                              `Pi Pocket could not ask git about this folder's hooks and configuration (${error instanceof Error ? error.message : String(error)}).`,
-                      )
-                    : undefined;
+                settings.mount !== "rw"
+                    ? undefined
+                    : git.unreadable !== undefined
+                      ? `Pi Pocket could not look inside ${git.unreadable} for repositories, so it cannot guard their git directories.`
+                      : await gitConfigProblem(target.cwd, git.trees, git.gitDirs).catch(
+                            (error: unknown) =>
+                                `Pi Pocket could not ask git about this folder's hooks and configuration (${error instanceof Error ? error.message : String(error)}).`,
+                        );
 
             if (problem !== undefined) {
                 throw new Error(WRITABLE_CODE(problem));

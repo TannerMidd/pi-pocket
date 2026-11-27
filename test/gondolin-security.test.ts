@@ -2,7 +2,7 @@
 // files that an artifact names, and a VM that keeps the folder a session has left. The real VM runs the same for the
 // git files and the folder move in `gondolin-real-parity.test.ts`.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -110,55 +110,49 @@ test("the sandbox is refused while the session runs a background task or a ! com
     }
 });
 
-// Background tasks find what a task left running through /proc (as `background.test.ts` does): without it, as on
-// macOS, `left` stays empty and there is nothing to find.
-test(
-    "a daemon that a finished background task left running still counts as host work",
-    { skip: existsSync("/proc/self/stat") ? false : "no /proc on this machine" },
-    async () => {
-        const driver = new FakeDriver();
+test("a daemon that a finished background task left running still counts as host work", async () => {
+    const driver = new FakeDriver();
 
-        useDriver(driver);
-        const app = await openFresh(scriptedModel());
+    useDriver(driver);
+    const app = await openFresh(scriptedModel());
 
-        try {
-            await app.setExtensionEnabled(owner(app), MODULE, true);
-            const id = await newSession(app, folder("daemon"));
-            const person = owner(app);
-            const task = await app.background.start(id, {
-                requestedBy: person.id,
-                command: `"${process.execPath}" -e "require('node:child_process').spawn('tail', ['-f', '/dev/null'], { detached: true, stdio: 'ignore' }).unref()"`,
-                quietMinutes: 0,
-                notify: false,
-            });
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = await newSession(app, folder("daemon"));
+        const person = owner(app);
+        const task = await app.background.start(id, {
+            requestedBy: person.id,
+            command: `"${process.execPath}" -e "require('node:child_process').spawn('tail', ['-f', '/dev/null'], { detached: true, stdio: 'ignore' }).unref()"`,
+            quietMinutes: 0,
+            notify: false,
+        });
 
-            await until(
-                async () =>
-                    (await app.background.list(id)).some(
-                        (item) => item.status !== "running" && (item.left?.length ?? 0) > 0,
-                    ),
-                "the task to end and leave its daemon",
-                20_000,
-            );
-            await assert.rejects(
-                app.sandboxes.set(id, person, true),
-                /a background task \(.*which left a process running\)/,
-            );
-            assert.equal((await app.sandboxes.get(id)).on, false);
-            await app.background.stop(id, task.id);
-            await until(
-                async () =>
-                    (await app.background.list(id)).every((item) => (item.left?.length ?? 0) === 0),
-                "the daemon to end",
-                20_000,
-            );
-            await app.sandboxes.set(id, person, true);
-            assert.equal((await app.sandboxes.get(id)).on, true);
-        } finally {
-            await app.close();
-        }
-    },
-);
+        await until(
+            async () =>
+                (await app.background.list(id)).some(
+                    (item) => item.status !== "running" && (item.left?.length ?? 0) > 0,
+                ),
+            "the task to end and leave its daemon",
+            20_000,
+        );
+        await assert.rejects(
+            app.sandboxes.set(id, person, true),
+            /a background task \(.*which left a process running\)/,
+        );
+        assert.equal((await app.sandboxes.get(id)).on, false);
+        await app.background.stop(id, task.id);
+        await until(
+            async () =>
+                (await app.background.list(id)).every((item) => (item.left?.length ?? 0) === 0),
+            "the daemon to end",
+            20_000,
+        );
+        await app.sandboxes.set(id, person, true);
+        assert.equal((await app.sandboxes.get(id)).on, true);
+    } finally {
+        await app.close();
+    }
+});
 
 // ─── Host files that an artifact names ──────────────────────────────────────
 

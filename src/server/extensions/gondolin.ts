@@ -12,6 +12,7 @@ import { defineExtension, section } from "@earendil-works/pi-durable";
 import type { ConversationId } from "@earendil-works/pi-durable";
 // Types only: at run time this module uses nothing of Pi Pocket's but the host and web, as a drop-in would.
 import type { ExtensionWeb, PocketHost, SandboxProvider, WebRequest } from "../host.ts";
+import { sandboxPlatformProblem } from "../sandbox.ts";
 import { GondolinDriver } from "./gondolin/real-driver.ts";
 import type { Backend, HostCheck, NetworkMode, SandboxDriver } from "./gondolin/guest.ts";
 import { VmJobs } from "./gondolin/jobs.ts";
@@ -346,6 +347,12 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
         newSessions: () => web.setting("newSessions") === true,
         hostTools,
         problem: () => {
+            const platform = sandboxPlatformProblem();
+
+            if (platform !== undefined) {
+                return platform;
+            }
+
             const failed = lastCheck?.lines.find((line) => !line.ok && line.optional !== true);
 
             return lastCheck === undefined || lastCheck.ok
@@ -594,6 +601,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
 
             return {
                 check: result,
+                supported: sandboxPlatformProblem() === undefined,
                 running: manager.running,
                 vms: manager.vms().map((vm) => ({ ...vm, title: titles.get(vm.rootId) ?? "" })),
                 max: settings().maxVms,
@@ -624,12 +632,25 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
     web.route("POST", "check", async () => ({ check: await check() }), { access: "owner" });
 
     // Whether this person is the owner, with no session: the browser adds its Set up entries (menu row, launcher) only for them.
-    web.route("GET", "owner", async () => ({ owner: true }), { access: "owner" });
+    web.route(
+        "GET",
+        "owner",
+        async () => ({ owner: true, supported: sandboxPlatformProblem() === undefined }),
+        {
+            access: "owner",
+        },
+    );
 
     web.route(
         "POST",
         "setup",
         async (request) => {
+            const platform = sandboxPlatformProblem();
+
+            if (platform !== undefined) {
+                throw web.error(409, platform);
+            }
+
             if (setup.running) {
                 throw web.error(409, "Set up is running.");
             }

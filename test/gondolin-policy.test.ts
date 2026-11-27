@@ -1,12 +1,14 @@
 // The small, pure parts of the sandbox: the names and paths that the guest may not write, the environment of a
 // sandboxed session that cannot run, the idle stop and the left-behind runners of the VM manager.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { context } from "./helpers.ts";
 import {
+    folderProblem,
     gitProtected,
     hasDotGit,
     holdsGitDir,
@@ -126,6 +128,55 @@ test("the guest may not write a git directory, a .git entry of the folder, or a 
     assert.equal(holdsGitDir("/work/gitdata", ["/work/gitdata"]), true);
     assert.equal(holdsGitDir("/work/src", ["/work/gitdata"]), false);
     assert.equal(holdsGitDir("/work/gitdata/objects", ["/work/gitdata"]), false);
+});
+
+test("a folder that is, or lies inside, a git directory cannot be a sandbox's folder", () => {
+    const base = temp();
+    const places = {
+        home: join(base, "home"),
+        dataDir: join(base, "data"),
+        agentDir: join(base, "agent"),
+    };
+    const repo = join(base, "repo");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+
+    for (const dir of [repo, places.home, places.dataDir, places.agentDir]) {
+        mkdirSync(dir, { recursive: true });
+    }
+
+    git("init", "-q", "-b", "main");
+    git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "first",
+    );
+    git("worktree", "add", "-q", join(base, "tree"), "-b", "feature");
+    git("init", "-q", "--bare", join(base, "bare.git"));
+    mkdirSync(join(repo, "src"));
+
+    for (const dir of [
+        join(repo, ".git"),
+        join(repo, ".git", "hooks"),
+        join(repo, ".git", "refs", "heads"),
+        join(repo, ".git", "worktrees", "tree"),
+        join(base, "bare.git"),
+        join(base, "bare.git", "hooks"),
+    ]) {
+        assert.match(folderProblem(dir, places) ?? "", /git directory/, dir);
+    }
+
+    for (const dir of [repo, join(repo, "src"), join(base, "tree")]) {
+        assert.equal(folderProblem(dir, places), undefined, dir);
+    }
+
+    // A git directory that a VM mounts is not a session's folder: it passes the private-folder check only.
+    assert.equal(folderProblem(join(repo, ".git"), places, "git"), undefined);
 });
 
 test("an environment that cannot run answers every call with the reason, and is not a promise", async () => {

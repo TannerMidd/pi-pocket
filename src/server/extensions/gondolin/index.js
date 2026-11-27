@@ -154,21 +154,25 @@ export default function setup(pocket) {
     // The owner can set up the sandbox with no session open: a row in the app menu and a launcher action, and the
     // module's entry in the Extensions sheet lists the row. Others have no Set up, so they get no entry.
     pocket.api("owner").then(
-        () => {
+        (reply) => {
             owner = true;
-            pocket.menu({
-                id: "sandbox-setup",
-                label: "Sandbox set up",
-                hint: "Install Gondolin and see what this machine has",
-                sheet: "sandbox",
-            });
-            pocket.launcher({
-                id: "sandbox-setup",
-                label: "Sandbox set up",
-                detail: "install Gondolin, build the guest image, see what runs where",
-                keywords: ["sandbox", "gondolin", "micro-vm", "setup", "set up"],
-                sheet: "sandbox",
-            });
+
+            if (reply.supported) {
+                pocket.menu({
+                    id: "sandbox-setup",
+                    label: "Sandbox set up",
+                    hint: "Install Gondolin and see what this machine has",
+                    sheet: "sandbox",
+                });
+                pocket.launcher({
+                    id: "sandbox-setup",
+                    label: "Sandbox set up",
+                    detail: "install Gondolin, build the guest image, see what runs where",
+                    keywords: ["sandbox", "gondolin", "micro-vm", "setup", "set up"],
+                    sheet: "sandbox",
+                });
+            }
+
             notify();
         },
         () => {
@@ -482,7 +486,7 @@ export default function setup(pocket) {
                       }
                   `;
         const actions =
-            host === null
+            host === null || host.supported === false
                 ? null
                 : html`
                       ${

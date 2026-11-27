@@ -17,6 +17,7 @@ import { after, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../src/server/docs.ts";
+import { GondolinDriver } from "../src/server/extensions/gondolin/real-driver.ts";
 import { FakeDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
@@ -399,7 +400,7 @@ test("a graceful stop ends the VM, and the call it ran ends with the VM's exit c
 
     useDriver(driver);
     const app = await openFresh(
-        // `tail` is not the last command, so the shell stays its parent (as macOS's `sh` always does): stopping the VM
+        // `tail` is not the last command, so the shell stays its parent: stopping the VM
         // must end the whole group, or the pipe stays open and the call never reports its end.
         calls("bash", { command: `echo run >> ${marker}; tail -f /dev/null; echo never` }),
     );
@@ -716,7 +717,7 @@ test("the routes: who sees the sandbox, who chooses, and the owner's set-up", as
         assert.equal((await call("guest", "host")).status, 404, "the owner's page is the owner's");
         assert.equal((await call("guest", "setup", { browser: false })).status, 404);
         // The owner is known with no session: the browser adds Set up entries only for them.
-        assert.deepEqual((await call("owner", "owner")).body, { owner: true });
+        assert.deepEqual((await call("owner", "owner")).body, { owner: true, supported: true });
         assert.equal((await call("guest", "owner")).status, 404);
         assert.equal((await call("owner", "session", { c: id, on: "yes" })).status, 400);
         assert.equal((await call("owner", "session", { c: 999999, on: true })).status, 404);
@@ -826,6 +827,93 @@ test("the owner's list of VMs names each session by its title, with its folder",
         );
         assert.notEqual(body.vms[0]!.title, "");
     } finally {
+        server.closeAllConnections();
+        server.close();
+        await app.close();
+    }
+});
+
+test("off Linux the sandbox cannot be turned on, set up, or offered, and the check says why", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(scriptedModel());
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/gondolin`;
+
+    const call = async (path: string, body?: unknown) => {
+        const response = await fetch(`${base}/${path}`, {
+            method: body === undefined ? "GET" : "POST",
+            headers: {
+                authorization: `Bearer ${app.config.ownerToken}`,
+                "x-pocket": "1",
+                ...(body === undefined ? {} : { "content-type": "application/json" }),
+            },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+
+        return {
+            status: response.status,
+            body: (await response.json().catch(() => ({}))) as Record<string, any>,
+        };
+    };
+
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const platform = (name: string) =>
+        Object.defineProperty(process, "platform", { ...real, value: name });
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const id = Number(await newSession(app, folder("linux-only")));
+
+        for (const name of ["darwin", "win32", "freebsd"]) {
+            platform(name);
+
+            for (const attempt of [
+                () => call("session", { c: id, on: true }),
+                () => call("setup", { browser: false }),
+            ]) {
+                const refused = await attempt();
+
+                assert.equal(refused.status, 409, name);
+                assert.match(String(refused.body.error), /runs on Linux only for now/);
+            }
+
+            await assert.rejects(
+                () => app.sandboxes.set(id as never, owner(app), true),
+                /runs on Linux only for now/,
+            );
+            assert.equal((await app.sandboxes.get(id as never)).on, false);
+            assert.deepEqual((await call("owner")).body, { owner: true, supported: false });
+            assert.equal((await call("host")).body.supported, false);
+            assert.equal(
+                (await call(`state?c=${id}`)).body.problem,
+                "The sandbox runs on Linux only for now.",
+            );
+
+            const check = await new GondolinDriver(folder("never-installed")).check({
+                backend: "auto",
+                image: "alpine-base:latest",
+            });
+
+            assert.equal(check.ok, false);
+            assert.deepEqual(check.lines[0], {
+                name: "Operating system",
+                ok: false,
+                detail: "The sandbox runs on Linux only for now.",
+            });
+            assert.equal(check.backend, undefined);
+            assert.ok(!check.lines.some((line) => line.name === "libkrun" || line.name === "QEMU"));
+        }
+
+        platform("linux");
+        assert.equal((await call("session", { c: id, on: true })).status, 200);
+    } finally {
+        Object.defineProperty(process, "platform", real);
         server.closeAllConnections();
         server.close();
         await app.close();

@@ -3,7 +3,15 @@
 // from it. The real VM enforces the same boundary in `gondolin-real-git.test.ts`.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+    chmodSync,
+    mkdirSync,
+    mkdtempSync,
+    realpathSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -190,12 +198,21 @@ test("every git directory that a .git file names is guarded, with a back-pointer
     assert.deepEqual((await gitMounts(main)).gitDirs, [join(main, ".git")]);
 });
 
+/** A home folder whose global git configuration is `text`: the machine's own settings, not the repository's. */
+function homeWith(text: string): NodeJS.ProcessEnv {
+    const home = temp();
+
+    writeFileSync(join(home, ".gitconfig"), text);
+
+    return { HOME: home };
+}
+
 /** What the sandbox must say, and what it must name, when a writable folder holds what git would run. */
-async function refused(cwd: string, path: string, env?: NodeJS.ProcessEnv) {
+async function refused(cwd: string, needle: string, env?: NodeJS.ProcessEnv) {
     const writable = await starts(cwd, "rw", env);
 
-    assert.equal(writable.started, false, `${path}: a VM started`);
-    assert.ok(writable.message.includes(path), `${path} is named: ${writable.message}`);
+    assert.equal(writable.started, false, `${needle}: a VM started`);
+    assert.ok(writable.message.includes(needle), `${needle} is named: ${writable.message}`);
     assert.match(writable.message, /read only/);
 
     const readOnly = await starts(cwd, "ro", env);
@@ -205,123 +222,172 @@ async function refused(cwd: string, path: string, env?: NodeJS.ProcessEnv) {
 
 test("a hooks folder inside a writable folder keeps the VM from starting, and a read only folder still works", async () => {
     const repo = repository();
+    const outside = temp();
+    const hooks = (path: string) => homeWith(`[core]\n\thooksPath = ${path}\n`);
 
     assert.equal((await starts(repo)).started, true, "the default hooks folder is inside .git");
-
-    git(repo, "config", "core.hooksPath", ".githooks");
-    await refused(repo, join(repo, ".githooks"));
-
+    await refused(repo, join(repo, ".githooks"), hooks(join(repo, ".githooks")));
     // A husky repository: the hooks folder does not exist yet.
-    git(repo, "config", "core.hooksPath", ".husky/_");
-    await refused(repo, join(repo, ".husky", "_"));
+    await refused(repo, join(repo, ".husky", "_"), hooks(join(repo, ".husky", "_")));
+    assert.equal((await starts(repo, "rw", hooks(outside))).started, true, "outside the folder");
+    assert.equal(
+        (await starts(repo, "rw", hooks(join(repo, ".git", "custom-hooks")))).started,
+        true,
+        "in the git directory",
+    );
 
-    git(repo, "config", "core.hooksPath", "../shared-hooks");
-    assert.equal((await starts(repo)).started, true, "a hooks folder outside the folder");
-
-    git(repo, "config", "core.hooksPath", join(repo, ".git", "custom-hooks"));
-    assert.equal((await starts(repo)).started, true, "a hooks folder in the git directory");
+    // In the repository's own configuration the key itself is refused, whatever it names.
+    git(repo, "config", "core.hooksPath", outside);
+    await refused(repo, "core.hookspath");
 });
 
-test("a hooks folder that leads into the folder by a link, or by a link that leads nowhere yet, keeps it from starting", async () => {
+test("a hooks folder, a hook, or a configuration file that is reached through a place the guest can write keeps the VM from starting", async () => {
     const repo = repository();
     const outside = temp();
+    const hooks = (path: string) => homeWith(`[core]\n\thooksPath = ${path}\n`);
 
+    // A link outside the folder that leads into it, one that leads nowhere yet, and a link in the middle of a chain
+    // whose end is outside: the guest can change the one in the folder.
     mkdirSync(join(repo, "tools"));
     symlinkSync(join(repo, "tools"), join(outside, "via-link"));
     symlinkSync(join(repo, "not-yet", "hooks"), join(outside, "dangling"));
-    git(repo, "config", "core.hooksPath", join(outside, "via-link"));
-    await refused(repo, join(repo, "tools"));
-    git(repo, "config", "core.hooksPath", join(outside, "dangling"));
-    await refused(repo, join(repo, "not-yet", "hooks"));
+    symlinkSync(outside, join(repo, "middle"));
+    symlinkSync(join(repo, "middle"), join(outside, "chain"));
+    await refused(repo, join(repo, "tools"), hooks(join(outside, "via-link")));
+    await refused(repo, join(repo, "not-yet"), hooks(join(outside, "dangling")));
+    await refused(repo, join(repo, "middle"), hooks(join(outside, "chain")));
+
+    // A hook of the git directory that is a link to a script of the folder, and one that is not.
+    mkdirSync(join(repo, "scripts"));
+    writeFileSync(join(repo, "scripts", "pre-commit"), "#!/bin/sh\n");
+    writeFileSync(join(repo, ".git", "hooks", "pre-push"), "#!/bin/sh\n");
+    rmSync(join(repo, ".git", "hooks", "commit-msg.sample"));
+    symlinkSync(
+        join(repo, "scripts", "pre-commit"),
+        join(repo, ".git", "hooks", "commit-msg.sample"),
+    );
+    assert.equal((await starts(repo)).started, true, "a sample is not run");
+    symlinkSync("../../scripts/pre-commit", join(repo, ".git", "hooks", "pre-commit"));
+    await refused(repo, join(repo, "scripts"));
+    rmSync(join(repo, ".git", "hooks", "pre-commit"));
+
+    // The machine's configuration file that is a link into the folder.
+    const home = temp();
+
+    writeFileSync(join(repo, "later.cfg"), "[user]\n\tname = x\n");
+    symlinkSync(join(repo, "later.cfg"), join(home, ".gitconfig"));
+    await refused(repo, join(repo, "later.cfg"), { HOME: home });
 });
 
-test("a configuration file that git includes, even one that is not there yet, keeps a writable folder from starting", async () => {
+test("a configuration file that the machine's git includes, even one that is not there yet, keeps a writable folder from starting", async () => {
     const repo = repository();
-    const config = join(repo, ".git", "config");
     const outside = temp();
 
     writeFileSync(join(outside, "extra.cfg"), "[user]\n\tname = x\n");
-    git(repo, "config", "include.path", join(outside, "extra.cfg"));
-    assert.equal((await starts(repo)).started, true, "an included file outside the folder");
-
-    git(repo, "config", "--unset-all", "include.path");
-    git(repo, "config", "include.path", "../extra.cfg");
-    await refused(repo, join(repo, "extra.cfg"));
-
-    git(repo, "config", "--unset-all", "include.path");
-    git(repo, "config", "includeIf.onbranch:never.path", "../later.cfg");
-    await refused(repo, join(repo, "later.cfg"));
-
-    git(repo, "config", "--unset-all", "includeIf.onbranch:never.path");
-    git(repo, "config", "include.path", "more.cfg");
-    assert.equal((await starts(repo)).started, true, "an included file in the git directory");
-    assert.ok(config.length > 0);
-
-    git(repo, "config", "--unset-all", "include.path");
-    const global = join(outside, "global.cfg");
-
-    writeFileSync(global, `[include]\n\tpath = ${join(repo, "from-global.cfg")}\n`);
-    await refused(repo, join(repo, "from-global.cfg"), { GIT_CONFIG_GLOBAL: global });
+    assert.equal(
+        (await starts(repo, "rw", homeWith(`[include]\n\tpath = ${join(outside, "extra.cfg")}\n`)))
+            .started,
+        true,
+    );
+    await refused(
+        repo,
+        join(repo, "from-global.cfg"),
+        homeWith(`[include]\n\tpath = ${join(repo, "from-global.cfg")}\n`),
+    );
+    await refused(
+        repo,
+        join(repo, "later.cfg"),
+        homeWith(`[includeIf "onbranch:never"]\n\tpath = ${join(repo, "later.cfg")}\n`),
+    );
 });
 
-/** A key that the repository's own configuration sets must name what the sandbox cannot rewrite, so it is refused. */
-async function programRefused(repo: string, key: string, value: string) {
-    git(repo, "config", key, value);
-    const writable = await starts(repo, "rw");
-
-    assert.equal(writable.started, false, `${key} = ${value}: a VM started`);
-    assert.ok(writable.message.includes(key.toLowerCase()), `${key} is named: ${writable.message}`);
-    assert.match(writable.message, /read only/);
-    assert.equal((await starts(repo, "ro")).started, true, "a read only folder works");
-    git(repo, "config", "--unset-all", key);
-}
-
-test("a program that the repository's configuration names keeps a writable folder from starting, and a boolean or a global one does not", async () => {
+test("the repository's own configuration may set only plain data: any other key keeps a writable folder from starting", async () => {
     const repo = repository();
 
     for (const [key, value] of [
-        ["core.fsmonitor", "./watch.sh"],
-        ["core.sshCommand", "ssh -F ./ssh-config"],
-        ["core.editor", "./edit.sh"],
-        ["core.pager", "./page.sh"],
-        ["core.askPass", "./ask.sh"],
-        ["gpg.program", "./sign.sh"],
-        ["gpg.ssh.program", "./sign.sh"],
-        ["credential.helper", "!./cred.sh"],
-        ["credential.https://example.com.helper", "./cred"],
-        ["diff.x.command", "./diff.sh"],
-        ["diff.x.textconv", "./conv.sh"],
-        ["merge.x.driver", "./merge.sh %O"],
-        ["filter.x.clean", "./clean.sh"],
-        ["filter.x.smudge", "./smudge.sh"],
-        ["filter.x.process", "./process.sh"],
-        ["difftool.x.cmd", "./dt.sh"],
-        ["mergetool.x.cmd", "./mt.sh"],
-        ["remote.origin.uploadpack", "./up.sh"],
-        ["remote.origin.receivepack", "./rp.sh"],
-        ["alias.co", "!./co.sh"],
-        ["sequence.editor", "./seq.sh"],
-    ] as const) {
-        await programRefused(repo, key, value);
-    }
-
-    for (const [key, value] of [
-        ["core.fsmonitor", "true"],
-        ["core.fsmonitor", "false"],
-        ["alias.st", "status -s"],
+        ["core.repositoryformatversion", "0"],
+        ["core.filemode", "false"],
+        ["core.ignorecase", "true"],
+        ["core.autocrlf", "input"],
+        ["remote.origin.url", "https://example.com/a.git"],
+        ["remote.origin.pushurl", "https://example.com/b.git"],
+        ["remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+        ["branch.main.remote", "origin"],
+        ["branch.main.merge", "refs/heads/main"],
+        ["branch.main.rebase", "true"],
         ["user.name", "someone"],
-        ["diff.x.binary", "true"],
+        ["user.signingkey", "ABCD"],
+        ["extensions.worktreeConfig", "true"],
+        ["init.defaultBranch", "main"],
+        ["pull.rebase", "true"],
+        ["push.default", "simple"],
+        ["fetch.prune", "true"],
+        ["lfs.repositoryformatversion", "0"],
+        ["submodule.active", "."],
     ] as const) {
         git(repo, "config", key, value);
         assert.equal((await starts(repo)).started, true, `${key} = ${value}`);
         git(repo, "config", "--unset-all", key);
     }
 
-    // A program in the global configuration is the machine's: it does not count.
-    const global = join(temp(), "global.cfg");
+    for (const [key, value] of [
+        ["core.fsmonitor", "./watch.sh"],
+        ["core.fsmonitor", "true"],
+        ["core.hooksPath", "../hooks"],
+        ["core.sshCommand", "ssh -F ./ssh-config"],
+        ["core.editor", "./edit.sh"],
+        ["core.pager", "./page.sh"],
+        ["core.gitProxy", "./proxy.sh"],
+        ["pager.diff", "./page.sh"],
+        ["interactive.diffFilter", "./filter.sh"],
+        ["gpg.program", "./sign.sh"],
+        ["gpg.ssh.defaultKeyCommand", "./key.sh"],
+        ["credential.helper", "!./cred.sh"],
+        ["diff.x.textconv", "./conv.sh"],
+        ["merge.x.driver", "./merge.sh %O"],
+        ["filter.x.clean", "./clean.sh"],
+        ["mergetool.x.cmd", "./mt.sh"],
+        ["remote.origin.uploadpack", "./up.sh"],
+        ["alias.co", "!./co.sh"],
+        ["alias.st", "status -s"],
+        ["sequence.editor", "./seq.sh"],
+        ["include.path", "../extra.cfg"],
+        ["includeIf.onbranch:main.path", "../extra.cfg"],
+        ["submodule.x.update", "!./up.sh"],
+        ["something.new", "anything"],
+    ] as const) {
+        git(repo, "config", key, value);
+        const writable = await starts(repo, "rw");
 
-    writeFileSync(global, "[core]\n\tsshCommand = ./global-ssh.sh\n[alias]\n\tgo = !./go.sh\n");
-    assert.equal((await starts(repo, "rw", { GIT_CONFIG_GLOBAL: global })).started, true);
+        assert.equal(writable.started, false, `${key} = ${value}: a VM started`);
+        assert.ok(writable.message.includes(key.toLowerCase().split(":")[0]!), writable.message);
+        assert.match(writable.message, /read only/);
+        assert.equal((await starts(repo, "ro")).started, true, "a read only folder works");
+        git(repo, "config", "--unset-all", key);
+    }
+
+    // The same keys in the global configuration are the machine's: they do not count.
+    const global = homeWith(
+        "[core]\n\tsshCommand = ./global-ssh.sh\n\tfsmonitor = ./w.sh\n[alias]\n\tgo = !./go.sh\n[credential]\n\thelper = store\n",
+    );
+
+    assert.equal((await starts(repo, "rw", global)).started, true);
+});
+
+test("a repository above the folder counts: its own configuration is checked against the folder it holds", async () => {
+    const repo = repository();
+    const folder = join(repo, "src");
+
+    mkdirSync(folder);
+    writeFileSync(join(folder, "watch.sh"), "#!/bin/sh\n");
+    assert.equal((await starts(folder, "rw", { GIT_DIR: "/nonexistent" })).started, true);
+    git(repo, "config", "core.fsmonitor", "./src/watch.sh");
+    await refused(folder, "core.fsmonitor");
+    git(repo, "config", "--unset", "core.fsmonitor");
+    await refused(folder, join(folder, "hooks"), {
+        ...homeWith(`[core]\n\thooksPath = ${join(folder, "hooks")}\n`),
+        GIT_DIR: "/nonexistent",
+    });
 });
 
 test("a program in a worktree's own configuration, or in a submodule's, counts as the repository's", async () => {
@@ -345,6 +411,60 @@ test("a program in a worktree's own configuration, or in a submodule's, counts a
     assert.match(worktree.message, /core\.sshcommand/);
 });
 
+test("every repository in the folder is found by walking it: nested ones, ones that keep their git directory elsewhere, and bare ones", async () => {
+    const repo = repository();
+    const kept = temp();
+
+    // A nested repository that is no submodule, nested ones whose git directory is in the folder and outside it, and
+    // a bare repository; a link is not followed.
+    mkdirSync(join(repo, "a"));
+    git(join(repo, "a"), "init", "-q", "b");
+    mkdirSync(join(repo, "c"));
+    git(join(repo, "c"), "init", "-q", "--separate-git-dir", join(repo, "c-data"), ".");
+    mkdirSync(join(repo, "d"));
+    git(join(repo, "d"), "init", "-q", "--separate-git-dir", join(kept, "d-data"), ".");
+    git(repo, "init", "-q", "--bare", "e.git");
+    symlinkSync(kept, join(repo, "link"));
+
+    const found = await gitMounts(repo);
+
+    assert.deepEqual(
+        [...found.gitDirs].sort(),
+        [
+            join(repo, ".git"),
+            join(repo, "a", "b", ".git"),
+            join(repo, "c-data"),
+            join(repo, "e.git"),
+            join(kept, "d-data"),
+        ].sort(),
+    );
+    assert.deepEqual(
+        [...found.trees].sort(),
+        [repo, join(repo, "a", "b"), join(repo, "c"), join(repo, "d")].sort(),
+    );
+    assert.equal(found.unreadable, undefined);
+    const nested = await starts(repo);
+
+    assert.equal(nested.started, true, nested.message);
+
+    // A folder that cannot be read leaves a git directory unknown: a writable folder does not start.
+    const closed = join(repo, "closed");
+
+    mkdirSync(closed);
+    chmodSync(closed, 0o000);
+
+    try {
+        assert.equal((await gitMounts(repo)).unreadable, closed);
+        const writable = await starts(repo, "rw");
+
+        assert.equal(writable.started, false);
+        assert.ok(writable.message.includes(closed), writable.message);
+        assert.equal((await starts(repo, "ro")).started, true, "a read only folder works");
+    } finally {
+        chmodSync(closed, 0o755);
+    }
+});
+
 test("when git does not say which scope a value comes from, a writable folder does not start", async () => {
     const repo = repository();
     const bin = temp();
@@ -358,17 +478,6 @@ test("when git does not say which scope a value comes from, a writable folder do
 
     assert.equal(refusal.started, false);
     assert.match(refusal.message, /could not ask git|scope/);
-});
-
-test("a submodule's hooks folder inside the folder keeps the VM from starting", async () => {
-    const main = repository();
-    const sub = repository();
-
-    git(main, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "lib");
-    git(main, "commit", "-q", "-m", "with a submodule");
-    assert.equal((await starts(main)).started, true);
-    git(join(main, "lib"), "config", "core.hooksPath", "../hooks-of-lib");
-    await refused(main, join(main, "hooks-of-lib"));
 });
 
 test("when git cannot be asked, a writable folder does not start, and the message says why", async () => {

@@ -105,6 +105,11 @@ const INERT = new Set(["ask", "ui", "tool_search", "memory", "schedule", "subage
 export const SANDBOX_ROUTED_TOOLS: ReadonlySet<string> = ROUTED;
 export const SANDBOX_INERT_TOOLS: ReadonlySet<string> = INERT;
 
+/** Why this machine cannot run a sandbox, or undefined: the guarantee is kept only where it can be enforced. */
+export function sandboxPlatformProblem(): string | undefined {
+    return process.platform === "linux" ? undefined : "The sandbox runs on Linux only for now.";
+}
+
 /** The words that a call stopped by the gate gets. */
 export function hostToolBlocked(tool: string): string {
     return `${tool} runs on the host, outside the sandbox, so this sandboxed session cannot use it. The owner can allow host tools in Menu → Extensions → Gondolin sandbox.`;
@@ -346,7 +351,7 @@ export class Sandboxes {
     /** Whether sessions start in the sandbox, as the module says; false without a module. */
     get newSessions(): boolean {
         try {
-            return this.provider?.newSessions() === true;
+            return sandboxPlatformProblem() === undefined && this.provider?.newSessions() === true;
         } catch {
             return false;
         }
@@ -611,6 +616,12 @@ export class Sandboxes {
         const owner = user.role === "owner";
 
         if (on) {
+            const platform = sandboxPlatformProblem();
+
+            if (platform !== undefined) {
+                throw new HttpError(409, platform);
+            }
+
             if (provider === undefined) {
                 throw new HttpError(409, "The sandbox is turned off in Extensions.");
             }

@@ -2,8 +2,8 @@
  * What the sandbox allows, as data and small functions: which paths the guest may not write (a `.git` entry, a git
  * directory), which hosts the network allows by default, and what runs where. The sheet shows the same table that the gate uses.
  */
-import { realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { SANDBOX_INERT_TOOLS, SANDBOX_ROUTED_TOOLS } from "../../sandbox.ts";
 
 /** Where this machine keeps what a sandbox must never share. */
@@ -47,15 +47,29 @@ export function within(child: string, parent: string): boolean {
 /**
  * Why a sandbox may not mount `path`, or undefined when it may. A sandbox shares a folder with the guest whole, so a
  * folder that is, or holds, the home folder or a place that keeps sign-ins and keys would hand those to it. `kind`
- * "folder" is the session's own folder, a git directory, "skill" a skill folder that is read only: those may lie inside
- * Pi's own `skills` folder, and nothing else of Pi's folder.
+ * "folder" is the session's own folder, which may not be, or lie inside, a git directory (the guest would write its
+ * configuration and hooks); "git" is a git directory that a VM mounts; "skill" is a skill folder that is read only:
+ * those may lie inside Pi's own `skills` folder, and nothing else of Pi's folder.
  */
 export function folderProblem(
     path: string,
     places: PrivatePlaces,
-    kind: "folder" | "skill" = "folder",
+    kind: "folder" | "git" | "skill" = "folder",
 ): string | undefined {
     const target = canonical(path);
+
+    if (kind === "folder") {
+        for (let at = target; ; at = dirname(at)) {
+            if (isDotGit(at.slice(at.lastIndexOf(sep) + 1)) || looksLikeGitDir(at)) {
+                return `${path} is, or lies inside, a git directory (${at}): a sandbox would write the repository's own configuration and hooks. Use the project folder that holds it.`;
+            }
+
+            if (dirname(at) === at) {
+                break;
+            }
+        }
+    }
+
     const home = canonical(places.home);
     const data = canonical(places.dataDir);
     const agent = canonical(places.agentDir);
@@ -90,6 +104,22 @@ export function folderProblem(
     }
 
     return undefined;
+}
+
+export function isDirectory(path: string): boolean {
+    try {
+        return statSync(path).isDirectory();
+    } catch {
+        return false;
+    }
+}
+
+/** A folder that is a git directory: a `HEAD`, and `objects` (or, for a linked worktree, a `commondir` file). */
+export function looksLikeGitDir(folder: string): boolean {
+    return (
+        existsSync(join(folder, "HEAD")) &&
+        (isDirectory(join(folder, "objects")) || existsSync(join(folder, "commondir")))
+    );
 }
 
 /** Code points that HFS+ ignores when it compares names: `.g\u200cit` is `.git` there. */

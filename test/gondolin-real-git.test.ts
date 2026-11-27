@@ -5,11 +5,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
     existsSync,
+    linkSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
     realpathSync,
     rmSync,
+    statSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,7 +230,6 @@ test("the guest cannot write a git directory by any path: a file, a new entry, a
             "rm g/index; echo rmviadir=$?",
             "rm g; echo rmlink=$?",
             "mv sub sub2; echo mvnested=$?",
-            "echo x > sub2/.git/hooks/pre-commit; echo renamed=$?",
             "echo ok > notes.txt; echo notes=$?",
             "mkdir .gitx; echo gitx=$?",
             "echo ok > .gitignore2; echo gitignore=$?",
@@ -261,18 +263,18 @@ test("the guest cannot write a git directory by any path: a file, a new entry, a
         "viadir",
         "mvviadir",
         "rmviadir",
-        "renamed",
+        "mvnested",
     );
 
     // A name that is not .git is the guest's, and so is a link that it made (the entry, not what it names).
-    for (const name of ["notes", "gitx", "gitignore", "rmlink", "mvnested"]) {
+    for (const name of ["notes", "gitx", "gitignore", "rmlink"]) {
         assert.match(output, new RegExp(`${name}=0`), `${name}: ${output}`);
     }
 
     assert.equal(snapshot(join(repo, ".git")), kept.git);
-    assert.equal(snapshot(join(repo, "sub2", ".git")), kept.nested);
+    assert.equal(snapshot(join(repo, "sub", ".git")), kept.nested);
     assert.equal(existsSync(join(repo, ".git", "hooks", "pre-commit")), false);
-    assert.equal(existsSync(join(repo, "sub2", ".git", "hooks", "pre-commit")), false);
+    assert.equal(existsSync(join(repo, "sub2")), false);
     assert.equal(existsSync(join(repo, ".GIT")), false);
     assert.equal(existsSync(join(repo, "git~1")), false);
     assert.ok(!readFileSync(join(repo, ".git", "config"), "utf8").includes("x\n"));
@@ -388,6 +390,127 @@ test("a program that the repository's configuration names keeps the VM from star
 
     onHost(repo, "config", "--unset-all", "core.fsmonitor");
     assert.equal((await inVm(repo, "true")).started, true);
+});
+
+test("a hook that is a link into the folder keeps the VM from starting, and the same repository works in a read only folder", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("hooklink");
+
+    mkdirSync(join(repo, "scripts"));
+    writeFileSync(join(repo, "scripts", "pre-commit"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    symlinkSync("../../scripts/pre-commit", join(repo, ".git", "hooks", "pre-commit"));
+
+    const writable = await inVm(repo, "echo started");
+
+    assert.equal(writable.started, false);
+    assert.ok(writable.error.includes(join(repo, "scripts")), writable.error);
+    assert.match(writable.error, /read only/);
+
+    const readOnly = await inVm(
+        repo,
+        "echo x > scripts/pre-commit; echo write=$?; git log --oneline | head -1",
+        "ro",
+    );
+
+    assert.ok(readOnly.started, readOnly.error);
+    failed(readOnly.output, "write");
+});
+
+test("every repository found by walking the folder is read only to the guest: a nested one, one with a separate git directory, a bare one", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("walk");
+    const kept = realpathSync(mkdtempSync(join(scratch, "walk-data-")));
+
+    mkdirSync(join(repo, "c"));
+    onHost(join(repo, "c"), "init", "-q", "--separate-git-dir", join(repo, "c-data"), ".");
+    mkdirSync(join(repo, "d"));
+    onHost(join(repo, "d"), "init", "-q", "--separate-git-dir", join(kept, "d-data"), ".");
+    onHost(repo, "init", "-q", "--bare", "bare.git");
+    onHost(repo, "init", "-q", "nested");
+    const before = [
+        snapshot(join(repo, "c-data")),
+        snapshot(join(kept, "d-data")),
+        snapshot(join(repo, "bare.git")),
+    ];
+    const { output } = await inVm(
+        repo,
+        [
+            "echo x >> c-data/config; echo cdata=$?",
+            "echo x > c-data/hooks/pre-commit; echo chook=$?",
+            "mv c-data c-data2; echo cmove=$?",
+            "git -C c status --short; echo cstatus=$?",
+            `echo x >> ${kept}/d-data/config; echo ddata=$?`,
+            "git -C d status --short; echo dstatus=$?",
+            "echo x >> bare.git/config; echo bare=$?",
+            "echo x > bare.git/hooks/post-update; echo barehook=$?",
+            "mv bare.git bare2.git; echo baremove=$?",
+            "echo x > nested/.git/hooks/pre-commit; echo nested=$?",
+            "echo ok > nested/file.txt; echo file=$?",
+        ].join("; "),
+    );
+
+    assert.match(output, /cstatus=0/);
+    assert.match(output, /dstatus=0/);
+    failed(output, "cdata", "chook", "cmove", "ddata", "bare", "barehook", "baremove", "nested");
+    assert.match(output, /file=0/);
+    assert.deepEqual(
+        [
+            snapshot(join(repo, "c-data")),
+            snapshot(join(kept, "d-data")),
+            snapshot(join(repo, "bare.git")),
+        ],
+        before,
+    );
+});
+
+test("a file with other hard links is never changed in place, and can be replaced or removed", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("links");
+    const store = realpathSync(mkdtempSync(join(scratch, "store-")));
+
+    writeFileSync(join(store, "shared.txt"), "from the store\n");
+    linkSync(join(store, "shared.txt"), join(repo, "linked.txt"));
+    linkSync(join(store, "shared.txt"), join(repo, "linked2.txt"));
+    linkSync(join(store, "shared.txt"), join(repo, "linked3.txt"));
+    writeFileSync(join(repo, "plain.txt"), "plain\n");
+    const { output } = await inVm(
+        repo,
+        [
+            "echo x >> linked.txt; echo append=$?",
+            "echo x > linked.txt; echo write=$?",
+            "truncate -s 0 linked.txt; echo truncate=$?",
+            "python3 -c \"import os; os.truncate('linked.txt', 0)\"; echo ptruncate=$?",
+            "chmod 777 linked.txt; echo chmod=$?",
+            "cp plain.txt linked.txt; echo copy=$?",
+            "echo x >> plain.txt; echo plain=$?",
+            "echo new > linked2.txt.new && mv linked2.txt.new linked2.txt; echo replace=$?",
+            "rm linked3.txt; echo remove=$?",
+            "cat linked.txt",
+        ].join("; "),
+    );
+
+    failed(output, "append", "write", "truncate", "ptruncate", "chmod");
+    assert.match(output, /plain=0/);
+    assert.match(output, /replace=0/);
+    assert.match(output, /remove=0/);
+    assert.equal(readFileSync(join(store, "shared.txt"), "utf8"), "from the store\n");
+    assert.equal(statSync(join(store, "shared.txt")).mode & 0o777, 0o644);
+    assert.equal(readFileSync(join(repo, "linked2.txt"), "utf8"), "new\n");
+    assert.equal(
+        readFileSync(join(repo, "linked.txt"), "utf8"),
+        "plain\n",
+        "cp replaced the name, not the file",
+    );
+    assert.equal(existsSync(join(repo, "linked3.txt")), false);
 });
 
 test("a worktree session reads the main repository's git directory, read only, whatever it tries", async (t) => {

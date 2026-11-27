@@ -10,6 +10,7 @@ import {
     constants,
     copyFileSync,
     existsSync,
+    lstatSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
@@ -24,6 +25,7 @@ import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
+import { sandboxPlatformProblem } from "../../sandbox.ts";
 import { GIT_WRAPPER, guestGitConfig } from "./git.ts";
 import { gitProtected, holdsGitDir, within } from "./policy.ts";
 import type {
@@ -85,10 +87,11 @@ export function resolveImage(
 /**
  * The calls of a provider that change something, and which of their arguments name an entry that they change: `follow`
  * when a link at the end of the name is followed (a file that is opened, the source of a hard link), `moves` when the
- * entry goes away from where it is (a folder that holds a git directory may not).
+ * entry goes away from where it is (a folder that holds a git directory may not), `inPlace` when the call changes
+ * the file that the name leads to, not the name (a file with other hard links may not be changed so).
  */
-const WRITES: Record<string, { at: number; follow: boolean; moves?: true }[]> = {
-    open: [{ at: 0, follow: true }],
+const WRITES: Record<string, { at: number; follow: boolean; moves?: true; inPlace?: true }[]> = {
+    open: [{ at: 0, follow: true, inPlace: true }],
     mkdir: [{ at: 0, follow: false }],
     rmdir: [{ at: 0, follow: false }],
     unlink: [{ at: 0, follow: false }],
@@ -101,15 +104,17 @@ const WRITES: Record<string, { at: number; follow: boolean; moves?: true }[]> = 
         { at: 1, follow: false },
     ],
     symlink: [{ at: 1, follow: false }],
-    chmod: [{ at: 0, follow: true }],
-    copyFile: [{ at: 1, follow: true }],
+    chmod: [{ at: 0, follow: true, inPlace: true }],
+    copyFile: [{ at: 1, follow: true, inPlace: true }],
 };
 
 /**
  * `backend` with every write into a git directory refused (`EROFS`), and every read as it is: the guest reads `.git`
  * and cannot change it. A write is refused when the path it names, or the place that path leads to, is protected
  * (`gitProtected`); renaming a folder that holds a git directory is refused too, since the directory would then lie
- * where nothing guards it. A hard link needs its source checked as well as its name: both are.
+ * where nothing guards it. A hard link needs its source checked as well as its name: both are. A file that has other
+ * hard links (`nlink` above 1) is never changed in place (`EPERM`): the other names may lie outside the folder, in a
+ * package store or in a git directory. Replacing it by a rename over it, or removing its name, is allowed.
  */
 function refuseWrites(
     library: Library,
@@ -120,18 +125,16 @@ function refuseWrites(
     const { isWriteFlag, normalizeVfsPath, ERRNO } = library;
     const guarded = gitProtected(root, gitDirs);
 
-    const refuse = (op: string, path: string): never => {
-        const error = new Error(
-            `EROFS: ${op} '${path}' (git metadata is read only here)`,
-        ) as Error & {
+    const refuse = (code: "EROFS" | "EPERM", op: string, path: string, why: string): never => {
+        const error = new Error(`${code}: ${op} '${path}' (${why})`) as Error & {
             code: string;
             errno: number;
             syscall: string;
             path: string;
         };
 
-        error.code = "EROFS";
-        error.errno = ERRNO.EROFS;
+        error.code = code;
+        error.errno = ERRNO[code];
         error.syscall = op;
         error.path = path;
 
@@ -165,6 +168,16 @@ function refuseWrites(
             return guarded(host) || (moves && holdsGitDir(host, gitDirs));
         });
 
+    const hasOtherLinks = (path: string): boolean => {
+        try {
+            const stat = lstatSync(join(root, leadsTo(normalizeVfsPath(path), true)));
+
+            return stat.isFile() && stat.nlink > 1;
+        } catch {
+            return false;
+        }
+    };
+
     return new Proxy(backend, {
         get(target, property) {
             const value = Reflect.get(target, property, target);
@@ -182,11 +195,24 @@ function refuseWrites(
             return (...args: unknown[]) => {
                 const reads = base === "open" && !isWriteFlag(String(args[1] ?? "r"));
 
-                for (const { at, follow, moves } of reads ? [] : WRITES[base]!) {
+                for (const { at, follow, moves, inPlace } of reads ? [] : WRITES[base]!) {
                     const path = args[at];
 
-                    if (typeof path === "string" && protectedPath(path, follow, moves === true)) {
-                        refuse(base, path);
+                    if (typeof path !== "string") {
+                        continue;
+                    }
+
+                    if (protectedPath(path, follow, moves === true)) {
+                        refuse("EROFS", base, path, "git metadata is read only here");
+                    }
+
+                    if (inPlace === true && hasOtherLinks(path)) {
+                        refuse(
+                            "EPERM",
+                            base,
+                            path,
+                            "this file has other hard links, so it is not changed in place: write a new file and rename it over this one",
+                        );
                     }
                 }
 
@@ -460,36 +486,33 @@ export class GondolinDriver implements SandboxDriver {
             "@earendil-works",
             `gondolin-krun-runner-${platform}`,
         );
-        const krunPlatform = platform === "linux-x64" || platform === "darwin-arm64";
+        const krunPlatform = platform === "linux-x64";
         const krunRunner = krunPlatform && existsSync(runner);
-        const krunHardware = process.platform === "darwin" ? true : kvm();
+        const hardware = kvm();
         const qemu = onPath(
             process.arch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64",
         );
-        const accel = process.platform === "darwin" ? true : kvm();
 
         lines.push({
             name: "libkrun",
             optional: true,
-            ok: krunPlatform && krunRunner && krunHardware,
+            ok: krunPlatform && krunRunner && hardware,
             detail: !krunPlatform
                 ? `No prebuilt libkrun runner for ${platform}.`
                 : !krunRunner
                   ? "The libkrun runner package is not installed. Tap Set up."
-                  : !krunHardware
+                  : !hardware
                     ? "No access to /dev/kvm: add your user to the kvm group, or turn on virtualization."
-                    : "Ready (uses KVM or the macOS hypervisor).",
+                    : "Ready (uses KVM).",
         });
         lines.push({
             name: "QEMU",
             optional: true,
-            ok: qemu !== undefined && accel,
+            ok: qemu !== undefined && hardware,
             detail:
                 qemu === undefined
-                    ? process.platform === "darwin"
-                        ? "Not installed: `brew install qemu`. Pi Pocket does not install system packages."
-                        : "Not installed: install your distribution's QEMU package (for example `qemu-system-x86` on Debian). Pi Pocket does not install system packages."
-                    : !accel
+                    ? "Not installed: install your distribution's QEMU package (for example `qemu-system-x86` on Debian). Pi Pocket does not install system packages."
+                    : !hardware
                       ? "Found, but /dev/kvm is not readable and writable: a VM would be far too slow."
                       : `Found at ${qemu}.`,
         });
@@ -516,14 +539,12 @@ export class GondolinDriver implements SandboxDriver {
 
     async check(settings: { backend: Backend; image: string }): Promise<HostCheck> {
         const lines: CheckLine[] = [];
-        const supported = process.platform === "linux" || process.platform === "darwin";
+        const unsupported = sandboxPlatformProblem();
 
         lines.push({
             name: "Operating system",
-            ok: supported,
-            detail: supported
-                ? `${process.platform} ${process.arch}`
-                : "Gondolin runs on Linux and macOS only. On Windows, run Pi Pocket inside WSL 2.",
+            ok: unsupported === undefined,
+            detail: unsupported ?? `${process.platform} ${process.arch}`,
         });
         lines.push({
             name: "Node.js",
@@ -539,7 +560,7 @@ export class GondolinDriver implements SandboxDriver {
                 ? `${GONDOLIN_VERSION}, in ${this.#dir}`
                 : `Not installed. Tap Set up: it installs @earendil-works/gondolin@${GONDOLIN_VERSION} into ${this.#dir}.`,
         });
-        const backend = supported ? this.#backend(settings.backend) : { lines: [] };
+        const backend = unsupported === undefined ? this.#backend(settings.backend) : { lines: [] };
 
         lines.push(...backend.lines);
         lines.push({
@@ -636,7 +657,7 @@ export class GondolinDriver implements SandboxDriver {
                 JSON.stringify({ name: "pocket-gondolin", private: true }),
             );
             await run(
-                process.platform === "win32" ? "npm.cmd" : "npm",
+                "npm",
                 [
                     "install",
                     `@earendil-works/gondolin@${GONDOLIN_VERSION}`,

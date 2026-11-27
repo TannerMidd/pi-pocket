@@ -706,6 +706,32 @@ test("the sheet's text keeps its spaces and lays each VM out as a title, a folde
         text,
         /<strong>Session 13<\/strong><span>\/tmp\/gdl\/w2<\/span><span>Idle<\/span>/,
     );
+
+    // Off Linux no Set up is offered.
+    const unsupported = await sheet.render({
+        sure: "browser",
+        host: {
+            check: {
+                lines: [
+                    {
+                        name: "Operating system",
+                        ok: false,
+                        detail: "The sandbox runs on Linux only for now.",
+                    },
+                ],
+            },
+            supported: false,
+            running: 0,
+            max: 3,
+            vms: [],
+            setup: { running: false, lines: [], error: null, done: false },
+            estimate: { plain: {}, browser: {} },
+        },
+        flat,
+    });
+
+    assert.match(unsupported, /The sandbox runs on Linux only for now\./);
+    assert.doesNotMatch(unsupported, /Set up/);
 });
 
 // ─── Guard: running text of the sheet keeps its spaces ──────────────────────

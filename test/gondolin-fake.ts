@@ -5,10 +5,8 @@
  */
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import { EventEmitter } from "node:events";
-import { once } from "node:events";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type {
     GuestChunk,
@@ -77,10 +75,6 @@ export class FakeDriver implements SandboxDriver {
 
         return vm;
     }
-}
-
-function guestError(error: unknown): Error {
-    return error as Error;
 }
 
 const fakeFs: GuestFs = {
@@ -237,7 +231,7 @@ export class FakeVm extends EventEmitter implements GuestVm {
 
 /**
  * End a command and everything it started, as a VM that stops does. Ending only the shell leaves a child (`tail -f` under
- * macOS's `sh`, which does not exec its last command) holding the output pipe open, so the command never reports its end.
+ * a shell that does not exec its last command) holding the output pipe open, so the command never reports its end.
  */
 function killGroup(child: ReturnType<typeof spawn>): void {
     try {
@@ -246,7 +240,3 @@ function killGroup(child: ReturnType<typeof spawn>): void {
         child.kill("SIGKILL");
     }
 }
-
-void createReadStream;
-void once;
-void guestError;
