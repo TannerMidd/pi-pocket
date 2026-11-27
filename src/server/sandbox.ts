@@ -263,7 +263,15 @@ export class Sandboxes {
     #serial: Promise<unknown> = Promise.resolve();
     /** Counts every change of the provider: an environment handle made under another generation is stale. */
     #generation = 0;
-    readonly #phases = new Map<number, { phase: Phase; reason?: string }>();
+    /**
+     * `lifecycle`: set by a provider change or by start; only a provider change or a reconcile clears it. Any other suspension
+     * (a failed release, a failed step) needs an explicit recovery.
+     */
+    readonly #phases = new Map<number, { phase: Phase; reason?: string; lifecycle?: true }>();
+    /** The transitions under way (a change, a turn-on or turn-off, a resume, the rules): a provider change waits for them. */
+    readonly #active = new Set<Promise<unknown>>();
+    /** One release attempt for each tree at a time: a retry joins it, and a late one never follows a recovery. */
+    readonly #releasing = new Map<number, Promise<void>>();
     readonly #changed = new Set<() => void>();
     /** Which roots are sandboxed, kept in step with their documents. */
     readonly #on = new Set<number>();
@@ -399,10 +407,12 @@ export class Sandboxes {
      * with the reason, and keeps the provider. `leave`: the provider goes after the proof.
      */
     async #stop(mine: { provider: SandboxProvider }, leave: boolean, why: string): Promise<void> {
+        // A provider change never ends, or overwrites, a transition that it does not own: it waits until they are done.
+        await this.#quiet();
         const roots = [...this.#on];
 
         for (const root of roots) {
-            this.#setPhase(root, "suspended", why);
+            this.#setPhase(root, "suspended", why, true);
         }
 
         try {
@@ -498,6 +508,11 @@ export class Sandboxes {
         return this.#on.has(this.#rootOfNumber(Number(id)));
     }
 
+    /** How many calls wait for a phase to end (tests look that none is left behind). */
+    get waiting(): number {
+        return this.#changed.size;
+    }
+
     /** Whether any tree is sandboxed. A server with none pays nothing for the rest of this module. */
     get any(): boolean {
         return this.#on.size > 0;
@@ -542,14 +557,35 @@ export class Sandboxes {
 
     // ─── Phases ─────────────────────────────────────────────────────────────
 
-    #setPhase(root: number, phase: Phase, reason?: string): void {
+    /** Run a transition, and let a provider change see it under way (it waits for it, and never ends its phase). */
+    #track<T>(work: () => Promise<T>): Promise<T> {
+        const run = work();
+        const done = () => void this.#active.delete(run);
+
+        this.#active.add(run);
+        run.then(done, done);
+
+        return run;
+    }
+
+    async #quiet(): Promise<void> {
+        while (this.#active.size > 0) {
+            await Promise.allSettled([...this.#active]);
+        }
+    }
+
+    #setPhase(root: number, phase: Phase, reason?: string, lifecycle = false): void {
         this.#epoch++;
 
         if (phase === "stable") {
             this.#phases.delete(root);
             this.#told.delete(root);
         } else {
-            this.#phases.set(root, { phase, ...(reason === undefined ? {} : { reason }) });
+            this.#phases.set(root, {
+                phase,
+                ...(reason === undefined ? {} : { reason }),
+                ...(lifecycle ? { lifecycle: true as const } : {}),
+            });
         }
 
         for (const listener of [...this.#changed]) {
@@ -594,17 +630,20 @@ export class Sandboxes {
                     );
                 }
 
-                await Promise.race([
-                    bound,
-                    new Promise<void>((resolve) => {
-                        const wake = () => {
-                            this.#changed.delete(wake);
-                            resolve();
-                        };
+                let wake!: () => void;
 
-                        this.#changed.add(wake);
-                    }),
-                ]);
+                try {
+                    await Promise.race([
+                        bound,
+                        new Promise<void>((resolve) => {
+                            wake = resolve;
+                            this.#changed.add(wake);
+                        }),
+                    ]);
+                } finally {
+                    // Whichever branch ended the wait, its callback goes.
+                    this.#changed.delete(wake);
+                }
             }
         } finally {
             stop.abort();
@@ -810,7 +849,8 @@ export class Sandboxes {
             for (const root of this.#on) {
                 const meta = items[String(root)];
 
-                if (meta === undefined) {
+                // An archived tree with no work is not in its group (I3): it cannot mix with a session that is.
+                if (meta === undefined || (meta.archived === true && !this.#hasWork(root))) {
                     continue;
                 }
 
@@ -1271,7 +1311,11 @@ export class Sandboxes {
      * sandbox anywhere it is just the hold and the commit. A step that fails after the release leaves the tree
      * `suspended` with its old folder and setting, and a refusal (a 4xx) leaves it as it was.
      */
-    async change<T>(spec: ChangeSpec, steps: ChangeSteps<T>): Promise<T> {
+    change<T>(spec: ChangeSpec, steps: ChangeSteps<T>): Promise<T> {
+        return this.#track(() => this.#change(spec, steps));
+    }
+
+    async #change<T>(spec: ChangeSpec, steps: ChangeSteps<T>): Promise<T> {
         const root = this.#rootOfNumber(Number(spec.id));
 
         const resolve = async (): Promise<Request> => {
@@ -1306,14 +1350,8 @@ export class Sandboxes {
                     .finally(() => this.#audited()),
             );
 
-        if (this.#on.size === 0) {
-            const request = await resolve();
-
-            await steps.afterRelease?.();
-
-            return commit(request);
-        }
-
+        // No shortcut for a server with no sandbox: a first turn-on could succeed while this prepares, and the change would end
+        // without it. Every change reserves its folders and marks its tree before any preparation.
         const releases = spec.kind !== "enter" && this.#on.has(root);
         const reservation: Reservation = {
             folders: [
@@ -1614,19 +1652,16 @@ export class Sandboxes {
         // One bound on the whole attempt: a revoke handler that never settles, a lease that never ends, or a provider that
         // never closes leaves the caller with a failure (the tree stays suspended), not with a wait that never ends.
         const stop = new AbortController();
-        let expired = false;
-        const timeout = this.#timer(this.#drainMs, stop.signal).then(() => {
-            expired = !stop.signal.aborted;
-
-            return expired
-                ? Promise.reject(
+        const timeout = this.#timer(this.#drainMs, stop.signal).then(() =>
+            stop.signal.aborted
+                ? new Promise<never>(() => {})
+                : Promise.reject(
                       new Error(
                           "the release did not finish in time, so it is not known to be gone",
                       ),
-                  )
-                : new Promise<never>(() => {});
-        });
-        const attempt = this.#releaseAttempt(roots, reason);
+                  ),
+        );
+        const attempt = Promise.all(roots.map((root) => this.#releaseOne(root, reason)));
 
         // The attempt may fail after the bound: that failure is no one's to handle any more.
         attempt.catch(() => undefined);
@@ -1636,6 +1671,29 @@ export class Sandboxes {
         } finally {
             stop.abort();
         }
+    }
+
+    /**
+     * The release of one tree: one attempt at a time. A retry, or a recovery, joins the attempt that is under way (also one
+     * that the bound gave up on), so a late release never runs after a recovery has reopened the tree.
+     */
+    #releaseOne(root: number, reason: string): Promise<void> {
+        const going = this.#releasing.get(root);
+
+        if (going !== undefined) {
+            return going;
+        }
+
+        const run = this.#releaseAttempt([root], reason).finally(() => {
+            if (this.#releasing.get(root) === run) {
+                this.#releasing.delete(root);
+            }
+        });
+
+        this.#releasing.set(root, run);
+        run.catch(() => undefined);
+
+        return run;
     }
 
     async #releaseAttempt(roots: readonly number[], reason: string): Promise<void> {
@@ -1665,7 +1723,11 @@ export class Sandboxes {
     // ─── Turn on, turn off, resume ──────────────────────────────────────────
 
     /** Put a session in the sandbox. The readiness gate refuses it in this build. */
-    async turnOn(id: ConversationId, user: User): Promise<void> {
+    turnOn(id: ConversationId, user: User): Promise<void> {
+        return this.#track(() => this.#turnOn(id, user));
+    }
+
+    async #turnOn(id: ConversationId, user: User): Promise<void> {
         const app = this.#app;
         const root = Number(id);
 
@@ -1748,7 +1810,11 @@ export class Sandboxes {
      * A failed release or commit leaves the tree `suspended` with its setting on: every call fails at once with the
      * reason, and the group stays reserved against plain joins. A later turn-off, or `resume`, retries.
      */
-    async turnOff(id: ConversationId, user: User): Promise<void> {
+    turnOff(id: ConversationId, user: User): Promise<void> {
+        return this.#track(() => this.#turnOff(id, user));
+    }
+
+    async #turnOff(id: ConversationId, user: User): Promise<void> {
         const app = this.#app;
         const root = Number(id);
 
@@ -1842,7 +1908,11 @@ export class Sandboxes {
     }
 
     /** The owner resumes a suspended tree: it retries the release, and goes back to `stable` when that works. */
-    async resume(id: ConversationId): Promise<void> {
+    resume(id: ConversationId): Promise<void> {
+        return this.#track(() => this.#resume(id));
+    }
+
+    async #resume(id: ConversationId): Promise<void> {
         const root = Number(id);
         const at = this.#phases.get(root);
 
@@ -1897,36 +1967,38 @@ export class Sandboxes {
 
         const still = (root: number) => this.#phases.get(root)?.reason === tag;
 
-        return this.exclusive(async () => {
-            for (const root of mine) {
-                if (!still(root)) {
-                    continue;
-                }
-
-                const problem = await this.#trusted.check(this.#folderOfRoot(root));
-
-                if (!still(root)) {
-                    continue;
-                }
-
-                if (problem !== undefined) {
-                    this.#setPhase(root, "suspended", problem);
-                    continue;
-                }
-
-                try {
-                    if (this.provider?.stricter?.() === true) {
-                        await this.#release([root], "the rules got stricter");
+        return this.#track(() =>
+            this.exclusive(async () => {
+                for (const root of mine) {
+                    if (!still(root)) {
+                        continue;
                     }
 
-                    if (still(root)) {
-                        this.#setPhase(root, "stable");
+                    const problem = await this.#trusted.check(this.#folderOfRoot(root));
+
+                    if (!still(root)) {
+                        continue;
                     }
-                } catch (error) {
-                    this.#setPhase(root, "suspended", describeError(error));
+
+                    if (problem !== undefined) {
+                        this.#setPhase(root, "suspended", problem);
+                        continue;
+                    }
+
+                    try {
+                        if (this.provider?.stricter?.() === true) {
+                            await this.#release([root], "the rules got stricter");
+                        }
+
+                        if (still(root)) {
+                            this.#setPhase(root, "stable");
+                        }
+                    } catch (error) {
+                        this.#setPhase(root, "suspended", describeError(error));
+                    }
                 }
-            }
-        });
+            }),
+        );
     }
 
     #rulesCount = 0;
@@ -1959,7 +2031,12 @@ export class Sandboxes {
         for (const root of [...this.#on]) {
             const current = this.#phases.get(root);
 
-            if (current !== undefined && current.phase !== "suspended") {
+            // Only a start, or a suspension that a provider change made, is this module's to clear: a tree another transition
+            // owns, or one a failed release left suspended, waits for its own recovery.
+            if (
+                current !== undefined &&
+                !(current.phase === "suspended" && current.lifecycle === true)
+            ) {
                 continue;
             }
 
@@ -1968,7 +2045,7 @@ export class Sandboxes {
                 this.unsupported() ??
                 (await this.#trusted.check(this.#folderOfRoot(root)));
 
-            this.#setPhase(root, missing === undefined ? "stable" : "suspended", missing);
+            this.#setPhase(root, missing === undefined ? "stable" : "suspended", missing, true);
         }
     }
 
@@ -2134,6 +2211,8 @@ export class Sandboxes {
 
                     // What the handle was made for is looked at again at every call: the state of the tree, its folder,
                     // and the provider. When any changed, the call goes to the environment that the new state gives.
+                    // The folder is compared by its path here. PR 2 adds its identity (`pinnedRoot`, the descriptor of the
+                    // folder that `hostfs` opened): a swap of the folder under the same path then makes the handle stale too.
                     if (
                         lease.sandboxed !== boxed ||
                         this.#generation !== generation ||
