@@ -936,7 +936,7 @@ test("a rebase in the sandbox fails with a clear word, and the rest of git works
     assert.equal(existsSync(join(repo, ".git", "sequencer")), false);
 });
 
-test("git's hooks folder that is the folder itself keeps the VM from starting, and a link to a hooks folder cannot be moved", async (t) => {
+test("git's hooks folder that is the folder itself keeps the VM from starting, and a link or a hook that is a link keeps it from starting, and a plain hooks folder is held with its way", async (t) => {
     if (unavailable(t)) {
         return;
     }
@@ -954,30 +954,76 @@ test("git's hooks folder that is the folder itself keeps the VM from starting, a
     assert.ok(!refused.ok, "the VM did not start");
     assert.match(
         String((refused as { error: Error }).error.message),
-        /core\.hooksPath \("\.", set in .*\) is the folder .* itself.*Point core\.hooksPath at a folder inside/,
+        /core\.hookspath \("\.", set in .*\) is the folder .* itself.*names a plain file or folder inside the project/i,
     );
     assert.equal(manager!.state(rootId)?.phase, "error", "no VM for this session");
     assert.ok(!readFileSync(join(repo, "post-checkout"), "utf8").includes("echo hi"));
 
-    // A link: the hooks folder is a link to another folder of the project. Neither can be changed.
+    // A chain of links to a hooks folder: the guest could point any link of it at a folder that it made. No VM.
     onHost(repo, "config", "core.hooksPath", "hooks");
     mkdirSync(join(repo, "real-hooks"));
     writeFileSync(join(repo, "real-hooks", "post-checkout"), "#!/bin/sh\ntouch OWNER_LINK_HOOK\n", {
         mode: 0o755,
     });
-    mkdirSync(join(repo, "evil-hooks"));
-    symlinkSync("real-hooks", join(repo, "hooks"));
+    symlinkSync("real-hooks", join(repo, "step"));
+    symlinkSync("step", join(repo, "hooks"));
+    const chain = ++numbers;
+    const linked = await manager!
+        .envFor(chain, { rootId: chain, cwd: repo, uploadDir: undefined })
+        .exec("echo hi > evil.txt; echo ran", { timeout: 60 }, context);
+
+    assert.ok(!linked.ok, "the VM did not start");
+    assert.match(
+        String((linked as { error: Error }).error.message),
+        /through a link \(.*hooks leads to/,
+    );
+    assert.equal(existsSync(join(repo, "evil.txt")), false);
+    rmSync(join(repo, "hooks"));
+    rmSync(join(repo, "step"));
+
+    // A link inside the hooks folder to a file of the project that the guest may write: no VM either.
+    mkdirSync(join(repo, "scripts"));
+    writeFileSync(join(repo, "scripts", "h.sh"), "#!/bin/sh\ntouch OWNER_LINK_HOOK\n", {
+        mode: 0o755,
+    });
+    mkdirSync(join(repo, "tools", "git", "hooks"), { recursive: true });
+    symlinkSync("../../../scripts/h.sh", join(repo, "tools", "git", "hooks", "post-checkout"));
+    onHost(repo, "config", "core.hooksPath", "tools/git/hooks");
+    const inside = ++numbers;
+    const insideLink = await manager!
+        .envFor(inside, { rootId: inside, cwd: repo, uploadDir: undefined })
+        .exec("echo hi > evil.txt", { timeout: 60 }, context);
+
+    assert.ok(!insideLink.ok);
+    assert.match(
+        String((insideLink as { error: Error }).error.message),
+        /post-checkout is a link to .*h\.sh/,
+    );
+
+    // A plain hooks folder, deep in the project: it and every folder on the way are held, and the rest is the guest's.
+    rmSync(join(repo, "tools", "git", "hooks", "post-checkout"));
+    writeFileSync(
+        join(repo, "tools", "git", "hooks", "post-checkout"),
+        "#!/bin/sh\ntouch OWNER_LINK_HOOK\n",
+        {
+            mode: 0o755,
+        },
+    );
     const second = ++numbers;
     const output: string[] = [];
     const again = manager!.envFor(second, { rootId: second, cwd: repo, uploadDir: undefined });
 
     await again.exec(
         [
-            "echo 'touch EVIL_LINK_HOOK' > evil-hooks/post-checkout; chmod +x evil-hooks/post-checkout; echo made=$?",
-            "ln -sfn evil-hooks hooks; echo relink=$?",
-            "rm hooks; echo remove=$?",
-            "echo 'touch EVIL_LINK_HOOK' >> real-hooks/post-checkout; echo write=$?",
-            "echo ok > notes.txt; echo notes=$?",
+            "echo 'touch EVIL_LINK_HOOK' >> tools/git/hooks/post-checkout; echo write=$?",
+            "mv tools/git/hooks tools/git/hooks2; echo movehooks=$?",
+            "mv tools/git tools/git2; echo movegit=$?",
+            "mv tools tools2; echo movetools=$?",
+            "rm -rf tools/git; echo remove=$?",
+            "ln -sfn ../../scripts tools/git/hooks; echo relink=$?",
+            "rm tools/git/hooks/post-checkout && ln -s ../../../../scripts/h.sh tools/git/hooks/post-checkout; echo hooklink=$?",
+            "echo ok > tools/git/notes.txt; echo notes=$?",
+            "echo ok > notes.txt; echo rootnotes=$?",
         ].join("; "),
         { onOutput: (text) => output.push(text), timeout: 60 },
         context,
@@ -985,13 +1031,20 @@ test("git's hooks folder that is the folder itself keeps the VM from starting, a
     await manager!.stop(second, "the test ended");
     const text = output.join("");
 
-    assert.match(text, /made=0/);
-
-    for (const name of ["relink", "remove", "write"]) {
+    for (const name of [
+        "write",
+        "movehooks",
+        "movegit",
+        "movetools",
+        "remove",
+        "relink",
+        "hooklink",
+    ]) {
         assert.match(text, new RegExp(`${name}=[1-9]`), `${name}: ${text}`);
     }
 
     assert.match(text, /notes=0/);
+    assert.match(text, /rootnotes=0/);
     onHost(repo, "checkout", "-q", "-b", "elsewhere");
     assert.equal(existsSync(join(repo, "OWNER_LINK_HOOK")), true);
     assert.equal(existsSync(join(repo, "EVIL_LINK_HOOK")), false);

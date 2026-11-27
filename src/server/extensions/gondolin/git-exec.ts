@@ -7,9 +7,9 @@
  * (`policy.ts` protects `.git`'s own files; this protects what the config adds.)
  */
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /** A path of this machine that the guest may not write: the path itself, and, for a folder (`tree`), all below it. */
 export interface ExecPath {
@@ -128,86 +128,174 @@ function fileWords(command: string, bases: readonly string[]): string[] {
     return found;
 }
 
-/** `path` as the paths that it may mean: absolute ones as they are, relative ones from each base. */
-function candidates(path: string, bases: readonly string[], home: string): string[] {
-    if (path === "~" || path.startsWith("~/")) {
-        return [join(home, path.slice(1))];
-    }
-
-    return isAbsolute(path) ? [resolve(path)] : bases.map((base) => resolve(base, path));
+/** A place that a value of the configuration may mean: as written out, and as the file system walks the text. */
+interface Where {
+    readonly path: string;
+    /** The absolute text before any `..` is taken out: a link followed by `..` leads somewhere else than the text. */
+    readonly raw: string;
 }
 
-/** Protect `path`: a folder with all below it, or a file; a path that is missing is held by its top missing folder. */
-function protect(
-    path: string,
-    tree: boolean,
-    mounts: readonly string[],
-    out: Map<string, ExecPath>,
-) {
-    const here = canonical(path);
-    const mount = mounts.find((each) => inside(here, each) || inside(path, each));
-
-    if (mount === undefined) {
-        return;
+/** `path` as the places that it may mean: absolute ones as they are, relative ones from each base. */
+function candidates(path: string, bases: readonly string[], home: string): Where[] {
+    if (path === "~" || path.startsWith("~/")) {
+        return [{ path: join(home, path.slice(1)), raw: `${home}${path.slice(1)}` }];
     }
 
-    let target = inside(here, mount) ? here : path;
-    let held = tree || isDirectory(target);
+    return isAbsolute(path)
+        ? [{ path: resolve(path), raw: path }]
+        : bases.map((base) => ({ path: resolve(base, path), raw: `${base}${sep}${path}` }));
+}
 
-    if (!existsSync(target)) {
-        // The guest could make the path, or a folder or a link that leads to it: the top missing folder is held.
-        let top = target;
+/** What a value of the configuration is: the key, its text, and where it was set, for what a person reads. */
+function describe(entry: ConfigEntry, origin: string | undefined): string {
+    return `git's ${entry.key} (${JSON.stringify(entry.value)}${origin === undefined ? "" : `, set in ${origin}`})`;
+}
 
-        for (
-            let up = dirname(top);
-            inside(up, mount) && up !== mount && !existsSync(up);
-            up = dirname(up)
-        ) {
-            top = up;
+/** Whether `path` is below one of `roots`, and not one of them. */
+function below(path: string, roots: readonly string[]): boolean {
+    return roots.some((root) => inside(path, root) && path.toLowerCase() !== root.toLowerCase());
+}
+
+/**
+ * Follow `raw` as the file system does, one part at a time, and say where it ends. A link on the way that lies below a
+ * mount, or leads below one, is refused: the guest may make a link there, or point one elsewhere, and the folder that git
+ * uses would be one it made. A link outside the mounts (`/tmp` on macOS) is only followed.
+ */
+function follow(raw: string, roots: readonly string[]): { physical: string; problem?: string } {
+    let at: string = sep;
+
+    for (const part of raw.split(sep)) {
+        if (part === "" || part === ".") {
+            continue;
         }
 
-        target = top;
-        held = true;
+        if (part === "..") {
+            at = dirname(at);
+
+            continue;
+        }
+
+        const next = join(at, part);
+        let link = false;
+
+        try {
+            link = lstatSync(next).isSymbolicLink();
+        } catch {
+            // missing: the rest is read as written
+            at = next;
+
+            continue;
+        }
+
+        if (!link) {
+            at = next;
+
+            continue;
+        }
+
+        let real: string;
+
+        try {
+            real = realpathSync(next);
+        } catch {
+            return {
+                physical: next,
+                problem: `reaches into the folder through a link that leads nowhere (${next})`,
+            };
+        }
+
+        if (below(next, roots) || below(real, roots)) {
+            return {
+                physical: real,
+                problem: `reaches into the folder through a link (${next} leads to ${real})`,
+            };
+        }
+
+        at = real;
     }
 
-    if (target.toLowerCase() !== mount.toLowerCase()) {
-        out.set(target.toLowerCase(), { path: target, tree: held });
-    }
+    return { physical: at };
+}
 
-    // A link on the way (`hooks -> ../x`, or a folder that is one) is held too: the guest could point it elsewhere in
-    // the folder, at a path that it made.
-    const down = relative(mount, path);
+/** The first link inside `dir` that leads below a mount but out of `dir`, or that leads nowhere; undefined when none. */
+function linkOut(dir: string, roots: readonly string[]): string | undefined {
+    let budget = 5000;
 
-    if (!down.startsWith("..") && !isAbsolute(down)) {
-        let at = mount;
+    const walk = (folder: string): string | undefined => {
+        let names: string[];
 
-        for (const part of down.split(sep).filter((each) => each !== "")) {
-            at = join(at, part);
+        try {
+            names = readdirSync(folder);
+        } catch {
+            return undefined;
+        }
+
+        for (const name of names) {
+            const child = join(folder, name);
+
+            if (--budget < 0) {
+                return `${dir} holds too many entries to check`;
+            }
+
+            let stats;
 
             try {
-                if (lstatSync(at).isSymbolicLink()) {
-                    out.set(at.toLowerCase(), { path: at, tree: false });
-                }
+                stats = lstatSync(child);
             } catch {
-                break;
+                continue;
+            }
+
+            if (stats.isSymbolicLink()) {
+                let real: string;
+
+                try {
+                    real = realpathSync(child);
+                } catch {
+                    return `${child} is a link that leads nowhere`;
+                }
+
+                if (below(real, roots) && !inside(real, dir)) {
+                    return `${child} is a link to ${real}, which the guest may write`;
+                }
+            } else if (stats.isDirectory()) {
+                const found = walk(child);
+
+                if (found !== undefined) {
+                    return found;
+                }
             }
         }
-    }
-}
 
-/** The mount that `path` is, and not only inside: a hooks folder that is the whole folder cannot be held. */
-function mountItself(path: string, mounts: readonly string[]): string | undefined {
-    const named = resolve(path).toLowerCase();
-    const real = canonical(path).toLowerCase();
+        return undefined;
+    };
 
-    return mounts.find((mount) => mount.toLowerCase() === named || mount.toLowerCase() === real);
+    return walk(dir);
 }
 
 /** What the host's git would read or run inside the mounts, and what makes holding it impossible. */
 export interface ExecPlan {
     readonly paths: ExecPath[];
-    /** Why the folder cannot be shared at all: git runs hooks from the folder itself, and every file of it could be one. */
+    /** Why the folder cannot be shared at all: a path git uses reaches it through a link, or is the folder itself. */
     readonly problems: string[];
+}
+
+/** Keys that hold a list: every entry counts. The others have one value, and the last entry is the one git uses. */
+const LISTS = [/^(include|includeif\..+)\.path$/, /^credential\.(.*\.)?helper$/];
+
+/** The entries that git uses: for a key with one value the last one (the order is git's, from the weakest scope to the strongest). */
+function effective(entries: readonly ConfigEntry[]): ConfigEntry[] {
+    const last = new Map<string, number>();
+
+    entries.forEach((entry, index) => {
+        if (!LISTS.some((pattern) => pattern.test(entry.key))) {
+            last.set(entry.key, index);
+        }
+    });
+
+    return entries.filter(
+        (entry, index) =>
+            LISTS.some((pattern) => pattern.test(entry.key)) || last.get(entry.key) === index,
+    );
 }
 
 /** The files of the folder that git would read as configuration, or run, given its configuration. */
@@ -217,28 +305,122 @@ export function execPathsOf(entries: readonly ConfigEntry[], context: ExecContex
 
 export function execPlan(entries: readonly ConfigEntry[], context: ExecContext): ExecPlan {
     const home = context.home ?? homedir();
-    const mounts = context.mounts.map(canonical);
+    const real = context.mounts.map(canonical);
+    const roots = [...new Set([...context.mounts.map((mount) => resolve(mount)), ...real])];
     const bases = [...new Set([context.top, context.cwd].filter((base) => base !== undefined))];
     const out = new Map<string, ExecPath>();
     const problems: string[] = [];
 
+    /** Hold `where`: refuse when it reaches the folder through a link, else hold it and the way to it. */
+    const hold = (
+        where: Where,
+        tree: boolean,
+        entry: ConfigEntry,
+        origin: string | undefined,
+        hooks = false,
+    ) => {
+        const { physical, problem } = follow(where.raw, roots);
+
+        if (problem !== undefined) {
+            problems.push(
+                `${describe(entry, origin)} ${problem}, so the guest could make git run its files`,
+            );
+
+            return;
+        }
+
+        const mount = real.find((each) => inside(physical, each));
+
+        if (hooks) {
+            const whole = real.find((each) => physical.toLowerCase() === each.toLowerCase());
+            const around = real.find((each) => inside(each, physical) && !inside(physical, each));
+
+            if (whole !== undefined || around !== undefined) {
+                problems.push(
+                    `${describe(entry, origin)} is ${whole === undefined ? "a folder that holds" : "the folder"} ${whole ?? around}${whole === undefined ? "" : " itself"}, so any file in it could be a hook that git runs on this machine`,
+                );
+
+                return;
+            }
+        }
+
+        if (mount === undefined) {
+            return;
+        }
+
+        let target = physical;
+        let held = tree || isDirectory(physical);
+
+        if (!existsSync(physical)) {
+            // The guest could make the path, or a folder or a link that leads to it: the top missing folder is held.
+            let top = physical;
+
+            for (
+                let up = dirname(top);
+                inside(up, mount) && up.toLowerCase() !== mount.toLowerCase() && !existsSync(up);
+                up = dirname(up)
+            ) {
+                top = up;
+            }
+
+            target = top;
+            held = true;
+        }
+
+        if (target.toLowerCase() !== mount.toLowerCase()) {
+            out.set(target.toLowerCase(), { path: target, tree: held });
+        }
+
+        // Every folder on the way is held as itself: it cannot be moved, removed, or made a link, though the files that
+        // it holds besides stay the guest's.
+        for (
+            let up = dirname(physical);
+            inside(up, mount) && up.toLowerCase() !== mount.toLowerCase();
+            up = dirname(up)
+        ) {
+            if (existsSync(up) && !out.has(up.toLowerCase())) {
+                out.set(up.toLowerCase(), { path: up, tree: false });
+            }
+        }
+
+        if (held && isDirectory(physical)) {
+            const out_ = linkOut(physical, roots);
+
+            if (out_ !== undefined) {
+                problems.push(
+                    `${describe(entry, origin)}: ${out_}, so the guest could make git run its files`,
+                );
+            }
+        }
+    };
+
+    // A config file inside the folder is configuration that the guest could write: every entry's file, used or not.
     for (const entry of entries) {
+        if (entry.origin.startsWith("file:")) {
+            hold(
+                {
+                    path: resolve(context.cwd, entry.origin.slice(5)),
+                    raw: resolve(context.cwd, entry.origin.slice(5)),
+                },
+                false,
+                entry,
+                undefined,
+            );
+        }
+    }
+
+    for (const entry of effective(entries)) {
         const key = entry.key;
         const originFile = entry.origin.startsWith("file:")
             ? resolve(context.cwd, entry.origin.slice(5))
             : undefined;
 
-        // A config file inside the folder (an included one) is configuration that the guest could write.
-        if (originFile !== undefined) {
-            protect(originFile, false, mounts, out);
-        }
-
         if (/^(include|includeif\..+)\.path$/.test(key)) {
             // Relative to the file that holds the directive; a missing file is read when it appears.
             const from = originFile === undefined ? context.cwd : dirname(originFile);
 
-            for (const path of candidates(entry.value, [from], home)) {
-                protect(path, false, mounts, out);
+            for (const where of candidates(entry.value, [from], home)) {
+                hold(where, false, entry, originFile);
             }
 
             continue;
@@ -251,25 +433,16 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
                 ...(context.gitDir === undefined ? [] : [context.gitDir]),
             ];
 
-            for (const path of candidates(entry.value, hooks, home)) {
-                const whole = mountItself(path, mounts);
-
-                if (whole !== undefined) {
-                    // Every file of the folder could be a hook, and the folder is the guest's to write: no way to hold it.
-                    problems.push(
-                        `git's core.hooksPath (${JSON.stringify(entry.value)}${originFile === undefined ? "" : `, set in ${originFile}`}) is the folder ${whole} itself, so any file in it could be a hook that git runs on this machine`,
-                    );
-                } else {
-                    protect(path, true, mounts, out);
-                }
+            for (const where of candidates(entry.value, hooks, home)) {
+                hold(where, true, entry, originFile, true);
             }
 
             continue;
         }
 
         if (FILES.some((pattern) => pattern.test(key))) {
-            for (const path of candidates(entry.value, bases, home)) {
-                protect(path, false, mounts, out);
+            for (const where of candidates(entry.value, bases, home)) {
+                hold(where, false, entry, originFile);
             }
 
             continue;
@@ -277,8 +450,8 @@ export function execPlan(entries: readonly ConfigEntry[], context: ExecContext):
 
         if (commandValue(key, entry.value)) {
             for (const word of fileWords(entry.value, bases)) {
-                for (const path of candidates(word, bases, home)) {
-                    protect(path, false, mounts, out);
+                for (const where of candidates(word, bases, home)) {
+                    hold(where, false, entry, originFile);
                 }
             }
         }

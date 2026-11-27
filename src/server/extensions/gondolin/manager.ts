@@ -117,9 +117,9 @@ export interface ManagerOptions {
     readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
 }
 
-/** What a person reads when git is set up so that its hooks cannot be held (`git-exec.ts`). */
+/** What a person reads when git is set up so that what it runs cannot be held (`git-exec.ts`). */
 const HOOKS_ROOT = (problem: string) =>
-    `${problem}. Point core.hooksPath at a folder inside the project (for example .githooks), or unset it, and try again.`;
+    `${problem}. Change that setting so that it names a plain file or folder inside the project (not a link, and not the whole folder), or unset it, and try again.`;
 
 const STRICTER = "the owner made the sandbox's rules stricter";
 

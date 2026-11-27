@@ -87,6 +87,7 @@ test("what the configuration names inside the folder is held: hooks folder, incl
     );
 
     assert.deepEqual(held(paths, root), [
+        "/.git",
         "/.git/.githooks",
         "/.git/config",
         "/.git/more.cfg",
@@ -95,6 +96,7 @@ test("what the configuration names inside the folder is held: hooks folder, incl
         "/check.sh",
         "/cred.sh",
         "/extra.cfg",
+        "/tools",
         "/tools/clean.sh",
         "/tools/conv",
         "/tools/ssh-config",
@@ -117,7 +119,13 @@ test("a path that does not exist yet is held by its top missing folder, so a lin
         { cwd: root, top: root, mounts: [root] },
     );
 
-    assert.deepEqual(held(paths, root), ["/.git/cfg", "/.git/config", "/tools/deep"]);
+    assert.deepEqual(held(paths, root), [
+        "/.git",
+        "/.git/cfg",
+        "/.git/config",
+        "/tools",
+        "/tools/deep",
+    ]);
 });
 
 test("a file of the folder that holds an included configuration is held, and values outside the folder are not", () => {
@@ -305,7 +313,7 @@ test("a hooks folder that is the folder itself cannot be held, and the way it is
         });
 
         assert.equal(plan.problems.length, 1, JSON.stringify(value));
-        assert.match(plan.problems[0]!, /core\.hooksPath .* is the folder .* itself/);
+        assert.match(plan.problems[0]!, /core\.hookspath .* is the folder .* itself/i);
         assert.deepEqual(hooksOnly(plan.paths, root), []);
     }
 
@@ -322,7 +330,7 @@ test("a hooks folder that is the folder itself cannot be held, and the way it is
     }
 });
 
-test("a hooks folder at the top of the tree is refused for a session in a folder below it only when it is that folder", () => {
+test("a hooks folder that is the session's folder, or holds it, is refused; one inside it is held", () => {
     const top = temp();
     const cwd = join(top, "app");
 
@@ -330,33 +338,105 @@ test("a hooks folder at the top of the tree is refused for a session in a folder
     mkdirSync(join(top, ".git"));
     const context = { cwd, top, gitDir: join(top, ".git"), mounts: [cwd] };
 
-    assert.deepEqual(
-        execPlan([entry("core.hookspath", ".")], context).problems,
-        [],
-        "the top is not mounted",
+    assert.equal(
+        execPlan([entry("core.hookspath", ".")], context).problems.length,
+        1,
+        "the top holds the folder: every file there is a hook, and the folder's name is one place",
     );
     assert.equal(execPlan([entry("core.hookspath", "app")], context).problems.length, 1);
+    assert.deepEqual(execPlan([entry("core.hookspath", "app/hooks")], context).problems, []);
     assert.deepEqual(hooksOnly(execPathsOf([entry("core.hookspath", "app/hooks")], context), cwd), [
         "/hooks",
     ]);
 });
 
-test("a link on the way to a hooks folder is held too, so it cannot be pointed at a folder that the guest made", () => {
+test("a path that reaches the folder through a link is refused, whatever the chain, and a plain folder is held with the way to it", () => {
+    const base = temp();
+    const root = join(base, "proj");
+
+    mkdirSync(join(root, ".git"), { recursive: true });
+    mkdirSync(join(root, "real", "hooks"), { recursive: true });
+    mkdirSync(join(root, "scripts"));
+    writeFileSync(join(root, "scripts", "h.sh"), "#!/bin/sh\n");
+    symlinkSync("real", join(root, "alias"));
+    symlinkSync("real/hooks", join(root, "hooks"));
+    symlinkSync("hooks", join(root, "chain"));
+    mkdirSync(join(base, "elsewhere"));
+    symlinkSync(root, join(base, "into-root"));
+    symlinkSync(join(base, "elsewhere"), join(base, "outside-link"));
+    const context = { cwd: root, top: root, gitDir: join(root, ".git"), mounts: [root] };
+    const plan = (value: string, key = "core.hookspath") =>
+        execPlan([entry(key, value)], context).problems;
+
+    for (const value of ["hooks", "alias/hooks", "chain", "./chain/", "alias/../real/hooks"]) {
+        assert.match(plan(value)[0] ?? "", /through a link/, value);
+    }
+
+    // The same for a script, an include, and an attributes file.
+    assert.match(plan("./chain", "core.fsmonitor")[0] ?? "", /through a link/);
+    assert.match(plan("../alias/x.cfg", "include.path")[0] ?? "", /through a link/);
+    assert.match(plan("alias/attrs", "core.attributesfile")[0] ?? "", /through a link/);
+
+    // A link of the owner's outside the folder that leads to a plain folder in it is followed, and the folder is held.
+    assert.deepEqual(plan(`${base}/into-root/real/hooks`), []);
+
+    // A link that leads out of the folder, and a plain folder, are no problem; the plain one is held with its way.
+    assert.deepEqual(plan(`${base}/outside-link/hooks`), []);
+    assert.deepEqual(plan("real/hooks"), []);
+    assert.deepEqual(
+        hooksOnly(execPathsOf([entry("core.hookspath", "real/hooks")], context), root),
+        ["/real", "/real/hooks"],
+    );
+
+    // A link inside the hooks folder to a file that the guest may write is refused; one inside the folder is not.
+    symlinkSync("../../scripts/h.sh", join(root, "real", "hooks", "post-checkout"));
+    assert.match(plan("real/hooks")[0] ?? "", /post-checkout is a link to .*h\.sh/);
+    rmSync(join(root, "real", "hooks", "post-checkout"));
+    writeFileSync(join(root, "real", "hooks", "common.sh"), "#!/bin/sh\n");
+    symlinkSync("common.sh", join(root, "real", "hooks", "pre-commit"));
+    assert.deepEqual(plan("real/hooks"), []);
+});
+
+test("git's effective value decides: a global setting that the repository overrides does not refuse the folder", () => {
     const root = temp();
 
     mkdirSync(join(root, ".git"));
-    mkdirSync(join(root, "real", "hooks"), { recursive: true });
-    symlinkSync("real", join(root, "alias"));
-    symlinkSync("real/hooks", join(root, "hooks"));
+    mkdirSync(join(root, ".githooks"));
     const context = { cwd: root, top: root, gitDir: join(root, ".git"), mounts: [root] };
+    const global = (key: string, value: string) => entry(key, value, "global");
 
-    assert.deepEqual(hooksOnly(execPathsOf([entry("core.hookspath", "hooks")], context), root), [
-        "/hooks",
-        "/real/hooks",
-    ]);
+    // The repository's value is the later one: the global `.` is not used.
+    const overridden = execPlan(
+        [global("core.hookspath", "."), entry("core.hookspath", ".githooks")],
+        context,
+    );
+
+    assert.deepEqual(overridden.problems, []);
+    assert.ok(held(overridden.paths, root).includes("/.githooks"));
+
+    // The other way round, `.` is the one git uses.
+    assert.equal(
+        execPlan([entry("core.hookspath", ".githooks"), entry("core.hookspath", ".")], context)
+            .problems.length,
+        1,
+    );
+
+    // A command that is overridden is not held; every include and every credential helper is.
+    const many = execPlan(
+        [
+            entry("core.fsmonitor", "./old.sh"),
+            entry("core.fsmonitor", "./new.sh"),
+            entry("include.path", "../a.cfg"),
+            entry("include.path", "../b.cfg"),
+            entry("credential.helper", "!./one.sh"),
+            entry("credential.helper", "!./two.sh"),
+        ],
+        context,
+    );
+
     assert.deepEqual(
-        hooksOnly(execPathsOf([entry("core.hookspath", "alias/hooks")], context), root),
-        ["/alias", "/real/hooks"],
+        held(many.paths, root).filter((each) => !each.startsWith("/.git")),
+        ["/new.sh", "/one.sh", "/two.sh", "/a.cfg", "/b.cfg"].sort(),
     );
 });
 
@@ -393,7 +473,7 @@ test("a VM does not start when git runs hooks from the folder itself, and one th
         assert.ok(!refused.ok);
         assert.match(
             String((refused as { error: Error }).error.message),
-            /core\.hooksPath .* itself/,
+            /core\.hookspath .* itself/i,
         );
         assert.equal(vms.running, 0, "the VM that ran was stopped");
         const again = await env.exec("true", undefined, context);
@@ -402,7 +482,7 @@ test("a VM does not start when git runs hooks from the folder itself, and one th
         assert.equal(driver.log.started.length, 1);
         assert.match(
             String((again as { error: Error }).error.message),
-            /Point core\.hooksPath at a folder inside/,
+            /names a plain file or folder inside the project/,
         );
         execFileSync("git", ["config", "core.hooksPath", ".githooks"], { cwd: root });
         assert.ok((await env.exec("true", undefined, context)).ok);
