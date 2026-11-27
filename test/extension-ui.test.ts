@@ -466,6 +466,10 @@ test(
 
         await inPage(`(await import("/store.js")).navigate(null); return "null";`);
         await until(async () => !(await has(".composer")), "the session closes");
+        await openMenu("menu");
+        await until(() => hasLabel("App row"), "the App row in the menu itself, without a session");
+        await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
+        await until(async () => !(await hasLabel("App row")), "the menu to close");
         await openMenu("ext");
         await until(() => hasLabel("App row"), "the default App row without a session");
         assert.equal(await hasLabel("Session row"), false, "a Session row needs a session");
@@ -484,7 +488,7 @@ test(
         await until(() => has(".composer"), "the session opens");
         await openMenu("menu");
         await until(() => hasLabel("Session row"), "the session extension row in the session menu");
-        assert.equal(await hasLabel("App row"), false);
+        assert.equal(await hasLabel("App row"), true, "app rows show in the menu in a session too");
         await inPage(
             `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Session row")).click(); return "null";`,
         );
