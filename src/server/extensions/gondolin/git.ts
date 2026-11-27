@@ -93,12 +93,13 @@ function inside(child: string, parent: string): boolean {
 }
 
 /**
- * The git directories of one work tree: its own, and the common one of a linked worktree; undefined when the tree is
- * no repository. Only a `.git` file that git itself wrote counts: the folder it names must hold a repository whose own
- * record points back at the tree (a worktree's `gitdir` file, or a separate git directory's `core.worktree`), so a
- * `.git` file cannot make the sandbox share another folder.
+ * The git directories of one work tree: its own (a `.git` folder, or the folder that a `.git` file names, with a
+ * back-pointer or without: `git init --separate-git-dir` leaves none), and the common one of a linked worktree;
+ * undefined when the tree is no repository. A linked worktree whose record does not point back at the tree is
+ * guarded only where it lies inside `here` (the folder): a `.git` file cannot make the sandbox share another folder
+ * as a worktree.
  */
-function gitDirsOf(tree: string): string[] | undefined {
+function gitDirsOf(tree: string, here: string | undefined): string[] | undefined {
     const dotGit = join(tree, ".git");
     let stat;
 
@@ -108,15 +109,16 @@ function gitDirsOf(tree: string): string[] | undefined {
         return undefined;
     }
 
+    let own: string | undefined;
+
     if (stat.isDirectory()) {
-        const own = real(dotGit);
+        own = real(dotGit);
+    } else {
+        const text = read(dotGit);
+        const match = text === undefined ? null : /^gitdir:\s*(.+?)\s*$/m.exec(text);
 
-        return own !== undefined && looksLikeGitDir(own) ? [own] : undefined;
+        own = match === null ? undefined : real(resolve(tree, match[1]!));
     }
-
-    const text = read(dotGit);
-    const match = text === undefined ? null : /^gitdir:\s*(.+?)\s*$/m.exec(text);
-    const own = match === null ? undefined : real(resolve(tree, match[1]!));
 
     if (own === undefined || !looksLikeGitDir(own)) {
         return undefined;
@@ -125,28 +127,25 @@ function gitDirsOf(tree: string): string[] | undefined {
     const commondir = read(join(own, "commondir"));
 
     if (commondir === undefined) {
-        const config = read(join(own, "config"));
-        const worktree =
-            config === undefined ? undefined : /^\s*worktree\s*=\s*(.+?)\s*$/m.exec(config)?.[1];
-
-        return worktree !== undefined && real(resolve(own, worktree)) === real(tree)
-            ? [own]
-            : undefined;
+        return [own];
     }
 
     const back = read(join(own, "gitdir"))?.trim();
-
-    if (back === undefined || real(isAbsolute(back) ? back : resolve(own, back)) !== real(dotGit)) {
-        return undefined;
-    }
-
     const common = real(resolve(own, commondir.trim()));
+    const dirs =
+        common !== undefined && looksLikeGitDir(common) && isDirectory(join(common, "refs"))
+            ? inside(own, common)
+                ? [common]
+                : [common, own]
+            : [own];
 
-    if (common === undefined || !looksLikeGitDir(common) || !isDirectory(join(common, "refs"))) {
-        return undefined;
+    if (back !== undefined && real(isAbsolute(back) ? back : resolve(own, back)) === real(dotGit)) {
+        return dirs;
     }
 
-    return inside(own, common) ? [common] : [common, own];
+    const kept = dirs.filter((dir) => here !== undefined && inside(dir, here));
+
+    return kept.length === 0 ? undefined : kept;
 }
 
 /** Runs host Git in `tree`. A failure rejects with what git said. */
@@ -200,7 +199,7 @@ export async function gitMounts(cwd: string): Promise<GitMounts> {
     const trees: string[] = [];
 
     const visit = async (tree: string): Promise<void> => {
-        const own = gitDirsOf(tree);
+        const own = gitDirsOf(tree, here);
 
         if (own === undefined || trees.includes(tree)) {
             return;
@@ -291,6 +290,7 @@ function leadsTo(path: string, links = 0): string {
 }
 
 interface ConfigValue {
+    readonly scope: string;
     readonly origin: string;
     readonly key: string;
     readonly value: string;
@@ -301,11 +301,20 @@ function parseConfig(list: string): ConfigValue[] {
     const parts = list.split("\0");
     const values: ConfigValue[] = [];
 
-    for (let at = 0; at + 2 < parts.length; at += 3) {
+    if (parts.pop() !== "" || parts.length % 3 !== 0) {
+        throw new Error("git's configuration list has an unexpected shape");
+    }
+
+    for (let at = 0; at < parts.length; at += 3) {
         const text = parts[at + 2]!;
         const newline = text.indexOf("\n");
 
+        if (parts[at] === "") {
+            throw new Error("git did not say which scope a configuration value comes from");
+        }
+
         values.push({
+            scope: parts[at]!,
             origin: parts[at + 1]!,
             key: newline === -1 ? text : text.slice(0, newline),
             value: newline === -1 ? "" : text.slice(newline + 1),
@@ -316,11 +325,44 @@ function parseConfig(list: string): ConfigValue[] {
 }
 
 /**
+ * The keys whose value is a program that git runs with the user's rights (git-config's documentation): the value may
+ * name a script of the folder. Git lists a section and a name in lower case, and a subsection as written.
+ */
+const PROGRAM_KEYS: readonly RegExp[] = [
+    /^core\.(sshcommand|editor|pager|askpass|alternaterefscommand)$/i,
+    /^sequence\.editor$/i,
+    /^gpg\.(.+\.)?program$/i,
+    /^credential\.(.+\.)?helper$/i,
+    /^diff\.external$/i,
+    /^diff\..+\.(command|textconv)$/i,
+    /^merge\..+\.(recursive)?driver$/i,
+    /^filter\..+\.(clean|smudge|process)$/i,
+    /^(difftool|mergetool)\..+\.cmd$/i,
+    /^remote\..+\.(uploadpack|receivepack)$/i,
+    /^uploadpack\.packobjectshook$/i,
+];
+
+/** Whether the value of `key` names a program: `core.fsmonitor` does unless it is a boolean, an alias only after `!`. */
+function runsProgram(key: string, value: string): boolean {
+    if (/^core\.fsmonitor$/i.test(key)) {
+        return !/^(true|false|yes|no|on|off|1|0)?$/i.test(value.trim());
+    }
+
+    if (/^alias\..+$/i.test(key)) {
+        return value.trimStart().startsWith("!");
+    }
+
+    return PROGRAM_KEYS.some((pattern) => pattern.test(key));
+}
+
+/**
  * Why git, run on this machine, could run what the guest writes: the effective hooks folder, or a configuration file
  * that git reads or may read (an `include` or `includeIf` target, whether it exists or not), lies in the folder where
- * the guest may write. Git runs hooks and reads configuration with the user's rights. Only what the guest cannot
- * write (the git directories) may hold them. Undefined when there is nothing to say. A read only folder has no such
- * risk. It rejects when git cannot answer: nothing is assumed.
+ * the guest may write; or the repository's own configuration (local or worktree scope) sets a key whose value is a
+ * program (`PROGRAM_KEYS`), which may be a script of the folder. Git runs hooks and programs, and reads
+ * configuration, with the user's rights. Only what the guest cannot write (the git directories) may hold them, and
+ * a program is allowed in the global and system configuration, which are the machine's. Undefined when there is
+ * nothing to say. A read only folder has no such risk. It rejects when git cannot answer: nothing is assumed.
  */
 export async function gitConfigProblem(
     cwd: string,
@@ -357,7 +399,11 @@ export async function gitConfigProblem(
             "--null",
         ]);
 
-        for (const { origin, key, value } of parseConfig(list)) {
+        for (const { scope, origin, key, value } of parseConfig(list)) {
+            if ((scope === "local" || scope === "worktree") && runsProgram(key, value)) {
+                return `The repository's own configuration sets ${key} (in ${origin.replace(/^file:/, "")}), and git runs what it names with your rights: it can be a script in the sandbox folder, where the sandbox can write it.`;
+            }
+
             if (!origin.startsWith("file:")) {
                 continue;
             }

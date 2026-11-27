@@ -103,7 +103,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
             type: "choice",
             default: "rw",
             description:
-                "Read and write: Pi's changes reach the folder. Read only: Pi can run and read, and cannot change it. Either way git directories are read only to the VM. A repository whose git hooks or included config lie inside the folder needs the read only choice.",
+                "Read and write: Pi's changes reach the folder. Read only: Pi can run and read, and cannot change it. Git directories are read only either way. A repository whose own git hooks, includes, or programs (fsmonitor, filters) lie in the folder needs read only.",
             choices: [
                 { value: "rw", label: "Read and write" },
                 { value: "ro", label: "Read only" },

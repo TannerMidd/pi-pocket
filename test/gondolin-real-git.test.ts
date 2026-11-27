@@ -278,7 +278,7 @@ test("the guest cannot write a git directory by any path: a file, a new entry, a
     assert.ok(!readFileSync(join(repo, ".git", "config"), "utf8").includes("x\n"));
 });
 
-test("a git directory of another name inside the folder is read only, and so is every folder that holds it", async (t) => {
+test("a separate git directory (git init --separate-git-dir, no back-pointer) inside the folder is read only, and so is every folder that holds it", async (t) => {
     if (unavailable(t)) {
         return;
     }
@@ -288,7 +288,6 @@ test("a git directory of another name inside the folder is read only, and so is 
 
     mkdirSync(join(repo, "deep", "er"), { recursive: true });
     onHost(repo, "init", "-q", "-b", "main", "--separate-git-dir", data, ".");
-    onHost(repo, "config", "--file", join(data, "config"), "core.worktree", repo);
     writeFileSync(join(repo, "a.txt"), "a\n");
     onHost(repo, "add", ".");
     onHost(repo, "commit", "-q", "-m", "first");
@@ -327,6 +326,68 @@ test("a git directory of another name inside the folder is read only, and so is 
     assert.equal(snapshot(data), before);
     assert.equal(existsSync(join(repo, "deep2")), false);
     assert.equal(existsSync(join(repo, "deep", "er2")), false);
+});
+
+test("a separate git directory outside the folder is a read only mount, and git reads through it", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = realpathSync(mkdtempSync(join(scratch, "outside-")));
+    const data = realpathSync(mkdtempSync(join(scratch, "outside-data-")));
+
+    onHost(repo, "init", "-q", "-b", "main", "--separate-git-dir", join(data, "g"), ".");
+    writeFileSync(join(repo, "a.txt"), "a\n");
+    onHost(repo, "add", ".");
+    onHost(repo, "commit", "-q", "-m", "first");
+    const before = snapshot(join(data, "g"));
+    const { output } = await inVm(
+        repo,
+        [
+            "git log --oneline | head -1; echo log=$?",
+            "git status --short; echo status=$?",
+            `echo x >> ${data}/g/config; echo config=$?`,
+            `echo x > ${data}/g/hooks/pre-commit; echo hook=$?`,
+            `echo x > ${data}/g/refs/heads/y; echo ref=$?`,
+            `ln ${data}/g/config ./c; echo link=$?`,
+            "echo w >> a.txt; git add a.txt 2>&1; echo add=$?",
+        ].join("; "),
+    );
+
+    assert.match(output, /log=0/);
+    assert.match(output, /status=0/);
+    failed(output, "config", "hook", "ref", "link", "add");
+    assert.equal(snapshot(join(data, "g")), before);
+});
+
+test("a program that the repository's configuration names keeps the VM from starting, and a read only folder works", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("program");
+
+    writeFileSync(join(repo, "watch.sh"), "#!/bin/sh\ntouch /tmp/ran-by-host\n", { mode: 0o755 });
+    onHost(repo, "config", "core.fsmonitor", "./watch.sh");
+
+    const writable = await inVm(repo, "echo started");
+
+    assert.equal(writable.started, false);
+    assert.match(writable.error, /core\.fsmonitor/);
+    assert.match(writable.error, /read only/);
+    assert.ok(!writable.output.includes("started"));
+
+    const readOnly = await inVm(repo, "cat watch.sh; echo x > watch.sh; echo write=$?", "ro");
+
+    assert.ok(readOnly.started, readOnly.error);
+    failed(readOnly.output, "write");
+    assert.equal(
+        readFileSync(join(repo, "watch.sh"), "utf8"),
+        "#!/bin/sh\ntouch /tmp/ran-by-host\n",
+    );
+
+    onHost(repo, "config", "--unset-all", "core.fsmonitor");
+    assert.equal((await inVm(repo, "true")).started, true);
 });
 
 test("a worktree session reads the main repository's git directory, read only, whatever it tries", async (t) => {

@@ -573,7 +573,7 @@ test("the background tool of a sandboxed session never starts a host process", a
 
 // ─── Git, worktrees, skills ─────────────────────────────────────────────────
 
-test("a worktree's main repository is mounted at its host path, and a forged .git file mounts nothing", async () => {
+test("a worktree's main repository is mounted at its host path, and a .git file that is not a git directory or a worktree's record mounts nothing", async () => {
     const base = realpathSync(mkdtempSync(join(root, "git-")));
     const main = join(base, "main");
     const tree = join(base, "tree");
@@ -599,7 +599,11 @@ test("a worktree's main repository is mounted at its host path, and a forged .gi
     // A `.git` file that names something else (not written by git, no back-pointer) mounts nothing.
     mkdirSync(forged);
     writeFileSync(join(forged, ".git"), `gitdir: ${join(main, ".git")}\n`);
-    assert.deepEqual((await gitMounts(forged)).gitDirs, []);
+    assert.deepEqual(
+        (await gitMounts(forged)).gitDirs,
+        [join(main, ".git")],
+        "a .git file that names a git directory shares it, read only (the file is the host's, the guest cannot write one)",
+    );
     writeFileSync(join(forged, ".git"), `gitdir: ${home}\n`);
     assert.deepEqual((await gitMounts(forged)).gitDirs, []);
     writeFileSync(join(forged, ".git"), `gitdir: ${join(main, ".git", "worktrees", "tree")}\n`);

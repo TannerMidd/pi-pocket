@@ -116,7 +116,7 @@ export interface ManagerOptions {
 
 /** What a person reads when git would run code that the sandbox can write (`git.ts`). */
 const WRITABLE_CODE = (problem: string) =>
-    `The sandbox did not start. ${problem} Make the sandbox folder read only (Menu → Sandbox: a read only folder works with git, hooks included), or point the setting at a place outside the project.`;
+    `The sandbox did not start. ${problem} Make the sandbox folder read only (Menu → Sandbox: a read only folder works with git, hooks included), or change the setting: hooks and included files belong outside the project, and a program belongs in your global git configuration.`;
 
 const STRICTER = "the owner made the sandbox's rules stricter";
 
