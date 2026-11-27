@@ -469,7 +469,7 @@ export class SandboxManager {
                     ? undefined
                     : git.unreadable !== undefined
                       ? `Pi Pocket could not look inside ${git.unreadable} for repositories, so it cannot guard their git directories.`
-                      : await gitConfigProblem(target.cwd, git.trees, git.gitDirs).catch(
+                      : await gitConfigProblem(target.cwd, git).catch(
                             (error: unknown) =>
                                 `Pi Pocket could not ask git about this folder's hooks and configuration (${error instanceof Error ? error.message : String(error)}).`,
                         );

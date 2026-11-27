@@ -70,13 +70,15 @@ after(async () => {
 /** Skip the test (say why) when there is no real VM to run it on. */
 function unavailable(t: TestContext, browser = false): boolean {
     const why =
-        dir === undefined
-            ? "PI_POCKET_GONDOLIN_REAL is not set"
-            : check?.ok !== true
-              ? "this host cannot run a VM"
-              : browser && !check.images.some((image) => image.name === "pocket-browser:latest")
-                ? "the image with a browser is not in the store"
-                : undefined;
+        process.platform !== "linux"
+            ? "a real VM runs on Linux only"
+            : dir === undefined
+              ? "PI_POCKET_GONDOLIN_REAL is not set"
+              : check?.ok !== true
+                ? "this host cannot run a VM"
+                : browser && !check.images.some((image) => image.name === "pocket-browser:latest")
+                  ? "the image with a browser is not in the store"
+                  : undefined;
 
     if (why !== undefined) {
         t.skip(why);

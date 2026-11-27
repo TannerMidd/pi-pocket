@@ -171,6 +171,10 @@ export interface GitMounts {
     readonly gitDirs: readonly string[];
     /** The folders where git runs for this one: each work tree below it, and the folder itself when a repository holds it. */
     readonly trees: readonly string[];
+    /** The bare repositories in the folder: git runs in each, with its own directory as the repository. */
+    readonly bare: readonly string[];
+    /** The git directory of the repository that holds the folder from above: checked, and not mounted. */
+    readonly above?: string;
     /** Folders that git in the guest must trust (`safe.directory`). */
     readonly safeDirectories: readonly string[];
     /** A folder that could not be read: a git directory below it would not be known. */
@@ -189,6 +193,7 @@ export async function gitMounts(cwd: string): Promise<GitMounts> {
     const here = real(cwd);
     const gitDirs = new Set<string>();
     const trees = new Set<string>();
+    const bare = new Set<string>();
     let unreadable: string | undefined;
     const pending = here === undefined ? [] : [cwd];
 
@@ -209,6 +214,7 @@ export async function gitMounts(cwd: string): Promise<GitMounts> {
 
                 if (["HEAD", "objects", "refs"].every((name) => names.has(name))) {
                     gitDirs.add(real(folder) ?? folder);
+                    bare.add(folder);
 
                     return;
                 }
@@ -229,8 +235,10 @@ export async function gitMounts(cwd: string): Promise<GitMounts> {
         );
     }
 
+    let above: string | undefined;
+
     try {
-        await git(cwd, ["rev-parse", "--git-dir"]);
+        above = real((await git(cwd, ["rev-parse", "--absolute-git-dir"])).trim());
         trees.add(cwd);
     } catch (error) {
         // Git's own "fatal" (exit 128): no repository that it can use holds the folder, so no hook or program runs.
@@ -244,6 +252,8 @@ export async function gitMounts(cwd: string): Promise<GitMounts> {
     return {
         gitDirs: [...gitDirs].sort(),
         trees: [...trees].sort(),
+        bare: [...bare].sort(),
+        ...(above === undefined || gitDirs.has(above) ? {} : { above }),
         safeDirectories: [
             ...new Set([
                 cwd,
@@ -352,22 +362,51 @@ function parseConfig(list: string): ConfigValue[] {
 const DATA_KEYS =
     /^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|worktree)|remote\..+\.(url|pushurl|fetch)|branch\..+\.(remote|pushremote|merge|mergeoptions|rebase|description)|user\..+|extensions\..+|init\.defaultbranch|pull\.rebase|push\.default|fetch\.prune|lfs\.repositoryformatversion|submodule\.active|submodule\..+\.(url|active))$/i;
 
+/** Every link below the folders `dirs`, found without following any. It rejects when a folder cannot be read. */
+async function linksBelow(dirs: readonly string[]): Promise<string[]> {
+    const links: string[] = [];
+    const pending = dirs.filter(
+        (dir) => !dirs.some((other) => other !== dir && within(dir, other)),
+    );
+
+    while (pending.length > 0) {
+        await Promise.all(
+            pending.splice(0, 32).map(async (folder) => {
+                for (const entry of await readdir(folder, { withFileTypes: true })) {
+                    const path = join(folder, entry.name);
+
+                    if (entry.isSymbolicLink()) {
+                        links.push(path);
+                    } else if (entry.isDirectory()) {
+                        pending.push(path);
+                    }
+                }
+            }),
+        );
+    }
+
+    return links;
+}
+
 /**
  * Why git, run on this machine, could run what the guest writes, or undefined. The guest may write the folder
  * outside the git directories, and git runs hooks and programs, and reads configuration, with the user's rights. So
  * none of these may lie there, or pass through a place there (a link that the guest could change; a folder that
- * holds a git directory cannot be moved, so it is not such a place): the hooks
- * folder and each hook in it, each configuration file git reads, and each file that one includes (also one that is
- * not there yet). The repository's own configuration may set only plain data (`DATA_KEYS`); the global and system
- * configuration are the machine's. A read only folder has no such risk. It rejects when git cannot answer.
+ * holds a git directory cannot be moved, so it is not such a place):
+ * - every link inside a git directory (its configuration, `config.worktree`, hooks, and `info` files are whatever
+ *   it leads to);
+ * - the hooks folder and each hook in it, and every file that git reads as configuration, whether it is there or
+ *   not (the repository's own, the user's two, and the system's, which git reads at the same paths each time, and
+ *   so cannot be learned from the values that git lists, an empty file having none); and each file that one of
+ *   them includes.
+ * The repository's own configuration may set only plain data (`DATA_KEYS`); the global and system configuration are
+ * the machine's. Every repository counts: the folder's, those below it, a bare one, and the one above. A read only
+ * folder has no such risk. It rejects when git cannot answer. Git runs with the server's environment less every
+ * `GIT_*` variable (`git`), as the person's own git runs.
  */
-export async function gitConfigProblem(
-    cwd: string,
-    trees: readonly string[],
-    gitDirs: readonly string[],
-): Promise<string | undefined> {
+export async function gitConfigProblem(cwd: string, found: GitMounts): Promise<string | undefined> {
     const root = real(cwd) ?? cwd;
-    const guarded = gitProtected(root, gitDirs);
+    const guarded = gitProtected(root, found.gitDirs);
     const home = process.env.HOME ?? homedir();
 
     const exposed = (path: string): string | undefined =>
@@ -376,66 +415,99 @@ export async function gitConfigProblem(
                 within(place.toLowerCase(), root.toLowerCase()) &&
                 place.toLowerCase() !== root.toLowerCase() &&
                 !guarded(place) &&
-                !holdsGitDir(place, gitDirs),
+                !holdsGitDir(place, found.gitDirs),
         );
 
-    for (const tree of trees) {
-        const hooks = (
-            await git(tree, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"])
-        ).trim();
+    for (const link of await linksBelow([
+        ...found.gitDirs,
+        ...(found.above ? [found.above] : []),
+    ])) {
+        const place = exposed(link);
+
+        if (place !== undefined) {
+            return `${link} in a git directory is a link, and ${place} on the way to what it names is in the sandbox folder, where the sandbox can write it.`;
+        }
+    }
+
+    for (const path of [
+        join(process.env.XDG_CONFIG_HOME || join(home, ".config"), "git", "config"),
+        join(home, ".gitconfig"),
+        "/etc/gitconfig",
+    ]) {
+        const place = exposed(path);
+
+        if (place !== undefined) {
+            return `Git reads ${path} as configuration, and ${place} on the way to it is in the sandbox folder, where the sandbox can write it.`;
+        }
+    }
+
+    const repositories = [
+        ...found.trees.map((tree) => ({ tree, args: [] as string[] })),
+        ...found.bare.map((tree) => ({ tree, args: ["--git-dir", tree] })),
+    ];
+
+    for (const { tree, args } of repositories) {
+        const inside = (rest: string[]) => git(tree, [...args, ...rest]);
+        const [hooks, ...sources] = (
+            await inside([
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "hooks",
+                "--git-path",
+                "config",
+                "--git-path",
+                "config.worktree",
+            ])
+        )
+            .trim()
+            .split("\n");
         let names: string[] = [];
 
         try {
-            names = readdirSync(hooks).filter((name) => !name.endsWith(".sample"));
+            names = readdirSync(hooks!).filter((name) => !name.endsWith(".sample"));
         } catch {
             // no hooks folder: nothing runs from it
         }
 
-        for (const path of [hooks, ...names.map((name) => join(hooks, name))]) {
-            const found = exposed(path);
+        for (const path of [hooks!, ...names.map((name) => join(hooks!, name))]) {
+            const place = exposed(path);
 
-            if (found !== undefined) {
-                return `Git would run hooks from ${hooks}, and ${found} on the way to ${path} is in the sandbox folder, where the sandbox can write it.`;
+            if (place !== undefined) {
+                return `Git would run hooks from ${hooks}, and ${place} on the way to ${path} is in the sandbox folder, where the sandbox can write it.`;
             }
         }
 
-        const list = await git(tree, [
-            "config",
-            "--list",
-            "--show-origin",
-            "--show-scope",
-            "--null",
-        ]);
+        for (const path of sources) {
+            const place = exposed(path);
+
+            if (place !== undefined) {
+                return `Git reads ${path} as configuration, and ${place} on the way to it is in the sandbox folder, where the sandbox can write it.`;
+            }
+        }
+
+        const list = await inside(["config", "--list", "--show-origin", "--show-scope", "--null"]);
 
         for (const { scope, origin, key, value } of parseConfig(list)) {
             if ((scope === "local" || scope === "worktree") && !DATA_KEYS.test(key)) {
                 return `The repository's own configuration sets ${key} (in ${origin.replace(/^file:/, "")}). A writable sandbox folder allows only plain data there, because git can run a program, or read a file, that the sandbox could rewrite.`;
             }
 
-            if (!origin.startsWith("file:")) {
+            if (!origin.startsWith("file:") || !/^include(if\..+)?\.path$/i.test(key)) {
                 continue;
             }
 
             const file = origin.slice(5);
             const from = isAbsolute(file) ? file : `${tree}/${file}`;
-            const files = [from];
+            const path = value.startsWith("~/")
+                ? join(home, value.slice(2))
+                : isAbsolute(value)
+                  ? value
+                  : `${dirname(from)}/${value}`;
+            const place = exposed(path);
 
-            if (/^include(if\..+)?\.path$/i.test(key)) {
-                files.push(
-                    value.startsWith("~/")
-                        ? join(home, value.slice(2))
-                        : isAbsolute(value)
-                          ? value
-                          : `${dirname(from)}/${value}`,
-                );
-            }
-
-            for (const path of files) {
-                const found = exposed(path);
-
-                if (found !== undefined) {
-                    return `Git reads ${path} as configuration (${key} in ${from}), and ${found} on the way to it is in the sandbox folder, where the sandbox can write it.`;
-                }
+            if (place !== undefined) {
+                return `Git reads ${path} as configuration (${key} in ${from}), and ${place} on the way to it is in the sandbox folder, where the sandbox can write it.`;
             }
         }
     }

@@ -862,9 +862,10 @@ test("off Linux the sandbox cannot be turned on, set up, or offered, and the che
         };
     };
 
-    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
-    const platform = (name: string) =>
-        Object.defineProperty(process, "platform", { ...real, value: name });
+    const platform = (name: string) => {
+        (globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.sandbox.test-platform")] =
+            name;
+    };
 
     try {
         await app.setExtensionEnabled(owner(app), MODULE, true);
@@ -913,7 +914,7 @@ test("off Linux the sandbox cannot be turned on, set up, or offered, and the che
         platform("linux");
         assert.equal((await call("session", { c: id, on: true })).status, 200);
     } finally {
-        Object.defineProperty(process, "platform", real);
+        platform("linux");
         server.closeAllConnections();
         server.close();
         await app.close();

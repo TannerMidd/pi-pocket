@@ -69,13 +69,15 @@ after(async () => {
 
 function unavailable(t: TestContext): boolean {
     const why =
-        dir === undefined
-            ? "PI_POCKET_GONDOLIN_REAL is not set"
-            : check?.ok !== true
-              ? "this host cannot run a VM"
-              : !check.images.some((each) => each.name === "pocket-base:latest" && each.git)
-                ? "the image pocket-base:latest with git is not in the store"
-                : undefined;
+        process.platform !== "linux"
+            ? "a real VM runs on Linux only"
+            : dir === undefined
+              ? "PI_POCKET_GONDOLIN_REAL is not set"
+              : check?.ok !== true
+                ? "this host cannot run a VM"
+                : !check.images.some((each) => each.name === "pocket-base:latest" && each.git)
+                  ? "the image pocket-base:latest with git is not in the store"
+                  : undefined;
 
     if (why !== undefined) {
         t.skip(why);
@@ -511,6 +513,43 @@ test("a file with other hard links is never changed in place, and can be replace
         "cp replaced the name, not the file",
     );
     assert.equal(existsSync(join(repo, "linked3.txt")), false);
+});
+
+test("a bare repository whose hooks folder is in the folder, and a configuration that is an empty file of the folder, keep the VM from starting", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const bare = repository("bare-hooks");
+
+    onHost(bare, "init", "-q", "--bare", "cache.git");
+    mkdirSync(join(bare, "scripts"));
+    writeFileSync(join(bare, "scripts", "pre-receive"), "#!/bin/sh\n", { mode: 0o755 });
+    onHost(join(bare, "cache.git"), "config", "core.hooksPath", join(bare, "scripts"));
+
+    const hooks = await inVm(bare, "echo started");
+
+    assert.equal(hooks.started, false);
+    assert.ok(hooks.error.includes(join(bare, "scripts")), hooks.error);
+    assert.ok((await inVm(bare, "echo x > scripts/pre-receive; echo write=$?", "ro")).started);
+
+    const linked = repository("empty-config");
+
+    writeFileSync(join(linked, "empty.cfg"), "");
+    rmSync(join(linked, ".git", "config"));
+    symlinkSync(join(linked, "empty.cfg"), join(linked, ".git", "config"));
+
+    const config = await inVm(linked, "echo started");
+
+    assert.equal(config.started, false);
+    assert.ok(config.error.includes(join(linked, "empty.cfg")), config.error);
+    assert.match(config.error, /read only/);
+    assert.equal(readFileSync(join(linked, "empty.cfg"), "utf8"), "");
+
+    const readOnly = await inVm(linked, "echo '[core]' >> empty.cfg; echo write=$?", "ro");
+
+    assert.ok(readOnly.started, readOnly.error);
+    failed(readOnly.output, "write");
 });
 
 test("a worktree session reads the main repository's git directory, read only, whatever it tries", async (t) => {

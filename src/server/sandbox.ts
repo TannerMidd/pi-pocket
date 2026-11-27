@@ -105,9 +105,14 @@ const INERT = new Set(["ask", "ui", "tool_search", "memory", "schedule", "subage
 export const SANDBOX_ROUTED_TOOLS: ReadonlySet<string> = ROUTED;
 export const SANDBOX_INERT_TOOLS: ReadonlySet<string> = INERT;
 
+/** Tests only: a platform named here stands in for `process.platform`, so the fake-VM tests run on every OS. */
+const TEST_PLATFORM = Symbol.for("pi-pocket.sandbox.test-platform");
+
 /** Why this machine cannot run a sandbox, or undefined: the guarantee is kept only where it can be enforced. */
 export function sandboxPlatformProblem(): string | undefined {
-    return process.platform === "linux" ? undefined : "The sandbox runs on Linux only for now.";
+    const platform = (globalThis as Record<symbol, unknown>)[TEST_PLATFORM] ?? process.platform;
+
+    return platform === "linux" ? undefined : "The sandbox runs on Linux only for now.";
 }
 
 /** The words that a call stopped by the gate gets. */

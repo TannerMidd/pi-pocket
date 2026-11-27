@@ -73,13 +73,15 @@ after(async () => {
 
 function unavailable(t: TestContext, image = "pocket-base:latest"): boolean {
     const why =
-        dir === undefined
-            ? "PI_POCKET_GONDOLIN_REAL is not set"
-            : check?.ok !== true
-              ? "this host cannot run a VM"
-              : !check.images.some((each) => each.name === image)
-                ? `the image ${image} is not in the store`
-                : undefined;
+        process.platform !== "linux"
+            ? "a real VM runs on Linux only"
+            : dir === undefined
+              ? "PI_POCKET_GONDOLIN_REAL is not set"
+              : check?.ok !== true
+                ? "this host cannot run a VM"
+                : !check.images.some((each) => each.name === image)
+                  ? `the image ${image} is not in the store`
+                  : undefined;
 
     if (why !== undefined) {
         t.skip(why);

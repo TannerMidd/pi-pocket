@@ -21,6 +21,9 @@ import type {
     VmSpec,
 } from "../src/server/extensions/gondolin/guest.ts";
 
+// The tests that use a fake VM run on every OS: the gate that allows only Linux (`sandboxPlatformProblem`) is told so.
+(globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.sandbox.test-platform")] = "linux";
+
 export interface FakeLog {
     started: VmSpec[];
     closed: string[];

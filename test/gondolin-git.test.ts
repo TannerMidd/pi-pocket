@@ -261,12 +261,7 @@ test("a hooks folder, a hook, or a configuration file that is reached through a 
     mkdirSync(join(repo, "scripts"));
     writeFileSync(join(repo, "scripts", "pre-commit"), "#!/bin/sh\n");
     writeFileSync(join(repo, ".git", "hooks", "pre-push"), "#!/bin/sh\n");
-    rmSync(join(repo, ".git", "hooks", "commit-msg.sample"));
-    symlinkSync(
-        join(repo, "scripts", "pre-commit"),
-        join(repo, ".git", "hooks", "commit-msg.sample"),
-    );
-    assert.equal((await starts(repo)).started, true, "a sample is not run");
+    assert.equal((await starts(repo)).started, true, "a hook of the git directory is its own");
     symlinkSync("../../scripts/pre-commit", join(repo, ".git", "hooks", "pre-commit"));
     await refused(repo, join(repo, "scripts"));
     rmSync(join(repo, ".git", "hooks", "pre-commit"));
@@ -388,6 +383,76 @@ test("a repository above the folder counts: its own configuration is checked aga
         ...homeWith(`[core]\n\thooksPath = ${join(folder, "hooks")}\n`),
         GIT_DIR: "/nonexistent",
     });
+});
+
+test("a bare repository in the folder is audited as any other: its hooks folder and its configuration", async () => {
+    const repo = repository();
+
+    git(repo, "init", "-q", "--bare", "cache.git");
+    mkdirSync(join(repo, "scripts"));
+    assert.equal((await starts(repo)).started, true);
+
+    git(join(repo, "cache.git"), "config", "core.hooksPath", join(repo, "scripts"));
+    await refused(repo, join(repo, "scripts"));
+    git(join(repo, "cache.git"), "config", "--unset", "core.hooksPath");
+
+    git(join(repo, "cache.git"), "config", "core.fsmonitor", "./watch.sh");
+    await refused(repo, "core.fsmonitor");
+});
+
+test("a link inside a git directory that leads into the folder keeps a writable VM from starting, whatever the file is", async () => {
+    const repo = repository();
+    const outside = temp();
+
+    // The repository's own configuration is an empty file of the folder: git lists no value of it.
+    writeFileSync(join(repo, "empty.cfg"), "");
+    rmSync(join(repo, ".git", "config"));
+    symlinkSync(join(repo, "empty.cfg"), join(repo, ".git", "config"));
+    await refused(repo, join(repo, "empty.cfg"));
+    rmSync(join(repo, ".git", "config"));
+    writeFileSync(join(repo, ".git", "config"), "[core]\n\tbare = false\n");
+
+    // The worktree configuration, and a file of info, that lead to a name that is not there yet.
+    symlinkSync(join(repo, "later.cfg"), join(repo, ".git", "config.worktree"));
+    await refused(repo, join(repo, "later.cfg"));
+    rmSync(join(repo, ".git", "config.worktree"));
+    rmSync(join(repo, ".git", "info", "exclude"));
+    symlinkSync("../../ignore-list", join(repo, ".git", "info", "exclude"));
+    await refused(repo, join(repo, "ignore-list"));
+    rmSync(join(repo, ".git", "info", "exclude"));
+
+    // A link in a git directory that leads outside the folder is fine.
+    rmSync(join(repo, ".git", "info", "exclude"), { force: true });
+    symlinkSync(join(outside, "elsewhere"), join(repo, ".git", "info", "exclude"));
+    assert.equal((await starts(repo)).started, true);
+});
+
+test("each file that git reads as configuration counts, whether it is there or not, and also when it is empty", async () => {
+    const repo = repository();
+    const home = temp();
+    const empty = join(repo, "empty.cfg");
+
+    writeFileSync(empty, "");
+    symlinkSync(empty, join(home, ".gitconfig"));
+    await refused(repo, empty, { HOME: home });
+    rmSync(join(home, ".gitconfig"));
+
+    mkdirSync(join(home, "xdg", "git"), { recursive: true });
+    symlinkSync(join(repo, "not-yet.cfg"), join(home, "xdg", "git", "config"));
+    await refused(repo, join(repo, "not-yet.cfg"), {
+        HOME: home,
+        XDG_CONFIG_HOME: join(home, "xdg"),
+    });
+});
+
+test("a repository above the folder is audited with its git directory too: a link in it that leads into the folder", async () => {
+    const repo = repository();
+    const folder = join(repo, "src");
+
+    mkdirSync(folder);
+    rmSync(join(repo, ".git", "info", "exclude"));
+    symlinkSync("../../src/exclude-list", join(repo, ".git", "info", "exclude"));
+    await refused(folder, join(folder, "exclude-list"));
 });
 
 test("a program in a worktree's own configuration, or in a submodule's, counts as the repository's", async () => {
