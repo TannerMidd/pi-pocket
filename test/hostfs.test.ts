@@ -135,7 +135,9 @@ test(
         await assert.rejects(hostfs.readFileAsync(folder.at("pipe")), { code: "ENXIO" });
         // A look at it works; an open does not.
         assert.equal(hostfs.stat(folder.at("pipe")).isFIFO(), true);
-        assert.throws(() => hostfs.createReadStream(folder.at("pipe")), { code: "ENXIO" });
+        assert.throws(() => hostfs.createReadStream(folder.at("pipe"), { end: 10 }), {
+            code: "ENXIO",
+        });
         assert.throws(() => hostfs.openSync(folder.at("pipe")), { code: "ENXIO" });
         assert.throws(() => hostfs.readText(folder.at("ok.txt"), { max: 1 }), { code: "EFBIG" });
     },
@@ -512,7 +514,7 @@ test(
                 name,
             );
             assert.throws(
-                () => hostfs.createReadStream(folder.at(name)),
+                () => hostfs.createReadStream(folder.at(name), { end: 10 }),
                 { code: /ENXIO|EACCES/ },
                 name,
             );
@@ -1204,3 +1206,110 @@ test("a walk that crosses a listed root that cannot be held is refused", { skip:
     });
     host.close();
 });
+
+test(
+    "a traversal reference does not get past a listed root: capacity and replacement are checked, and the view's identity wins",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+        const outer = statSync(root, { bigint: true });
+        const inner = statSync(nested, { bigint: true });
+        const listed = [
+            { path: root, dev: outer.dev, ino: outer.ino },
+            { path: nested, dev: inner.dev, ino: inner.ino },
+        ];
+
+        // Capacity: the table holds the outer root only, and a folder for a walk inside the inner root is refused.
+        const small = new hostfs.Hostfs({ sandboxedFolders: () => listed }, { maxPins: 1 });
+
+        assert.equal(hostfs.readText(small.at(join(root, "ok.txt"))), "ok");
+        assert.throws(() => hostfs.readText(small.traverse(nested).at("deep.txt")), {
+            code: "EMFILE",
+        });
+        small.close();
+
+        // Replacement: the folder for the walk is made after the inner root was replaced, so it carries the replacement's
+        // identity. The view lists the original, and a conflict is refused.
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        assert.equal(hostfs.readText(host.traverse(nested).at("deep.txt")), "deep");
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+        assert.throws(() => hostfs.readText(host.traverse(nested).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        assert.throws(() => hostfs.readText(host.folder(nested).at("deep.txt")), {
+            code: "ESTALE",
+        });
+        host.close();
+    },
+);
+
+test(
+    "a file in a sandboxed folder is never read or streamed without a bound",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const folder = host.folder(root);
+
+        writeFileSync(join(root, "big.txt"), "x".repeat(hostfs.MAX_TEXT + 1));
+        // Whole-file read through a descriptor: the default is the cap.
+        assert.throws(() => hostfs.openSync(folder.at("big.txt")).readAll(), { code: "EFBIG" });
+        assert.equal(hostfs.openSync(folder.at("ok.txt")).readAll().toString(), "ok");
+        // A stream with no bound is refused at run time (and is a type error).
+        assert.throws(() => hostfs.createReadStream(folder.at("ok.txt"), {} as { end: number }), {
+            code: "EINVAL",
+        });
+        assert.throws(() => hostfs.createReadStream(folder.at("ok.txt"), { end: Infinity }), {
+            code: "EINVAL",
+        });
+        hostfs.createReadStream(folder.at("ok.txt"), { end: 1 }).destroy();
+        // A plain folder is as before: no cap on a whole-file read.
+        const open = hostfs.openSync(hostfs.own(root).child("big.txt"));
+
+        assert.equal(open.readAll().length, hostfs.MAX_TEXT + 1);
+        open.close();
+    },
+);
+
+test(
+    "a folder that was admitted keeps its first identity when the view adds a root above it",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const base = join(root, "..", "outer");
+        const inner = join(base, "inner");
+        const sub = join(inner, "sub");
+
+        mkdirSync(sub, { recursive: true });
+        writeFileSync(join(sub, "f.txt"), "real");
+
+        const info = (path: string) => {
+            const found = statSync(path, { bigint: true });
+
+            return { path, dev: found.dev, ino: found.ino };
+        };
+
+        let listed = [info(inner)];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed });
+
+        // Admitted with the inner root listed, and no identity from admission state: the first look pins it.
+        assert.equal(hostfs.readText(host.folder(sub).at("f.txt")), "real");
+
+        // Another session adds the outer root: the folder now lies in the outer root, and the position changes.
+        listed = [info(base), info(inner)];
+        rmSync(sub, { recursive: true });
+        mkdirSync(sub);
+        writeFileSync(join(sub, "f.txt"), "forged");
+
+        // Admitted again, or reached by a path: it is still the first folder, not the replacement the guest made.
+        assert.throws(() => hostfs.readText(host.folder(sub).at("f.txt")), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(host.at(join(sub, "f.txt"))), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(host.at(base).child("inner/sub/f.txt")), {
+            code: "ESTALE",
+        });
+        host.close();
+    },
+);

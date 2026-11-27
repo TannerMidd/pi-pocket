@@ -588,10 +588,13 @@ const notRegular = (place: Place, max: number): NodeJS.ErrnoException =>
 /** A descriptor held open for a file: read it, look at it, close it. */
 export class OpenFile {
     readonly #fd: number;
+    readonly #confined: boolean;
     #closed = false;
 
-    constructor(fd: number) {
+    /** `confined`: the file is in a sandboxed folder, so a read of it is always bounded (`readAll`). */
+    constructor(fd: number, confined = false) {
         this.#fd = fd;
+        this.#confined = confined;
     }
 
     stat(): Stats;
@@ -629,9 +632,12 @@ export class OpenFile {
 
     /** What is left of the file, from the start; `max` bounds it (more than that is `EFBIG`). */
     readAll(max?: number): Buffer {
-        return max === undefined
+        // A file in a sandboxed folder is never read without a bound: the default is `MAX_TEXT`.
+        const bound = max ?? (this.#confined ? MAX_TEXT : undefined);
+
+        return bound === undefined
             ? readFileSync(this.#fd)
-            : readBounded((buffer) => fsReadSync(this.#fd, buffer, 0, buffer.length, null), max);
+            : readBounded((buffer) => fsReadSync(this.#fd, buffer, 0, buffer.length, null), bound);
     }
 
     close(): void {
@@ -1372,7 +1378,7 @@ export function openSync(place: Place, flags: string | number = "r", mode?: numb
                   fsOpenSync(path, bits | (bits & ACCMODE ? 0 : NON_BLOCK), mode),
               );
 
-        return new OpenFile(fd);
+        return new OpenFile(fd, confined);
     });
 }
 
@@ -1414,7 +1420,7 @@ export function openNoFollowSync(
             return new OpenFile(fd);
         }
 
-        return new OpenFile(openChecked(path, flags, undefined, place.display.text));
+        return new OpenFile(openChecked(path, flags, undefined, place.display.text), true);
     });
 }
 
@@ -1485,12 +1491,20 @@ export async function openNoFollow(
     });
 }
 
-/** A read stream of a file. Sandboxed: the descriptor is opened without a link first, and the stream owns it. */
+/**
+ * A read stream of a file, at most `end + 1` bytes: a bound is required (by type, and at run time for a sandboxed file),
+ * so no stream of a file that a guest can grow is unbounded. Sandboxed: the descriptor is opened without a link first,
+ * and the stream owns it.
+ */
 export function createReadStream(
     place: Place,
-    options?: { start?: number; end?: number },
+    options: { start?: number; end: number },
 ): ReadStream {
     return use(place, (path, confined) => {
+        if (confined && !Number.isFinite(options?.end)) {
+            throw failure("EINVAL", "a stream of a file in a sandboxed folder needs a bound");
+        }
+
         if (!confined) {
             return fsCreateReadStream(path, options);
         }
@@ -1719,6 +1733,14 @@ function climbTo(path: string, key: string): boolean {
     }
 }
 
+/** What owns a pinned nested folder: the identity it was admitted with, and the paths (aliases) that hold it. */
+type Owner = {
+    id: number;
+    identity: { dev: bigint; ino: bigint };
+    key: string;
+    paths: Set<string>;
+};
+
 /** Owns which folders sandboxed trees use, and makes folders and places. */
 export class Hostfs {
     readonly #view: SandboxView;
@@ -1735,12 +1757,12 @@ export class Hostfs {
      * alias points at the same owner, so an identity is never overwritten while it has holders, and a position is dropped
      * only when its last holder ends.
      */
-    readonly #owners = new Map<
-        string,
-        { identity: { dev: bigint; ino: bigint }; key: string; paths: Set<string> }
-    >();
+    readonly #owners = new Map<string, Owner>();
     /** The position of each path that holds a nested pin. */
     readonly #byPath = new Map<string, string>();
+    #nextOwner = 0;
+    /** The sandboxed folders the view listed at the last look: a change moves the owners to their new positions. */
+    #listedKey = "";
 
     /**
      * `maxPins`: how many root descriptors are held at once, sandboxed folders and nested pins together (default 256,
@@ -1760,6 +1782,7 @@ export class Hostfs {
 
         for (const pin of options.positions ?? []) {
             this.#owners.set(pin.position, {
+                id: this.#nextOwner++,
                 identity: { dev: pin.dev, ino: pin.ino },
                 key: keyOf(pin),
                 paths: new Set(),
@@ -1801,7 +1824,7 @@ export class Hostfs {
 
         if (owner.paths.size === 0) {
             this.#owners.delete(position);
-            this.#drop(owner.key, `pos:${position}`);
+            this.#drop(owner.key, `pos:${owner.id}`);
         }
     }
 
@@ -1938,17 +1961,31 @@ export class Hostfs {
                 names.length >= 1 &&
                 names.length <= at.parts.length &&
                 !names.includes("..") &&
-                !found.has(names.length) &&
                 names.every((name, index) => name === at.parts[index])
             ) {
-                // The walk crosses a listed root: it must be held, or the operation is refused (a root that cannot be held
-                // could have its inode number reused by a replacement).
+                // The walk crosses a listed root, whatever else seeded this depth: it is held, or the operation is refused
+                // (a root that cannot be held could have its inode number reused by a replacement).
                 this.#holdStart(listed);
 
                 if (!this.#held.has(keyOf(listed))) {
                     throw failure(
                         "EMFILE",
                         `${resolve(listed.path)} cannot be admitted: too many roots are pinned`,
+                        listed.path,
+                    );
+                }
+
+                // The view's identity wins; an identity from any other source (a folder's own, an owner's) that differs
+                // from it is refused.
+                const seeded = found.get(names.length);
+
+                if (
+                    seeded !== undefined &&
+                    (seeded.dev !== listed.dev || seeded.ino !== listed.ino)
+                ) {
+                    throw failure(
+                        "ESTALE",
+                        `${resolve(listed.path)} is not the folder the view lists`,
                         listed.path,
                     );
                 }
@@ -1966,6 +2003,21 @@ export class Hostfs {
             path: resolve(each.path),
             key: keyOf(each),
         }));
+
+        // The view listed other folders than at the last look: a folder that was nested in one root may now be nested in
+        // another (a root was added above it), so each owner moves to its new position and keeps its first identity.
+        const listedKey = listed
+            .map((each) => each.key)
+            .sort()
+            .join(",");
+
+        if (listedKey !== this.#listedKey) {
+            this.#listedKey = listedKey;
+
+            if (this.#owners.size > 0) {
+                this.#rekey(listed);
+            }
+        }
 
         // The view's holds follow what the view lists, at every look. A root that is no longer listed lets go first, so a
         // replaced root frees its place before the new one needs it; then each listed root gets one. A look never fails
@@ -1990,6 +2042,39 @@ export class Hostfs {
         }
 
         return listed;
+    }
+
+    /** Move each owner to the position its paths have under the folders now listed; its identity does not change. */
+    #rekey(listed: Folder[]): void {
+        const moved = new Map<string, Owner>();
+
+        for (const [position, owner] of this.#owners) {
+            let now = position;
+
+            for (const path of owner.paths) {
+                const where = this.#locate(path, listed, true);
+
+                if (where.kind === "confined" && where.parts.length > 0) {
+                    now = `${keyOf(where.start)}\0${where.parts.join("/")}`;
+
+                    break;
+                }
+            }
+
+            if (!moved.has(now)) {
+                moved.set(now, owner);
+            }
+
+            for (const path of owner.paths) {
+                this.#byPath.set(path, now);
+            }
+        }
+
+        this.#owners.clear();
+
+        for (const [position, owner] of moved) {
+            this.#owners.set(position, owner);
+        }
     }
 
     /**
@@ -2023,11 +2108,21 @@ export class Hostfs {
         // owner's identity is what it was admitted with: a later look reuses it, a mismatch with admission is refused before
         // anything else is held, and an identity is never overwritten while the position has holders.
         const position = `${keyOf(where.start)}\0${where.parts.join("/")}`;
-        const owner = this.#owners.get(position);
+        // The owner of this position, or the one this path was admitted under before the view changed: a path that was
+        // admitted keeps its first identity.
+        const before = this.#byPath.get(target);
+        const owner =
+            this.#owners.get(position) ??
+            (before === undefined ? undefined : this.#owners.get(before));
 
         if (owner !== undefined) {
             if (pinned !== undefined && keyOf(pinned) !== owner.key) {
                 throw failure("ESTALE", `${target} is not the folder it was admitted as`, target);
+            }
+
+            if (before !== undefined && before !== position && this.#owners.get(before) === owner) {
+                this.#owners.delete(before);
+                this.#owners.set(position, owner);
             }
 
             owner.paths.add(target);
@@ -2058,8 +2153,10 @@ export class Hostfs {
             throw failure("ESTALE", `${target} is no longer the folder it was admitted as`, target);
         }
 
-        this.#keep(key, dir, `pos:${position}`, target);
-        this.#owners.set(position, { identity, key, paths: new Set([target]) });
+        const made: Owner = { id: this.#nextOwner++, identity, key, paths: new Set([target]) };
+
+        this.#keep(key, dir, `pos:${made.id}`, target);
+        this.#owners.set(position, made);
         this.#byPath.set(target, position);
 
         return ref;
