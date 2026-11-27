@@ -620,6 +620,18 @@ export class Sandboxes {
             listener();
         }
 
+        // A transition that held the tree while the rules changed ends: the rules are checked for it now.
+        if (phase === "stable" && this.#rulesRecheck.delete(root)) {
+            queueMicrotask(() => {
+                this.rules("the rules changed while it was changing", [root]).catch(
+                    (error: unknown) =>
+                        this.#app.log(
+                            `Sandbox rules could not be applied: ${describeError(error)}`,
+                        ),
+                );
+            });
+        }
+
         return token;
     }
 
@@ -1886,6 +1898,31 @@ export class Sandboxes {
                 throw new HttpError(409, problem);
             }
 
+            // Every conversation of the tree, not the root only: one VM serves them all, in the session's folder.
+            for (const conversation of app.conversationsOf(id)) {
+                if (Number(conversation) === root) {
+                    continue;
+                }
+
+                const there = app.cwdOf(conversation);
+
+                if (workspaceScheme(there) !== undefined || !within(cwd, there)) {
+                    throw new HttpError(
+                        409,
+                        `The subagent #${String(conversation)} of this session works in ${there}, outside the session's folder, so the sandbox cannot be turned on. Move it into ${cwd}, or stop it, and then try again.`,
+                    );
+                }
+
+                const refused = await this.#problemOf(there);
+
+                if (refused !== undefined) {
+                    throw new HttpError(
+                        409,
+                        `The subagent #${String(conversation)} works in ${there}, which cannot be shared with a sandbox: ${refused}`,
+                    );
+                }
+            }
+
             if (this.#phases.get(root) !== undefined) {
                 throw new HttpError(
                     409,
@@ -2101,15 +2138,25 @@ export class Sandboxes {
      * answer says when the trees are checked again. A tree whose folder the trusted places now reach stays suspended;
      * with stricter rules a looser VM is stopped, and the next call starts one under the new rules.
      */
-    rules(reason: string): Promise<void> {
-        // Only the trees that this transition stopped are its own: a tree in another transition, or one a failed release left
-        // suspended, is not touched, and not cleared.
+    rules(reason: string, only?: readonly number[]): Promise<void> {
         const tag = `its rules changed (${reason})`;
         const mine = new Map<number, number>();
 
-        for (const root of this.#on) {
-            if (!this.#phases.has(root)) {
-                mine.set(root, this.#setPhase(root, "suspended", tag));
+        for (const root of only ?? [...this.#on]) {
+            if (!this.#on.has(root)) {
+                continue;
+            }
+
+            // The newest rules win. A tree that is stable, or that an earlier rules change suspended and no one wrote since, is
+            // taken over: its record is written again, so the earlier run sees that it is not current and stops. A tree in
+            // another transition is checked again when that transition ends.
+            if (!this.#phases.has(root) || this.#rulesOwned.get(root) === this.#revision(root)) {
+                const revision = this.#setPhase(root, "suspended", tag);
+
+                mine.set(root, revision);
+                this.#rulesOwned.set(root, revision);
+            } else {
+                this.#rulesRecheck.add(root);
             }
         }
 
@@ -2123,42 +2170,62 @@ export class Sandboxes {
         const write = (root: number, phase: Phase, why?: string) => {
             const next = this.#setIf(root, mine.get(root), phase, why);
 
-            if (next !== undefined) {
-                mine.set(root, next);
+            if (next === undefined) {
+                return;
+            }
+
+            mine.set(root, next);
+
+            if (phase === "stable") {
+                this.#rulesOwned.delete(root);
+            } else {
+                this.#rulesOwned.set(root, next);
             }
         };
 
-        return this.#track(() =>
-            this.exclusive(async () => {
-                for (const root of [...mine.keys()]) {
-                    if (!still(root)) {
-                        continue;
-                    }
-
-                    const problem = await this.#problemOf(this.#folderOfRoot(root));
-
-                    if (!still(root)) {
-                        continue;
-                    }
-
-                    if (problem !== undefined) {
-                        write(root, "suspended", problem);
-                        continue;
-                    }
-
-                    try {
-                        if (this.provider?.stricter?.() === true) {
-                            await this.#release([root], "the rules got stricter");
-                        }
-
-                        write(root, "stable");
-                    } catch (error) {
-                        write(root, "suspended", describeError(error));
-                    }
+        // Not in the queue of changes: a release is never held there. The revisions keep the runs apart.
+        return this.#track(async () => {
+            for (const root of [...mine.keys()]) {
+                if (!still(root)) {
+                    continue;
                 }
-            }),
-        );
+
+                const problem = await this.#problemOf(this.#folderOfRoot(root));
+
+                if (!still(root)) {
+                    continue;
+                }
+
+                try {
+                    // A folder that may not be shared any more: what runs in it is stopped, and proved gone, before this
+                    // ends. A stricter rule stops a looser VM the same way.
+                    if (problem !== undefined || this.provider?.stricter?.() === true) {
+                        await this.#release(
+                            [root],
+                            problem === undefined
+                                ? "the rules got stricter"
+                                : "the folder may not be shared any more",
+                        );
+                    }
+
+                    write(root, problem === undefined ? "stable" : "suspended", problem);
+                } catch (error) {
+                    write(
+                        root,
+                        "suspended",
+                        problem === undefined
+                            ? describeError(error)
+                            : `${problem} Its VM could not be stopped (${describeError(error)}).`,
+                    );
+                }
+            }
+        });
     }
+
+    /** Trees whose suspension the rules wrote and no one has written since, by the revision of that record. */
+    readonly #rulesOwned = new Map<number, number>();
+    /** Trees that the rules skipped because another transition held them: checked again when it ends. */
+    readonly #rulesRecheck = new Set<number>();
 
     /**
      * The settings of `module` changed. When it serves the sandbox, every call stops at once and the `rules` transition

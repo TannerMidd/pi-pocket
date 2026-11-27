@@ -19,6 +19,7 @@ import {
     owner,
     root,
     scriptedModel,
+    until,
     type App,
 } from "./helpers.ts";
 import { FakeProvider, gate, sandboxOptions } from "./sandbox-fake.ts";
@@ -389,6 +390,8 @@ test("a change of the rules finishes only its own transition: a suspension that 
     );
     assert.equal(await exec(w.app, w.a), false);
     await w.app.sandboxes.resume(w.a);
+    // The rules that were skipped while the tree was held are checked when it is let go: stable again once that ends.
+    await until(() => w.app.sandboxes.phaseOf(w.a) === "stable", "the recheck of the rules");
     assert.equal(await exec(w.app, w.a), true);
 
     // A module teardown under way is not cleared by the rules either.
