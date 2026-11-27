@@ -178,6 +178,11 @@ export class Memory {
 
         const folder = cwd ?? app.cwdOf(conversationId);
 
+        // A sandboxed tree's folder is the guest's: no realpath, no Git on this machine. Its project is the folder as stated.
+        if (app.sandboxes.isOn(conversationId)) {
+            return { key: folder, name: named(basename(folder), folder) };
+        }
+
         const now = this.#app.now();
         let cached = this.#projects.get(folder);
 

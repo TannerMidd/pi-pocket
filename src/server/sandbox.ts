@@ -40,6 +40,14 @@ import { workspaceScheme } from "./paths.ts";
 const context = BACKGROUND_CONTEXT;
 
 /** Where a tree stands in a change of its sandbox (design 2.1). `stable` is the only phase that grants a lease. */
+/**
+ * The key of one tool call's host lease: its task and its own call id. Nested calls (codemode's) share their task, so the task
+ * alone would let the first of them to end release the lease of one that still runs.
+ */
+export function toolKey(taskId: unknown, callId: unknown): string {
+    return `${String(taskId)}\u0000${String(callId)}`;
+}
+
 export type Phase = "stable" | "turning-on" | "turning-off" | "moving" | "suspended";
 
 /**
@@ -2882,6 +2890,14 @@ export class Sandboxes {
     #toolNeedsLease(tool: string, args: unknown): boolean {
         if (ROUTED_TOOLS.has(tool)) {
             return false;
+        }
+
+        if (tool === "memory") {
+            // Its project lookup resolves the folder and asks Git: host work, except for a session-scope add, which looks up
+            // nothing.
+            const call = (args ?? {}) as { action?: unknown; scope?: unknown };
+
+            return !(call.action === "add" && call.scope === "session");
         }
 
         return !INERT_TOOLS.has(tool) || (tool === "artifact" && namesPath(args));

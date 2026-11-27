@@ -222,7 +222,11 @@ export default function createMemory(host: PocketHost, web?: ExtensionWeb) {
                     );
                 }
 
-                const project = await memory.project(api.conversationId, cwd);
+                // A session lesson belongs to the session: no folder is looked at (that is host work, and Git).
+                const project =
+                    args.scope === "session"
+                        ? undefined
+                        : await memory.project(api.conversationId, cwd);
                 const scope =
                     args.scope === "session"
                         ? "session"

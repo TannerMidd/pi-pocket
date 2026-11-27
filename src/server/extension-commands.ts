@@ -148,21 +148,25 @@ export class ExtensionCommands {
                                             : "A sandboxed session runs no extension commands: they run on this machine.",
                                 };
                             } else {
-                                await runtime.memo("started", true, context);
-                                this.#running.set(String(task.id), task.input.by);
-
+                                // Everything after the grant is inside the `try`: a failure or a stop at any step ends the
+                                // lease, and a lease that never ends would refuse every later turn-on.
                                 try {
-                                    result = await this.#handle(
-                                        picked.command,
-                                        task.input,
-                                        runtime,
-                                    );
-                                } catch (error) {
-                                    if (runtime.signal.aborted) {
-                                        throw error;
-                                    }
+                                    await runtime.memo("started", true, context);
+                                    this.#running.set(String(task.id), task.input.by);
 
-                                    result = this.#failed(picked.command, error);
+                                    try {
+                                        result = await this.#handle(
+                                            picked.command,
+                                            task.input,
+                                            runtime,
+                                        );
+                                    } catch (error) {
+                                        if (runtime.signal.aborted) {
+                                            throw error;
+                                        }
+
+                                        result = this.#failed(picked.command, error);
+                                    }
                                 } finally {
                                     this.#running.delete(String(task.id));
                                     lease.end();

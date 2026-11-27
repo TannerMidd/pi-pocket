@@ -92,7 +92,7 @@ import {
     WatchDoc,
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
-import { Sandboxes, type SandboxOptions } from "./sandbox.ts";
+import { Sandboxes, type SandboxOptions, toolKey } from "./sandbox.ts";
 import { ExtensionCommands } from "./extension-commands.ts";
 import { ExtensionWebs, mayUse } from "./extension-web.ts";
 import { defang, quoted } from "./fence.ts";
@@ -1001,7 +1001,7 @@ export class PocketApp {
                         beforeTool: async (call, api) => {
                             const why = await this.sandboxes.beforeTool(
                                 api.conversationId,
-                                String(api.taskId),
+                                toolKey(api.taskId, call.id),
                                 call.name,
                                 call.arguments,
                             );
@@ -1009,7 +1009,7 @@ export class PocketApp {
                             return why === undefined ? undefined : { block: why };
                         },
                         afterTool: (_call, result, api) => {
-                            this.sandboxes.toolEnded(String(api.taskId));
+                            this.sandboxes.toolEnded(toolKey(api.taskId, _call.id));
                             // A secret that changed while the tool ran is hidden from its result too.
                             this.secrets.sync();
                             const cleaned = this.hidden.result(result, api.conversationId);
