@@ -10,7 +10,7 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { runningNow } from "../src/server/running.ts";
 import { SandboxManager } from "../src/server/extensions/gondolin/manager.ts";
 import { VmJobs } from "../src/server/extensions/gondolin/jobs.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
@@ -28,13 +28,8 @@ after(cleanUp);
 
 let opened = 0;
 const openFresh = (model: ReturnType<typeof scriptedModel>) =>
-    openApp(model, join(root, `data-security-${++opened}`));
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
+    openApp(model, join(root, `data-security-${++opened}`), undefined, undefined, sandboxOptions());
 const MODULE = "gondolin.ts";
-
-const useDriver = (driver: FakeDriver | undefined) => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = driver;
-};
 
 function folder(name: string): string {
     const path = join(root, `security-${name}`);

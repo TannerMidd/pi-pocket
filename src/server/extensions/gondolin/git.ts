@@ -7,7 +7,7 @@
 import { execFile } from "node:child_process";
 import { readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -349,6 +349,47 @@ function parseConfig(list: string): ConfigValue[] {
     return values;
 }
 
+/** The home folder of the user `name`, as the system's user list gives it, or undefined. */
+function homeOf(name: string): string | undefined {
+    try {
+        if (userInfo().username === name) {
+            return userInfo().homedir;
+        }
+
+        return readFileSync("/etc/passwd", "utf8")
+            .split("\n")
+            .map((line) => line.split(":"))
+            .find((fields) => fields[0] === name && fields.length >= 6)?.[5];
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Where git reads an `include.path` or `includeIf.*.path` value `value` of the file `holder`, as git expands it: `~/`
+ * is `$HOME`, `~user/` is that user's home folder, an absolute name is itself, and any other name is relative to the
+ * folder of the file that holds it. The text is kept as it is (no `..` is taken out), so the kernel's walk of it, link
+ * by link, decides where it leads. Undefined for a form that git expands in another way (`%(prefix)/`) or that cannot
+ * be expanded here: it is then not known where git reads.
+ */
+function expandPath(value: string, holder: string): string | undefined {
+    if (value.startsWith("~")) {
+        const slash = value.indexOf("/");
+        const name = value.slice(1, slash === -1 ? undefined : slash);
+        const home = name === "" ? process.env.HOME : homeOf(name);
+
+        return home === undefined || home === ""
+            ? undefined
+            : home + (slash === -1 ? "" : value.slice(slash));
+    }
+
+    if (value.startsWith("%(")) {
+        return undefined;
+    }
+
+    return isAbsolute(value) ? value : `${dirname(holder)}/${value}`;
+}
+
 /**
  * The only keys that the repository's own configuration (local or worktree scope) may set when the folder is
  * writable: settings that are plain data in git-config's documentation. Git writes the first group when it makes or
@@ -499,11 +540,12 @@ export async function gitConfigProblem(cwd: string, found: GitMounts): Promise<s
 
             const file = origin.slice(5);
             const from = isAbsolute(file) ? file : `${tree}/${file}`;
-            const path = value.startsWith("~/")
-                ? join(home, value.slice(2))
-                : isAbsolute(value)
-                  ? value
-                  : `${dirname(from)}/${value}`;
+            const path = expandPath(value, from);
+
+            if (path === undefined) {
+                return `Git reads the file ${value} as configuration (${key} in ${from}), and Pi Pocket cannot tell where git expands that name to, so a writable sandbox folder cannot be allowed.`;
+            }
+
             const place = exposed(path);
 
             if (place !== undefined) {

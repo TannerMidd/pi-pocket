@@ -7,7 +7,9 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import * as fs from "node:fs/promises";
 import { EventEmitter } from "node:events";
+import type { OpenOptions } from "../src/server/app.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
+import { gondolinWith } from "../src/server/extensions/gondolin.ts";
 import type {
     GuestChunk,
     GuestExecOptions,
@@ -21,8 +23,22 @@ import type {
     VmSpec,
 } from "../src/server/extensions/gondolin/guest.ts";
 
-// The tests that use a fake VM run on every OS: the gate that allows only Linux (`sandboxPlatformProblem`) is told so.
-(globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.sandbox.test-platform")] = "linux";
+let current: SandboxDriver | undefined;
+
+/** The VM that the sandbox module of the next apps runs (`sandboxOptions`); undefined: the module's own. */
+export function useDriver(driver: SandboxDriver | undefined): void {
+    current = driver;
+}
+
+/** What `openApp` takes so that the sandbox module runs `useDriver`'s VM, and the gate sees a Linux machine on every OS. */
+export function sandboxOptions(): Partial<OpenOptions> {
+    return {
+        sandboxPlatform: "linux",
+        ...(current === undefined
+            ? {}
+            : { builtInOverrides: { "gondolin.ts": gondolinWith(current) } }),
+    };
+}
 
 export interface FakeLog {
     started: VmSpec[];

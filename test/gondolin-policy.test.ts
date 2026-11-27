@@ -16,7 +16,7 @@ import {
     whereTable,
 } from "../src/server/extensions/gondolin/policy.ts";
 import { SandboxManager } from "../src/server/extensions/gondolin/manager.ts";
-import { failedEnv } from "../src/server/sandbox.ts";
+import { failedEnv, sandboxPlatformProblem } from "../src/server/sandbox.ts";
 import { FakeDriver } from "./gondolin-fake.ts";
 
 const roots: string[] = [];
@@ -177,6 +177,20 @@ test("a folder that is, or lies inside, a git directory cannot be a sandbox's fo
 
     // A git directory that a VM mounts is not a session's folder: it passes the private-folder check only.
     assert.equal(folderProblem(join(repo, ".git"), places, "git"), undefined);
+});
+
+test("the platform gate has no global to set: only the platform it is asked about decides", () => {
+    const seam = Symbol.for("pi-pocket.sandbox.test-platform");
+
+    (globalThis as Record<symbol, unknown>)[seam] = "darwin";
+
+    try {
+        assert.equal(sandboxPlatformProblem("linux"), undefined);
+        assert.match(sandboxPlatformProblem("darwin") ?? "", /Linux only/);
+        assert.match(sandboxPlatformProblem("win32") ?? "", /Linux only/);
+    } finally {
+        delete (globalThis as Record<symbol, unknown>)[seam];
+    }
 });
 
 test("an environment that cannot run answers every call with the reason, and is not a promise", async () => {

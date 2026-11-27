@@ -25,7 +25,7 @@ import { viewFile } from "../src/server/files.ts";
 import { serveImage } from "../src/server/http/assets.ts";
 import { loadPromptTemplates } from "../src/server/prompts.ts";
 import { reloadedFolderProblem } from "../src/server/sandbox.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
@@ -40,7 +40,6 @@ import {
 
 after(cleanUp);
 
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
 /** Only Linux has the primitive that these tests need (`confined.ts`): elsewhere a sandboxed folder is refused. */
 const LINUX =
     process.platform === "linux"
@@ -98,8 +97,14 @@ test("a folder the server loads code from, or keeps its data in, is refused what
 });
 
 test("the sandbox cannot be chosen for a folder of the server's own code or data", async () => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
-    const app = await openApp(scriptedModel(), join(root, "data-confined"));
+    useDriver(new FakeDriver());
+    const app = await openApp(
+        scriptedModel(),
+        join(root, "data-confined"),
+        undefined,
+        undefined,
+        sandboxOptions(),
+    );
 
     try {
         await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
@@ -121,7 +126,7 @@ test("the sandbox cannot be chosen for a folder of the server's own code or data
         await app.sandboxes.set(fine, owner(app), true);
         assert.equal((await app.sandboxes.get(fine)).on, true);
     } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+        useDriver(undefined);
         await app.close();
     }
 });
@@ -218,7 +223,7 @@ test(
     "a link in a sandboxed session's folder puts no host file in the prompt, a mention, or a template",
     { skip: LINUX },
     async () => {
-        (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
+        useDriver(new FakeDriver());
         const seen: string[] = [];
         const app = await openApp(
             scriptedModel((request) => {
@@ -229,6 +234,9 @@ test(
                 ]);
             }),
             join(root, "data-prompts"),
+            undefined,
+            undefined,
+            sandboxOptions(),
         );
 
         const linkedFolder = (name: string) => {
@@ -297,7 +305,7 @@ test(
             assert.match(text, /HONEST_INSTRUCTIONS/);
             assert.match(text, /HONEST_MENTION/);
         } finally {
-            (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+            useDriver(undefined);
             await app.close();
         }
     },

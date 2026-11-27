@@ -17,8 +17,7 @@ import { after, test } from "node:test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../src/server/docs.ts";
-import { GondolinDriver } from "../src/server/extensions/gondolin/real-driver.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
@@ -40,14 +39,9 @@ let opened = 0;
 
 /** Each test has a data folder of its own: settings and sessions of one must not reach the next. */
 const openFresh = (model: ReturnType<typeof scriptedModel>) =>
-    openApp(model, join(root, `data-fresh-${++opened}`));
+    openApp(model, join(root, `data-fresh-${++opened}`), undefined, undefined, sandboxOptions());
 
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
 const MODULE = "gondolin.ts";
-
-function useDriver(driver: FakeDriver | undefined): void {
-    (globalThis as Record<symbol, unknown>)[SEAM] = driver;
-}
 
 /** A folder for a session, so each test's marker files are its own. */
 function folder(name: string): string {
@@ -356,7 +350,7 @@ test("a server that dies mid-call: the call comes back interrupted, and runs onc
     const model = () => calls("bash", { command: `echo run >> ${marker}; tail -f /dev/null` });
 
     useDriver(driver);
-    const first = await openApp(model(), dataDir);
+    const first = await openApp(model(), dataDir, undefined, undefined, sandboxOptions());
     let id: ConversationId;
 
     try {
@@ -374,7 +368,7 @@ test("a server that dies mid-call: the call comes back interrupted, and runs onc
     }
 
     useDriver(new FakeDriver());
-    const second = await openApp(model(), crashed);
+    const second = await openApp(model(), crashed, undefined, undefined, sandboxOptions());
 
     try {
         await until(
@@ -566,6 +560,7 @@ function openWithoutHostBrowser(dataDir: string): Promise<App> {
         configureModels: (models) => models.registerNativeProvider(scriptedModel().provider),
         home,
         browser: null,
+        ...sandboxOptions(),
     });
 }
 
@@ -834,45 +829,55 @@ test("the owner's list of VMs names each session by its title, with its folder",
 });
 
 test("off Linux the sandbox cannot be turned on, set up, or offered, and the check says why", async () => {
-    const driver = new FakeDriver();
+    for (const name of ["darwin", "win32", "freebsd", "linux"]) {
+        // The module's own driver (no fake VM): its check asks core, which has the platform it was opened with.
+        useDriver(name === "linux" ? new FakeDriver() : undefined);
+        const app = await openApp(
+            scriptedModel(),
+            join(root, `data-platform-${name}`),
+            undefined,
+            undefined,
+            { ...sandboxOptions(), sandboxPlatform: name },
+        );
+        const server = createServer(
+            createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+        );
 
-    useDriver(driver);
-    const app = await openFresh(scriptedModel());
-    const server = createServer(
-        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
-    );
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/gondolin`;
 
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/gondolin`;
+        const call = async (path: string, body?: unknown) => {
+            const response = await fetch(`${base}/${path}`, {
+                method: body === undefined ? "GET" : "POST",
+                headers: {
+                    authorization: `Bearer ${app.config.ownerToken}`,
+                    "x-pocket": "1",
+                    ...(body === undefined ? {} : { "content-type": "application/json" }),
+                },
+                ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            });
 
-    const call = async (path: string, body?: unknown) => {
-        const response = await fetch(`${base}/${path}`, {
-            method: body === undefined ? "GET" : "POST",
-            headers: {
-                authorization: `Bearer ${app.config.ownerToken}`,
-                "x-pocket": "1",
-                ...(body === undefined ? {} : { "content-type": "application/json" }),
-            },
-            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
-
-        return {
-            status: response.status,
-            body: (await response.json().catch(() => ({}))) as Record<string, any>,
+            return {
+                status: response.status,
+                body: (await response.json().catch(() => ({}))) as Record<string, any>,
+            };
         };
-    };
 
-    const platform = (name: string) => {
-        (globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.sandbox.test-platform")] =
-            name;
-    };
+        try {
+            await app.setExtensionEnabled(owner(app), MODULE, true);
+            const id = Number(await newSession(app, folder(`platform-${name}`)));
 
-    try {
-        await app.setExtensionEnabled(owner(app), MODULE, true);
-        const id = Number(await newSession(app, folder("linux-only")));
+            // What the tests used to set on the process: it does nothing now, so no code in the process can use it.
+            (globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.sandbox.test-platform")] =
+                "linux";
+            (globalThis as Record<symbol, unknown>)[Symbol.for("pi-pocket.gondolin.test-driver")] =
+                new FakeDriver();
 
-        for (const name of ["darwin", "win32", "freebsd"]) {
-            platform(name);
+            if (name === "linux") {
+                assert.equal((await call("session", { c: id, on: true })).status, 200);
+                assert.deepEqual((await call("owner")).body, { owner: true, supported: true });
+                continue;
+            }
 
             for (const attempt of [
                 () => call("session", { c: id, on: true }),
@@ -890,33 +895,35 @@ test("off Linux the sandbox cannot be turned on, set up, or offered, and the che
             );
             assert.equal((await app.sandboxes.get(id as never)).on, false);
             assert.deepEqual((await call("owner")).body, { owner: true, supported: false });
-            assert.equal((await call("host")).body.supported, false);
-            assert.equal(
-                (await call(`state?c=${id}`)).body.problem,
-                "The sandbox runs on Linux only for now.",
-            );
 
-            const check = await new GondolinDriver(folder("never-installed")).check({
-                backend: "auto",
-                image: "alpine-base:latest",
-            });
+            const host = (await call("host")).body;
 
-            assert.equal(check.ok, false);
-            assert.deepEqual(check.lines[0], {
+            assert.equal(host.supported, false);
+            assert.equal(host.check.ok, false);
+            assert.deepEqual(host.check.lines[0], {
                 name: "Operating system",
                 ok: false,
                 detail: "The sandbox runs on Linux only for now.",
             });
-            assert.equal(check.backend, undefined);
-            assert.ok(!check.lines.some((line) => line.name === "libkrun" || line.name === "QEMU"));
+            assert.ok(
+                !host.check.lines.some(
+                    (line: { name: string }) => line.name === "libkrun" || line.name === "QEMU",
+                ),
+            );
+            assert.equal(
+                (await call(`state?c=${id}`)).body.problem,
+                "The sandbox runs on Linux only for now.",
+            );
+        } finally {
+            delete (globalThis as Record<symbol, unknown>)[
+                Symbol.for("pi-pocket.sandbox.test-platform")
+            ];
+            delete (globalThis as Record<symbol, unknown>)[
+                Symbol.for("pi-pocket.gondolin.test-driver")
+            ];
+            server.closeAllConnections();
+            server.close();
+            await app.close();
         }
-
-        platform("linux");
-        assert.equal((await call("session", { c: id, on: true })).status, 200);
-    } finally {
-        platform("linux");
-        server.closeAllConnections();
-        server.close();
-        await app.close();
     }
 });

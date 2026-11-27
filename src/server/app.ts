@@ -97,6 +97,7 @@ import { Goals } from "./goals.ts";
 import {
     type ApprovalRequest,
     Approvals,
+    type ExtensionWeb,
     type ModelRequestShaper,
     type PocketHost,
     type WebAccess,
@@ -404,6 +405,10 @@ export interface OpenOptions {
     restart?: () => void;
     /** Where Pi Pocket's own code is, for its updates; tests give a checkout of their own. */
     appRoot?: string;
+    /** The platform that the sandbox gate sees; undefined is this machine's. Tests run fake VMs on every OS. */
+    sandboxPlatform?: string;
+    /** Built-in modules, by file, that load these default exports in place of their own. Tests give a fake VM. */
+    builtInOverrides?: Readonly<Record<string, (host: PocketHost, web: ExtensionWeb) => unknown>>;
 }
 
 export class PocketApp {
@@ -505,7 +510,7 @@ export class PocketApp {
     readonly commandEnvs = new CommandEnvs((line) => this.#log(line));
     /** No variables for a sandboxed session's commands: what extensions add to host commands are secrets of the host. */
     readonly #noCommandEnvs = new CommandEnvs((line) => this.#log(line));
-    readonly sandboxes = new Sandboxes(this);
+    readonly sandboxes: Sandboxes;
     readonly #stopSandboxedFolders = onSandboxedFolders((folder) =>
         this.sandboxes.usesFolder(folder),
     );
@@ -573,6 +578,7 @@ export class PocketApp {
     #closing: Promise<void> | undefined;
     readonly #log: (line: string) => void;
     readonly #configureModels: ((models: ModelRuntime) => void) | undefined;
+    readonly #builtInOverrides: OpenOptions["builtInOverrides"];
     /** Request shapers from the extension modules the owner turned on (`host.shapeModelRequests`). */
     readonly #shapers: ModelRequestShaper[] = [];
     /**
@@ -585,6 +591,8 @@ export class PocketApp {
     readonly now: () => number;
 
     private constructor(options: OpenOptions) {
+        this.sandboxes = new Sandboxes(this, options.sandboxPlatform);
+        this.#builtInOverrides = options.builtInOverrides;
         this.#configureModels = options.configureModels;
         this.#home = options.home ?? (process.env.HOME || homedir());
         this.now = options.now ?? Date.now;
@@ -1064,6 +1072,7 @@ export class PocketApp {
                 get: (conversationId) => this.sandboxes.get(conversationId),
                 set: (conversationId, person, on) => this.sandboxes.set(conversationId, person, on),
                 jobs: (conversationId) => this.sandboxes.jobs(conversationId),
+                unsupported: () => this.sandboxes.unsupported(),
             },
             shapeModelRequests: (shape) => {
                 this.#shapers.push(shape);
@@ -1190,7 +1199,13 @@ export class PocketApp {
             { builtIn: join(APP_ROOT, "src", "server", "extensions"), dropIn },
             (file) => this.config.extensionChoice(file),
             // What a module's load says can name the server's folders, or quote a provider: the owner's to read.
-            { webs: this.webs, notify: (level, message) => this.ownerNotice(level, message) },
+            {
+                webs: this.webs,
+                notify: (level, message) => this.ownerNotice(level, message),
+                ...(this.#builtInOverrides === undefined
+                    ? {}
+                    : { builtInOverrides: this.#builtInOverrides }),
+            },
         );
         await this.themes.load().catch((error: unknown) => {
             this.#log(`Themes could not be read: ${describe(error)}`);

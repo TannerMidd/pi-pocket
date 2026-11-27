@@ -12,6 +12,7 @@ import {
     type App,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { sandboxOptions } from "./gondolin-fake.ts";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
@@ -57,7 +58,7 @@ before(async () => {
         return;
     }
 
-    app = await openApp(scriptedModel());
+    app = await openApp(scriptedModel(), undefined, undefined, undefined, sandboxOptions());
     await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
     session = await newSession(app);
     server = createServer(

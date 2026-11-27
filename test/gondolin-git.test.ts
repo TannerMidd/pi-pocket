@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
     chmodSync,
+    readFileSync,
     mkdirSync,
     mkdtempSync,
     realpathSync,
@@ -12,7 +13,7 @@ import {
     symlinkSync,
     writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { gitMounts } from "../src/server/extensions/gondolin/git.ts";
@@ -294,6 +295,43 @@ test("a configuration file that the machine's git includes, even one that is not
         join(repo, "later.cfg"),
         homeWith(`[includeIf "onbranch:never"]\n\tpath = ${join(repo, "later.cfg")}\n`),
     );
+});
+
+test("an include path is read as git expands it: ~/, ~user/, a name relative to its file, and never with a .. taken out first", async () => {
+    const repo = repository();
+    const sub = join(repo, "sub");
+    const me = userInfo().username;
+
+    mkdirSync(sub);
+
+    // The machine's configuration includes `text`, from a home folder whose `link` leads into the folder.
+    const including = (text: string, file = ".gitconfig"): NodeJS.ProcessEnv => {
+        const home = temp();
+
+        symlinkSync(sub, join(home, "link"));
+        writeFileSync(join(home, file), `[include]\n\tpath = ${text}\n`);
+
+        return { HOME: home };
+    };
+
+    // `link/..` is the folder that holds `sub`, not the home folder: the walk keeps every name.
+    await refused(repo, sub, including("~/link/../x.cfg"));
+    await refused(repo, sub, including("link/../y.cfg"));
+    assert.equal((await starts(repo, "rw", including("~/link/x.cfg"))).started, false);
+    assert.equal((await starts(repo, "rw", including("elsewhere/x.cfg"))).started, true);
+
+    // `~user/` is that user's home folder, which is not `$HOME`, and a user that is not known is not guessed.
+    assert.equal((await starts(repo, "rw", including(`~${me}/x.cfg`))).started, true);
+    const listed = /^nobody:/m.test(readFileSync("/etc/passwd", "utf8"));
+
+    if (listed) {
+        const other = await starts(repo, "rw", including("~nobody/x.cfg"));
+
+        assert.equal(other.started, true, other.message);
+    }
+
+    await refused(repo, "~no-such-user-here/x.cfg", including("~no-such-user-here/x.cfg"));
+    await refused(repo, "%(prefix)/etc/x.cfg", including("%(prefix)/etc/x.cfg"));
 });
 
 test("the repository's own configuration may set only plain data: any other key keeps a writable folder from starting", async () => {

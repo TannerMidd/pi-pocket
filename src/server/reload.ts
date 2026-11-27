@@ -31,7 +31,7 @@ import type { Extension, Registry } from "@earendil-works/pi-durable";
 import { describe } from "./errors.ts";
 import { documentImports } from "./extension-document-imports.ts";
 import { ExtensionWebs, OLDEST_POCKET_API, POCKET_API } from "./extension-web.ts";
-import type { ExtensionModule, PocketHost, WebAccess } from "./host.ts";
+import type { ExtensionModule, ExtensionWeb, PocketHost, WebAccess } from "./host.ts";
 
 /**
  * How long a module may take to load (its import, and an async default export) before its load fails. At the server's
@@ -382,6 +382,9 @@ export class ExtensionLoader {
      */
     readonly #generations = new Map<string, number>();
     readonly #loadLimitMs: number;
+    readonly #builtInOverrides: Readonly<
+        Record<string, (host: PocketHost, web: ExtensionWeb) => unknown>
+    >;
     readonly #stopDocumentImports: () => void;
     /** The folder of each file's latest load: its removal from that folder takes that version away. */
     readonly #sources = new Map<string, string>();
@@ -407,6 +410,10 @@ export class ExtensionLoader {
             notify?: (level: "info" | "warning" | "error", message: string) => void;
             /** How long a load may take; tests make it short. */
             loadLimitMs?: number;
+            /** Built-in modules, by file, that load these default exports in place of their own (tests). */
+            builtInOverrides?: Readonly<
+                Record<string, (host: PocketHost, web: ExtensionWeb) => unknown>
+            >;
         } = {},
     ) {
         this.#registry = registry;
@@ -417,6 +424,7 @@ export class ExtensionLoader {
         this.#webs = options.webs ?? new ExtensionWebs();
         this.#notify = options.notify ?? ((level, message) => host.notice(level, message));
         this.#loadLimitMs = options.loadLimitMs ?? LOAD_LIMIT_MS;
+        this.#builtInOverrides = options.builtInOverrides ?? {};
         this.#stopDocumentImports =
             this.#dropIn === undefined
                 ? () => {}
@@ -716,7 +724,9 @@ export class ExtensionLoader {
         let committed = false;
 
         try {
-            const returned = loaded.default(this.#host, web) as unknown;
+            const override =
+                module.source === "built-in" ? this.#builtInOverrides[file] : undefined;
+            const returned = (override ?? loaded.default)(this.#host, web) as unknown;
             // An async default export: it may register until it settles.
             const built = isThenable(returned)
                 ? await this.#within(Promise.resolve(returned), deadline, file)

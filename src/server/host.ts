@@ -542,6 +542,8 @@ export interface SandboxApi {
      * Throws when the session is sandboxed and its sandbox cannot run them: the tool then never uses this machine.
      */
     jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
+    /** Why this machine cannot run a sandbox, or undefined. Core refuses to turn a session's sandbox on then. */
+    unsupported(): string | undefined;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */

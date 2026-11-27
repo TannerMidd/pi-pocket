@@ -38,6 +38,7 @@ web.onDispose(
 - `mayChoose(person)`, `newSessions()`, `hostTools()`, and `problem()` are read at each use. `problem()` says why a session cannot be put in the sandbox now.
 - `folderProblem(cwd)` (optional) says why a folder may not be a sandboxed session's folder (it holds sign-ins or keys). Core asks when a session is put in the sandbox and for the folder of a linked session.
 - `otherFolders()` (optional) says whether a linked session that a sandboxed session starts may use a folder other than its parent's. Without it, it may not.
+- `host.sandbox.unsupported()` says why this machine cannot run a sandbox (today: anything but Linux), or undefined. Core refuses to turn a session's sandbox on then, and a provider reports it in its check and offers no Set up.
 - `jobs(target)` (optional) gives the session's `background` tasks as `{ start, output, list, jobs, stop }`, each answering with the words Pi reads. The tasks run in the sandbox. Without it, the `background` tool is blocked in a sandboxed session; with it, the tool calls `host.sandbox.jobs(conversationId)` and never starts a process on this machine.
 - The newest live registration wins. The returned function removes that registration only, in any order: one that ended never comes back.
 

@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { createHandler } from "../src/server/http.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
@@ -21,7 +21,6 @@ import {
     type App,
 } from "./helpers.ts";
 
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
 const SECRET = "HOST_SECRET_MARKER_91c2";
 const PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
@@ -51,7 +50,7 @@ function linked(name: string): string {
 }
 
 before(async () => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = new FakeDriver();
+    useDriver(new FakeDriver());
     app = await openApp(
         scriptedModel((request) => {
             requests.push(JSON.stringify(request));
@@ -59,6 +58,9 @@ before(async () => {
             return fauxAssistantMessage([fauxText("ok")]);
         }),
         join(root, "data"),
+        undefined,
+        undefined,
+        sandboxOptions(),
     );
     server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
@@ -78,7 +80,7 @@ before(async () => {
 });
 
 after(async () => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+    useDriver(undefined);
     server.closeAllConnections();
     server.close();
     await app.close();

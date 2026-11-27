@@ -416,11 +416,16 @@ class GondolinVm implements GuestVm {
 
 export class GondolinDriver implements SandboxDriver {
     readonly #dir: string;
+    readonly #unsupported: () => string | undefined;
     #library: Promise<Library> | undefined;
 
-    /** `dir` is the module's folder in the data folder: the package, and the image store, live in it. */
-    constructor(dir: string) {
+    /**
+     * `dir` is the module's folder in the data folder: the package, and the image store, live in it. `unsupported` says
+     * why this machine cannot run a sandbox (core's answer), or undefined.
+     */
+    constructor(dir: string, unsupported: () => string | undefined = sandboxPlatformProblem) {
         this.#dir = dir;
+        this.#unsupported = unsupported;
     }
 
     /** Where the images are: Gondolin's own variable when the owner set it, else the module's folder. */
@@ -539,7 +544,7 @@ export class GondolinDriver implements SandboxDriver {
 
     async check(settings: { backend: Backend; image: string }): Promise<HostCheck> {
         const lines: CheckLine[] = [];
-        const unsupported = sandboxPlatformProblem();
+        const unsupported = this.#unsupported();
 
         lines.push({
             name: "Operating system",

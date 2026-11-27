@@ -216,6 +216,7 @@ export interface SandboxApi {
         on: boolean,
     ): Promise<void>;
     jobs(conversationId: ConversationId): Promise<SandboxJobs | undefined>;
+    unsupported(): string | undefined;
 }
 
 /**

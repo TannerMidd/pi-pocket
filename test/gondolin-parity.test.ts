@@ -20,7 +20,7 @@ import {
     NO_CREDENTIALS,
 } from "../src/server/extensions/gondolin/git.ts";
 import { folderProblem } from "../src/server/extensions/gondolin/policy.ts";
-import { FakeDriver } from "./gondolin-fake.ts";
+import { FakeDriver, sandboxOptions, useDriver } from "./gondolin-fake.ts";
 import {
     cleanUp,
     context,
@@ -41,13 +41,8 @@ after(cleanUp);
 
 let opened = 0;
 const openFresh = (model: ReturnType<typeof scriptedModel>) =>
-    openApp(model, join(root, `data-parity-${++opened}`));
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
+    openApp(model, join(root, `data-parity-${++opened}`), undefined, undefined, sandboxOptions());
 const MODULE = "gondolin.ts";
-
-const useDriver = (driver: FakeDriver | undefined) => {
-    (globalThis as Record<symbol, unknown>)[SEAM] = driver;
-};
 
 function folder(name: string): string {
     const path = join(root, `parity-${name}`);

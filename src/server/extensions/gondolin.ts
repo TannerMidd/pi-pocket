@@ -12,7 +12,6 @@ import { defineExtension, section } from "@earendil-works/pi-durable";
 import type { ConversationId } from "@earendil-works/pi-durable";
 // Types only: at run time this module uses nothing of Pi Pocket's but the host and web, as a drop-in would.
 import type { ExtensionWeb, PocketHost, SandboxProvider, WebRequest } from "../host.ts";
-import { sandboxPlatformProblem } from "../sandbox.ts";
 import { GondolinDriver } from "./gondolin/real-driver.ts";
 import type { Backend, HostCheck, NetworkMode, SandboxDriver } from "./gondolin/guest.ts";
 import { VmJobs } from "./gondolin/jobs.ts";
@@ -20,9 +19,6 @@ import { SandboxManager, type SandboxSettings, type VmTarget } from "./gondolin/
 import { DEFAULT_ALLOWED_HOSTS, folderProblem, whereTable } from "./gondolin/policy.ts";
 
 export const pocketApi = 2;
-
-/** A test gives the module a fake VM here (`test/gondolin-fake.ts`); nothing else sets it. */
-const TEST_DRIVER = Symbol.for("pi-pocket.gondolin.test-driver");
 
 const HOST_NAME = /^(\*\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
 
@@ -41,16 +37,26 @@ function plural(count: number, word: string): string {
     return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
+/** The module with a VM driver of the caller's: tests give a fake one (`test/gondolin-fake.ts`). The default export has Gondolin's. */
+export function gondolinWith(testDriver?: SandboxDriver) {
+    return (host: PocketHost, web?: ExtensionWeb) => createGondolin(host, web, testDriver);
+}
+
+export default gondolinWith();
+
+function createGondolin(
+    host: PocketHost,
+    web: ExtensionWeb | undefined,
+    testDriver?: SandboxDriver,
+) {
     // A server that runs older code than 0.31.0 has no `host.sandbox`: this module then adds nothing.
     if (web === undefined || typeof host.sandbox?.register !== "function") {
         return;
     }
 
-    const injected = (globalThis as Record<symbol, unknown>)[TEST_DRIVER] as
-        SandboxDriver | undefined;
     const folder = `${host.dataDir}/gondolin`;
-    const driver: SandboxDriver = injected ?? new GondolinDriver(folder);
+    const driver: SandboxDriver =
+        testDriver ?? new GondolinDriver(folder, () => host.sandbox.unsupported());
 
     web.settings([
         {
@@ -347,7 +353,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
         newSessions: () => web.setting("newSessions") === true,
         hostTools,
         problem: () => {
-            const platform = sandboxPlatformProblem();
+            const platform = host.sandbox.unsupported();
 
             if (platform !== undefined) {
                 return platform;
@@ -601,7 +607,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
 
             return {
                 check: result,
-                supported: sandboxPlatformProblem() === undefined,
+                supported: host.sandbox.unsupported() === undefined,
                 running: manager.running,
                 vms: manager.vms().map((vm) => ({ ...vm, title: titles.get(vm.rootId) ?? "" })),
                 max: settings().maxVms,
@@ -635,7 +641,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
     web.route(
         "GET",
         "owner",
-        async () => ({ owner: true, supported: sandboxPlatformProblem() === undefined }),
+        async () => ({ owner: true, supported: host.sandbox.unsupported() === undefined }),
         {
             access: "owner",
         },
@@ -645,7 +651,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
         "POST",
         "setup",
         async (request) => {
-            const platform = sandboxPlatformProblem();
+            const platform = host.sandbox.unsupported();
 
             if (platform !== undefined) {
                 throw web.error(409, platform);

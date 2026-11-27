@@ -24,10 +24,10 @@ import {
     scriptedModel,
     until,
 } from "./helpers.ts";
+import { sandboxOptions, useDriver } from "./gondolin-fake.ts";
 
 const dir = process.env.PI_POCKET_GONDOLIN_REAL;
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "gondolin-real-parity-")));
-const SEAM = Symbol.for("pi-pocket.gondolin.test-driver");
 let driver: GondolinDriver | undefined;
 let manager: SandboxManager | undefined;
 let check: HostCheck | undefined;
@@ -339,7 +339,7 @@ test("team: a sandboxed session's linked session runs in a VM of its own, in its
         return;
     }
 
-    (globalThis as Record<symbol, unknown>)[SEAM] = driver;
+    useDriver(driver);
     const model = scriptedModel((request) => {
         const { messages } = request as { messages: { role: string }[] };
 
@@ -360,7 +360,7 @@ test("team: a sandboxed session's linked session runs in a VM of its own, in its
 
     mkdirSync(folder);
     mkdirSync(elsewhere);
-    const app = await openApp(model, join(base, "data"));
+    const app = await openApp(model, join(base, "data"), undefined, undefined, sandboxOptions());
 
     try {
         await app.setExtensionEnabled(owner(app), "gondolin.ts", true);
@@ -407,7 +407,7 @@ test("team: a sandboxed session's linked session runs in a VM of its own, in its
         assert.ok(childBoot && childBoot !== leadBoot, "a VM of its own");
         assert.ok((await modelTexts(app, child)).join("\n").includes(folder));
     } finally {
-        (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
+        useDriver(undefined);
         await app.close();
     }
 });
