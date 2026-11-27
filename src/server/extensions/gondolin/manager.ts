@@ -99,11 +99,15 @@ export interface ManagerOptions {
     readonly kill?: (pid: number) => void;
     /** Called when the state of a VM changes. */
     readonly onChange?: (rootId: number) => void;
+    /** Called when a VM goes from idle to working or back (the owner's list says which). */
+    readonly onActivity?: (rootId: number) => void;
     /** Called when a VM ends, for whatever reason, with its session and the reason: what ran in it ended too. */
     readonly onEnded?: (rootId: number, reason: string) => void;
     /** Why a folder may not be mounted (`policy.ts`), or undefined. A session's own folder that fails never starts. */
     readonly folderProblem?: (path: string, kind: "folder" | "skill") => string | undefined;
 }
+
+const STRICTER = "the owner made the sandbox's rules stricter";
 
 function sessionLabel(rootId: number, cwd: string): string {
     return `pi-pocket #${rootId} ${cwd.split("/").filter(Boolean).at(-1) ?? ""}`.trim();
@@ -116,6 +120,23 @@ export function psInspect(pid: number): Promise<string | undefined> {
         );
     });
 }
+
+/** A VM that was made with looser rules than the settings now say: more network, more hosts, or a writable folder. */
+function looserThanSettings(spec: VmSpec, settings: SandboxSettings): boolean {
+    const rank = { off: 0, allowlist: 1, open: 2 } as const;
+    const hosts = new Set(settings.allowedHosts);
+
+    return (
+        (spec.mount === "rw" && settings.mount === "ro") ||
+        rank[settings.network] < rank[spec.network.mode] ||
+        (spec.network.mode === "allowlist" &&
+            settings.network === "allowlist" &&
+            spec.network.allowedHosts.some((host) => !hosts.has(host)))
+    );
+}
+
+/** A VM that finished starting with rules the settings made stricter meanwhile: it ends and starts again. */
+class RulesChanged extends Error {}
 
 export class SandboxManager {
     readonly #options: ManagerOptions;
@@ -198,6 +219,14 @@ export class SandboxManager {
         }
     }
 
+    #activity(rootId: number): void {
+        try {
+            this.#options.onActivity?.(rootId);
+        } catch (error) {
+            this.#options.log(`sandbox: an activity listener failed: ${String(error)}`);
+        }
+    }
+
     #busy(rootId: number): () => void {
         const entry = this.#entries.get(rootId);
 
@@ -207,6 +236,11 @@ export class SandboxManager {
 
         entry.busy++;
         this.#touch(rootId);
+
+        if (entry.busy === 1) {
+            this.#activity(rootId);
+        }
+
         let ended = false;
 
         return () => {
@@ -214,6 +248,10 @@ export class SandboxManager {
                 ended = true;
                 entry.busy--;
                 this.#touch(rootId);
+
+                if (entry.busy === 0) {
+                    this.#activity(rootId);
+                }
             }
         };
     }
@@ -265,7 +303,18 @@ export class SandboxManager {
         }
 
         if (entry.vm !== undefined) {
-            return entry.vm;
+            if (
+                entry.spec === undefined ||
+                !looserThanSettings(entry.spec, this.#options.settings())
+            ) {
+                return entry.vm;
+            }
+
+            // Stricter settings end a VM made with looser rules before any call uses it: the check that
+            // `enforce` makes on a settings change may not have run yet.
+            await this.stop(rootId, STRICTER);
+
+            return this.#ready(rootId, signal);
         }
 
         entry.starting ??= this.#start(rootId, entry).finally(() => {
@@ -286,7 +335,24 @@ export class SandboxManager {
         ]);
     }
 
+    /** Start the VM with the settings as they are now; again when they get stricter while it starts. */
     async #start(rootId: number, entry: Entry): Promise<GuestVm> {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                return await this.#startOnce(rootId, entry);
+            } catch (error) {
+                if (!(error instanceof RulesChanged) || attempt >= 3) {
+                    throw error instanceof RulesChanged
+                        ? new Error(
+                              "The sandbox could not start: its rules kept changing while it started.",
+                          )
+                        : error;
+                }
+            }
+        }
+    }
+
+    async #startOnce(rootId: number, entry: Entry): Promise<GuestVm> {
         const settings = this.#options.settings();
         const holders = [...this.#entries.entries()].filter(
             ([id, other]) =>
@@ -386,6 +452,12 @@ export class SandboxManager {
                 throw new Error("The sandbox was stopped while it started.");
             }
 
+            if (looserThanSettings(spec, this.#options.settings())) {
+                await vm.close().catch(() => undefined);
+
+                throw new RulesChanged();
+            }
+
             entry.vm = vm;
             entry.trusted = undefined;
             entry.shell = shell;
@@ -410,6 +482,10 @@ export class SandboxManager {
 
             return vm;
         } catch (error) {
+            if (error instanceof RulesChanged) {
+                throw error;
+            }
+
             const message = `The sandbox could not start: ${error instanceof Error ? error.message : String(error)}`;
 
             entry.phase = "error";
@@ -612,7 +688,6 @@ export class SandboxManager {
      */
     async enforce(): Promise<number[]> {
         const settings = this.#options.settings();
-        const rank = { off: 0, allowlist: 1, open: 2 } as const;
         const stopped: number[] = [];
 
         for (const [rootId, entry] of [...this.#entries.entries()]) {
@@ -622,18 +697,7 @@ export class SandboxManager {
                 continue;
             }
 
-            const hosts = new Set(settings.allowedHosts);
-            const stricter =
-                (spec.mount === "rw" && settings.mount === "ro") ||
-                rank[settings.network] < rank[spec.network.mode] ||
-                (spec.network.mode === "allowlist" &&
-                    settings.network === "allowlist" &&
-                    spec.network.allowedHosts.some((host) => !hosts.has(host)));
-
-            if (
-                stricter &&
-                (await this.stop(rootId, "the owner made the sandbox's rules stricter"))
-            ) {
+            if (looserThanSettings(spec, settings) && (await this.stop(rootId, STRICTER))) {
                 stopped.push(rootId);
             }
         }

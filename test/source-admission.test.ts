@@ -63,6 +63,7 @@ function delivery(kind: Delivery) {
     const app = {
         now: () => 1,
         hidden: { replace: (text: string) => text },
+        sandboxes: { mayMessage: async () => true, linkedFolder: async () => undefined },
         sessions: () => sessions,
         sessionMeta: (id: ConversationId) => sessions.find((session) => session.id === id),
         attribution: { requesterOf: () => user.id },

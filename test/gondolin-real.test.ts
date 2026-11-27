@@ -104,13 +104,13 @@ test("the VM has no secrets: none of the host's variables, none of its files out
         return;
     }
 
-    process.env.GONDOLIN_REAL_SECRET = "hunter2";
+    process.env.GONDOLIN_REAL_SECRET = "not-a-real-value";
     const { output } = await run(
         "env; ls -d /home /root /etc/passwd; ls /home; cat $HOME/.pi/agent/auth.json 2>&1; ls /mnt",
     );
 
     delete process.env.GONDOLIN_REAL_SECRET;
-    assert.ok(!output.includes("hunter2"));
+    assert.ok(!output.includes("not-a-real-value"));
     assert.ok(
         !output.includes(process.env.HOME ?? "/nonexistent-home") ||
             (process.env.HOME ?? "") === "/root",

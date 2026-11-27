@@ -50,6 +50,8 @@ interface Live extends Saved {
     abort?: AbortController;
     quiet?: NodeJS.Timeout;
     done?: Promise<void>;
+    /** Set while its process starts: the task, its ID, and its key are taken, but nothing runs yet. */
+    starting?: Promise<void>;
 }
 
 export interface JobsOptions {
@@ -140,9 +142,20 @@ export class VmJobs {
         const roots: Record<string, Saved[]> = { ...this.#saved };
 
         for (const [rootId, tasks] of this.#tasks) {
+            const ended = [...tasks.values()].filter((task) => task.status !== "running");
+            const kept = new Set(
+                ended.filter((task) => (task.endedAt ?? 0) > cut).slice(-KEEP_ENDED),
+            );
+
+            // An ended task that is not kept leaves the live map too, with its output.
+            for (const task of ended) {
+                if (!kept.has(task)) {
+                    tasks.delete(task.id);
+                }
+            }
+
             roots[String(rootId)] = [...tasks.values()]
-                .filter((task) => task.status === "running" || (task.endedAt ?? 0) > cut)
-                .slice(-KEEP_ENDED)
+                .filter((task) => task.starting === undefined)
                 .map((task) => this.#plain(task));
         }
 
@@ -305,7 +318,14 @@ export class VmJobs {
             task.exitCode = exitCode;
         }
 
+        // What an ended task keeps is the end of its output, the most a read gives: the rest, and the references to
+        // its process, go.
         task.tail = task.text.slice(-READ_CHARS);
+        task.base += task.text.length - task.tail.length;
+        task.text = task.tail;
+        task.quiet = undefined;
+        task.abort = undefined;
+        task.done = undefined;
         this.#save();
         void this.#notify(task);
     }
@@ -345,6 +365,10 @@ export class VmJobs {
     }
 
     #append(task: Live, data: Uint8Array): void {
+        if (task.status !== "running") {
+            return;
+        }
+
         task.text += Buffer.from(data).toString("utf8");
 
         if (task.text.length > OUTPUT_LIMIT) {
@@ -381,6 +405,8 @@ export class VmJobs {
                 const existing = [...tasks().values()].find((task) => task.key === request.key);
 
                 if (existing !== undefined) {
+                    await existing.starting;
+
                     return this.#started(existing);
                 }
 
@@ -424,6 +450,16 @@ export class VmJobs {
                 };
                 const release = this.#options.hold(target);
                 let process_: GuestProcess;
+                let spawned!: () => void;
+                let failed!: (error: unknown) => void;
+
+                // Take the task, its ID, and its key before the process starts: a start at the same time sees them.
+                task.starting = new Promise<void>((resolve, reject) => {
+                    spawned = resolve;
+                    failed = reject;
+                });
+                task.starting.catch(() => undefined);
+                tasks().set(task.id, task);
 
                 try {
                     process_ = await this.#options.spawn(target, command, {
@@ -431,12 +467,25 @@ export class VmJobs {
                         signal: abort.signal,
                     });
                 } catch (error) {
+                    tasks().delete(task.id);
+                    task.starting = undefined;
                     release();
+                    failed(error);
 
                     throw error;
                 }
 
-                tasks().set(task.id, task);
+                task.starting = undefined;
+                spawned();
+
+                if (task.status !== "running") {
+                    // The VM ended while the process started: it ends too.
+                    abort.abort();
+                    release();
+
+                    return this.#started(task);
+                }
+
                 this.#arm(task);
                 this.#save();
                 task.done = (async () => {

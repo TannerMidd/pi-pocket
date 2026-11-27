@@ -294,7 +294,7 @@ test("the skills a session uses are read only in the VM, and nothing else of Pi'
     writeFileSync(secret, '{"token":"sign-in"}');
     const { output } = await inVm(
         work,
-        `tail -1 ${skill}/SKILL.md; echo x >> ${skill}/SKILL.md; echo write=$?; cat ${secret} 2>&1 | grep -c sign-in; ls ${home}/.pi/agent | grep -c auth`,
+        `tail -1 ${skill}/SKILL.md; { echo x >> ${skill}/SKILL.md; } 2>/dev/null; echo write=$?; cat ${secret} 2>&1 | grep -c sign-in; ls ${home}/.pi/agent | grep -c auth`,
         { skillDirs: [skill] } as never,
     );
 
@@ -518,5 +518,67 @@ test("team: a sandboxed session's linked session runs in a VM of its own, in its
     } finally {
         (globalThis as Record<symbol, unknown>)[SEAM] = undefined;
         await app.close();
+    }
+});
+
+test("in a real VM, tasks that start together each keep a process, and a stricter network ends the VM before the next call uses it", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const folder = realpathSync(mkdtempSync(join(scratch, "review-")));
+    let network: "allowlist" | "off" = "allowlist";
+    const vms = new SandboxManager({
+        driver: driver!,
+        log: () => {},
+        pidFile: join(folder, "vms.json"),
+        settings: () => settings("pocket-base:latest", { network, idleMinutes: 0, maxVms: 1 })(),
+    });
+    const jobs = new VmJobs({
+        file: join(folder, "jobs.json"),
+        spawn: (target: VmTarget, command: string, spawnOptions: object) =>
+            vms.spawnShell(target, command, spawnOptions),
+        hold: (target: VmTarget) => vms.hold(target),
+        limits: () => ({ running: 5, taskQuietMs: 0 }),
+        log: () => {},
+    });
+    const target = { rootId: 31, cwd: folder, uploadDir: undefined };
+    const api = jobs.for({ ...target, own: true });
+
+    try {
+        const answers = await Promise.all(
+            ["one", "two", "three"].map((word) =>
+                api.start({ command: `echo ${word}; read line`, key: word }),
+            ),
+        );
+
+        assert.deepEqual(
+            answers.map((text) => /Started (vm-\d)/.exec(text)?.[1]),
+            ["vm-1", "vm-2", "vm-3"],
+        );
+        await until(async () => (await api.output("vm-3")).includes("three"), "the third task");
+        assert.match(await api.output("vm-1"), /one/);
+        assert.match(await api.output("vm-2"), /two/);
+        assert.equal(vms.running, 1);
+
+        // The settings get stricter and nothing calls `enforce`: the next call gets a VM with the new rules.
+        for (const id of ["vm-1", "vm-2", "vm-3"]) {
+            await api.stop(id);
+        }
+
+        const env = vms.envFor(31, target);
+        const before = await env.exec("echo first", { timeout: 60 }, context);
+
+        assert.ok(before.ok);
+        assert.equal(vms.state(31)?.network, "allowlist");
+        network = "off";
+        const after = await env.exec("echo second", { timeout: 60 }, context);
+
+        assert.ok(after.ok);
+        assert.equal(vms.state(31)?.network, "off");
+        assert.equal(vms.state(31)?.stale, false);
+        assert.equal(vms.running, 1);
+    } finally {
+        await vms.stopAll("the test ended").catch(() => undefined);
     }
 });

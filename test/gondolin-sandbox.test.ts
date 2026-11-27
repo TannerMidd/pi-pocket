@@ -104,7 +104,7 @@ test("a sandboxed session runs bash in the VM, not on the host", async () => {
     const work = folder("route");
 
     useDriver(driver);
-    process.env.POCKET_TEST_SECRET = "hunter2";
+    process.env.POCKET_TEST_SECRET = "not-a-real-value";
     const app = await openFresh(
         calls("bash", { command: "echo in-vm; echo $POCKET_TEST_SECRET; pwd" }),
     );
@@ -112,7 +112,7 @@ test("a sandboxed session runs bash in the VM, not on the host", async () => {
     try {
         await app.setExtensionEnabled(owner(app), MODULE, true);
         // A secret that an extension gives to every host command must not reach a VM.
-        app.commandEnvs.add(() => ({ GH_TOKEN: "ghp_secret" }));
+        app.commandEnvs.add(() => ({ GH_TOKEN: "host-added-value" }));
         const id = await newSession(app, work);
 
         await sandboxed(app, id);
@@ -120,9 +120,9 @@ test("a sandboxed session runs bash in the VM, not on the host", async () => {
         const texts = (await modelTexts(app, id)).join("\n");
 
         assert.match(texts, /in-vm/);
-        assert.ok(!texts.includes("hunter2"), "the host's environment is not in the VM");
+        assert.ok(!texts.includes("not-a-real-value"), "the host's environment is not in the VM");
         assert.ok(
-            !texts.includes("ghp_secret"),
+            !texts.includes("host-added-value"),
             "what extensions add to host commands is not in the VM",
         );
         assert.equal(driver.log.started.length, 1);

@@ -324,9 +324,27 @@ export default function setup(pocket) {
             }
 
             void refresh();
-            const stop = pocket.on("setup", () => void refresh());
+            let timer;
 
-            return stop;
+            // A VM that starts, stops, or goes from idle to working changes the list too, not only the set-up.
+            const soon = () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => void refresh(), 150);
+            };
+
+            const stops = [
+                pocket.on("setup", () => void refresh()),
+                pocket.on("changed", soon),
+                pocket.on("vms", soon),
+            ];
+
+            return () => {
+                clearTimeout(timer);
+
+                for (const stop of stops) {
+                    stop();
+                }
+            };
         }, [mine?.admin, refresh]);
 
         if (mine?.admin !== true) {

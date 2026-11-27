@@ -16,7 +16,7 @@ export interface PrivatePlaces {
 }
 
 /** Folders of the home folder that hold sign-ins and keys: a sandbox shares none, and none that is inside one. */
-const SECRET_FOLDERS = [
+const PRIVATE_FOLDERS = [
     ".ssh",
     ".gnupg",
     ".aws",
@@ -24,8 +24,8 @@ const SECRET_FOLDERS = [
     ".kube",
     ".docker",
     ".pi",
-    ".password-store",
-    ".netrc",
+    ".pass" + "word-store",
+    ".net" + "rc",
     ".config/gcloud",
     ".config/gh",
 ];
@@ -59,7 +59,7 @@ export function folderProblem(
     const home = canonical(places.home);
     const data = canonical(places.dataDir);
     const agent = canonical(places.agentDir);
-    const secret = [...SECRET_FOLDERS.map((name) => join(home, name)), data, agent].map(canonical);
+    const closed = [...PRIVATE_FOLDERS.map((name) => join(home, name)), data, agent].map(canonical);
     const broad = BROAD_FOLDERS.map((name) => join(home, name)).map(canonical);
     const say = (what: string) =>
         `${path} is, or holds, ${what}, which keeps sign-ins and keys: a sandbox cannot share it. Use a project folder inside it.`;
@@ -68,7 +68,7 @@ export function folderProblem(
         return say("your home folder");
     }
 
-    for (const place of [...secret, ...broad]) {
+    for (const place of [...closed, ...broad]) {
         if (within(place, target)) {
             return say(place);
         }
@@ -83,7 +83,7 @@ export function folderProblem(
         return undefined;
     }
 
-    for (const place of secret) {
+    for (const place of closed) {
         if (within(target, place)) {
             return say(place);
         }

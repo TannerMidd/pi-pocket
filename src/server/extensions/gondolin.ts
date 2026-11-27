@@ -264,6 +264,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
         log: () => {},
         pidFile: `${folder}/vms.json`,
         onChange: (rootId) => web.send("changed", { c: rootId }),
+        onActivity: () => web.send("vms", {}),
         onEnded: (rootId, reason) => jobs.vmEnded(rootId, reason),
         folderProblem: (path, kind) => folderProblem(path, places(), kind),
     });
