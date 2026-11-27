@@ -61,24 +61,28 @@ test("an image is streamed from the descriptor that was checked, and no more tha
     assert.equal(sent(), PNG.length, "not a byte past the declared size");
 });
 
-test("a pipe named like an image in a plain folder is refused, and does not hold the server", (t) => {
-    const dir = mkdtempSync(join(tmpdir(), "pocket-serve-image-"));
+test(
+    "a pipe named like an image in a plain folder is refused, and does not hold the server",
+    { skip: process.platform === "win32" && "Windows has no mkfifo and no Unix pipes" },
+    (t) => {
+        const dir = mkdtempSync(join(tmpdir(), "pocket-serve-image-"));
 
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
-    execFileSync("mkfifo", [join(dir, "image.png")]);
+        t.after(() => rmSync(dir, { recursive: true, force: true }));
+        execFileSync("mkfifo", [join(dir, "image.png")]);
 
-    // In a process of its own: a call that waits for a writer would hold the test too.
-    const hostfs = new URL("../src/server/hostfs.ts", import.meta.url).href;
-    const assets = new URL("../src/server/http/assets.ts", import.meta.url).href;
-    const script = `import { Hostfs } from ${JSON.stringify(hostfs)};
+        // In a process of its own: a call that waits for a writer would hold the test too.
+        const hostfs = new URL("../src/server/hostfs.ts", import.meta.url).href;
+        const assets = new URL("../src/server/http/assets.ts", import.meta.url).href;
+        const script = `import { Hostfs } from ${JSON.stringify(hostfs)};
 import { serveImage } from ${JSON.stringify(assets)};
 try { await serveImage({ headers: {} }, {}, new Hostfs().at(${JSON.stringify(join(dir, "image.png"))})); console.log("served"); }
 catch (error) { console.log(error.status); }`;
-    const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
-        timeout: 15_000,
-        encoding: "utf8",
-    });
+        const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+            timeout: 15_000,
+            encoding: "utf8",
+        });
 
-    assert.equal(run.error, undefined, "it did not wait for a writer");
-    assert.equal(run.stdout.trim(), "404");
-});
+        assert.equal(run.error, undefined, "it did not wait for a writer");
+        assert.equal(run.stdout.trim(), "404");
+    },
+);

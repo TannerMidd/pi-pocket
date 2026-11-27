@@ -49,23 +49,27 @@ function lab(t: { after: (fn: () => void) => void }): Lab {
     return { root, outside, secret: join(outside, "secret.txt"), host, plain: new hostfs.Hostfs() };
 }
 
-test("a plain folder is the plain call: links are followed and the errors are the same", (t) => {
-    const { root, outside, secret, plain } = lab(t);
+test(
+    "a plain folder is the plain call: links are followed and the errors are the same",
+    { skip: process.platform === "win32" && "links need a privilege on Windows" },
+    (t) => {
+        const { root, outside, secret, plain } = lab(t);
 
-    symlinkSync(secret, join(root, "link.txt"));
-    symlinkSync(outside, join(root, "dir-link"));
+        symlinkSync(secret, join(root, "link.txt"));
+        symlinkSync(outside, join(root, "dir-link"));
 
-    const folder = plain.folder(root);
+        const folder = plain.folder(root);
 
-    assert.equal(folder.sandboxed, false);
-    assert.equal(hostfs.readText(folder.at("ok.txt")), "ok");
-    assert.equal(hostfs.readText(folder.at("link.txt")), "secret");
-    assert.equal(hostfs.readText(folder.at("dir-link/secret.txt")), "secret");
-    assert.equal(hostfs.stat(folder.at("link.txt")).isFile(), true);
-    assert.throws(() => hostfs.readText(folder.at("missing.txt")), { code: "ENOENT" });
-    assert.deepEqual(hostfs.readdir(folder.at("sub")), ["deep.txt"]);
-    assert.equal(hostfs.exists(plain.at(secret)), true);
-});
+        assert.equal(folder.sandboxed, false);
+        assert.equal(hostfs.readText(folder.at("ok.txt")), "ok");
+        assert.equal(hostfs.readText(folder.at("link.txt")), "secret");
+        assert.equal(hostfs.readText(folder.at("dir-link/secret.txt")), "secret");
+        assert.equal(hostfs.stat(folder.at("link.txt")).isFile(), true);
+        assert.throws(() => hostfs.readText(folder.at("missing.txt")), { code: "ENOENT" });
+        assert.deepEqual(hostfs.readdir(folder.at("sub")), ["deep.txt"]);
+        assert.equal(hostfs.exists(plain.at(secret)), true);
+    },
+);
 
 test("a FolderRef is no string, and fs rejects it", (t) => {
     const { root, plain } = lab(t);
@@ -1057,6 +1061,70 @@ test(
             code: "ESTALE",
         });
         listing.close();
+        host.close();
+    },
+);
+
+test(
+    "a full table never stalls a look: a replaced root frees its place first, and plain folders are not affected",
+    { skip: !linux },
+    (t) => {
+        const { root, outside } = lab(t);
+
+        const make = (name: string) => {
+            mkdirSync(join(root, name));
+            writeFileSync(join(root, name, "f.txt"), name);
+
+            const info = statSync(join(root, name), { bigint: true });
+
+            return { path: join(root, name), dev: info.dev, ino: info.ino };
+        };
+
+        // Three separate roots under their own folders, and a table that holds two.
+        const base = join(root, "..", "roots");
+
+        mkdirSync(base);
+
+        const folders = ["a", "b", "c"].map((name) => {
+            mkdirSync(join(base, name));
+            writeFileSync(join(base, name, "f.txt"), name);
+
+            const info = statSync(join(base, name), { bigint: true });
+
+            return { path: join(base, name), dev: info.dev, ino: info.ino };
+        });
+
+        assert.ok(make);
+
+        let listed = [folders[0]!, folders[1]!];
+        const host = new hostfs.Hostfs({ sandboxedFolders: () => listed }, { maxPins: 2 });
+
+        assert.equal(hostfs.readText(host.at(join(base, "a", "f.txt"))), "a");
+        assert.equal(hostfs.readText(host.at(join(base, "b", "f.txt"))), "b");
+        assert.equal(host.heldRoots, 2, "the table is full");
+
+        // `b` is replaced by `c` in the view: `b` lets go first, so `c` fits.
+        listed = [folders[0]!, folders[2]!];
+        assert.equal(hostfs.readText(host.at(join(base, "c", "f.txt"))), "c");
+        assert.equal(host.heldRoots, 2);
+
+        // A third root does not fit: only an operation inside it is refused, with the reason. Everything else still works.
+        listed = [folders[0]!, folders[1]!, folders[2]!];
+        assert.equal(
+            hostfs.readText(host.at(join(outside, "secret.txt"))),
+            "secret",
+            "a plain path",
+        );
+        assert.equal(hostfs.readText(host.folder(outside).at("secret.txt")), "secret");
+        assert.equal(hostfs.readText(host.traverse(outside).at("secret.txt")), "secret");
+        assert.equal(host.folder(outside).sandboxed, false);
+        assert.equal(hostfs.readText(host.at(join(base, "a", "f.txt"))), "a", "a held root");
+        assert.throws(() => hostfs.readText(host.at(join(base, "b", "f.txt"))), {
+            code: "EMFILE",
+            message: /too many roots/,
+        });
+        host.unpinRoot(join(base, "a"));
+        assert.equal(hostfs.readText(host.at(join(outside, "secret.txt"))), "secret");
         host.close();
     },
 );

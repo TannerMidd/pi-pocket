@@ -1954,18 +1954,25 @@ export class Hostfs {
             key: keyOf(each),
         }));
 
-        // The view's holds follow what the view lists, at every look: a listed root has one, whichever path pinned it, and
-        // a root that is no longer listed loses it (a nested pin keeps its own).
-        const live = new Set<string>();
-
-        for (const each of listed) {
-            live.add(each.key);
-            this.#holdStart(each);
-        }
+        // The view's holds follow what the view lists, at every look. A root that is no longer listed lets go first, so a
+        // replaced root frees its place before the new one needs it; then each listed root gets one. A look never fails
+        // for a full table: a root that does not fit stays unheld, and only an operation inside it is refused (`#placed`,
+        // with the reason). Plain folders take no hold, and are never affected.
+        const live = new Set(listed.map((each) => each.key));
 
         for (const [key, entry] of [...this.#held]) {
             if (!live.has(key) && entry.holders.has("view")) {
                 this.#drop(key, "view");
+            }
+        }
+
+        for (const each of listed) {
+            try {
+                this.#holdStart(each);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "EMFILE") {
+                    throw error;
+                }
             }
         }
 

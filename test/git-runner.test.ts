@@ -58,36 +58,40 @@ function repo(t: { after: (fn: () => void) => void }) {
 
 const FAKE = { path: "/usr/bin/git", version: [2, 45, 1] } as const;
 
-test("a plain folder runs git exactly as it always did", (t) => {
-    const { root, plain } = repo(t);
-    const runner = createGitRunner({ resolve: () => FAKE });
-    const planned = runner.plan(plain.folder(root), ["status", "--porcelain"]);
+test(
+    "a plain folder runs git exactly as it always did",
+    { skip: process.platform === "win32" && "the paths and PATH of this test are Unix ones" },
+    (t) => {
+        const { root, plain } = repo(t);
+        const runner = createGitRunner({ resolve: () => FAKE });
+        const planned = runner.plan(plain.folder(root), ["status", "--porcelain"]);
 
-    assert.equal(planned.command, "git");
-    assert.deepEqual(planned.args, ["-c", "core.fsmonitor=false", "status", "--porcelain"]);
-    assert.equal(planned.cwd, root);
-    assert.equal(planned.env.GIT_LITERAL_PATHSPECS, "1");
-    assert.equal(planned.env.GIT_OPTIONAL_LOCKS, "0");
-    assert.equal(planned.env.LC_ALL, "C");
-    // The server's own GIT_* stay, as they did: a plain folder is hardened by nothing.
-    const kept = process.env.GIT_AUTHOR_NAME;
+        assert.equal(planned.command, "git");
+        assert.deepEqual(planned.args, ["-c", "core.fsmonitor=false", "status", "--porcelain"]);
+        assert.equal(planned.cwd, root);
+        assert.equal(planned.env.GIT_LITERAL_PATHSPECS, "1");
+        assert.equal(planned.env.GIT_OPTIONAL_LOCKS, "0");
+        assert.equal(planned.env.LC_ALL, "C");
+        // The server's own GIT_* stay, as they did: a plain folder is hardened by nothing.
+        const kept = process.env.GIT_AUTHOR_NAME;
 
-    process.env.GIT_AUTHOR_NAME = "kept";
-    t.after(() => {
-        if (kept === undefined) {
-            delete process.env.GIT_AUTHOR_NAME;
-        } else {
-            process.env.GIT_AUTHOR_NAME = kept;
-        }
-    });
-    assert.equal(runner.plan(plain.folder(root), []).env.GIT_AUTHOR_NAME, "kept");
-    assert.deepEqual(runner.plan(plain.folder(root), ["x"], { literalPaths: false }).args, [
-        "-c",
-        "core.fsmonitor=false",
-        "--no-literal-pathspecs",
-        "x",
-    ]);
-});
+        process.env.GIT_AUTHOR_NAME = "kept";
+        t.after(() => {
+            if (kept === undefined) {
+                delete process.env.GIT_AUTHOR_NAME;
+            } else {
+                process.env.GIT_AUTHOR_NAME = kept;
+            }
+        });
+        assert.equal(runner.plan(plain.folder(root), []).env.GIT_AUTHOR_NAME, "kept");
+        assert.deepEqual(runner.plan(plain.folder(root), ["x"], { literalPaths: false }).args, [
+            "-c",
+            "core.fsmonitor=false",
+            "--no-literal-pathspecs",
+            "x",
+        ]);
+    },
+);
 
 test(
     "a sandboxed folder runs the absolute git with the repository pinned, hooks off, and no GIT_ of the server",
@@ -184,20 +188,28 @@ test(
     },
 );
 
-test("the absolute git ignores relative and empty PATH entries", (t) => {
-    const base = mkdtempSync(join(tmpdir(), "pocket-path-"));
+test(
+    "the absolute git ignores relative and empty PATH entries",
+    {
+        skip:
+            process.platform === "win32" &&
+            "the script, the mode, and the PATH separator are Unix ones",
+    },
+    (t) => {
+        const base = mkdtempSync(join(tmpdir(), "pocket-path-"));
 
-    t.after(() => rmSync(base, { recursive: true, force: true }));
-    mkdirSync(join(base, "bin"));
-    writeFileSync(join(base, "bin", "git"), "#!/bin/sh\n", { mode: 0o755 });
+        t.after(() => rmSync(base, { recursive: true, force: true }));
+        mkdirSync(join(base, "bin"));
+        writeFileSync(join(base, "bin", "git"), "#!/bin/sh\n", { mode: 0o755 });
 
-    const cwd = process.cwd();
+        const cwd = process.cwd();
 
-    process.chdir(base);
-    t.after(() => process.chdir(cwd));
-    assert.equal(findGit("bin::."), undefined, "a relative entry means the server's folder");
-    assert.equal(findGit(`:bin:${join(base, "bin")}`), join(base, "bin", "git"));
-});
+        process.chdir(base);
+        t.after(() => process.chdir(cwd));
+        assert.equal(findGit("bin::."), undefined, "a relative entry means the server's folder");
+        assert.equal(findGit(`:bin:${join(base, "bin")}`), join(base, "bin", "git"));
+    },
+);
 
 test(
     "a real git in a sandboxed folder reads the work tree and runs no hook, filter, or attribute of the guest",
