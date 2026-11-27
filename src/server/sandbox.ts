@@ -985,6 +985,39 @@ export class Sandboxes {
         );
     }
 
+    /**
+     * The rules for the conversations of a sandboxed tree, with the folders they would have (`resulting` overrides what
+     * `cwdOf` says): each lies inside the session's folder (one VM serves the tree), is no remote workspace, and may be shared.
+     * A turn-on and a move of a sandboxed tree ask it the same way, so the two cannot drift apart. Undefined when all hold.
+     */
+    async #treeProblem(
+        root: number,
+        rootCwd: string,
+        resulting: ReadonlyMap<number, string>,
+    ): Promise<string | undefined> {
+        for (const conversation of this.#app.conversationsOf(root as unknown as ConversationId)) {
+            const id = Number(conversation);
+
+            if (id === root) {
+                continue;
+            }
+
+            const there = resulting.get(id) ?? this.#app.cwdOf(conversation);
+
+            if (workspaceScheme(there) !== undefined || !within(rootCwd, there)) {
+                return `The subagent #${id} works in ${there}, outside the session's folder (${rootCwd}): a subagent of a sandboxed session works inside the session's folder. Move it into ${rootCwd}, or stop it, and then try again.`;
+            }
+
+            const refused = await this.#problemOf(there);
+
+            if (refused !== undefined) {
+                return `The subagent #${id} works in ${there}, which cannot be shared with a sandbox: ${refused}`;
+            }
+        }
+
+        return undefined;
+    }
+
     /** `#folderProblem`, with a check that throws taken as a refusal that says so. */
     async #problemOf(cwd: string): Promise<string | undefined> {
         try {
@@ -1178,17 +1211,20 @@ export class Sandboxes {
             if (boxed && workspaceScheme(move.cwd) !== undefined) {
                 throw new HttpError(409, "A sandbox does not support a remote workspace.");
             }
+        }
 
-            // One VM serves a tree: a subagent of a sandboxed tree stays inside the session's folder.
-            if (
-                boxed &&
-                Number(move.id) !== root &&
-                !within(target?.cwd ?? this.#folderOfRoot(root), move.cwd)
-            ) {
-                throw new HttpError(
-                    409,
-                    "A subagent of a sandboxed session works inside the session's folder.",
-                );
+        // One VM serves a tree: every conversation of a sandboxed tree, as the move leaves it, is looked at with the rules a
+        // turn-on uses, not only the folders that move.
+        if (boxed) {
+            const resulting = new Map(request.moves.map((move) => [Number(move.id), move.cwd]));
+            const problem = await this.#treeProblem(
+                root,
+                target?.cwd ?? this.#folderOfRoot(root),
+                resulting,
+            );
+
+            if (problem !== undefined) {
+                throw new HttpError(409, problem);
             }
         }
 
@@ -1814,6 +1850,22 @@ export class Sandboxes {
     }
 
     /**
+     * Wait until no release is in flight for the tree (also one that a bound gave up on), and answer why it failed, if it
+     * did. Nothing reopens a tree while a release runs: every path that would restore `stable` waits here first.
+     */
+    async #idle(root: number): Promise<Error | undefined> {
+        while (this.#releasing.has(root)) {
+            try {
+                await this.#releasing.get(root);
+            } catch (error) {
+                return error instanceof Error ? error : new Error(String(error));
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
      * The release of one tree: one attempt at a time. A retry, or a recovery, joins the attempt that is under way (also one
      * that the bound gave up on), so a late release never runs after a recovery has reopened the tree.
      */
@@ -1899,28 +1951,18 @@ export class Sandboxes {
             }
 
             // Every conversation of the tree, not the root only: one VM serves them all, in the session's folder.
-            for (const conversation of app.conversationsOf(id)) {
-                if (Number(conversation) === root) {
-                    continue;
-                }
+            const treeProblem = await this.#treeProblem(root, cwd, new Map());
 
-                const there = app.cwdOf(conversation);
+            if (treeProblem !== undefined) {
+                throw new HttpError(409, treeProblem);
+            }
 
-                if (workspaceScheme(there) !== undefined || !within(cwd, there)) {
-                    throw new HttpError(
-                        409,
-                        `The subagent #${String(conversation)} of this session works in ${there}, outside the session's folder, so the sandbox cannot be turned on. Move it into ${cwd}, or stop it, and then try again.`,
-                    );
-                }
-
-                const refused = await this.#problemOf(there);
-
-                if (refused !== undefined) {
-                    throw new HttpError(
-                        409,
-                        `The subagent #${String(conversation)} works in ${there}, which cannot be shared with a sandbox: ${refused}`,
-                    );
-                }
+            // A VM that is still being stopped is not a place to start another in.
+            if (this.#releasing.has(root)) {
+                throw new HttpError(
+                    409,
+                    "The VM of this session is still being stopped. Try again in a moment.",
+                );
             }
 
             if (this.#phases.get(root) !== undefined) {
@@ -2115,6 +2157,20 @@ export class Sandboxes {
             throw new HttpError(409, `It could not be resumed: ${problem}`);
         }
 
+        // Nothing reopens while a release runs (another change of the rules may have started one).
+        const late = await this.#idle(root);
+
+        if (late !== undefined) {
+            this.#setIf(
+                root,
+                token,
+                "suspended",
+                `it could not be stopped (${describeError(late)})`,
+            );
+
+            throw new HttpError(409, `It could not be resumed: ${describeError(late)}`);
+        }
+
         // The reservation that the failure kept goes, so the group is free again.
         if (this.#revision(root) === token) {
             this.#dropReservations(root);
@@ -2208,6 +2264,23 @@ export class Sandboxes {
                         );
                     }
 
+                    // A release that an earlier rules change started may still run: the tree stays closed until it has
+                    // ended, and when it failed the tree stays suspended with that reason.
+                    const late = await this.#idle(root);
+
+                    if (!still(root)) {
+                        continue;
+                    }
+
+                    if (late !== undefined) {
+                        write(
+                            root,
+                            "suspended",
+                            `${problem ?? "Its VM was being stopped"} It could not be stopped (${describeError(late)}).`,
+                        );
+                        continue;
+                    }
+
                     write(root, problem === undefined ? "stable" : "suspended", problem);
                 } catch (error) {
                     write(
@@ -2269,15 +2342,24 @@ export class Sandboxes {
             const seen = this.#revision(root);
             const missing = await this.#problemOf(this.#folderOfRoot(root));
 
-            if (this.#on.has(root)) {
+            if (!this.#on.has(root)) {
+                continue;
+            }
+
+            // Not while a release runs for the tree; a release that failed keeps it suspended, with its reason.
+            const late = missing === undefined ? await this.#idle(root) : undefined;
+
+            if (late !== undefined) {
                 this.#setIf(
                     root,
                     seen,
-                    missing === undefined ? "stable" : "suspended",
-                    missing,
-                    true,
+                    "suspended",
+                    `it could not be stopped (${describeError(late)})`,
                 );
+                continue;
             }
+
+            this.#setIf(root, seen, missing === undefined ? "stable" : "suspended", missing, true);
         }
     }
 

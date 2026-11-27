@@ -544,8 +544,16 @@ export class ExtensionLoader {
             return;
         }
 
-        // Revoke, prove gone, then take the module away: a failure keeps it installed.
+        // Revoke, prove gone, then take the module away: a failure keeps it installed. A newer load, turn-on, or removal that
+        // came while the proof was awaited has this generation behind it, and the module is not taken away under it.
+        const generation = this.#generation(file);
+
         await this.#suspend(file, true);
+
+        if (!this.#isLatest(file, generation)) {
+            return;
+        }
+
         this.#uninstall(file);
     }
 
@@ -1043,10 +1051,16 @@ export class ExtensionLoader {
             (module === undefined || this.#sources.get(file) === directory)
         ) {
             const installed = this.#installed.has(file);
+            // The same guard as a turn-off: a load that began while the proof was awaited is not undone by this removal.
+            const generation = this.#generation(file);
 
             // Revoke and prove gone before the module goes; when that cannot be proved, the module stays installed.
             void this.#suspend(file, true).then(
                 () => {
+                    if (!this.#isLatest(file, generation)) {
+                        return;
+                    }
+
                     this.#uninstall(file);
 
                     if (installed) {
