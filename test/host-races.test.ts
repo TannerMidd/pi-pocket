@@ -30,6 +30,12 @@ import {
 import { viewFile } from "../src/server/files.ts";
 import { createWorktree } from "../src/server/worktrees.ts";
 
+/** Only Linux has the primitive that these tests need (`confined.ts`): elsewhere a sandboxed folder is refused. */
+const LINUX =
+    process.platform === "linux"
+        ? false
+        : "the walk of names needs Linux; elsewhere it fails closed";
+
 const SECRET = "OUTSIDE_SECRET_MARKER_42";
 const made: string[] = [];
 
@@ -110,55 +116,75 @@ function swapBeforeUse(folder: string, outside: string): () => void {
     };
 }
 
-test("a folder swapped for a link while a sandboxed folder is listed does not list the outside folder", async () => {
-    const { folder, outside } = layout("only-outside-or-inside.txt");
-    const stop = onSandboxedFolders((used) => used === folder);
-    const restore = swapBeforeUse(folder, outside);
+test(
+    "a folder swapped for a link while a sandboxed folder is listed does not list the outside folder",
+    { skip: LINUX },
+    async () => {
+        const { folder, outside } = layout("only-outside-or-inside.txt");
+        const stop = onSandboxedFolders((used) => used === folder);
+        const restore = swapBeforeUse(folder, outside);
 
-    try {
-        const view = await viewFile(join(folder, "race"), undefined, folder).catch(
-            (error: unknown) => error,
-        );
+        try {
+            const view = await viewFile(join(folder, "race"), undefined, folder).catch(
+                (error: unknown) => error,
+            );
 
-        assert.ok(view instanceof Error, "the listing went on after the swap");
-        assert.match(view.message, /not followed/);
-    } finally {
-        restore();
-        stop();
-    }
-});
+            assert.ok(view instanceof Error, "the listing went on after the swap");
+            assert.match(view.message, /not followed/);
+        } finally {
+            restore();
+            stop();
+        }
+    },
+);
 
-test("a folder swapped for a link while a file of a sandboxed folder is opened does not open the outside file", async () => {
-    const { folder, outside } = layout("file.txt");
-    const stop = onSandboxedFolders((used) => used === folder);
-    const restore = swapBeforeUse(folder, outside);
+test(
+    "a folder swapped for a link while a file of a sandboxed folder is opened does not open the outside file",
+    { skip: LINUX },
+    async () => {
+        const { folder, outside } = layout("file.txt");
+        const stop = onSandboxedFolders((used) => used === folder);
+        const restore = swapBeforeUse(folder, outside);
 
-    try {
-        await assert.rejects(openInside(folder, join(folder, "race", "file.txt")), /not followed/);
-    } finally {
-        restore();
-        stop();
-    }
-});
+        try {
+            await assert.rejects(
+                openInside(folder, join(folder, "race", "file.txt")),
+                /not followed/,
+            );
+        } finally {
+            restore();
+            stop();
+        }
+    },
+);
 
-test("a folder swapped for a link while a file is written does not write outside the sandboxed folder", () => {
-    const { folder, outside } = layout("out.txt");
-    const stop = onSandboxedFolders((used) => used === folder);
-    const restore = swapBeforeUse(folder, outside);
+test(
+    "a folder swapped for a link while a file is written does not write outside the sandboxed folder",
+    { skip: LINUX },
+    () => {
+        const { folder, outside } = layout("out.txt");
+        const stop = onSandboxedFolders((used) => used === folder);
+        const restore = swapBeforeUse(folder, outside);
 
-    try {
-        assert.throws(
-            () =>
-                writeInside(folder, join(folder, "race", "out.txt"), Buffer.from("written"), 0o644),
-            /not followed/,
-        );
-        assert.equal(readFileSync(join(outside, "out.txt"), "utf8"), `${SECRET}\n`);
-        assert.deepEqual(readdirSync(outside), ["out.txt"]);
-    } finally {
-        restore();
-        stop();
-    }
-});
+        try {
+            assert.throws(
+                () =>
+                    writeInside(
+                        folder,
+                        join(folder, "race", "out.txt"),
+                        Buffer.from("written"),
+                        0o644,
+                    ),
+                /not followed/,
+            );
+            assert.equal(readFileSync(join(outside, "out.txt"), "utf8"), `${SECRET}\n`);
+            assert.deepEqual(readdirSync(outside), ["out.txt"]);
+        } finally {
+            restore();
+            stop();
+        }
+    },
+);
 
 function repository(): { folder: string; outside: string } {
     const { folder, outside } = layout("new.txt");
@@ -184,84 +210,99 @@ function repository(): { folder: string; outside: string } {
     return { folder, outside };
 }
 
-test("undo of a new file, in a folder swapped for a link, does not delete outside the sandboxed folder", async () => {
-    const { folder, outside } = repository();
-    const stop = onSandboxedFolders((used) => used === folder);
-    const restore = swapBeforeUse(folder, outside);
+test(
+    "undo of a new file, in a folder swapped for a link, does not delete outside the sandboxed folder",
+    { skip: LINUX },
+    async () => {
+        const { folder, outside } = repository();
+        const stop = onSandboxedFolders((used) => used === folder);
+        const restore = swapBeforeUse(folder, outside);
 
-    try {
-        await revertFile(folder, "race/new.txt").catch(() => undefined);
-        assert.ok(lstatSync(join(folder, "race")).isSymbolicLink(), "the swap did not run");
-        assert.ok(existsSync(join(outside, "new.txt")), "a file outside the folder was deleted");
-    } finally {
-        restore();
-        stop();
-    }
-});
-
-test("undo in a sandboxed folder puts a changed, a deleted, and an executable file back, by blob", async () => {
-    const { folder } = repository();
-
-    writeFileSync(join(folder, "script.sh"), "#!/bin/sh\n");
-    execFileSync("chmod", ["755", "script.sh"], { cwd: folder });
-    execFileSync("git", ["add", "script.sh"], { cwd: folder });
-    execFileSync("git", ["commit", "-q", "-m", "script"], {
-        cwd: folder,
-        env: {
-            ...process.env,
-            GIT_AUTHOR_NAME: "t",
-            GIT_AUTHOR_EMAIL: "t@e",
-            GIT_COMMITTER_NAME: "t",
-            GIT_COMMITTER_EMAIL: "t@e",
-        },
-    });
-    const stop = onSandboxedFolders((used) => used === folder);
-
-    try {
-        writeFileSync(join(folder, "kept.txt"), "changed\n");
-        rmSync(join(folder, "script.sh"));
-        await revertFile(folder, "kept.txt");
-        await revertFile(folder, "script.sh");
-        assert.equal(readFileSync(join(folder, "kept.txt"), "utf8"), "kept\n");
-        assert.equal(readFileSync(join(folder, "script.sh"), "utf8"), "#!/bin/sh\n");
-        assert.equal(fs.statSync(join(folder, "script.sh")).mode & 0o111, 0o111);
-        assert.equal(
-            execFileSync("git", ["status", "--porcelain"], { cwd: folder }).toString(),
-            "?? race/\n",
-        );
-    } finally {
-        stop();
-    }
-});
-
-test("a folder swapped for a link while a worktree copies new files does not copy a file from outside", async () => {
-    const { folder, outside } = repository();
-    const trees = scratch();
-    const stop = onSandboxedFolders((used) => used === folder);
-    const restore = swapBeforeUse(folder, outside);
-
-    try {
-        await createWorktree(folder, trees, "race").catch(() => undefined);
-
-        const copied = (path: string): string[] =>
-            readdirSync(path, { withFileTypes: true }).flatMap((entry) =>
-                entry.name === ".git"
-                    ? []
-                    : entry.isDirectory()
-                      ? copied(join(path, entry.name))
-                      : [readFileSync(join(path, entry.name), "utf8")],
+        try {
+            await revertFile(folder, "race/new.txt").catch(() => undefined);
+            assert.ok(lstatSync(join(folder, "race")).isSymbolicLink(), "the swap did not run");
+            assert.ok(
+                existsSync(join(outside, "new.txt")),
+                "a file outside the folder was deleted",
             );
+        } finally {
+            restore();
+            stop();
+        }
+    },
+);
 
-        assert.ok(lstatSync(join(folder, "race")).isSymbolicLink(), "the swap did not run");
-        assert.ok(
-            !copied(trees).some((text) => text.includes(SECRET)),
-            "a file from outside the folder was copied",
-        );
-    } finally {
-        restore();
-        stop();
-    }
-});
+test(
+    "undo in a sandboxed folder puts a changed, a deleted, and an executable file back, by blob",
+    { skip: LINUX },
+    async () => {
+        const { folder } = repository();
+
+        writeFileSync(join(folder, "script.sh"), "#!/bin/sh\n");
+        execFileSync("chmod", ["755", "script.sh"], { cwd: folder });
+        execFileSync("git", ["add", "script.sh"], { cwd: folder });
+        execFileSync("git", ["commit", "-q", "-m", "script"], {
+            cwd: folder,
+            env: {
+                ...process.env,
+                GIT_AUTHOR_NAME: "t",
+                GIT_AUTHOR_EMAIL: "t@e",
+                GIT_COMMITTER_NAME: "t",
+                GIT_COMMITTER_EMAIL: "t@e",
+            },
+        });
+        const stop = onSandboxedFolders((used) => used === folder);
+
+        try {
+            writeFileSync(join(folder, "kept.txt"), "changed\n");
+            rmSync(join(folder, "script.sh"));
+            await revertFile(folder, "kept.txt");
+            await revertFile(folder, "script.sh");
+            assert.equal(readFileSync(join(folder, "kept.txt"), "utf8"), "kept\n");
+            assert.equal(readFileSync(join(folder, "script.sh"), "utf8"), "#!/bin/sh\n");
+            assert.equal(fs.statSync(join(folder, "script.sh")).mode & 0o111, 0o111);
+            assert.equal(
+                execFileSync("git", ["status", "--porcelain"], { cwd: folder }).toString(),
+                "?? race/\n",
+            );
+        } finally {
+            stop();
+        }
+    },
+);
+
+test(
+    "a folder swapped for a link while a worktree copies new files does not copy a file from outside",
+    { skip: LINUX },
+    async () => {
+        const { folder, outside } = repository();
+        const trees = scratch();
+        const stop = onSandboxedFolders((used) => used === folder);
+        const restore = swapBeforeUse(folder, outside);
+
+        try {
+            await createWorktree(folder, trees, "race").catch(() => undefined);
+
+            const copied = (path: string): string[] =>
+                readdirSync(path, { withFileTypes: true }).flatMap((entry) =>
+                    entry.name === ".git"
+                        ? []
+                        : entry.isDirectory()
+                          ? copied(join(path, entry.name))
+                          : [readFileSync(join(path, entry.name), "utf8")],
+                );
+
+            assert.ok(lstatSync(join(folder, "race")).isSymbolicLink(), "the swap did not run");
+            assert.ok(
+                !copied(trees).some((text) => text.includes(SECRET)),
+                "a file from outside the folder was copied",
+            );
+        } finally {
+            restore();
+            stop();
+        }
+    },
+);
 
 test("where the system has no way to open a name inside a folder safely, a sandboxed folder is not read", async () => {
     const { folder } = layout("file.txt");

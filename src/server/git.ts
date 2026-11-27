@@ -1,7 +1,7 @@
 /**
  * Git as Pi Pocket runs it for itself (Changes, branches, worktrees, the file list). A work tree is untrusted, as a
  * cloned repository is: what a guest writes there can steer git, so every call is held to the repository the folder is
- * known to be in. It runs without a file system monitor, without optional locks so it never gets in the way of Pi's own
+ * known to be in. It runs with no `GIT_*` variable that Pi Pocket was started with, without a file system monitor, without optional locks so it never gets in the way of Pi's own
  * git commands, with paths taken literally, and in English, so a failure can be told from another by what git says.
  * Git is told the repository (`GIT_DIR`, `GIT_WORK_TREE`), never finds one by itself in a folder a guest can write
  * (`safe.bareRepository=explicit`, `GIT_CEILING_DIRECTORIES`), and runs none of the clean, smudge, and process filters
@@ -36,19 +36,6 @@ export class GitError extends Error {
     }
 }
 
-/** The variables that choose a repository, an index, or objects: git is told them by Pi Pocket, never by what runs it. */
-const REPOSITORY_VARIABLES = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_NAMESPACE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-];
-
 const HARDENING = ["-c", "core.fsmonitor=false", "-c", "safe.bareRepository=explicit"];
 
 /** How long a repository, and the filters its configuration defines, are remembered: a burst of calls asks git once. */
@@ -70,11 +57,11 @@ function run(
         literalPaths = true,
     }: GitOptions,
 ): Promise<string> {
-    const base = { ...process.env };
-
-    for (const name of REPOSITORY_VARIABLES) {
-        delete base[name];
-    }
+    // Git reads its configuration, repository, and programs from `GIT_*` variables: Pi Pocket sets the ones it needs, and
+    // none that it was started with, which a guest could be able to change the files of (`GIT_CONFIG_GLOBAL`).
+    const base = Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+    );
 
     return new Promise((resolve, reject) => {
         const child = execFile(
