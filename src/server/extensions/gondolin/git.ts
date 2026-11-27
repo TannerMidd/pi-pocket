@@ -145,6 +145,46 @@ export function gitMounts(cwd: string): GitMounts {
     };
 }
 
+/** What the guest's git says when someone rebases: the state of a rebase is held (`policy.ts`). */
+export const NO_REBASE =
+    "pi-pocket sandbox: git keeps the state of a rebase, of git am, and of a cherry-pick or revert of several commits in files that git runs commands from, so this sandbox may not write them. Rebase from the host: ask the person to run it there.";
+
+/**
+ * The guest's `git`, in `/usr/local/bin` before the real one: `rebase` and `am` say at once what they cannot do, and
+ * `pull`, `cherry-pick`, and `revert` add it when they fail because of the held state. Everything else is the real git.
+ */
+export const GIT_WRAPPER = [
+    "#!/bin/sh",
+    "# pi-pocket sandbox: git, with a clear word for what the sandbox cannot do.",
+    "real=/usr/bin/git",
+    '[ -x "$real" ] || { echo "git: not found" >&2; exit 127; }',
+    "cmd=",
+    "skip=0",
+    'for arg in "$@"; do',
+    '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
+    '  case "$arg" in',
+    "    -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env) skip=1 ;;",
+    "    -*) ;;",
+    '    *) cmd="$arg"; break ;;',
+    "  esac",
+    "done",
+    'case "$cmd" in',
+    `  rebase|am) echo ${JSON.stringify(NO_REBASE)} >&2; exit 1 ;;`,
+    "  pull|cherry-pick|revert)",
+    '    log=$(mktemp) || exec "$real" "$@"',
+    '    "$real" "$@" 2>"$log"; code=$?',
+    '    cat "$log" >&2',
+    '    if grep -qiE "rebase-merge|rebase-apply|sequencer" "$log"; then',
+    `      echo ${JSON.stringify(NO_REBASE)} >&2`,
+    '      [ "$code" -eq 0 ] && code=1',
+    "    fi",
+    '    rm -f "$log"',
+    '    exit "$code" ;;',
+    "esac",
+    'exec "$real" "$@"',
+    "",
+].join("\n");
+
 /** What the VM's `/etc/gitconfig` holds: trust for the mounted folders, a default author, and no way to sign in. */
 export function guestGitConfig(safeDirectories: readonly string[]): string {
     const quote = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;

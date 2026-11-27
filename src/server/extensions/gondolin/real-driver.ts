@@ -24,7 +24,7 @@ import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { guestGitConfig } from "./git.ts";
+import { GIT_WRAPPER, guestGitConfig } from "./git.ts";
 import { gitDirMatcher, protectedMatcher } from "./policy.ts";
 import type {
     Backend,
@@ -883,6 +883,15 @@ export class GondolinDriver implements SandboxDriver {
             );
         } catch {
             // without it git in the guest says "dubious ownership": the call that needs it says so
+        }
+
+        // The guest's `git`: the real one, with a clear word for a rebase, which the sandbox may not do.
+        try {
+            await vm.fs.mkdir("/usr/local/bin", { recursive: true });
+            await vm.fs.writeFile("/usr/local/bin/git", Buffer.from(GIT_WRAPPER, "utf8"));
+            await vm.exec(["/bin/sh", "-c", "chmod 755 /usr/local/bin/git"]);
+        } catch {
+            // without it a rebase fails with git's own words: the state is held either way
         }
 
         return new GondolinVm(vm);

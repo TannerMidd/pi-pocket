@@ -106,14 +106,8 @@ const CHANGES = new Set([
     "write",
 ]);
 
-/**
- * Whether `rest`, the path below a git folder, is a file that points Git at another folder: with it the host's `git`
- * would read the config and hooks of a folder that the guest made. They are `commondir` (where the shared config, hooks,
- * and objects are) of the repository, of a linked worktree (`worktrees/<name>/`), or of a submodule (`modules/<name>/`,
- * nested ones too); the `gitdir` of a linked worktree or a submodule; and the lists of other object stores. A branch
- * or a worktree named like one of them is no such file: only the places Git looks at count.
- */
-function redirectsGit(rest: string[]): boolean {
+/** `rest` without the `worktrees/<name>/` and `modules/<name>/` that lead to a git folder of its own (nested ones too). */
+function ownFiles(rest: string[]): { inner: string[]; nested: boolean } {
     let inner = rest;
     let nested = false;
 
@@ -122,6 +116,26 @@ function redirectsGit(rest: string[]): boolean {
         nested = true;
     }
 
+    return { inner, nested };
+}
+
+/**
+ * The folders in which git keeps the state of a rebase, an `am`, or a cherry-pick or revert of several commits. Git turns
+ * what is in them into commands: `git rebase --continue` runs the `exec` lines of `rebase-merge/git-rebase-todo`, and
+ * `git rebase --continue` on the host cannot tell a rebase that the guest started from one it faked. So the guest may
+ * not create or change them: `git rebase` and `git am` fail in the sandbox, and the owner runs them on the host.
+ */
+const SEQUENCER_STATE = new Set(["rebase-merge", "rebase-apply", "sequencer"]);
+
+/**
+ * Whether `rest`, the path below a git folder, is a file that points Git at another folder: with it the host's `git`
+ * would read the config and hooks of a folder that the guest made. They are `commondir` (where the shared config, hooks,
+ * and objects are) of the repository, of a linked worktree (`worktrees/<name>/`), or of a submodule (`modules/<name>/`,
+ * nested ones too); the `gitdir` of a linked worktree or a submodule; and the lists of other object stores. A branch
+ * or a worktree named like one of them is no such file: only the places Git looks at count.
+ */
+function redirectsGit(rest: string[]): boolean {
+    const { inner, nested } = ownFiles(rest);
     const name = inner.join("/");
 
     return (
@@ -137,7 +151,8 @@ function redirectsGit(rest: string[]): boolean {
  * host's own `git` runs from the guest's hands: a repository's config (an `fsmonitor`, a `pager`, an `sshCommand` run as
  * the owner when Pi Pocket's Changes panel or the owner's shell uses git), its hooks, its `info` folder, the files that
  * name filters and submodules, the files that point Git at another folder (`commondir`, a linked worktree's `gitdir`,
- * `objects/info/alternates`), and any change to an entry named `.git` (a swap of the whole repository folder). The
+ * `objects/info/alternates`), the state of a rebase, `am`, or sequence of picks (`rebase-merge`, `rebase-apply`,
+ * `sequencer`: git runs the `exec` lines in it), and any change to an entry named `.git` (a swap of the whole repository folder). The
  * guest still reads everything except these files, which look missing to it.
  */
 function gitProtected(segments: string[], op: string): boolean {
@@ -167,7 +182,9 @@ function gitProtected(segments: string[], op: string): boolean {
             return true;
         }
 
-        if (redirectsGit(segments.slice(at + 1))) {
+        const rest = segments.slice(at + 1);
+
+        if (redirectsGit(rest) || SEQUENCER_STATE.has(ownFiles(rest).inner[0] ?? "")) {
             return true;
         }
 

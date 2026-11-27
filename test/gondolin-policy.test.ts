@@ -54,6 +54,15 @@ test("git's config, hooks, info, and the files that name filters are out of the 
         "/.git/objects/info/http-alternates",
         "/.git/modules/sub/objects/info/alternates",
         "/.GIT/CommonDir",
+        // The state of a rebase, `am`, and a sequence of picks: git runs commands from it.
+        "/.git/rebase-merge",
+        "/.git/rebase-merge/git-rebase-todo",
+        "/pkg/.git/rebase-merge/git-rebase-todo",
+        "/.git/rebase-apply/head-name",
+        "/.git/sequencer/todo",
+        "/.git/worktrees/w/rebase-merge/git-rebase-todo",
+        "/.git/modules/sub/rebase-merge/git-rebase-todo",
+        "/.GIT/Rebase-Merge/Git-Rebase-Todo",
         "/.gitmodules",
         "/a/b/.gitattributes",
         // Case-insensitive file systems.
@@ -70,6 +79,11 @@ test("git's config, hooks, info, and the files that name filters are out of the 
         "/.git/refs/heads/main",
         // A branch or a worktree with such a name is no pointer file.
         "/.git/refs/heads/commondir",
+        "/.git/refs/heads/rebase-merge",
+        "/.git/MERGE_HEAD",
+        "/.git/CHERRY_PICK_HEAD",
+        "/.git/ORIG_HEAD",
+        "/src/rebase-merge/a.ts",
         "/.git/refs/heads/gitdir",
         "/.git/worktrees/commondir/HEAD",
         "/.git/worktrees/refs/index",

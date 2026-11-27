@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+    cpSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
@@ -127,9 +128,14 @@ function inVm(cwd: string, command: string, extra: Partial<VmTarget> = {}, vms =
     const env = vms.envFor(rootId, { rootId, cwd, uploadDir: undefined, ...extra });
     let output = "";
 
+    // Each call has a VM of its own, and ends it: the most that run at once is a limit of the manager's.
     return env
         .exec(command, { onOutput: (text) => (output += text), timeout: 90 }, context)
-        .then((result) => ({ result, output }));
+        .then(async (result) => {
+            await vms.stop(rootId, "the call ended");
+
+            return { result, output };
+        });
 }
 
 test("git works in the VM: status, diff, add, commit, branch, log, stash; config and hooks are read only", async (t) => {
@@ -806,4 +812,125 @@ test("what the repository's configuration names in the folder cannot be written,
 
     assert.match(later, /newpath=[1-9]/, later);
     assert.ok(!readFileSync(join(repo, ".newhooks", "post-checkout"), "utf8").includes("evil"));
+});
+
+test("the guest cannot fake a stopped rebase whose todo list runs a command when the owner continues on the host", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("rebase");
+    const git = (...args: string[]) =>
+        execFileSync("git", args, {
+            cwd: repo,
+            encoding: "utf8",
+            env: {
+                ...process.env,
+                ...author,
+                GIT_SEQUENCE_EDITOR: "sed -i -e '1s/^pick/edit/'",
+                GIT_EDITOR: "true",
+            },
+        });
+
+    for (const name of ["b", "c"]) {
+        writeFileSync(join(repo, `${name}.txt`), `${name}\n`);
+        git("add", ".");
+        git("commit", "-q", "-m", name);
+    }
+
+    // The state of a rebase that stopped at its first commit, as git itself writes it: the guest copies it.
+    git("rebase", "-q", "-i", "HEAD~2");
+    const stopped = git("rev-parse", "HEAD").trim();
+
+    cpSync(join(repo, ".git", "rebase-merge"), join(repo, "bundle"), { recursive: true });
+    git("rebase", "--abort");
+
+    const guest = await inVm(
+        repo,
+        [
+            `git checkout -q --detach ${stopped}; echo detach=$?`,
+            "cp -r bundle .git/rebase-merge; echo copy=$?",
+            "echo 'exec touch EVIL_EXEC_RAN' >> .git/rebase-merge/git-rebase-todo; echo todo=$?",
+        ].join("; "),
+    );
+
+    for (const name of ["copy", "todo"]) {
+        assert.match(guest.output, new RegExp(`${name}=[1-9]`), `${name}: ${guest.output}`);
+    }
+
+    // What the owner does next on the host: there is no rebase to continue, and nothing of the guest's runs.
+    try {
+        git("rebase", "--continue");
+    } catch {
+        // "No rebase in progress" is the right answer
+    }
+
+    assert.equal(
+        existsSync(join(repo, "EVIL_EXEC_RAN")),
+        false,
+        "the host ran the guest's exec line",
+    );
+
+    // The other state that git turns into commands, and the state of a linked worktree.
+    const more = await inVm(
+        repo,
+        [
+            "mkdir .git/sequencer; echo sequencer=$?",
+            "mkdir .git/rebase-apply; echo apply=$?",
+            "mkdir -p .git/worktrees/w/rebase-merge; echo worktree=$?",
+        ].join("; "),
+    );
+
+    for (const name of ["sequencer", "apply", "worktree"]) {
+        assert.match(more.output, new RegExp(`${name}=[1-9]`), `${name}: ${more.output}`);
+    }
+
+    assert.equal(existsSync(join(repo, ".git", "sequencer")), false);
+    assert.equal(existsSync(join(repo, ".git", "rebase-apply")), false);
+});
+
+test("a rebase in the sandbox fails with a clear word, and the rest of git works", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const repo = repository("rebase-words");
+
+    for (const name of ["b", "c"]) {
+        writeFileSync(join(repo, `${name}.txt`), `${name}\n`);
+        onHost(repo, "add", ".");
+        onHost(repo, "commit", "-q", "-m", name);
+    }
+
+    onHost(repo, "branch", "side", "HEAD~1");
+    onHost(repo, "checkout", "-q", "side");
+    writeFileSync(join(repo, "d.txt"), "d\n");
+    onHost(repo, "add", ".");
+    onHost(repo, "commit", "-q", "-m", "d");
+    onHost(repo, "checkout", "-q", "main");
+    const { output } = await inVm(
+        repo,
+        [
+            "git rebase side 2>&1; echo rebase=$?",
+            "git -C . rebase -i HEAD~1 2>&1; echo rebasec=$?",
+            "git -c core.editor=true rebase --continue 2>&1; echo rebaseconfig=$?",
+            "git am nothing.patch 2>&1; echo am=$?",
+            "git pull --rebase . side 2>&1; echo pull=$?",
+            "git cherry-pick HEAD~1 HEAD 2>&1; echo pick=$?",
+            "git status --short; echo status=$?",
+            "git log --oneline | head -1",
+            "git checkout -q side && git cherry-pick main 2>&1 | tail -1; echo single=$?",
+        ].join("; "),
+    );
+
+    assert.equal(output.split("Rebase from the host").length - 1 >= 5, true, output);
+
+    for (const name of ["rebase", "rebasec", "rebaseconfig", "am", "pull", "pick"]) {
+        assert.match(output, new RegExp(`${name}=[1-9]`), `${name}: ${output}`);
+    }
+
+    assert.match(output, /status=0/);
+    assert.doesNotMatch(output, /fatal: not a git/);
+    assert.equal(existsSync(join(repo, ".git", "rebase-merge")), false);
+    assert.equal(existsSync(join(repo, ".git", "sequencer")), false);
 });
