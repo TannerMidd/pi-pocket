@@ -254,14 +254,20 @@ export class Place {
                 : this.#host.classified(joined, join(this.#label, ...parts));
         }
 
+        const confined: Located = {
+            kind: "confined",
+            start: this.located.start,
+            parts: [...this.located.parts, ...parts],
+            ...(this.located.root === undefined ? {} : { root: this.located.root }),
+        };
+        const label = join(this.#label, ...parts);
+
+        // A child that enters a pinned nested folder (a walk from above it) carries that pin.
         return new Place(
-            {
-                kind: "confined",
-                start: this.located.start,
-                parts: [...this.located.parts, ...parts],
-                ...(this.located.root === undefined ? {} : { root: this.located.root }),
-            },
-            join(this.#label, ...parts),
+            this.located.root === undefined && this.#host !== undefined
+                ? this.#host.pinned(confined, label)
+                : confined,
+            label,
             this.#host,
         );
     }
@@ -1713,6 +1719,8 @@ export class Hostfs {
     readonly #held = new Map<string, { fd: number; holders: Set<string> }>();
     /** The key of each nested pin, by stated path, for teardown. */
     readonly #heldNested = new Map<string, string>();
+    /** The identity of each nested pin, by stated path: any place built from a path inside one carries the pin. */
+    readonly #pins = new Map<string, { dev: bigint; ino: bigint }>();
 
     /**
      * `maxPins`: how many root descriptors are held at once, sandboxed folders and nested pins together (default 256,
@@ -1734,8 +1742,11 @@ export class Hostfs {
         const target = resolve(path);
         const key = this.#heldNested.get(target);
 
+        // The view's holds are brought up to date first: a root that is still listed keeps its descriptor.
+        this.#folders();
         this.#roots.delete(target);
         this.#heldNested.delete(target);
+        this.#pins.delete(target);
 
         if (key !== undefined) {
             this.#drop(key, `nested:${target}`);
@@ -1756,6 +1767,7 @@ export class Hostfs {
 
         this.#roots.clear();
         this.#heldNested.clear();
+        this.#pins.clear();
     }
 
     /**
@@ -1837,11 +1849,51 @@ export class Hostfs {
 
     /** A place for `located`, with the descriptor of the sandboxed folder it is in held. */
     #placed(located: Located, label: string): Place {
-        if (located.kind === "confined") {
-            this.#holdStart(located.start);
+        let at = located;
+
+        if (at.kind === "confined") {
+            this.#holdStart(at.start);
+
+            // A place built from a path inside a pinned nested folder carries that pin, so a rebuild from a path does
+            // not drop the admitted-root check.
+            if (at.root === undefined && this.#pins.size > 0) {
+                at = this.#withPin(at, label);
+            }
         }
 
-        return new Place(located, label, this);
+        return new Place(at, label, this);
+    }
+
+    /** @internal: `at` with the pin of the nested folder it lies in, if any. */
+    pinned(at: Located, label: string): Located {
+        return at.kind === "confined" && at.root === undefined && this.#pins.size > 0
+            ? this.#withPin(at, label)
+            : at;
+    }
+
+    #withPin(at: Located & { kind: "confined" }, label: string): Located {
+        const shown = resolve(label);
+        let best: { path: string; depth: number } | undefined;
+
+        for (const path of this.#pins.keys()) {
+            if (!within(path, shown) || !within(at.start.path, path)) {
+                continue;
+            }
+
+            const depth = relative(at.start.path, path).split(sep).filter(Boolean).length;
+
+            if (
+                depth >= 1 &&
+                depth <= at.parts.length &&
+                (best === undefined || depth > best.depth)
+            ) {
+                best = { path, depth };
+            }
+        }
+
+        return best === undefined
+            ? at
+            : { ...at, root: { depth: best.depth, ...this.#pins.get(best.path)! } };
     }
 
     #folders(): Folder[] {
@@ -1851,14 +1903,18 @@ export class Hostfs {
             key: keyOf(each),
         }));
 
-        // A sandboxed folder that the view no longer lists loses the view's hold; a nested pin on it keeps its own.
-        if (this.#held.size > 0) {
-            const live = new Set(listed.map((each) => each.key));
+        // The view's holds follow what the view lists, at every look: a listed root has one, whichever path pinned it, and
+        // a root that is no longer listed loses it (a nested pin keeps its own).
+        const live = new Set<string>();
 
-            for (const [key, entry] of [...this.#held]) {
-                if (!live.has(key) && entry.holders.has("view")) {
-                    this.#drop(key, "view");
-                }
+        for (const each of listed) {
+            live.add(each.key);
+            this.#holdStart(each);
+        }
+
+        for (const [key, entry] of [...this.#held]) {
+            if (!live.has(key) && entry.holders.has("view")) {
+                this.#drop(key, "view");
             }
         }
 
@@ -1917,6 +1973,7 @@ export class Hostfs {
                         }
 
                         this.#heldNested.set(target, key);
+                        this.#pins.set(target, identity);
                     }
 
                     if (known === undefined) {

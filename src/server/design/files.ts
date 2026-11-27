@@ -22,8 +22,16 @@ export function localFolder(cwd: string | undefined): string | undefined {
     return cwd === undefined || workspaceScheme(cwd) !== undefined ? undefined : cwd;
 }
 
-export async function writeExport(cwd: FolderRef, path: string, bytes: Buffer): Promise<string> {
+export async function writeExport(
+    cwd: FolderRef,
+    path: string,
+    bytes: Buffer,
+    /** @internal A test hook, after the first look at the folder: where a guest can replace it. */
+    afterCheck?: () => void | Promise<void>,
+): Promise<string> {
     const root = await realpathAsync(cwd.at());
+
+    await afterCheck?.();
     const target = resolve(root, path);
     const local = relative(root, target);
 
@@ -31,7 +39,8 @@ export async function writeExport(cwd: FolderRef, path: string, bytes: Buffer): 
         throw new Error("Export paths must stay inside the session folder.");
     }
 
-    let parent = cwd.host.at(root);
+    // Every place is derived from the folder itself, so its admitted root is checked at each step.
+    let parent = cwd.at();
 
     for (const part of relative(root, dirname(target)).split(sep).filter(Boolean)) {
         parent = parent.child(part);
@@ -57,7 +66,7 @@ export async function writeExport(cwd: FolderRef, path: string, bytes: Buffer): 
     try {
         await handle.writeFile(bytes);
         await handle.close();
-        await renameAsync(temporary, cwd.host.at(target));
+        await renameAsync(temporary, cwd.at(local));
     } finally {
         await handle.close();
         await rmAsync(temporary, { force: true });

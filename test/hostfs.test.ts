@@ -877,3 +877,46 @@ test(
         host.close();
     },
 );
+
+test(
+    "a listed root holds a view descriptor whichever path pinned it, so ending a nested pin first does not close it",
+    { skip: !linux },
+    (t) => {
+        const { root } = lab(t);
+        const nested = join(root, "sub");
+        const outer = statSync(root, { bigint: true });
+        const inner = statSync(nested, { bigint: true });
+        const host = new hostfs.Hostfs({
+            sandboxedFolders: () => [
+                { path: root, dev: outer.dev, ino: outer.ino },
+                { path: nested, dev: inner.dev, ino: inner.ino },
+            ],
+        });
+
+        // Both roots are listed, and the nested one is pinned first, with no other call that would hold it for the view.
+        host.folder(nested);
+        host.unpinRoot(nested);
+        assert.equal(host.heldRoots, 2, "both listed roots keep their descriptors");
+        host.close();
+    },
+);
+
+test(
+    "a place made from a path inside a pinned nested folder carries the pin",
+    { skip: !linux },
+    (t) => {
+        const { root, host } = lab(t);
+        const nested = join(root, "sub");
+
+        host.folder(nested);
+        rmSync(nested, { recursive: true });
+        mkdirSync(nested);
+        writeFileSync(join(nested, "deep.txt"), "forged");
+
+        // Rebuilt from the stated path, not from the folder: the admitted-root check is still there.
+        assert.throws(() => hostfs.readText(host.at(join(nested, "deep.txt"))), { code: "ESTALE" });
+        assert.throws(() => hostfs.readText(host.at(root).child("sub").child("deep.txt")), {
+            code: "ESTALE",
+        });
+    },
+);

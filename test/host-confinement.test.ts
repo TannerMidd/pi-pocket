@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { context, modelTexts, newSession, openApp, owner, scriptedModel } from "./helpers.ts";
 import { getAgentDir, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
+import { writeExport } from "../src/server/design/files.ts";
 import { type Place, readText, type SandboxView } from "../src/server/hostfs.ts";
 
 const linux = process.platform === "linux";
@@ -332,5 +333,40 @@ test(
 
         replace();
         await assert.rejects(second.workspace.viewFile(other, owner(second), "a.txt"), refused);
+    },
+);
+
+test(
+    "an export is written from the admitted root: a nested folder replaced after the first look is refused",
+    { skip: !linux, timeout: 60_000 },
+    async (t) => {
+        const { base, dir, view } = project();
+        const inner = join(dir, "inner");
+        const app = await openApp(scriptedModel(), join(base, "data"), undefined, undefined, view);
+
+        t.after(async () => {
+            await app.close();
+            rmSync(base, { recursive: true, force: true });
+        });
+        mkdirSync(inner);
+
+        const id = await newSession(app, inner);
+
+        const replace = () => {
+            rmSync(inner, { recursive: true });
+            mkdirSync(inner);
+        };
+
+        await assert.rejects(
+            writeExport(app.folderOf(id), "exports/a.txt", Buffer.from("data"), replace),
+            {
+                code: "ESTALE",
+            },
+        );
+        assert.equal(
+            existsSync(join(inner, "exports")),
+            false,
+            "nothing was written into the replacement",
+        );
     },
 );
