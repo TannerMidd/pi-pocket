@@ -157,6 +157,11 @@ async function ready(): Promise<void> {
     await until(
         async () =>
             await inPage<boolean>(`
+            // A document still being read has no import map yet: an import now fails, and stays failed.
+            if (document.readyState === "loading") {
+                return JSON.stringify(false);
+            }
+
             const { store } = await import("/store.js");
 
             return JSON.stringify(store.state.me != null && store.state.sessionsLoaded && store.state.connection === "open");
@@ -581,8 +586,11 @@ test(
         // The held stream and poll now answer as the signed-in person, not the one this page took: the page reloads
         // itself to start again. Wait for that, or it can come in the next test's own navigation and take its place.
         await until(
+            // A read while the document is being replaced fails: that is the reload, not yet its end.
             async () =>
-                await inPage<boolean>(`return JSON.stringify(window.beforeTheChange !== true)`),
+                await inPage<boolean>(
+                    `return JSON.stringify(window.beforeTheChange !== true)`,
+                ).catch(() => false),
             "the page's reload for the change of person",
             15_000,
         );
