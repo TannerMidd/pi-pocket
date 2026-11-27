@@ -548,7 +548,7 @@ test("in a real VM, tasks that start together each keep a process, and a stricte
     try {
         const answers = await Promise.all(
             ["one", "two", "three"].map((word) =>
-                api.start({ command: `echo ${word}; read line`, key: word }),
+                api.start({ command: `echo ${word}; tail -f /dev/null`, key: word }),
             ),
         );
 
@@ -578,6 +578,49 @@ test("in a real VM, tasks that start together each keep a process, and a stricte
         assert.equal(vms.state(31)?.network, "off");
         assert.equal(vms.state(31)?.stale, false);
         assert.equal(vms.running, 1);
+    } finally {
+        await vms.stopAll("the test ended").catch(() => undefined);
+    }
+});
+
+test("in a real VM, a task that starts while stricter rules replace the VM runs in the new VM", async (t) => {
+    if (unavailable(t)) {
+        return;
+    }
+
+    const folder = realpathSync(mkdtempSync(join(scratch, "replace-")));
+    let network: "allowlist" | "off" = "allowlist";
+    let jobs: VmJobs | undefined;
+    const vms = new SandboxManager({
+        driver: driver!,
+        log: () => {},
+        pidFile: join(folder, "vms.json"),
+        settings: () => settings("pocket-base:latest", { network, idleMinutes: 0, maxVms: 1 })(),
+        onEnded: (rootId, reason) => jobs?.vmEnded(rootId, reason),
+    });
+
+    jobs = new VmJobs({
+        file: join(folder, "jobs.json"),
+        spawn: (target: VmTarget, command: string, spawnOptions: object) =>
+            vms.spawnShell(target, command, spawnOptions),
+        hold: (target: VmTarget) => vms.hold(target),
+        limits: () => ({ running: 5, taskQuietMs: 0 }),
+        log: () => {},
+    });
+    const api = jobs.for({ rootId: 32, cwd: folder, uploadDir: undefined, own: true });
+
+    try {
+        await api.start({ command: "echo old; tail -f /dev/null", key: "old" });
+        await until(async () => (await api.output("vm-1")).includes("old"), "the first task");
+        network = "off";
+        assert.match(
+            await api.start({ command: "echo fresh; tail -f /dev/null", key: "new" }),
+            /Started vm-2/,
+        );
+        await until(async () => (await api.output("vm-2")).includes("fresh"), "the new task");
+        assert.match(await api.list(), /vm-1: ended/);
+        assert.match(await api.list(), /vm-2: running/);
+        assert.equal(vms.state(32)?.network, "off");
     } finally {
         await vms.stopAll("the test ended").catch(() => undefined);
     }

@@ -291,7 +291,9 @@ export class VmJobs {
     /** The VM of a session ended (stopped, crashed, or the server stops): what ran in it ended. */
     vmEnded(rootId: number, reason: string): void {
         for (const task of this.#tasks.get(rootId)?.values() ?? []) {
-            if (task.status === "running") {
+            // A task whose process is still starting is not in the VM that ended: it starts in the one that replaces
+            // it, or its start fails. Once it has a process, the end of the VM ends the process, and so the task.
+            if (task.status === "running" && task.starting === undefined) {
                 task.note = reason;
                 this.#finish(task, "ended");
             }
@@ -479,7 +481,7 @@ export class VmJobs {
                 spawned();
 
                 if (task.status !== "running") {
-                    // The VM ended while the process started: it ends too.
+                    // Something ended the task while its process started: the process ends too.
                     abort.abort();
                     release();
 
@@ -561,6 +563,17 @@ export class VmJobs {
                 const task = tasks().get(id);
 
                 if (task === undefined) {
+                    return `There is no background task ${id}.`;
+                }
+
+                if (task.status !== "running") {
+                    return `${task.id} had already ended: ${outcome(task)}.`;
+                }
+
+                // A task whose process is still starting has none to stop yet: it ends when the process is there.
+                await task.starting?.catch(() => undefined);
+
+                if (tasks().get(id) !== task) {
                     return `There is no background task ${id}.`;
                 }
 

@@ -13,7 +13,7 @@ import type {
 } from "../src/server/extensions/gondolin/guest.ts";
 import { VmJobs, type JobTarget } from "../src/server/extensions/gondolin/jobs.ts";
 import { SandboxManager, type SandboxSettings } from "../src/server/extensions/gondolin/manager.ts";
-import { context } from "./helpers.ts";
+import { context, until } from "./helpers.ts";
 import { FakeDriver } from "./gondolin-fake.ts";
 
 const roots: string[] = [];
@@ -482,4 +482,80 @@ test("the owner's list of running sandboxes is read again when VMs change, not o
     await later(20);
     assert.equal(sheet.hostReads(), first + 2);
     unmount();
+});
+
+// ─── A VM that is replaced does not end a task that starts in the new one ───
+
+test("a task that starts while the stricter rules replace the VM runs in the new VM, and the task in the old VM ends", async () => {
+    const driver = new FakeDriver();
+    const directory = temp();
+    const current = { value: settings({ network: "open" }) };
+
+    let ended: (rootId: number, reason: string) => void = () => {};
+
+    const vms = new SandboxManager({
+        driver,
+        log: () => {},
+        pidFile: join(directory, "vms.json"),
+        settings: () => current.value,
+        onEnded: (rootId, reason) => ended(rootId, reason),
+    });
+    const instance = new VmJobs({
+        file: join(directory, "jobs.json"),
+        spawn: (target, command, options) => vms.spawnShell(target, command, options),
+        hold: (target) => vms.hold(target),
+        limits: () => ({ running: 5, taskQuietMs: 0 }),
+        log: () => {},
+    });
+    const target = { rootId: 9, cwd: directory, uploadDir: undefined };
+    const api = instance.for({ ...target, own: true });
+
+    ended = (rootId, reason) => instance.vmEnded(rootId, reason);
+
+    try {
+        assert.match(
+            await api.start({ command: "echo old; tail -f /dev/null", key: "old" }),
+            /Started vm-1/,
+        );
+        await until(async () => (await api.output("vm-1")).includes("old"), "the first task");
+
+        // The rules get stricter; the next start replaces the VM, and its call is the one that ends the old one.
+        current.value = settings({ network: "off" });
+        driver.startDelay = 100;
+        const started = await api.start({
+            command: "echo fresh; tail -f /dev/null",
+            key: "new",
+        });
+
+        assert.match(started, /Started vm-2/);
+        assert.doesNotMatch(started, /since/);
+        assert.equal(driver.log.started.length, 2);
+        assert.equal(driver.log.closed.length, 1, "the old VM ended");
+        await later(300);
+        const list = await api.list();
+
+        assert.match(list, /vm-1: ended/, "the task in the old VM ended with it");
+        assert.match(list, /vm-2: running/, "the task in the new VM runs");
+        assert.match(await api.output("vm-2"), /fresh/);
+
+        // A task whose VM ends while it runs still ends.
+        await vms.stop(9, "the test");
+        await later(300);
+        assert.match(await api.list(), /vm-2: ended/);
+    } finally {
+        await vms.stopAll("the test ended");
+    }
+});
+
+test("a stop that comes while the process starts waits for it and then ends it, with nothing left running", async () => {
+    const { api, started } = jobs({ spawnDelay: 80 });
+    const first = api.start({ command: "wait", key: "slow" });
+
+    await later(10);
+    const stopped = await api.stop("vm-1");
+
+    assert.match(await first, /Started vm-1/);
+    assert.match(stopped, /Stopped vm-1/);
+    assert.match(await api.list(), /vm-1: stopped/);
+    assert.equal(started.length, 1);
 });
