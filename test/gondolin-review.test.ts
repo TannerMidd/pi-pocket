@@ -368,13 +368,16 @@ test("the manager says when a VM goes from idle to working and back", async () =
 });
 
 /** The sheet's browser module, with a `pocket` that records what it listens to. */
-async function openSheet() {
+async function openSheet(
+    markup?: (strings: TemplateStringsArray, ...values: unknown[]) => unknown,
+) {
     const listeners = new Map<string, Set<() => void>>();
     let host = 0;
     const effects: (() => (() => void) | undefined)[] = [];
     const states = new Map<number, unknown>();
     let slot = 0;
-    const html = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+    const html =
+        markup ?? ((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values }));
     const pocket = {
         html,
         useEffect: (effect: () => (() => void) | undefined) => effects.push(effect),
@@ -436,7 +439,19 @@ async function openSheet() {
             return node as never;
         }
 
-        for (const value of (node as { values?: unknown[] } | null)?.values ?? []) {
+        if (typeof node !== "object" || node === null) {
+            return undefined;
+        }
+
+        const parts = Array.isArray(node)
+            ? node
+            : [
+                  ...((node as { values?: unknown[] } | null)?.values ?? []),
+                  ...((node as { kids?: unknown[] } | null)?.kids ?? []),
+                  (node as { fn?: unknown } | null)?.fn,
+              ];
+
+        for (const value of parts) {
             const found = find(value, name);
 
             if (found !== undefined) {
@@ -458,6 +473,19 @@ async function openSheet() {
             const cleanups = effects.map((effect) => effect());
 
             return () => cleanups.forEach((cleanup) => cleanup?.());
+        },
+        /** The owner's part of the sheet as text, with the host's answer and the confirm that is open. */
+        render: async (input: {
+            host: unknown;
+            sure: string | null;
+            flat: (node: unknown) => string;
+        }) => {
+            slot = 0;
+            states.set(1, input.host);
+            states.set(4, input.sure);
+            effects.length = 0;
+
+            return input.flat(Host());
         },
         fire: (name: string) => listeners.get(name)?.forEach((listener) => listener()),
         hostReads: () => host,
@@ -558,4 +586,112 @@ test("a stop that comes while the process starts waits for it and then ends it, 
     assert.match(stopped, /Stopped vm-1/);
     assert.match(await api.list(), /vm-1: stopped/);
     assert.equal(started.length, 1);
+});
+
+// ─── The sheet shows the VM that lives, with its own size ───────────────────
+
+test("a VM that has stopped shows the settings, not the rules and the size it had", async () => {
+    const driver = new FakeDriver();
+    const directory = temp();
+    const current = {
+        value: settings({
+            network: "allowlist",
+            allowedHosts: ["example.com", "b.test"],
+            memoryMb: 2048,
+            cpus: 2,
+        }),
+    };
+    const vms = manager(driver, directory, current);
+    const env = vms.envFor(4, { rootId: 4, cwd: directory, uploadDir: undefined });
+
+    assert.ok((await env.exec("true", undefined, context)).ok);
+    const alive = vms.state(4)!;
+
+    assert.equal(alive.network, "allowlist");
+    assert.deepEqual(alive.allowedHosts, ["example.com", "b.test"]);
+    assert.equal(alive.memoryMb, 2048);
+    assert.equal(alive.cpus, 2);
+
+    // The size settings change: the VM that lives keeps its own size, and says so.
+    current.value = settings({ ...current.value, memoryMb: 1024, cpus: 1 });
+    assert.equal(vms.state(4)!.memoryMb, 2048);
+    assert.equal(vms.state(4)!.cpus, 2);
+
+    // Stricter rules end it: it shows the rules the settings give now.
+    current.value = settings({
+        ...current.value,
+        network: "off",
+        mount: "ro",
+        allowedHosts: [],
+    });
+    assert.deepEqual(await vms.enforce(), [4]);
+    const stopped = vms.state(4)!;
+
+    assert.equal(stopped.phase, "stopped");
+    assert.equal(stopped.network, "off");
+    assert.equal(stopped.mount, "ro");
+    assert.deepEqual(stopped.allowedHosts, []);
+    assert.equal(stopped.memoryMb, 1024);
+    assert.equal(stopped.cpus, 1);
+    assert.equal(stopped.stale, false);
+    await vms.stopAll("the test ended");
+});
+
+// ─── The words of the sheet, as the app's htm makes them ────────────────────
+
+test("the sheet's text keeps its spaces and lays each VM out as a title, a folder, and a state", async () => {
+    const { default: htm } = (await import("htm")) as unknown as {
+        default: { bind: (h: never) => unknown };
+    };
+    const flat = (node: unknown): string =>
+        Array.isArray(node)
+            ? node.map(flat).join("")
+            : typeof node === "object" && node !== null
+              ? `${(node as { open: string }).open}${flat((node as { kids: unknown }).kids)}${(node as { close: string }).close}`
+              : node === null || node === undefined || node === false
+                ? ""
+                : String(node);
+    const h = (type: unknown, props: Record<string, unknown> | null, ...kids: unknown[]) =>
+        typeof type === "function"
+            ? { open: "", kids: [], close: "", fn: type }
+            : { open: `<${String(type)}>`, kids, close: `</${String(type)}>`, props };
+    const html = htm.bind(h as never) as (...args: unknown[]) => unknown;
+    const sheet = await openSheet(html as never);
+    const text = await sheet.render({
+        sure: "browser",
+        host: {
+            check: { lines: [] },
+            running: 0,
+            max: 3,
+            vms: [
+                { rootId: 3, title: "Fix the build", cwd: "/tmp/gdl/w1", busy: 1 },
+                { rootId: 13, title: "", cwd: "/tmp/gdl/w2", busy: 0 },
+            ],
+            setup: { running: false, lines: [], error: null, done: false },
+            estimate: {
+                plain: { download: "about 110 MB", disk: "about 330 MB", time: "a minute or two" },
+                browser: {
+                    download: "about 250 MB",
+                    disk: "about 1.2 GB",
+                    time: "two to five minutes",
+                },
+            },
+        },
+        flat,
+    });
+
+    assert.match(text, /0 of 3 VMs running\./);
+    assert.match(
+        text,
+        /folder "gondolin" of the data folder, downloads the standard image, and builds an image with Chromium on this machine: about 250 MB, about 1\.2 GB on disk, two to five minutes\./,
+    );
+    // Each VM: the title (or the id when there is none), the folder, and the state, as parts.
+    assert.match(
+        text,
+        /<strong>Fix the build<\/strong><span>\/tmp\/gdl\/w1<\/span><span>Working<\/span>/,
+    );
+    assert.match(
+        text,
+        /<strong>Session 13<\/strong><span>\/tmp\/gdl\/w2<\/span><span>Idle<\/span>/,
+    );
 });

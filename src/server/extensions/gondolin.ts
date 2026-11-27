@@ -586,13 +586,16 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
     web.route(
         "GET",
         "host",
-        async () => {
+        async (request) => {
             const result = lastCheck ?? (await check());
+            const titles = new Map(
+                request.sessions().map((session) => [session.id, session.title]),
+            );
 
             return {
                 check: result,
                 running: manager.running,
-                vms: manager.vms(),
+                vms: manager.vms().map((vm) => ({ ...vm, title: titles.get(vm.rootId) ?? "" })),
                 max: settings().maxVms,
                 setup: {
                     running: setup.running,
@@ -694,6 +697,7 @@ export default function createGondolin(host: PocketHost, web?: ExtensionWeb) {
             await manager.stopAll("Gondolin was removed");
             manager.resume();
             await driver.remove();
+            Object.assign(setup, { lines: [], error: undefined, done: false });
             lastCheck = undefined;
             await check().catch(() => undefined);
 

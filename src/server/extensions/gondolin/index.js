@@ -20,6 +20,25 @@ function size(mb) {
     return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${mb} MB`;
 }
 
+/** A VM's size in words. It is a string, so the layout of the markup cannot take a space out of it. */
+function sizeText({ cpus, memoryMb }) {
+    return `${cpus} CPUs, ${size(memoryMb)} of memory`;
+}
+
+function runningText(host) {
+    return `${host.running} of ${host.max} VM${host.max === 1 ? "" : "s"} running.`;
+}
+
+/** What Set up does, in one string for the same reason. */
+function setupText(host, browser) {
+    const plain = host.estimate.plain;
+    const withBrowser = host.estimate.browser;
+
+    return browser
+        ? `Installs the Gondolin package into the folder "gondolin" of the data folder, downloads the standard image, and builds an image with Chromium on this machine: ${withBrowser.download}, ${withBrowser.disk} on disk, ${withBrowser.time}.`
+        : `Installs the Gondolin package into the folder "gondolin" of the data folder and downloads the guest image: ${plain.download}, ${plain.disk} on disk, ${plain.time}. Nothing is installed outside Pi Pocket's data folder.`;
+}
+
 export default function setup(pocket) {
     const { html, useEffect, useState, useCallback } = pocket;
 
@@ -263,7 +282,7 @@ export default function setup(pocket) {
                         }
                     </dd>
                     <dt>Size</dt>
-                    <dd>${mine.settings.cpus} CPUs, ${size(mine.settings.memoryMb)} of memory</dd>
+                    <dd>${sizeText(vm ?? mine.settings)}</dd>
                 </dl>
                 ${
                     vm !== null && vm.phase === "running"
@@ -393,10 +412,7 @@ export default function setup(pocket) {
                                       `,
                                   )}
                               </ul>
-                              <p class="muted small">
-                                  ${host.running} of ${host.max} VM${host.max === 1 ? "" : "s"}
-                                  running.
-                              </p>
+                              <p class="muted small">${runningText(host)}</p>
                               ${
                                   host.vms.length === 0
                                       ? null
@@ -405,15 +421,18 @@ export default function setup(pocket) {
                                                 ${host.vms.map(
                                                     (each) => html`
                                                         <li class="gdl-vm">
-                                                            <span class="gdl-line">
-                                                                <b>Session ${each.rootId}</b>
-                                                                <span class="mono small"
+                                                            <div class="gdl-vm-info">
+                                                                <strong class="gdl-vm-title"
+                                                                    >${each.title || `Session ${each.rootId}`}</strong
+                                                                >
+                                                                <span
+                                                                    class="mono small gdl-vm-folder"
                                                                     >${each.cwd}</span
                                                                 >
                                                                 <span class="muted small"
-                                                                    >${each.busy > 0 ? "working" : "idle"}</span
+                                                                    >${each.busy > 0 ? "Working" : "Idle"}</span
                                                                 >
-                                                            </span>
+                                                            </div>
                                                             <button
                                                                 class="button"
                                                                 disabled=${busy}
@@ -479,41 +498,7 @@ ${host.setup.lines.join("\n")}</pre>
                                                     : html`
                                                           <div class="gdl-confirm">
                                                               <p>
-                                                                  ${
-                                                                      sure === "browser"
-                                                                          ? html`Installs the
-                                                                                Gondolin package
-                                                                                into the data
-                                                                                folder's
-                                                                                <span class="mono"
-                                                                                    >gondolin</span
-                                                                                >
-                                                                                folder, downloads
-                                                                                the standard image,
-                                                                                and builds an image
-                                                                                with Chromium on
-                                                                                this machine:
-                                                                                ${host.estimate.browser.download},
-                                                                                ${host.estimate.browser.disk}
-                                                                                on disk,
-                                                                                ${host.estimate.browser.time}.`
-                                                                          : html`Installs the
-                                                                                Gondolin package
-                                                                                into the data
-                                                                                folder's
-                                                                                <span class="mono"
-                                                                                    >gondolin</span
-                                                                                >
-                                                                                folder and downloads
-                                                                                the guest image:
-                                                                                ${host.estimate.plain.download},
-                                                                                ${host.estimate.plain.disk}
-                                                                                on disk,
-                                                                                ${host.estimate.plain.time}.
-                                                                                Nothing is installed
-                                                                                outside Pi Pocket's
-                                                                                data folder.`
-                                                                  }
+                                                                  ${setupText(host, sure === "browser")}
                                                               </p>
                                                               <div class="gdl-actions">
                                                                   <button

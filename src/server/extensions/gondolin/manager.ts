@@ -50,6 +50,9 @@ export interface VmState {
     readonly cwd: string;
     readonly mount: "rw" | "ro";
     readonly network: NetworkMode;
+    /** The VM's size while it lives; the settings' otherwise. */
+    readonly cpus: number;
+    readonly memoryMb: number;
     /** The hosts the VM reaches (network mode allow list): the rules it started with. */
     readonly allowedHosts: readonly string[];
     /** The VM runs with rules the settings have since changed (looser ones: stricter ones end it). */
@@ -644,8 +647,9 @@ export class SandboxManager {
         }
 
         const settings = this.#options.settings();
-        const spec = entry.spec;
         const alive = entry.vm !== undefined;
+        // The rules and the size of a VM are shown while it lives or starts: after it ended, the settings are the answer.
+        const spec = alive || entry.starting !== undefined ? entry.spec : undefined;
         const network = spec?.network.mode ?? settings.network;
         const allowedHosts = spec?.network.allowedHosts ?? settings.allowedHosts;
         const mount = spec?.mount ?? settings.mount;
@@ -655,6 +659,8 @@ export class SandboxManager {
             cwd: entry.target.cwd,
             mount,
             network,
+            cpus: spec?.cpus ?? settings.cpus,
+            memoryMb: spec?.memoryMb ?? settings.memoryMb,
             allowedHosts,
             stale:
                 alive &&

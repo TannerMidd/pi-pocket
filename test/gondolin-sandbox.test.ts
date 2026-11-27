@@ -723,6 +723,14 @@ test("the routes: who sees the sandbox, who chooses, and the owner's set-up", as
             "Set up to finish",
         );
         assert.deepEqual(driver.log.setups, [{ browser: true }]);
+
+        // Remove ends what Set up reported: the sheet does not say "Set up finished" for what is gone.
+        assert.equal((await call("owner", "remove", {})).status, 200);
+        const removed = (await call("owner", "host")).body.setup;
+
+        assert.equal(removed.done, false);
+        assert.equal(removed.error, null);
+        assert.deepEqual(removed.lines, []);
         assert.equal(
             (await call("owner", "stop", { c: id })).body.stopped,
             false,
@@ -752,6 +760,46 @@ test("a `!` command of a sandboxed session runs in the VM", async () => {
         assert.equal(driver.log.started.length, 1, "the VM started for it");
         assert.ok(driver.log.commands.some((argv) => argv.join(" ").includes("shell-in-the-vm")));
     } finally {
+        await app.close();
+    }
+});
+
+test("the owner's list of VMs names each session by its title, with its folder", async () => {
+    const driver = new FakeDriver();
+
+    useDriver(driver);
+    const app = await openFresh(calls("bash", { command: "true" }));
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/x/gondolin`;
+
+    try {
+        await app.setExtensionEnabled(owner(app), MODULE, true);
+        const dir = folder("titles");
+        const id = await newSession(app, dir);
+
+        await app.sandboxes.set(id, owner(app), true);
+        await say(app, id, "go");
+        const response = await fetch(`${base}/host`, {
+            headers: { authorization: `Bearer ${app.config.ownerToken}`, "x-pocket": "1" },
+        });
+        const body = (await response.json()) as {
+            vms: { rootId: number; title: string; cwd: string }[];
+        };
+
+        assert.equal(body.vms.length, 1);
+        assert.equal(body.vms[0]!.cwd, dir);
+        assert.equal(
+            body.vms[0]!.title,
+            app.sessions().find((session) => session.id === id)?.title,
+        );
+        assert.notEqual(body.vms[0]!.title, "");
+    } finally {
+        server.closeAllConnections();
+        server.close();
         await app.close();
     }
 });

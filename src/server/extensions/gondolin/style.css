@@ -159,3 +159,20 @@
     justify-content: space-between;
     gap: 12px;
 }
+
+.gdl-vm-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.gdl-vm-title,
+.gdl-vm-folder {
+    overflow-wrap: anywhere;
+}
+
+.gdl-vm .button,
+.gdl-block > .button {
+    min-height: 44px;
+}
