@@ -17,3 +17,6 @@ result-*
 /*.tgz
 packaging/windows/out/
 packaging/macos/out/
+
+# Editors
+/.idea
