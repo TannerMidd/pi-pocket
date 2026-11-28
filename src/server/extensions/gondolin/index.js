@@ -4,6 +4,13 @@ export const pocketApi = 2;
 
 const SHIELD_PATH = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M9 12l2 2 4-4";
 
+function folderName(path) {
+    const trimmed = String(path ?? "").replace(/[\\/]+$/, "");
+    const parts = trimmed.split(/[\\/]/);
+
+    return parts[parts.length - 1] || path;
+}
+
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
 
@@ -94,15 +101,19 @@ export default function setup(pocket) {
             return;
         }
 
-        if (currentSandboxId === null) {
+        const found =
+            currentSandboxId === null
+                ? undefined
+                : snapshot?.sandboxes?.find((s) => s.id === currentSandboxId);
+
+        if (found === undefined) {
             statusHandle?.remove();
             statusHandle = null;
 
             return;
         }
 
-        const found = snapshot?.sandboxes?.find((s) => s.id === currentSandboxId);
-        const stateLabel = found?.state ? ` · ${found.state}` : "";
+        const stateLabel = found.state ? ` · ${found.state}` : "";
         const text = `Sandbox${stateLabel}`;
         const title = `Gondolin sandbox ${currentSandboxId}. Tap to review or apply changes.`;
 
@@ -128,7 +139,8 @@ export default function setup(pocket) {
 
                 if (
                     conversationId !== null &&
-                    snapshot?.sandboxByConversation?.[conversationId] === undefined
+                    snapshot?.sandboxByConversation?.[conversationId] === undefined &&
+                    snapshot?.cwdByConversation?.[conversationId] === undefined
                 ) {
                     void refresh();
                 }
@@ -366,16 +378,40 @@ export default function setup(pocket) {
 
     function MainSheet({ close }) {
         const data = useStatus();
+        const currentCwd =
+            currentConversationId === null
+                ? null
+                : (data?.cwdByConversation?.[currentConversationId] ?? null);
+        const folders = data?.folders ?? [];
         const [reviewId, setReviewId] = useState(null);
         const [title, setTitle] = useState("");
-        const [source, setSource] = useState("empty");
-        const [sourcePath, setSourcePath] = useState("");
+        const [source, setSource] = useState(currentCwd ? "repo" : "empty");
+        const [sourcePath, setSourcePath] = useState(currentCwd ?? "");
+        const [touchedSource, setTouchedSource] = useState(false);
+        const [initialized, setInitialized] = useState(data !== null);
         const [includeUncommitted, setIncludeUncommitted] = useState(false);
         const [repoUrl, setRepoUrl] = useState("");
-        const [networkMode, setNetworkMode] = useState("allowlist");
+        const [networkMode, setNetworkMode] = useState(data?.settings?.networkMode ?? "allowlist");
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState("");
         const [confirming, setConfirming] = useState(null);
+
+        useEffect(() => {
+            if (data === null || initialized || touchedSource) {
+                return;
+            }
+
+            setInitialized(true);
+
+            if (data.settings?.networkMode) {
+                setNetworkMode(data.settings.networkMode);
+            }
+
+            if (currentCwd) {
+                setSource("repo");
+                setSourcePath(currentCwd);
+            }
+        }, [data, initialized, touchedSource, currentCwd]);
 
         if (reviewId !== null) {
             return html`<${DiffReview} sandboxId=${reviewId} onBack=${() => setReviewId(null)} />`;
@@ -438,6 +474,10 @@ export default function setup(pocket) {
 
         const ready = data?.check?.ok === true;
         const sandboxes = data?.sandboxes ?? [];
+        const quickFolders = [
+            ...(currentCwd ? [currentCwd] : []),
+            ...folders.filter((folder) => folder !== currentCwd),
+        ];
 
         return html`<div class="gondolin-sheet">
             <p class="muted">
@@ -489,15 +529,58 @@ export default function setup(pocket) {
                     </label>
                     <label>
                         Workspace source
-                        <select value=${source} onChange=${(e) => setSource(e.currentTarget.value)}>
-                            <option value="empty">Empty workspace</option>
+                        <select
+                            value=${source}
+                            onChange=${(e) => {
+                                const next = e.currentTarget.value;
+
+                                setTouchedSource(true);
+                                setSource(next);
+
+                                if (
+                                    next === "repo" &&
+                                    sourcePath === "" &&
+                                    quickFolders.length > 0
+                                ) {
+                                    setSourcePath(quickFolders[0]);
+                                }
+                            }}
+                        >
                             <option value="repo">One-way snapshot from local repo/folder</option>
+                            <option value="empty">Empty workspace</option>
                             <option value="git">Clone HTTPS git URL inside VM</option>
                         </select>
                     </label>
                     ${
                         source === "repo" &&
                         html`<div>
+                            ${
+                                quickFolders.length > 0 &&
+                                html`<div class="gondolin-folder-chips">
+                                    ${quickFolders.map(
+                                        (folder) =>
+                                            html`<button
+                                                type="button"
+                                                class=${
+                                                    sourcePath === folder
+                                                        ? "gondolin-chip active"
+                                                        : "gondolin-chip"
+                                                }
+                                                title=${folder}
+                                                onClick=${() => {
+                                                    setTouchedSource(true);
+                                                    setSourcePath(folder);
+                                                }}
+                                            >
+                                                ${
+                                                    folder === currentCwd
+                                                        ? `Current: ${folderName(folder)}`
+                                                        : folderName(folder)
+                                                }
+                                            </button>`,
+                                    )}
+                                </div>`
+                            }
                             <label>
                                 Local folder path (copied one-way, never mounted RW)
                                 <input
@@ -505,7 +588,10 @@ export default function setup(pocket) {
                                     required
                                     value=${sourcePath}
                                     placeholder="/path/to/project"
-                                    onInput=${(e) => setSourcePath(e.currentTarget.value)}
+                                    onInput=${(e) => {
+                                        setTouchedSource(true);
+                                        setSourcePath(e.currentTarget.value);
+                                    }}
                                 />
                             </label>
                             <label class="gondolin-check">
@@ -574,7 +660,7 @@ export default function setup(pocket) {
                                                                     ${
                                                                         confirming.kind === "reset"
                                                                             ? "Erase /workspace and re-seed?"
-                                                                            : "Permanently delete sandbox?"
+                                                                            : "Delete sandbox and archive its session?"
                                                                     }
                                                                 </span>
                                                                 <button
@@ -606,7 +692,28 @@ export default function setup(pocket) {
                                                                 >
                                                                     Cancel
                                                                 </button>`
-                                                          : html`<button
+                                                          : html`${
+                                                                    data?.conversationBySandbox?.[
+                                                                        sb.id
+                                                                    ] &&
+                                                                    typeof pocket.openConversation ===
+                                                                        "function" &&
+                                                                    html`<button
+                                                                        type="button"
+                                                                        class="gondolin-btn"
+                                                                        onClick=${() => {
+                                                                            close();
+                                                                            pocket.openConversation(
+                                                                                data
+                                                                                    .conversationBySandbox[
+                                                                                    sb.id
+                                                                                ].id,
+                                                                            );
+                                                                        }}
+                                                                    >
+                                                                        Open
+                                                                    </button>`
+                                                                }<button
                                                                     type="button"
                                                                     class="gondolin-btn"
                                                                     onClick=${() =>

@@ -47,6 +47,8 @@ export interface SandboxRecord {
     /** Initial seed commit SHA in `/workspace` used as the fixed base for diff/export. */
     baseCommit?: string;
     hasSnapshot: boolean;
+    /** Optional idempotency key when created by an agent tool call. */
+    callKey?: string;
 }
 
 export interface SandboxSummary {
@@ -291,6 +293,30 @@ export class SandboxManager {
         return this.#records.get(id);
     }
 
+    findByCallKey(callKey: string): SandboxRecord | undefined {
+        for (const record of this.#records.values()) {
+            if (record.callKey === callKey) {
+                return record;
+            }
+        }
+
+        return undefined;
+    }
+
+    unavailable(cwd: string): string | undefined {
+        if (this.#disposed) {
+            return "Gondolin sandboxes are turned off in Extensions.";
+        }
+
+        const id = parseSandboxUri(cwd);
+
+        if (id === undefined || !this.#records.has(id)) {
+            return "This sandbox was deleted. History is kept read-only.";
+        }
+
+        return undefined;
+    }
+
     list(): SandboxSummary[] {
         const defaults = this.#getSettings();
 
@@ -324,6 +350,7 @@ export class SandboxManager {
         source?: SandboxSource;
         networkMode?: NetworkMode;
         allowedHosts?: string[];
+        callKey?: string;
     }): SandboxRecord {
         if (this.#disposed) {
             throw new Error("Sandbox manager is shut down.");
@@ -358,6 +385,7 @@ export class SandboxManager {
                 : { allowedHosts: parseAllowedHosts(options.allowedHosts) }),
             seeded: false,
             hasSnapshot: false,
+            ...(options.callKey === undefined ? {} : { callKey: options.callKey }),
         };
 
         mkdirSync(this.#sandboxDir(id), { recursive: true });

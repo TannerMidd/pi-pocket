@@ -929,6 +929,12 @@ export class Commands {
             throw new HttpError(409, "PiP is turned off in Extensions.");
         }
 
+        const workspaceUnavailable = app.workspaceUnavailable(app.cwdOf(id));
+
+        if (workspaceUnavailable !== undefined) {
+            throw new HttpError(409, workspaceUnavailable);
+        }
+
         const conversation = await app.conversation(id);
         const typed = request.text.trim();
         // `/skill:name request` sends the skill with the request; `/name arguments`, Pi's prompt template of that name.

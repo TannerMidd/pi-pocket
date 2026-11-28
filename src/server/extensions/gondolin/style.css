@@ -139,3 +139,30 @@
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2));
 }
+
+.gondolin-folder-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.35rem;
+}
+
+.gondolin-chip {
+    min-height: 30px;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--line, rgba(128, 128, 128, 0.35));
+    background: var(--card, transparent);
+    color: var(--text, inherit);
+    font-size: 0.8rem;
+    cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gondolin-chip.active {
+    background: color-mix(in srgb, var(--accent, #2563eb) 18%, transparent);
+    border-color: var(--accent, #2563eb);
+}

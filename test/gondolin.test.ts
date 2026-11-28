@@ -1259,3 +1259,365 @@ test("inspectPatch decodes quoted UTF-8 non-ASCII filenames while refusing contr
 
     assert.equal(controlEscape.ok, false);
 });
+
+test("deleting a sandbox locks its session read-only (409 on submit), auto-archives it, and status exposes folder picker data", async () => {
+    const app = await openApp(scriptedModel());
+    const repo = makeTempGitRepo();
+    const driver = new FakeDriver();
+    let disposeFn: (() => Promise<void> | void) | undefined;
+    const routes = new Map<string, (req: Record<string, unknown>) => Promise<unknown>>();
+    const owner = app.config.users[0]!;
+
+    try {
+        const fakeHost = {
+            dataDir: app.dataDir,
+            registerWorkspaceProvider: (
+                scheme: string,
+                provider: Parameters<typeof app.registerWorkspaceProvider>[1],
+            ) => app.registerWorkspaceProvider(scheme, provider),
+            notice: () => {},
+            text: { quoted: (t: string) => t, defang: (t: string) => t },
+        };
+        const fakeWeb = {
+            settings: () => {},
+            setting: () => undefined,
+            onDispose: (fn: () => Promise<void> | void) => {
+                disposeFn = fn;
+            },
+            client: () => {},
+            route: (
+                method: string,
+                path: string,
+                handler: (req: Record<string, unknown>) => Promise<unknown>,
+            ) => {
+                routes.set(`${method} ${path}`, handler);
+            },
+            send: () => {},
+            error: (status: number, message: string) =>
+                Object.assign(new Error(message), { status }),
+        };
+
+        createGondolin(fakeHost as never, fakeWeb as never, { driver });
+
+        const createRoute = routes.get("POST sandboxes")!;
+        const deleteRoute = routes.get("DELETE sandboxes/:id")!;
+        const statusRoute = routes.get("GET status")!;
+
+        let createdCwd = "";
+        let createdSessionId = 0;
+        const created = (await createRoute({
+            body: { title: "Disposable", source: "empty" },
+            createSession: async ({ cwd, title }: { cwd: string; title?: string }) => {
+                createdCwd = cwd;
+                const session = await app.commands.createSession(owner, { cwd, title });
+
+                createdSessionId = Number(session.id);
+
+                return { id: createdSessionId };
+            },
+        })) as { sandbox: { id: string } };
+        const sbId = created.sandbox.id;
+
+        assert.equal(app.workspaceUnavailable(createdCwd), undefined);
+
+        // Status returns cwdByConversation, conversationBySandbox, and deduplicated local folders.
+        const status = (await statusRoute({
+            sessions: () => [
+                {
+                    id: createdSessionId,
+                    title: "Disposable",
+                    cwd: createdCwd,
+                    archived: false,
+                    updatedAt: 200,
+                },
+                {
+                    id: 99,
+                    title: "Local repo",
+                    cwd: repo,
+                    archived: false,
+                    updatedAt: 300,
+                },
+            ],
+            folders: async () => ({ defaultCwd: app.defaultCwd, favorites: [repo] }),
+        })) as {
+            sandboxByConversation: Record<number, string>;
+            conversationBySandbox: Record<string, { id: number; archived: boolean }>;
+            cwdByConversation: Record<number, string>;
+            folders: string[];
+        };
+
+        assert.equal(status.sandboxByConversation[createdSessionId], sbId);
+        assert.deepEqual(status.conversationBySandbox[sbId], {
+            id: createdSessionId,
+            archived: false,
+        });
+        assert.equal(status.cwdByConversation[99], repo);
+        assert.equal(status.cwdByConversation[createdSessionId], undefined);
+        assert.equal(status.folders[0], repo);
+        assert.ok(status.folders.includes(app.defaultCwd));
+        assert.equal(
+            status.folders.filter((f) => f === repo).length,
+            1,
+            "folders must be deduplicated",
+        );
+
+        // Deleting the sandbox auto-archives its session and locks future submits with 409.
+        const archivedIds: number[] = [];
+
+        await deleteRoute({
+            params: { id: sbId },
+            sessions: () => [
+                {
+                    id: createdSessionId,
+                    title: "Disposable",
+                    cwd: createdCwd,
+                    archived: false,
+                    updatedAt: 200,
+                },
+            ],
+            archiveSession: async (id: number, archived = true) => {
+                archivedIds.push(id);
+                await app.commands.updateSession(id as never, owner, { archived });
+            },
+        });
+
+        assert.deepEqual(archivedIds, [createdSessionId]);
+        assert.equal(app.sessionMeta(createdSessionId as never)?.archived, true);
+        assert.match(app.workspaceUnavailable(createdCwd) ?? "", /sandbox was deleted/i);
+
+        await assert.rejects(
+            app.commands.submit(createdSessionId as never, owner, {
+                text: "still there?",
+                requestId: "req-deleted-1",
+            }),
+            (error: unknown) =>
+                typeof error === "object" &&
+                error !== null &&
+                (error as { status?: number }).status === 409 &&
+                /sandbox was deleted/i.test(String((error as Error).message)),
+        );
+    } finally {
+        await disposeFn?.();
+        rmSync(repo, { recursive: true, force: true });
+        await app.close();
+    }
+});
+
+test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with replay idempotency and strict guardrails", async () => {
+    const app = await openApp(scriptedModel());
+    const repo = makeTempGitRepo();
+    const isolatedDataDir = mkdtempSync(join(tmpdir(), "pocket-gondolin-tool-"));
+    const driver = new FakeDriver();
+    let disposeFn: (() => Promise<void> | void) | undefined;
+    let settingNetworkMode: "off" | "allowlist" | "open" = "allowlist";
+    let requesterRole: "owner" | "guest" | "viewer" | undefined = "owner";
+    let startError: Error | undefined;
+    const startedCalls: {
+        source: unknown;
+        request: { title?: string; message: string; cwd?: string };
+        key: string;
+    }[] = [];
+
+    try {
+        const fakeHost = {
+            dataDir: isolatedDataDir,
+            thinkingLevels: ["off", "low", "medium", "high"] as const,
+            registerWorkspaceProvider: (
+                scheme: string,
+                provider: Parameters<typeof app.registerWorkspaceProvider>[1],
+            ) => app.registerWorkspaceProvider(scheme, provider),
+            requesterOf: () => "user-1",
+            roleOf: () => requesterRole,
+            linkedSessions: {
+                start: async (
+                    source: unknown,
+                    request: { title?: string; message: string; cwd?: string },
+                    key: string,
+                ) => {
+                    if (startError !== undefined) {
+                        throw startError;
+                    }
+
+                    startedCalls.push({ source, request, key });
+
+                    return { session: 500 as never, address: "s1", answers: true };
+                },
+            },
+            notice: () => {},
+            text: { quoted: (t: string) => t, defang: (t: string) => t },
+        };
+        const fakeWeb = {
+            settings: () => {},
+            setting: (name: string) => (name === "networkMode" ? settingNetworkMode : undefined),
+            onDispose: (fn: () => Promise<void> | void) => {
+                disposeFn = fn;
+            },
+            client: () => {},
+            route: () => {},
+            send: () => {},
+            error: (status: number, message: string) =>
+                Object.assign(new Error(message), { status }),
+        };
+
+        const ext = createGondolin(fakeHost as never, fakeWeb as never, { driver }) as {
+            tools?: {
+                name: string;
+                execute: (
+                    args: Record<string, unknown>,
+                    api: Record<string, unknown>,
+                    context: unknown,
+                ) => Promise<{ output: { type: string; text: string }[] }>;
+            }[];
+        };
+        const sandboxTool = ext.tools?.find((t) => t.name === "sandbox");
+
+        assert.ok(sandboxTool !== undefined, "gondolin extension should register sandbox tool");
+
+        const makeApi = (cwd: string, callId = "call-1") => ({
+            conversationId: 10,
+            taskId: "task-1",
+            callId,
+            snapshot: async () => ({ cwd }),
+        });
+
+        // 1. Non-owner is refused.
+        requesterRole = "guest";
+        await assert.rejects(
+            sandboxTool.execute({ action: "list" }, makeApi(repo), BACKGROUND_CONTEXT),
+            /Only the owner/,
+        );
+        requesterRole = "owner";
+
+        // 2. Isolated sandbox session is refused (both by core isolatedToolBlock and tool guard).
+        const { isolatedToolBlock } = await import("../src/server/isolated-workspace.ts");
+
+        assert.ok(isolatedToolBlock("sandbox", { action: "start" }) !== undefined);
+        await assert.rejects(
+            sandboxTool.execute(
+                { action: "start", message: "escape" },
+                makeApi("gondolin://sb-abcdef/workspace"),
+                BACKGROUND_CONTEXT,
+            ),
+            /Isolated or remote sessions/,
+        );
+
+        // 3. Network mode ceiling prevents widening beyond owner's configured default.
+        settingNetworkMode = "allowlist";
+        await assert.rejects(
+            sandboxTool.execute(
+                { action: "start", message: "try open", networkMode: "open" },
+                makeApi(repo, "call-net"),
+                BACKGROUND_CONTEXT,
+            ),
+            /looser than the owner's configured default/,
+        );
+
+        // 4. Failed linkedSessions.start cleans up newly created sandbox (no orphan).
+        startError = new Error("model not allowed");
+        await assert.rejects(
+            sandboxTool.execute(
+                { action: "start", message: "will fail", source: "empty" },
+                makeApi(repo, "call-fail"),
+                BACKGROUND_CONTEXT,
+            ),
+            /model not allowed/,
+        );
+        startError = undefined;
+        const listAfterFail = await sandboxTool.execute(
+            { action: "list" },
+            makeApi(repo),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(listAfterFail.output[0]!.text, /No Gondolin sandboxes/);
+
+        // 5. Start from current project succeeds, and replaying same callId is idempotent!
+        const started = await sandboxTool.execute(
+            {
+                action: "start",
+                title: "Refactor parser",
+                message: "Refactor parser safely and run tests",
+                networkMode: "off",
+            },
+            makeApi(repo, "call-ok"),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(started.output[0]!.text, /Started sandbox (sb-[a-f0-9]+)/);
+        const sbId = started.output[0]!.text.match(/sb-[a-f0-9]+/)![0]!;
+
+        assert.equal(startedCalls.length, 1);
+        assert.equal(startedCalls[0]!.request.cwd, sandboxUri(sbId));
+        assert.equal(startedCalls[0]!.key, "task-1:call-ok");
+
+        // Replay with identical taskId:callId reuses the exact same sandbox (no duplicate!).
+        const replayed = await sandboxTool.execute(
+            {
+                action: "start",
+                title: "Refactor parser",
+                message: "Refactor parser safely and run tests",
+                networkMode: "off",
+            },
+            makeApi(repo, "call-ok"),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(replayed.output[0]!.text, new RegExp(sbId));
+
+        const listed = await sandboxTool.execute(
+            { action: "list" },
+            makeApi(repo),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.equal(listed.output[0]!.text.split("\n").length, 1);
+        assert.match(listed.output[0]!.text, new RegExp(`${sbId}.*net: off`));
+
+        // 6. Diff inspects edits made inside the sandbox, and stop snapshots & stops the VM.
+        const env = app.envFor(
+            (await app.commands.createSession(app.config.users[0]!, { cwd: sandboxUri(sbId) })).id,
+        );
+
+        await env.writeFile("README.md", "# Demo\nhello\nagent change\n", BACKGROUND_CONTEXT);
+        const diffRes = await sandboxTool.execute(
+            { action: "diff", sandboxId: sbId },
+            makeApi(repo),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(diffRes.output[0]!.text, /README\.md/);
+        assert.match(diffRes.output[0]!.text, /\+agent change/);
+        assert.match(diffRes.output[0]!.text, /<sandbox-diff>/);
+
+        const stopRes = await sandboxTool.execute(
+            { action: "stop", sandboxId: sbId },
+            makeApi(repo),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(stopRes.output[0]!.text, /stopped sandbox/);
+
+        // 7. Sandbox cap (10) prevents runaway agent spawning.
+        for (let i = 2; i <= 10; i++) {
+            await sandboxTool.execute(
+                { action: "start", source: "empty", message: `worker ${i}` },
+                makeApi(repo, `call-cap-${i}`),
+                BACKGROUND_CONTEXT,
+            );
+        }
+
+        await assert.rejects(
+            sandboxTool.execute(
+                { action: "start", source: "empty", message: "one too many" },
+                makeApi(repo, "call-cap-11"),
+                BACKGROUND_CONTEXT,
+            ),
+            /Sandbox limit reached/,
+        );
+    } finally {
+        await disposeFn?.();
+        rmSync(isolatedDataDir, { recursive: true, force: true });
+        rmSync(repo, { recursive: true, force: true });
+        await app.close();
+    }
+});

@@ -53,6 +53,31 @@ export class ExtensionRequest implements RequestActor {
         });
     }
 
+    async archiveSession(id: number, archived = true): Promise<void> {
+        if (this.#access !== "owner" || this.current().role !== "owner") {
+            throw new HttpError(403, "Only the owner can archive a session here.");
+        }
+
+        if (!Number.isSafeInteger(id) || id <= 0) {
+            throw new HttpError(400, "Invalid session id.");
+        }
+
+        await this.#app.commands.updateSession(id as unknown as ConversationId, this.current(), {
+            archived: Boolean(archived),
+        });
+        this.#app.refreshViews();
+    }
+
+    async folders(): Promise<{ defaultCwd: string; favorites: string[] }> {
+        if (this.#access !== "owner" || this.current().role !== "owner") {
+            throw new HttpError(403, "Only the owner can list folders here.");
+        }
+
+        const favorites = await this.#app.folderFavorites.list(this.current());
+
+        return { defaultCwd: this.#app.defaultCwd, favorites };
+    }
+
     close = (): void => {
         this.#stopped.abort(new HttpError(409, "This extension request has ended."));
     };

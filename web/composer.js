@@ -2013,14 +2013,48 @@ export function Composer() {
               : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
 
     useDock(dock);
-    // View only now, or someone else took the wheel: the box goes, and dictation with it.
-    const writes = !collab() || (canSteer() && !(view.turns?.on && view.turns.driver !== me?.id));
+    const unavailable = view.workspaceUnavailable ?? null;
+    // View only now, unavailable workspace, or someone else took the wheel: the box goes, and dictation with it.
+    const writes =
+        unavailable === null &&
+        (!collab() || (canSteer() && !(view.turns?.on && view.turns.driver !== me?.id)));
 
     useEffect(() => {
         if (!writes) {
             dictation.stop(true);
         }
     }, [writes]);
+
+    if (unavailable !== null) {
+        const archived =
+            store.state.sessions.find((session) => session.id === conversationId)?.archived ===
+            true;
+
+        return html`<footer class="composer-wrap" data-part="composer">
+            <div class="dock" data-part="dock" ref=${dock}>
+                <${TypingLine} where="pi" />
+                <${SubagentsBar} />
+            </div>
+            <${ParentSessionButton} />
+            <div class="view-only workspace-unavailable" data-part="workspace-unavailable">
+                <span><strong>Read-only.</strong> ${unavailable}</span>
+                ${
+                    !archived &&
+                    canSteer() &&
+                    html`<button
+                        class="button small"
+                        onClick=${() =>
+                            attempt(() =>
+                                actions.updateSession(conversationId, { archived: true }),
+                            )}
+                    >
+                        Archive session
+                    </button>`
+                }
+            </div>
+            <${StatusLine} />
+        </footer>`;
+    }
 
     if (collab() && !canSteer()) {
         return html`<footer class="composer-wrap" data-part="composer">

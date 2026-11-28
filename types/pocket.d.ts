@@ -140,6 +140,12 @@ export interface WorkspaceProvider {
      * @experimental @since 0.31.0
      */
     disposeWorkspace?(cwd: string): Promise<void> | void;
+    /**
+     * Returns a human-readable reason when `cwd` can no longer accept work (for example, after a sandbox is deleted),
+     * or `undefined` while the workspace is available.
+     * @experimental @since 0.31.0
+     */
+    unavailable?(cwd: string): string | undefined;
 }
 
 /**
@@ -1371,6 +1377,18 @@ export interface WebRequest {
      * @experimental
      */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    /**
+     * Archives or unarchives a session from an owner-only route.
+     * @since 0.31.0
+     * @experimental
+     */
+    archiveSession?(id: number, archived?: boolean): Promise<void>;
+    /**
+     * Returns the owner's default working directory and favorite project folders.
+     * @since 0.31.0
+     * @experimental
+     */
+    folders?(): Promise<{ defaultCwd: string; favorites: string[] }>;
     /**
      * The request's method.
      * @since 0.14.0

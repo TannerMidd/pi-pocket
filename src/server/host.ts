@@ -516,6 +516,8 @@ export interface WorkspaceProvider {
     readonly isolated?: boolean;
     /** Optional cleanup when a session is archived, removed, or the server closes. @experimental @since 0.31.0 */
     disposeWorkspace?(cwd: string): Promise<void> | void;
+    /** Optional reason why `cwd` can no longer run (e.g. a deleted sandbox); undefined when available. @experimental @since 0.31.0 */
+    unavailable?(cwd: string): string | undefined;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
@@ -815,6 +817,10 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface WebRequest {
     /** @experimental @since 0.28.0 */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    /** Archive or unarchive a session from an owner-only route. @experimental @since 0.31.0 */
+    archiveSession?(id: number, archived?: boolean): Promise<void>;
+    /** The owner's default folder and favorite folders, for owner-only pickers. @experimental @since 0.31.0 */
+    folders?(): Promise<{ defaultCwd: string; favorites: string[] }>;
     readonly method: WebMethod;
     /** The path's `:name` parts, by name. */
     readonly params: Readonly<Record<string, string>>;

@@ -926,6 +926,8 @@ export class Room {
             })),
             // The branch is read from the repository each time, so one Pi or a person switched to shows on the next update.
             branch: this.#readHead(),
+            workspaceUnavailable:
+                this.#app.workspaceUnavailable(agentState.cwd ?? this.#app.cwdOf(this.id)) ?? null,
             goal:
                 this.goal === undefined
                     ? null

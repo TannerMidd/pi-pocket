@@ -1853,7 +1853,8 @@ export class PocketApp {
             typeof provider?.resolveCwd !== "function" ||
             (provider.isolated !== undefined && typeof provider.isolated !== "boolean") ||
             (provider.disposeWorkspace !== undefined &&
-                typeof provider.disposeWorkspace !== "function")
+                typeof provider.disposeWorkspace !== "function") ||
+            (provider.unavailable !== undefined && typeof provider.unavailable !== "function")
         ) {
             throw new Error("Invalid workspace provider registration");
         }
@@ -1864,6 +1865,7 @@ export class PocketApp {
 
         registrations.push({ token, provider });
         this.#workspaceProviders.set(key, registrations);
+        this.refreshViews();
 
         return () => {
             const live = this.#workspaceProviders.get(key);
@@ -1875,12 +1877,36 @@ export class PocketApp {
                 if (live!.length === 0) {
                     this.#workspaceProviders.delete(key);
                 }
+
+                this.refreshViews();
             }
         };
     }
 
     workspaceScheme(cwd: string): string | undefined {
         return workspaceScheme(cwd);
+    }
+
+    /**
+     * Why a session on `cwd` cannot accept new work now (e.g. a deleted sandbox or disabled workspace provider),
+     * or undefined when the workspace is available.
+     */
+    workspaceUnavailable(cwd: string): string | undefined {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme === undefined) {
+            return undefined;
+        }
+
+        const provider = this.#workspaceProviders.get(scheme)?.at(-1)?.provider;
+
+        if (provider === undefined) {
+            return scheme === "gondolin"
+                ? "Gondolin sandboxes are turned off in Extensions."
+                : `Workspace provider "${scheme}" is not available.`;
+        }
+
+        return typeof provider.unavailable === "function" ? provider.unavailable(cwd) : undefined;
     }
 
     /**
