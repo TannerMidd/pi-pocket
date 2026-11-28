@@ -1439,6 +1439,7 @@ test(
 
         let quiet = 0;
         let same = 0;
+        let listed = [];
 
         options.diffed = (vnode) => {
             if (vnode.type?.name === "SessionRow") {
@@ -1450,7 +1451,7 @@ test(
 
         try {
             // An extension's async status fetch can bump extensionsRev right after load and redraw every row; retry if
-            // that unrelated revision changed during the quiet/same probe.
+            // that unrelated revision changed during the probe.
             for (let attempt = 0; attempt < 4; attempt++) {
                 const revBefore = store.state.extensionsRev;
                 const sessionsBefore = store.state.sessions;
@@ -1464,30 +1465,28 @@ test(
                 await settle();
                 same = rows.length - quiet;
 
-                if (
-                    store.state.extensionsRev === revBefore &&
-                    store.state.sessions.length === sessionsBefore.length &&
-                    (quiet === 0 && same === 0)
-                ) {
+                rows = [];
+                // One session renamed: its row, and no other.
+                store.set((state) => ({
+                    sessions: state.sessions.map((session) =>
+                        session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
+                    ),
+                }));
+                await settle();
+                listed = rows;
+
+                if (store.state.extensionsRev === revBefore) {
                     break;
                 }
 
+                store.set({ sessions: sessionsBefore });
                 await settle();
             }
-
-            rows = [];
-            // One session renamed: its row, and no other.
-            store.set((state) => ({
-                sessions: state.sessions.map((session) =>
-                    session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
-                ),
-            }));
-            await settle();
         } finally {
             options.diffed = diffed;
         }
 
-        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
+        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed, image: box.querySelector("img")?.getAttribute("src") ?? null });
     `);
 
         assert.ok(drawn.kept, "the first block stays as it was drawn");

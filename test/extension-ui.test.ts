@@ -308,11 +308,27 @@ const openTools = async () => {
     await until(() => has(".nav-menu"), "Tools");
 };
 
+/** Navigate and confirm the destination landed; a pending back.js history traversal from the prior test can abort it. */
+async function visit(url: string, on: BrowserPage = page): Promise<void> {
+    const expected = new URL(url).pathname;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const nav = await on.navigate(url);
+        const at = await inPage<string>(`return JSON.stringify(location.pathname)`, on);
+
+        if (nav.error === undefined && at === expected) {
+            return;
+        }
+    }
+
+    assert.fail(`could not navigate to ${url}`);
+}
+
 test(
     "a browser module's rail button opens its page, which calls its route and hears its events",
     real,
     async () => {
-        await page.navigate(`${base}/s/${session}`);
+        await visit(`${base}/s/${session}`);
         await meterReady();
         await page.click({ selector: '.desktop-rail [data-nav="tools"]' });
         await until(() => has(rail("Meter")), "the meter tool");
@@ -350,7 +366,7 @@ test("Tools keeps global pages at home and offers a session panel once", real, a
     const count = () =>
         inPage<number>(`return JSON.stringify(document.querySelectorAll('${dial}').length)`);
 
-    await page.navigate(base);
+    await visit(base);
     await meterReady();
     await withMeter(
         `pocket.rail({ id: 'open-dial', title: 'Dial', panel: 'dial' }); return 'null'`,
@@ -390,7 +406,7 @@ test(
                 globalThis.meterPocket.openConversation("${session}", ${options}); return "null"`,
             );
 
-        await page.navigate(base);
+        await visit(base);
         await meterReady();
         await open(`{ artifact: "plan", version: 2 }`);
         assert.deepEqual(await sheet(), { type: "viewer", id: "plan", version: 2 });
@@ -405,7 +421,7 @@ test(
     "a status item opens its panel beside the conversation, which the Files panel replaces",
     real,
     async () => {
-        await page.navigate(`${base}/s/${session}`);
+        await visit(`${base}/s/${session}`);
         await until(() => has('[data-part="status-item"]'), "the meter's status item");
         assert.equal(await text('[data-part="status-item"] .long'), "46W · 74° · 95%");
         // The module put its item first and hid the spend; the person's own choice brings the spend back.

@@ -446,6 +446,8 @@ function sync(list, known = true) {
 
     if (orderChanged) {
         markdownChanged();
+        chipsRev++;
+        wordsRev++;
     }
 
     const wanted = new Map(safeMode() ? [] : list.map((each) => [each.module, each]));
@@ -620,6 +622,8 @@ function unload(record) {
 function teardown(record) {
     const hadMarkdown = record.adds.fence.size > 0 || record.adds.mathInline.size > 0;
     const hadSurfaces = record.adds.surfaceComponent.size > 0;
+    const hadChips = record.adds.sessionChips.size > 0;
+    const hadWords = record.adds.sessionSearch.size > 0;
 
     for (const kind of KINDS) {
         record.adds[kind].clear();
@@ -631,6 +635,14 @@ function teardown(record) {
 
     if (hadSurfaces) {
         surfaceComponentsChanged();
+    }
+
+    if (hadChips) {
+        chipsRev++;
+    }
+
+    if (hadWords) {
+        wordsRev++;
     }
 
     record.arrangements.clear();
@@ -893,18 +905,15 @@ function check(kind, spec, module) {
     }
 }
 
-/** Two specs that would show the same: the same fields, each the very same value. */
+/** Two specs that would show the same: the same fields, each the very same value (missing and undefined match). */
 function sameSpec(a, b) {
     if (a === undefined || b === undefined) {
         return false;
     }
 
-    const keys = Object.keys(a);
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
 
-    return (
-        keys.length === Object.keys(b).length &&
-        keys.every((key) => Object.hasOwn(b, key) && Object.is(a[key], b[key]))
-    );
+    return [...keys].every((key) => Object.is(a[key], b[key]));
 }
 
 /**
@@ -975,6 +984,14 @@ function pocketFor(record) {
                     surfaceComponentsChanged();
                 }
 
+                if (kind === "sessionChips") {
+                    chipsRev++;
+                }
+
+                if (kind === "sessionSearch") {
+                    wordsRev++;
+                }
+
                 redraw();
             }
         }
@@ -1010,6 +1027,14 @@ function pocketFor(record) {
                     surfaceComponentsChanged();
                 }
 
+                if (kind === "sessionChips") {
+                    chipsRev++;
+                }
+
+                if (kind === "sessionSearch") {
+                    wordsRev++;
+                }
+
                 redraw();
             },
             remove() {
@@ -1024,6 +1049,14 @@ function pocketFor(record) {
 
                     if (kind === "surfaceComponent") {
                         surfaceComponentsChanged();
+                    }
+
+                    if (kind === "sessionChips") {
+                        chipsRev++;
+                    }
+
+                    if (kind === "sessionSearch") {
+                        wordsRev++;
                     }
 
                     redraw();
@@ -2113,12 +2146,13 @@ function cutText(text, max) {
         : characters.join("");
 }
 
-/** Chips stay valid until the server replaces the session or an extension changes what it adds, as words do. */
+/** Chips stay valid until the server replaces the session or a module changes its `sessionChips`. */
 const cachedChips = new WeakMap();
+let chipsRev = 0;
 
 /** The chips that extensions put on a session's row: `{ key, label, title, run }`, `run` only for one that does something. */
 export function sessionChips(session) {
-    const revision = store.state.extensionsRev;
+    const revision = chipsRev;
     const cached = cachedChips.get(session);
 
     if (cached?.revision === revision) {
@@ -2151,12 +2185,13 @@ export function sessionChips(session) {
     return chips;
 }
 
-/** Words stay valid until the server replaces the session or an extension changes what it adds. */
+/** Words stay valid until the server replaces the session or a module changes its `sessionSearch`. */
 const cachedWords = new WeakMap();
+let wordsRev = 0;
 
 /** The words that extensions give a session for the session list's search and the launcher's, lowercased. */
 export function sessionWords(session) {
-    const revision = store.state.extensionsRev;
+    const revision = wordsRev;
     const cached = cachedWords.get(session);
 
     if (cached?.revision === revision) {
