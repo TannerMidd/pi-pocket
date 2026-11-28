@@ -368,6 +368,8 @@ test(
         await withoutTheme(t);
         await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
         await goTo(first);
+        await reach({ path: `/s/${first}` }, "the session");
+        assert.ok(await page.waitFor({ selector: ".pane .composer textarea" }));
         await page.click({ selector: '.topbar [aria-label="Menu"]' });
         await reach({ sheet: "menu" }, "the menu");
 
@@ -2804,5 +2806,56 @@ test(
         await open();
         await until(async () => (await rows()).length > 0, "the legacy summary");
         assert.deepEqual(await rows(), [["Plan the release", "$5.00"], ...expected.slice(2)]);
+    },
+);
+
+test(
+    "a reply's wide Markdown table stays inside the transcript column on phone and desktop",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(
+            app,
+            id,
+            `Wide table:\n\n| Col1 | Col2 | Col3 | Col4 | Col5 | Col6 | Col7 | Col8 | Col9 | Col10 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| one-unbreakable-run-of-characters-far-longer-than-any-cell-could-hold | b | c | d | e | f | g | h | i | j |`,
+        );
+
+        for (const viewport of [VIEWPORTS.mobile, VIEWPORTS.desktop]) {
+            await page.setViewport(viewport);
+            await page.navigate(`${base}/s/${Number(id)}`);
+            await until(
+                async () =>
+                    (await inPage<boolean>(
+                        `return JSON.stringify(document.querySelector('[data-part~="reply"] .md table') !== null)`,
+                    )) === true,
+                "the reply table",
+                20_000,
+            );
+            const measured = await inPage<{
+                tableRight: number;
+                wordsRight: number;
+                scrollWidth: number;
+                clientWidth: number;
+                scrollerScrollW: number;
+                scrollerClientW: number;
+            }>(`
+            const scroller = document.querySelector(".scroller");
+            const table = document.querySelector('[data-part~="reply"] .md table');
+
+            return JSON.stringify({
+                tableRight: Math.round(table.getBoundingClientRect().right),
+                wordsRight: Math.round(table.closest(".md").getBoundingClientRect().right),
+                scrollWidth: table.scrollWidth,
+                clientWidth: table.clientWidth,
+                scrollerScrollW: scroller.scrollWidth,
+                scrollerClientW: scroller.clientWidth,
+            });
+        `);
+
+            assert.ok(measured.tableRight <= measured.wordsRight + 1);
+            assert.equal(measured.scrollerScrollW, measured.scrollerClientW);
+            assert.ok(measured.scrollWidth > measured.clientWidth);
+        }
     },
 );

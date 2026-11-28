@@ -354,6 +354,13 @@ test("a person who types what looks like an envelope gets their own message", ()
         ),
         null,
     );
+    assert.equal(
+        parse(
+            "[goal] `npm test` still fails (exit code 1, check 2 of 3). The end of its output:\n\n```\nnot ok 4\n```\n\nKeep working until it passes.",
+            typed,
+        ),
+        null,
+    );
     // A message that carries a name (several people use this server) is never a report either.
     assert.equal(parse("[subagent zed answered, no reply needed] mine", { named: true }), null);
     assert.equal(

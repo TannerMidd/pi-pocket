@@ -9,14 +9,34 @@ import {
     root,
     scriptedModel,
     until,
+    work,
 } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import {
+    appendFileSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    utimesSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
-import { BackgroundDoc } from "../src/server/docs.ts";
-import { taskProcesses, type TaskProcesses, type TaskRef } from "../src/server/processes.ts";
+import { StartCutOff } from "../src/server/background.ts";
+import { BackgroundDoc, DeletedDoc, SessionsDoc } from "../src/server/docs.ts";
+import {
+    BACKGROUND_MARKER,
+    type Signal,
+    taskProcesses,
+    type TaskProcesses,
+    type TaskRef,
+    WindowsProcesses,
+} from "../src/server/processes.ts";
 
 const skip = !existsSync("/proc/self/stat") && "requires /proc";
 const model = scriptedModel();
@@ -533,3 +553,446 @@ test(
         await assertNoNotification(id);
     },
 );
+
+test("after restart the log sweep cleans live and verified folders only", async (t) => {
+    const localModel = scriptedModel();
+    const localData = join(root, "bg-storage");
+    let localApp = await openApp(localModel, localData);
+
+    t.after(() => localApp.close());
+
+    const live = await newSession(localApp);
+    const original = await newSession(localApp);
+    const replaced = await newSession(localApp);
+    const absent = await newSession(localApp);
+    const legacy = await newSession(localApp);
+    const all = [live, original, replaced, absent, legacy];
+    const folderOf = (id: typeof live) => join(localData, "background", String(id));
+
+    for (const id of all) {
+        if (id !== absent) {
+            localApp.managedStorage.folder("background", String(id), true);
+        }
+    }
+
+    await localApp.harness.commit(async (tx) => {
+        const catalogue = await tx.doc(SessionsDoc);
+        const removed = await tx.doc(DeletedDoc);
+
+        for (const id of [original, replaced, absent, legacy]) {
+            const key = String(id);
+            const cwd = catalogue.items[key]!.cwd;
+
+            delete catalogue.items[key];
+            removed.items[key] = {
+                cwd,
+                conversations: [Number(id)],
+                at: 1,
+                done: 1,
+                by: owner(localApp).id,
+                ...(id === legacy
+                    ? {}
+                    : {
+                          folders: {
+                              uploads: {},
+                              background: {
+                                  [key]: localApp.managedStorage.capture("background", key),
+                              },
+                          },
+                      }),
+            };
+        }
+    }, context);
+    assert.equal(localApp.backgroundFolder(absent, true), undefined);
+    assert.equal(existsSync(folderOf(absent)), false);
+    await localApp.close();
+    renameSync(folderOf(replaced), join(root, "bg-storage-original-logs"));
+    mkdirSync(folderOf(replaced));
+    mkdirSync(folderOf(absent));
+
+    for (const id of all) {
+        const log = join(folderOf(id), "orphan.log.aaaaaa");
+
+        writeFileSync(log, "synthetic output");
+        utimesSync(log, new Date(0), new Date(0));
+    }
+
+    localApp = await openApp(localModel, localData);
+    await localApp.background.sweep();
+
+    for (const id of [live, original]) {
+        assert.equal(existsSync(join(folderOf(id), "orphan.log.aaaaaa")), false);
+    }
+
+    for (const id of [replaced, absent, legacy]) {
+        assert.equal(
+            readFileSync(join(folderOf(id), "orphan.log.aaaaaa"), "utf8"),
+            "synthetic output",
+        );
+    }
+});
+
+test("a guarded terminal stop retains the attempt until its group and descendants are gone", async (t) => {
+    const localApp = await openApp(scriptedModel(), join(root, "bg-terminal-stop"));
+
+    t.after(() => localApp.close());
+    const id = await newSession(localApp);
+    const requestedBy = owner(localApp).id;
+    const row = {
+        id: "aaaaaa",
+        jobId: "synthetic-job",
+        pid: 234567,
+        startTicks: 71,
+        startedAt: 1,
+        endedAt: 2,
+        command: "synthetic",
+        cwd: localApp.cwdOf(id),
+        requestedBy,
+        status: "stopped" as const,
+        processAlive: true,
+        processObservedAt: 2,
+        notify: false,
+        read: 0,
+        taskId: 1 as never,
+    };
+    const processes = Object.getPrototypeOf(taskProcesses()) as TaskProcesses;
+    let group: number[] | undefined = [row.pid];
+    let escaped: number[] = [];
+    const signals: string[] = [];
+
+    t.mock.method(processes, "unsupported", async () => undefined);
+    t.mock.method(processes, "members", async (task: TaskRef, fresh?: boolean) => {
+        assert.equal(fresh, true);
+
+        return task.pid === row.pid ? group : [];
+    });
+    t.mock.method(processes, "left", async (task: TaskRef) =>
+        task.marker.endsWith(`/${row.id}`) ? escaped : [],
+    );
+    t.mock.method(processes, "signal", async (task: TaskRef, name: Signal) => {
+        assert.equal(task.pid, row.pid);
+        assert.equal(task.startTicks, row.startTicks);
+        assert.ok(task.marker.endsWith(`/${row.id}`));
+        signals.push(name);
+    });
+    localApp.background.timing.grace = 0;
+    localApp.background.beforeSpawn = async () => assert.fail("must not launch a replacement");
+    localApp.background.sizes.keepEnded = 1;
+    localApp.managedStorage.folder("background", String(id), true);
+    await localApp.harness.commit(async (tx) => {
+        const items = (await tx.doc(BackgroundDoc, id)).items;
+
+        items[row.id] = row;
+        items.bbbbbb = { ...row, id: "bbbbbb", pid: 0, left: [345679], endedAt: 3 };
+        items.cccccc = { ...row, id: "cccccc", pid: 0, processAlive: false, endedAt: 4 };
+    }, context);
+    const stored = async () => (await localApp.harness.snapshot(BackgroundDoc, id, context))!.items;
+    const stop = () => localApp.background.stopJob(id, row.jobId, row.id, requestedBy);
+    const resume = () =>
+        localApp.background.start(id, {
+            jobId: row.jobId,
+            expectedAttempt: row.id,
+            requestedBy,
+            command: "synthetic",
+        });
+
+    assert.equal((await stop()).processAlive, true);
+    assert.deepEqual(signals.splice(0), ["SIGTERM", "SIGKILL"]);
+    await localApp.background.sweep();
+    assert.ok((await stored())[row.id], "a surviving group needs its stop handle");
+    assert.equal((await stored()).bbbbbb, undefined, "a stale daemon handle can be pruned");
+    await assert.rejects(resume, { status: 409 });
+
+    group = undefined;
+    const unknown = await stop();
+
+    assert.equal(unknown.processAlive, undefined);
+    assert.ok(unknown.processObservedAt! > row.processObservedAt);
+    assert.deepEqual(signals, [], "uncertainty is not permission to signal");
+    await localApp.harness.commit(async (tx) => {
+        (await tx.doc(BackgroundDoc, id)).items.dddddd = {
+            ...row,
+            id: "dddddd",
+            pid: 0,
+            left: [345680],
+            endedAt: 3,
+        };
+    }, context);
+    await localApp.background.sweep();
+    assert.equal((await stored()).dddddd, undefined);
+    assert.ok((await stored())[row.id]);
+    await assert.rejects(resume, { status: 409 });
+
+    group = [];
+    escaped = [345678];
+    const survivor = await stop();
+
+    assert.deepEqual(signals.splice(0), ["SIGTERM", "SIGKILL"]);
+    assert.deepEqual(survivor.left, escaped);
+    assert.equal(survivor.processAlive, true);
+    await assert.rejects(resume, { status: 409 });
+    escaped = [];
+    await localApp.background.sweep();
+    assert.equal((await stored())[row.id], undefined, "both scans now confirm absence");
+});
+
+function procStat(pid: number) {
+    try {
+        const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
+
+        return { state: fields[0], group: Number(fields[2]), start: Number(fields[19]) };
+    } catch {
+        return undefined;
+    }
+}
+
+test(
+    "rollback retains an unmarked child after the group leader exits",
+    { skip: process.platform !== "linux" },
+    async (t) => {
+        const localApp = await openApp(scriptedModel(), join(root, "bg-rollback"));
+
+        t.after(() => localApp.close());
+        localApp.background.sizes.keepEnded = 0;
+        const id = await newSession(localApp);
+        const requestedBy = owner(localApp).id;
+        const leaderFile = join(work, "rb-leader");
+        const childFile = join(work, "rb-unmarked");
+        const releaseFile = join(work, "rb-release");
+        const command = `echo "$PPID" > rb-leader; env -u ${BACKGROUND_MARKER} node -e 'const fs = require("node:fs"); fs.writeFileSync("rb-unmarked", String(process.pid)); setInterval(() => { if (fs.existsSync("rb-release")) process.exit(); }, 30); setTimeout(() => process.exit(), 30000)' </dev/null >/dev/null 2>&1 &`;
+        let child = 0;
+        let leader = 0;
+
+        localApp.background.beforeRecord = async () => {
+            await until(
+                () =>
+                    existsSync(leaderFile) &&
+                    existsSync(childFile) &&
+                    Number(readFileSync(childFile, "utf8")) > 0,
+                "the unmarked child to start",
+            );
+            child = Number(readFileSync(childFile, "utf8"));
+            leader = Number(readFileSync(leaderFile, "utf8"));
+            await until(() => procStat(leader) === undefined, "the launcher to exit");
+            assert.equal(procStat(child)?.group, leader);
+
+            throw new Error("synthetic record failure");
+        };
+
+        try {
+            await assert.rejects(
+                localApp.background.start(id, { command, requestedBy, notify: false }),
+                /synthetic record failure/,
+            );
+            localApp.background.beforeRecord = undefined;
+            await localApp.background.sweep();
+            const [attempt] = Object.values(
+                (await localApp.harness.snapshot(BackgroundDoc, id, context))!.items,
+            );
+
+            assert.ok(attempt);
+            assert.equal(attempt.pid, leader);
+            assert.equal(attempt.launchFailed, true);
+            assert.equal(attempt.processAlive, undefined);
+            await assert.rejects(
+                localApp.background.start(id, {
+                    command: "true",
+                    requestedBy,
+                    jobId: attempt.jobId!,
+                    expectedAttempt: attempt.id,
+                    notify: false,
+                }),
+                { status: 409 },
+            );
+        } finally {
+            writeFileSync(releaseFile, "");
+
+            if (child > 0) {
+                await until(
+                    () => [undefined, "Z", "X"].includes(procStat(child)?.state),
+                    "the isolated child to exit",
+                );
+            }
+        }
+    },
+);
+
+test(
+    "rollback signals the verified launcher group, not a reused group",
+    { skip: process.platform !== "linux" },
+    async (t) => {
+        const backend = taskProcesses();
+        const task = { pid: 0, marker: `${root}#rollback`, files: "", startedAt: Date.now() };
+        const env = { ...process.env };
+
+        delete env[BACKGROUND_MARKER];
+        const decoy = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+            detached: true,
+            env,
+            stdio: "ignore",
+        });
+        const exited = once(decoy, "exit");
+        const pid = decoy.pid!;
+        const recorder = t.mock.method(process, "kill");
+
+        try {
+            const start = procStat(pid)!.start;
+            const reused = { ...task, pid, startTicks: start - 1 };
+
+            await backend.killSpawned(reused, pid);
+            assert.ok(
+                !recorder.mock.calls.some(({ arguments: [, signal] }) => signal === "SIGKILL"),
+            );
+            assert.equal(procStat(pid)?.start, start);
+
+            const launched = await backend.spawn("exec sleep 30", root, env, task);
+            const original = { ...task, pid: launched.pid, startTicks: launched.start };
+
+            assert.ok(original.startTicks);
+            await backend.killSpawned(original, launched.pid);
+            assert.ok(
+                recorder.mock.calls.some(
+                    ({ arguments: [target, signal] }) =>
+                        target === -launched.pid && signal === "SIGKILL",
+                ),
+            );
+            await until(
+                () => procStat(launched.pid) === undefined,
+                "the verified launcher to exit",
+            );
+        } finally {
+            decoy.kill();
+            await exited;
+            backend.close();
+        }
+    },
+);
+
+for (const cutOff of [false, true]) {
+    test(
+        `a ${cutOff ? "starting" : "running"} watch retains a Windows attempt across failed probes`,
+        { skip: process.platform !== "linux" },
+        async (t) => {
+            const localApp = await openApp(scriptedModel(), join(root, `bg-watch-${cutOff}`));
+
+            t.after(() => localApp.close());
+            localApp.background.timing = { look: 40, starting: 100, grace: 100, sweep: 60_000 };
+            const id = await newSession(localApp);
+            let state: "unavailable" | "child" | "empty" = "unavailable";
+            const probes: number[] = [];
+            const backend = new WindowsProcesses({
+                ask: async (line) => {
+                    if (line.startsWith("members ")) {
+                        probes.push(performance.now());
+                    }
+
+                    if (state === "unavailable") {
+                        if (line === "list" && probes.length % 2 === 0) {
+                            return "incomplete";
+                        }
+
+                        if (line === "list") {
+                            throw new Error("synthetic helper outage");
+                        }
+
+                        return "members";
+                    }
+
+                    if (line === "list") {
+                        return state === "child" ? "list 77,1,123" : "list";
+                    }
+
+                    return line.startsWith("members ")
+                        ? state === "child"
+                            ? "members 77,123"
+                            : "members"
+                        : "ok";
+                },
+                failed: undefined,
+                close: () => {},
+                holds: () => false,
+            });
+            const processes = Object.getPrototypeOf(taskProcesses()) as TaskProcesses;
+            const mockedSpawn = t.mock.method(
+                processes,
+                "spawn",
+                async (_script: string, _cwd: string, env: NodeJS.ProcessEnv, task: TaskRef) => {
+                    const key = createHash("sha256").update(task.marker).digest("hex").slice(0, 32);
+
+                    writeFileSync(`${task.files}.pids`, `job ${key}\n`);
+                    writeFileSync(env.PI_POCKET_BACKGROUND_EXIT!, "7 0\n");
+
+                    return { pid: 41, start: 100 };
+                },
+            );
+
+            t.mock.method(processes, "members", backend.members.bind(backend));
+            t.mock.method(processes, "find", backend.find.bind(backend));
+            t.mock.method(processes, "left", async () => []);
+
+            if (cutOff) {
+                localApp.background.beforeRecord = async () => {
+                    state = "child";
+                    let overdue = 0;
+
+                    localApp.background.timing = {
+                        ...localApp.background.timing,
+                        get starting() {
+                            overdue++;
+
+                            return -1;
+                        },
+                    };
+                    await until(() => overdue >= 3, "the overdue local launch to stay reserved");
+                    assert.equal(probes.length, 0);
+                    state = "unavailable";
+
+                    throw new StartCutOff();
+                };
+            }
+
+            const start = localApp.background.start(id, {
+                command: "synthetic",
+                requestedBy: owner(localApp).id,
+                notify: false,
+                quietMinutes: 0,
+            });
+
+            if (cutOff) {
+                await assert.rejects(start, StartCutOff);
+            } else {
+                await start;
+            }
+
+            const row = async () =>
+                Object.values(
+                    (await localApp.harness.snapshot(BackgroundDoc, id, context))!.items,
+                )[0]!;
+
+            await until(() => probes.length >= 3, "repeated inconclusive probes");
+            assert.ok(probes[2]! - probes[0]! >= localApp.background.timing.look);
+            assert.equal((await row()).status, cutOff ? "starting" : "running");
+
+            const count = probes.length;
+
+            state = "child";
+            await until(
+                () => probes.length >= count + 3,
+                "the verified child to stay under supervision",
+            );
+            assert.equal((await row()).status, "running");
+
+            if (cutOff) {
+                assert.equal((await row()).pid, 77);
+                assert.equal((await row()).startTicks, 123);
+            }
+
+            state = "empty";
+            await until(async () => (await row()).status === "exited", "proved completion");
+            assert.equal((await row()).code, 7);
+            assert.equal((await row()).processAlive, false);
+            assert.equal(mockedSpawn.mock.callCount(), 1);
+        },
+    );
+}

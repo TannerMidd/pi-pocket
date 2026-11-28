@@ -25,7 +25,7 @@ import { SurfacesDoc } from "../src/server/docs.ts";
 import type { Client } from "../src/server/room.ts";
 import type { EmbedderMessage } from "../src/server/push.ts";
 import { createHandler } from "../src/server/http.ts";
-import { prepareRelay, recordSent } from "../src/server/surfaces/relay.ts";
+import { fromRelay, prepareRelay, recordSent } from "../src/server/surfaces/relay.ts";
 
 const dataDir = join(root, "data");
 const card = {
@@ -432,4 +432,53 @@ test("a card Pi waits for is pushed to the person who can act, by its title only
     } finally {
         app.detach(client);
     }
+});
+
+test("an unauthorized sender replying to an ended owner-only card gets silence, not ENDED", async () => {
+    const id = await newSession(app);
+
+    await loadTools(app, id, "ui");
+    await app.commands.submit(id, owner(app), {
+        text: "show the waiting card",
+        requestId: "owner-only-ended",
+    });
+    await until(
+        async () =>
+            Object.keys((await app.harness.snapshot(SurfacesDoc, id, context))?.items ?? {})
+                .length > 0,
+        "owner-only card created",
+    );
+
+    const sid = Object.keys((await app.harness.snapshot(SurfacesDoc, id, context))!.items)[0]!;
+    const route = { connector: "chat", routeRevision: "rev-1", channel: "c1" };
+    const prepared = await prepareRelay(app, id, sid, route);
+
+    assert.ok(prepared);
+    await recordSent(app, id, sid, prepared, { channel: "c1", id: "m-ended" }, () => true);
+    await app.harness.commit(async (tx) => {
+        const doc = await tx.doc(SurfacesDoc, id);
+        const target = doc.items[sid]!;
+
+        // Restrict all controls to the owner and mark the card ended.
+        target.who = "owner";
+
+        for (const component of Object.values(target.components)) {
+            delete component.who;
+        }
+
+        target.status = "done";
+    }, context);
+
+    const outcome = await fromRelay(app, id, {
+        connector: "chat",
+        routeRevision: "rev-1",
+        channel: "c1",
+        replyTo: "m-ended",
+        author: { id: "stranger-1", name: "Stranger" },
+        ownerIds: ["owner-1"],
+        by: owner(app).id,
+        text: "1",
+    });
+
+    assert.deepEqual(outcome, { handled: false });
 });

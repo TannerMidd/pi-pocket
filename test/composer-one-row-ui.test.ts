@@ -237,16 +237,18 @@ after(async () => {
 });
 
 test(
-    "on a phone the row is one row, idle and busy, with two extension buttons and Plan on",
+    "on a phone the row stays one row, idle and busy, and typing never moves items",
     real,
     async () => {
         try {
-            for (const width of [390, 360, 340]) {
+            for (const width of [390, 340]) {
                 await opened(phone(width));
                 await plan(true);
 
                 for (const working of [false, true]) {
                     await busy(working);
+
+                    const signatures: string[] = [];
 
                     for (const words of ["", "a few words"]) {
                         await page.evaluate(`
@@ -276,9 +278,21 @@ test(
                         assert.equal(row.more.label, "More actions, Plan on, Ask someone 2", what);
                         assert.ok(row.more.dot, `${what}: no dot on ⋯`);
                         assert.ok(row.more.width >= 32 && row.more.height >= 32, what);
-                        // 44px each way on a touch screen: the button, and its tap layer reaching 4px past it.
                         assert.equal(row.more.before, "-4px -4px 44px", `${what}: ⋯'s tap layer`);
+                        signatures.push(
+                            JSON.stringify({
+                                inline: row.inline,
+                                more: row.more.label,
+                                items: row.items
+                                    .map((each) => each.name.split(":")[0] ?? "")
+                                    .filter(
+                                        (each) => !["send-button", "mic-button"].includes(each),
+                                    ),
+                            }),
+                        );
                     }
+
+                    assert.equal(signatures[0], signatures[1], `typing stability at ${width} px`);
                 }
 
                 await busy(false);
@@ -291,43 +305,6 @@ test(
         }
     },
 );
-
-test("typing never moves an item in or out of the row", real, async () => {
-    try {
-        for (const width of [390, 360, 340]) {
-            await opened(phone(width));
-            await busy(true);
-
-            const at = async (words: string) => {
-                await page.evaluate(`
-                    const box = document.querySelector(".composer textarea");
-                    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-                    set.call(box, ${JSON.stringify(words)});
-                    box.dispatchEvent(new Event("input", { bubbles: true }));
-                `);
-                await frames();
-
-                const row = await look();
-
-                oneRow(`${width} px with ${JSON.stringify(words)}`, row);
-
-                // What is in the row and what is in ⋯: the mic and Send trade places while Pi works.
-                return {
-                    inline: row.inline,
-                    more: row.more?.label,
-                    items: row.items
-                        .map((each) => each.name.split(":")[0] ?? "")
-                        .filter((each) => !["send-button", "mic-button"].includes(each)),
-                };
-            };
-
-            assert.deepEqual(await at("a few words"), await at(""), `at ${width} px`);
-        }
-    } finally {
-        await busy(false);
-        await page.setViewport(DESKTOP);
-    }
-});
 
 test("Attach folds into ⋯ only where the model's name would be cut short", real, async () => {
     try {

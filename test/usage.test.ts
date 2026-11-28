@@ -664,3 +664,123 @@ test("a model's own limit is a hold of that model, not of the provider", (t) => 
     t.mock.method(app.limits, "gates", () => [] as never);
     assert.equal(mine()?.modelHolds, undefined);
 });
+
+test("web/usage.js: tightest window, provider states, sorting, holds, and open windows without left", async () => {
+    type Fn = (...args: any[]) => any;
+    const {
+        agoWords,
+        hoursMinutes,
+        inWords,
+        modelHoldWords,
+        providerView,
+        sortProviders,
+        summary,
+        tightestWindow,
+        usedShare,
+    } = (await import(new URL("../web/usage.js", import.meta.url).href)) as {
+        [
+            name in
+                | "agoWords"
+                | "hoursMinutes"
+                | "inWords"
+                | "modelHoldWords"
+                | "providerView"
+                | "sortProviders"
+                | "summary"
+                | "tightestWindow"
+                | "usedShare"
+        ]: Fn;
+    };
+    const NOW = 1_800_000_000_000;
+    const MIN = 60_000;
+    const win = (
+        id: string,
+        left: number | undefined,
+        state: string,
+        resetIn?: number,
+        tag = id,
+    ) => ({
+        ...{ id, tag, label: `${id} window`, state },
+        ...(left === undefined ? {} : { left }),
+        ...(resetIn === undefined ? {} : { resetAt: NOW + resetIn }),
+    });
+    const prov = (name: string, windows: unknown[], extra: Record<string, unknown> = {}) => ({
+        ...{
+            id: name.toLowerCase(),
+            name,
+            kind: "key",
+            status: "reported",
+            asOf: NOW - MIN,
+            windows,
+        },
+        ...extra,
+    });
+
+    const five = win("5h", 68, "ok", 120 * MIN);
+    const week = win("7d", 41, "ok", 3000 * MIN);
+
+    assert.equal(tightestWindow(prov("A", [five, week]), NOW)?.id, "7d");
+    assert.equal(tightestWindow(prov("A", [win("5h", 10, "low", -MIN), week]), NOW)?.id, "7d");
+    assert.equal(
+        tightestWindow(
+            prov("A", [win("5h", 0, "limited", 60 * MIN), win("7d", 0, "limited", 600 * MIN)]),
+            NOW,
+        )?.id,
+        "7d",
+    );
+    assert.equal(tightestWindow(prov("A", [win("5h", 10, "low", -MIN)]), NOW), null);
+
+    const view = (p: ReturnType<typeof prov>) => providerView(p, NOW);
+
+    assert.equal(view(prov("A", [win("5h", 68, "ok", MIN)])).state, "ok");
+    assert.equal(view(prov("A", [win("5h", 9, "low", MIN)])).state, "low");
+    assert.equal(view(prov("A", [win("5h", 0, "limited", 72 * MIN)])).state, "limited");
+    assert.equal(view(prov("A", [win("5h", 50, "ok", -MIN)])).state, "reset");
+    assert.equal(view(prov("A", [], { status: "no-data" })).state, "no-data");
+    assert.equal(view(prov("A", [], { status: "not-reported" })).state, "not-reported");
+
+    const openNoLeft = win("5h", undefined, "ok", MIN);
+
+    assert.equal(usedShare(openNoLeft), undefined);
+    assert.equal(summary(view(prov("A", [openNoLeft])), NOW), null);
+
+    const views = [
+        prov("Zed", [win("r", 90, "ok", MIN)]),
+        prov("Beta", [win("r", 34, "ok", MIN)]),
+        prov("Gamma", [win("r", 0, "limited", 300 * MIN)]),
+        prov("Delta", [win("r", 9, "low", MIN)]),
+        prov("Alpha", [win("r", 0, "limited", 60 * MIN)]),
+        prov("Eps", [win("r", 34, "ok", MIN)]),
+        prov("Old", [win("r", 20, "ok", -MIN)]),
+    ].map((each) => providerView(each, NOW));
+
+    assert.deepEqual(
+        sortProviders(views).map((each: { provider: { name: string } }) => each.provider.name),
+        ["Alpha", "Gamma", "Delta", "Beta", "Eps", "Zed", "Old"],
+    );
+
+    assert.equal(hoursMinutes(72 * MIN + 30_000), "1:13");
+    assert.equal(inWords(125 * MIN), "2 h 5 min");
+    assert.equal(agoWords(2000), "just now");
+    assert.equal(
+        summary(view(prov("Anthropic", [win("7d", 41, "ok", 3000 * MIN)])), NOW)?.text,
+        "7d 59% used",
+    );
+    assert.equal(
+        summary(view(prov("OpenAI", [win("5h", 0, "limited", 72 * MIN)])), NOW)?.text,
+        "Limited 1:12",
+    );
+
+    const modelHolds = [{ modelId: "claude-fable", until: NOW + 72 * MIN, reason: "y" }];
+    const reported = prov("Anthropic", [win("5h", 68, "ok", 120 * MIN)], { modelHolds });
+
+    assert.equal(providerView(reported, NOW, "claude-sonnet").state, "ok");
+    assert.deepEqual(modelHoldWords(providerView(reported, NOW, "claude-sonnet"), NOW), [
+        "claude-fable limited · 1:12",
+    ]);
+    assert.equal(providerView(reported, NOW, "claude-fable").state, "limited");
+
+    const tiny = { ...win("tokens", 0, "low", 6 * MIN, "tok"), tiny: true };
+
+    assert.equal(summary(view(prov("A", [tiny])), NOW)?.text, "tok >99% used");
+});

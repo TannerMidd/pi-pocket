@@ -7,6 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type ConversationId, UsageDoc } from "@earendil-works/pi-durable";
+import type { PocketApp } from "../src/server/app.ts";
 import type { Attachment } from "../src/server/commands.ts";
 import type { User } from "../src/server/config.ts";
 import type { LimitTuning } from "../src/server/limit-gate.ts";
@@ -34,8 +35,6 @@ mkdirSync(work);
 /** The home folder the app finds `~/.agents/skills` in, for the same isolation. */
 export const home = join(root, "home");
 mkdirSync(home);
-
-const { PocketApp } = await import("../src/server/app.ts");
 
 export type App = Awaited<ReturnType<typeof PocketApp.open>>;
 
@@ -84,12 +83,14 @@ export function scriptedModel(route: FauxResponseStep = echo) {
 }
 
 /** Open the app on `dataDir` with the scripted model. Opening the same folder again is a restart; `now` moves its clock. */
-export function openApp(
+export async function openApp(
     model: ReturnType<typeof scriptedModel>,
     dataDir = join(root, "data"),
     now?: () => number,
     limits?: Partial<LimitTuning>,
 ): Promise<App> {
+    const { PocketApp } = await import("../src/server/app.ts");
+
     return PocketApp.open({
         dataDir,
         defaultCwd: work,

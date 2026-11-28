@@ -25,11 +25,12 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { SurfacesDoc } from "../src/server/docs.ts";
 import { blockedInPlanMode } from "../src/server/extensions/plan.ts";
+import { dataFromSteps } from "../src/server/surfaces/a2ui.ts";
 import { applyOps } from "../src/server/surfaces/patch.ts";
 import { SurfaceActed } from "../src/server/surfaces/signal.ts";
 import { toText } from "../src/server/surfaces/text.ts";
 import type { Surface } from "../src/server/surfaces/types.ts";
-import { checkSurface, flatten, SurfaceError } from "../src/server/surfaces/validate.ts";
+import { checkSurface, clean, flatten, SurfaceError } from "../src/server/surfaces/validate.ts";
 import { bytes, checkExpr, evaluate, evaluateComputed } from "../web/surfaces-expr.js";
 
 const cleanup = {
@@ -538,4 +539,307 @@ test("a tab gets each surface projected for its person, with no task or wait key
 
 test("plan mode lets a card be shown, as it does a question", () => {
     assert.equal(blockedInPlanMode("ui", { action: "show", title: "x" }), undefined);
+});
+
+test("button.disabled is evaluated against post-set data on combined set+event requests", async () => {
+    const gated = {
+        action: "show",
+        title: "Confirm",
+        wait: { minutes: 10 },
+        data: { confirmed: false },
+        components: [
+            {
+                type: "Column",
+                children: [
+                    { type: "CheckBox", id: "agree", label: "Agree", bind: "/confirmed" },
+                    {
+                        type: "Button",
+                        id: "submit",
+                        label: "Submit",
+                        disabled: { "@call": "not", args: { value: { "@path": "/confirmed" } } },
+                        action: {
+                            event: {
+                                name: "submit",
+                                context: { confirmed: { "@path": "/confirmed" } },
+                            },
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const { id, card } = await show(gated);
+
+    // Filling the required field and pressing the gated button in one POST succeeds.
+    const ok = await act(me(), id, card.id, {
+        pv: card.pv,
+        set: { "/confirmed": true },
+        event: "submit",
+    });
+
+    assert.equal(ok.status, 200);
+
+    // Conversely, setting a value that disables the button in the same POST is refused (409).
+    const gatedOn = { ...gated, data: { confirmed: true } };
+    const second = await show(gatedOn);
+    const blocked = await act(me(), second.id, second.card.id, {
+        pv: second.card.pv,
+        set: { "/confirmed": false },
+        event: "submit",
+    });
+
+    assert.equal(blocked.status, 409);
+});
+
+test("applyOps drop handles cyclic or missing children cleanly, and A2UI enforces size and array bounds", () => {
+    const base = {
+        ...flatten([
+            {
+                type: "Column",
+                id: "box",
+                children: [{ type: "Text", id: "a", text: "hi" }],
+            },
+        ]),
+        data: {},
+    };
+
+    assert.throws(
+        () =>
+            applyOps(base, [
+                { op: "props", id: "box", props: { children: ["box"] } },
+                { op: "drop", id: "box" },
+            ]),
+        SurfaceError,
+    );
+    assert.throws(
+        () =>
+            applyOps(base, [
+                { op: "props", id: "box", props: { children: ["missing"] } },
+                { op: "drop", id: "box" },
+            ]),
+        SurfaceError,
+    );
+    assert.throws(() => clean(JSON.parse('{"__proto__":{}}'), "a2ui"), SurfaceError);
+    assert.throws(
+        () => checkSurface(base, new Set(), { big: { junk: "x".repeat(60_000) } }),
+        SurfaceError,
+    );
+    assert.throws(
+        () => dataFromSteps({ rows: ["a"] }, [{ kind: "remove", path: "/rows/not-a-number" }]),
+        /invalid array index/,
+    );
+    assert.throws(
+        () => dataFromSteps({ rows: ["a"] }, [{ kind: "set", path: "/rows/999", value: "b" }]),
+        /out of range/,
+    );
+});
+
+test("surface client model helpers (web/surfaces-model.js)", async () => {
+    type RawSurface = Record<string, unknown>;
+    type Model = {
+        cellPath: (rows: string, index: number, field: string) => string;
+        controlState: (surface: RawSurface, id: string) => { enabled: boolean; why: string };
+        withPending: (data: unknown, pending: Record<string, { value: unknown }>) => unknown;
+        prunePending: (
+            pending: Record<string, { value: unknown; until?: number }>,
+            rev: number,
+        ) => Record<string, unknown>;
+        imageKind: (url: unknown) => { kind: string; src?: string; href?: string; host?: string };
+        httpsUrl: (url: unknown) => URL | undefined;
+        footerOf: (surface: RawSurface) => string | undefined;
+        actBody: (
+            surface: RawSurface,
+            what: { set?: unknown; event?: string; pv?: number },
+        ) => unknown;
+        stepIndex: (count: number, at: number, key: string) => number | undefined;
+        toggled: (current: unknown, options: unknown, value: string, on: boolean) => string[];
+        bodyOfText: (text: string, title: string) => string;
+    };
+    const model = (await import(
+        new URL("../web/surfaces-model.js", import.meta.url).href
+    )) as Model;
+    const makeSurface = (extra: RawSurface = {}): RawSurface => ({
+        id: "s1",
+        status: "open",
+        who: "owner",
+        by: "Maria",
+        pv: 3,
+        rev: 5,
+        waiting: true,
+        components: { go: { type: "Button" }, tick: { type: "CheckBox", who: "requester" } },
+        can: { go: true, tick: false },
+        ...extra,
+    });
+
+    assert.equal(model.cellPath("/rows", 0, "picked"), "/rows/0/picked");
+    assert.equal(model.cellPath("/a/b/", 12, "name"), "/a/b/12/name");
+    assert.equal(model.controlState(makeSurface(), "go").enabled, true);
+    assert.deepEqual(model.controlState(makeSurface(), "tick"), {
+        enabled: false,
+        why: "Only Maria and the owner can use this",
+    });
+    assert.equal(model.controlState(makeSurface(), "none").enabled, false);
+    assert.equal(
+        model.controlState(makeSurface({ status: "done", can: {} }), "go").why,
+        "This card has ended",
+    );
+
+    const data = { rows: [{ picked: false }, { picked: false }], other: { x: 1 } };
+    const shown = model.withPending(data, { "/rows/1/picked": { value: true } }) as typeof data;
+
+    assert.equal(shown.rows[1]!.picked, true);
+    assert.equal(data.rows[1]!.picked, false);
+    assert.equal(shown.other, data.other);
+    assert.equal(model.withPending(data, { "/nope/1": { value: 1 } }), data);
+    assert.deepEqual(
+        Object.keys(
+            model.prunePending(
+                { "/a": { value: 1 }, "/b": { value: 2, until: 7 }, "/c": { value: 3, until: 5 } },
+                5,
+            ),
+        ),
+        ["/a", "/b"],
+    );
+    assert.deepEqual(model.imageKind("https://example.com/a.png"), {
+        kind: "link",
+        href: "https://example.com/a.png",
+        host: "example.com",
+    });
+    assert.equal(model.imageKind("data:image/png;base64,iVBORw0KGgo=").kind, "img");
+    assert.equal(model.imageKind("data:image/svg+xml;base64,PHN2Zz4=").kind, "none");
+    assert.equal(model.imageKind("http://example.com/a.png").kind, "none");
+    assert.equal(model.imageKind("javascript:alert(1)").kind, "none");
+    assert.equal(model.httpsUrl("https://user:pw@example.com/"), undefined);
+    assert.equal(model.footerOf(makeSurface()), "Pi is waiting for you");
+    assert.equal(model.footerOf(makeSurface({ waiting: false })), undefined);
+    assert.equal(
+        model.footerOf(makeSurface({ status: "done", final: { text: "Maria pressed delete" } })),
+        "Done: Maria pressed delete",
+    );
+    assert.equal(model.footerOf(makeSurface({ status: "expired" })), "Expired");
+    assert.deepEqual(model.actBody(makeSurface(), { event: "go" }), { pv: 3, event: "go" });
+    assert.deepEqual(
+        model.actBody(makeSurface({ pv: 7 }), { set: { "/a": 1 }, event: "go", pv: 4 }),
+        {
+            pv: 4,
+            set: { "/a": 1 },
+            event: "go",
+        },
+    );
+    assert.deepEqual(model.toggled(["b"], ["a", { label: "B", value: "b" }, "c"], "a", true), [
+        "a",
+        "b",
+    ]);
+    assert.equal(model.bodyOfText("Title\nline", "Title"), "line");
+    assert.equal(model.stepIndex(3, 2, "ArrowRight"), 0);
+    assert.equal(model.stepIndex(3, 0, "ArrowLeft"), 2);
+    assert.equal(model.stepIndex(3, 1, "Home"), 0);
+    assert.equal(model.stepIndex(3, 1, "End"), 2);
+    assert.equal(model.stepIndex(3, 1, "a"), undefined);
+});
+
+test("ui calls in transcript turns and call descriptions (web/turns.js, web/calls.js)", async () => {
+    type Block =
+        | { type: "text"; text: string }
+        | { type: "toolCall"; id: string; name: string; args: Record<string, unknown> };
+    type Entry = {
+        id?: number;
+        kind: string;
+        blocks?: Block[];
+        stopReason?: string;
+        text?: string;
+    };
+    type Step = { block: Block; entry?: Entry; streaming: boolean; canRun: boolean };
+    type Item = { type: string; key: string | number; steps?: Step[]; step?: Step };
+    type Turns = {
+        itemsOf: (rows: Entry[], partial: Entry | null) => Item[];
+        isInlineCall: (block: Block) => boolean;
+        summarize: (steps: Step[], thinking?: boolean) => string;
+    };
+    type Calls = {
+        describeCall: (call: { name: string; args?: Record<string, unknown> }) => {
+            label: string;
+            subject: string;
+        };
+    };
+    const turns = (await import(new URL("../web/turns.js", import.meta.url).href)) as Turns;
+    const calls = (await import(new URL("../web/calls.js", import.meta.url).href)) as Calls;
+    const call = (id: string, name: string, args: Record<string, unknown> = {}): Block => ({
+        type: "toolCall",
+        id,
+        name,
+        args,
+    });
+    const said = (text: string): Block => ({ type: "text", text });
+    const answer = (id: number, blocks: Block[], stopReason = "toolUse"): Entry => ({
+        id,
+        kind: "assistant",
+        blocks,
+        stopReason,
+    });
+    const user: Entry = { id: 1, kind: "user", text: "go" };
+
+    const items = turns.itemsOf(
+        [
+            user,
+            answer(2, [
+                call("a", "grep"),
+                said("Pick one:"),
+                call("card", "ui", { action: "show", title: "Cleanup" }),
+                call("b", "read", { path: "x" }),
+                call("c", "bash"),
+            ]),
+            answer(3, [said("Waiting."), call("d", "ui", { action: "show" })], "toolUse"),
+        ],
+        null,
+    );
+
+    assert.deepEqual(
+        items.map((item) => item.type),
+        ["row", "activity", "reply", "inline", "activity", "reply", "inline"],
+    );
+    assert.equal(items[3]!.key, "icard");
+    assert.equal(items[6]!.key, "id");
+    assert.equal(turns.isInlineCall(call("n", "ui", {})), true);
+    assert.equal(turns.isInlineCall(call("n", "ui", { action: "patch" })), false);
+    assert.equal(turns.isInlineCall(call("n", "ui", { action: "show", id: "s1" })), false);
+    assert.equal(
+        turns.isInlineCall(
+            call("c", "ui", { action: "a2ui", messages: [{ createSurface: { surfaceId: "a" } }] }),
+        ),
+        true,
+    );
+    assert.equal(
+        turns.isInlineCall(
+            call("u", "ui", {
+                action: "a2ui",
+                messages: [{ updateDataModel: { surfaceId: "a" } }],
+            }),
+        ),
+        false,
+    );
+    assert.deepEqual(calls.describeCall({ name: "ui", args: { title: "Cleanup" } }), {
+        icon: "▦",
+        label: "Showed card",
+        subject: "“Cleanup”",
+        mono: false,
+    });
+    assert.equal(
+        calls.describeCall({ name: "ui", args: { action: "patch", id: "s2" } }).label,
+        "Updated card",
+    );
+    assert.equal(
+        calls.describeCall({ name: "ui", args: { action: "show", id: "s1", title: "x" } }).label,
+        "Replaced card",
+    );
+    assert.equal(
+        turns.summarize([
+            {
+                block: call("a", "ui", { action: "patch", id: "s1" }),
+                streaming: false,
+                canRun: false,
+            },
+        ]),
+        "Updated a card",
+    );
 });
