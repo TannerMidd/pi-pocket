@@ -1,4 +1,5 @@
 import { type App, cleanUp, newSession, openApp, root, scriptedModel, until } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { mkdtempSync } from "node:fs";
@@ -42,10 +43,14 @@ async function openHooks(id: ConversationId): Promise<void> {
     await page.navigate(`${base}/s/${id}`);
     assert.ok(await page.waitFor({ selector: '.topbar [aria-label="Menu"]' }));
     await page.click({ selector: '.topbar [aria-label="Menu"]' });
-    await page.evaluate(`
-        [...document.querySelectorAll('.sheet button')]
-            .find((button) => button.textContent.includes('Webhooks and watches')).click();
-    `);
+    assert.ok(await page.waitFor({ selector: ".nav-menu" }), "the session menu");
+    await clickNavigation(page, { label: "App settings" });
+    assert.ok(await page.waitFor({ selector: '.nav-menu[aria-label="App settings"]' }));
+    await clickNavigation(page, { label: "Extensions and integrations" });
+    assert.ok(
+        await page.waitFor({ selector: '.nav-menu[aria-label="Extensions and integrations"]' }),
+    );
+    await clickNavigation(page, { label: "Webhooks and watches" });
     assert.ok(await page.waitFor({ selector: '.hook-form input[aria-label="Name"]' }));
     await page.waitFor({ ms: 350 });
 }

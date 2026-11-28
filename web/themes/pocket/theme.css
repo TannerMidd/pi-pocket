@@ -1,189 +1,1243 @@
 /*
- * Pocket: the app's own look. Appearance → Duplicate makes a copy of this folder that is yours to change: take the
- * comment marks off a token below and give it a value, or add rules for the parts of the app (`data-part`). The guide
- * is docs/extensions/themes.md; every token and part is in docs/extensions/reference/theme-surface.md.
+ * Pocket: the app's own look, "C · Bold": near-black neutral planes that rise by tone, sharp corners, 1px hairlines, one
+ * quiet tool well, an accent for "here" and the primary button (coral in Pocket neutral; blue stays for links and
+ * focus), and the amber approval as the strongest state. Appearance → Duplicate makes a copy of this folder that is
+ * yours to change: change a token below, or add rules for the parts of the app (`data-part`). The guide is
+ * docs/extensions/themes.md; every token and part is in docs/extensions/reference/theme-surface.md.
  *
- * As it is, this file changes nothing: each value below is the app's own, for reference. A token you set stays as you
- * set it, so leave the others commented and they follow the app's updates.
+ * The planes, the text, and the status colors are made from the colors in use (`--o-*`, Colors in Appearance), so this
+ * look follows any palette: Pocket neutral is the one it is drawn for. A copy of this folder keeps the look it was
+ * copied with; the app's updates change this one only.
+ *
+ * Tokens that start with `--step`, `--lift`, `--wash`, and the ones named in "Pocket's own" are this theme's: they are
+ * not on the theme surface, and another theme cannot rely on them. Class names (`.row`, `.state-mark`) are the app's
+ * own and can change from release to release; where this file uses one, a part is not enough, and a copy of it may need
+ * a look after an update.
  */
 
 :root {
-    /* The palette, from Colors (theme.js); a theme reads them, and may set them. */
-    /* --o-bg: #1a1b26; */
-    /* --o-bg-dark: #13141c; */
-    /* --o-bg-darker: #0e0e14; */
-    /* --o-bg-light: #24283b; */
-    /* --o-fg: #a9b1d6; */
-    /* --o-fg-dim: #565f89; */
-    /* --o-fg-light: #b4bee6; */
-    /* --o-fg-bright: #c0caf5; */
-    /* --o-accent: #7aa2f7; */
-    /* --o-selection: #292e42; */
-    /* --o-red: #f7768e; */
-    /* --o-yellow: #e0af68; */
-    /* --o-orange: #eb927b; */
-    /* --o-green: #9ece6a; */
-    /* --o-cyan: #449dab; */
-    /* --o-blue: #7aa2f7; */
-    /* --o-magenta: #ad8ee6; */
+    /* Plane steps: how much black is mixed into the ground (`--bg`) for each plane under the conversation. */
+    --step-rail: 52%;
+    --step-list: 28%;
+    --step-well: 10%;
+    --step-field: 38%;
+    /* How much of the text color is mixed into the ground for each plane over it. */
+    --lift-card: 5%;
+    --lift-card-2: 9%;
+    --lift-raised: 15%;
+    --lift-sheet: 12%;
+    /*
+     * How strong the text color is as quiet text (`--muted`, and `--faint` a step under it: both are 4.5:1 on the
+     * ground), and as a glyph or an edge (`--glyph`: 3:1, never words).
+     */
+    --mute: 80%;
+    --faint-pct: 50%;
+    /* The tint of broad state areas: diff lines and Priority's groups. */
+    --wash-pct: 5%;
 
-    /* Surfaces */
-    /* --desk: var(--o-bg-darker); */
-    /* --bg: var(--o-bg); */
-    /* --panel: var(--bg); */
-    /* --card: color-mix(in srgb, var(--body) 4%, var(--bg)); */
-    /* --card-2: color-mix(in srgb, var(--body) 8%, var(--bg)); */
-    /* --raised: color-mix(in srgb, var(--body) 12%, var(--bg)); */
-    /* --hover: color-mix(in srgb, var(--body) 7%, transparent); */
-    /* --pressed: color-mix(in srgb, var(--body) 18%, transparent); */
-    /* --scrim: color-mix(in srgb, var(--desk) 55%, transparent); */
-    /* --code-bg: var(--o-bg-dark); */
+    /* Planes: the rail and the list sit under the conversation, the well is sunk into it, cards and sheets rise over it. */
+    --desk: color-mix(in oklab, var(--bg), black var(--step-rail));
+    --panel: color-mix(in oklab, var(--bg), black var(--step-list));
+    --code-bg: color-mix(in oklab, var(--bg), black var(--step-well));
+    --field: color-mix(in oklab, var(--bg), black var(--step-field));
+    --card: color-mix(in oklab, var(--body) var(--lift-card), var(--bg));
+    --card-2: color-mix(in oklab, var(--body) var(--lift-card-2), var(--bg));
+    --raised: color-mix(in oklab, var(--body) var(--lift-raised), var(--bg));
+    --sheet: color-mix(in oklab, var(--body) var(--lift-sheet), var(--bg));
+    --row-on: var(--card-2);
+    --hover: color-mix(in srgb, var(--body) 7%, transparent);
+    --pressed: color-mix(in srgb, var(--body) 16%, transparent);
+    --scrim: color-mix(in srgb, var(--desk) 62%, transparent);
 
-    /* Lines */
-    /* --line: color-mix(in srgb, var(--body) 13%, var(--bg)); */
-    /* --line-strong: color-mix(in srgb, var(--body) 26%, var(--bg)); */
-    /* --edge: color-mix(in srgb, var(--body) 25%, transparent); */
-    /* --hair: color-mix(in srgb, var(--body) 10%, transparent); */
-    /* --hair-2: color-mix(in srgb, var(--body) 17%, transparent); */
+    /* Lines: crisp 1px hairlines. */
+    --hair: color-mix(in srgb, var(--body) 9%, transparent);
+    --hair-2: color-mix(in srgb, var(--body) 16%, transparent);
+    --line: color-mix(in srgb, var(--body) 14%, var(--bg));
+    --line-strong: color-mix(in srgb, var(--body) 28%, var(--bg));
+    --edge: color-mix(in srgb, var(--body) 26%, transparent);
+    --lip: color-mix(in srgb, var(--text) 7%, transparent);
 
-    /* Text */
-    /* --text: var(--o-fg-bright); */
-    /* --body: var(--o-fg); */
-    /* --muted: color-mix(in oklab, var(--body) 76%, var(--bg)); */
-    /* --faint: color-mix(in oklab, var(--body) 42%, var(--bg)); */
+    /* Text. Pi's answers are soft white (`--body`); pure `--text` is for headings, titles, and emphasis. */
+    --reply: var(--body);
+    --muted: color-mix(in oklab, var(--body) var(--mute), var(--bg));
+    --faint: color-mix(in oklab, var(--body) calc(var(--mute) - 4%), var(--bg));
+    --glyph: color-mix(in oklab, var(--body) var(--faint-pct), var(--bg));
 
-    /* Accent and status */
-    /* --accent: var(--o-accent); */
-    /* --accent-ink: var(--bg); */
-    /* --accent-fill: var(--accent); */
-    /* --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent); */
-    /* --accent-line: color-mix(in srgb, var(--accent) 50%, transparent); */
-    /* --accent-2: var(--spark); */
-    /* --focus-ring: var(--accent); */
-    /* --spark: var(--o-magenta); */
-    /* --brand: var(--o-orange); */
-    /* --ok: var(--o-green); */
-    /* --ok-soft: color-mix(in srgb, var(--o-green) 14%, transparent); */
-    /* --warn: var(--o-yellow); */
-    /* --warn-soft: color-mix(in srgb, var(--o-yellow) 10%, transparent); */
-    /* --warn-line: color-mix(in srgb, var(--o-yellow) 42%, transparent); */
-    /* --err: var(--o-red); */
-    /* --err-soft: color-mix(in srgb, var(--o-red) 14%, transparent); */
-    /* --err-line: color-mix(in srgb, var(--o-red) 50%, transparent); */
+    /*
+     * The accent is the hue (`--hue`) of what the app draws for "here", "selected", "working", and the primary button.
+     * The hue is the palette's own accent; Pocket neutral sets it to the brand coral (below). Links and the keyboard's
+     * focus ring keep the palette's accent (`--link`, `--focus-ring`), so with Pocket neutral they stay a muted blue.
+     * The state colors keep their meaning.
+     */
+    --hue: var(--o-accent);
+    --link: var(--o-accent);
+    --accent: var(--hue);
+    --accent-fill: var(--hue);
+    --accent-ink: var(--bg);
+    --accent-fill-hover: color-mix(in oklab, var(--accent-fill), var(--bg) 14%);
+    --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 55%, transparent);
+    --focus-ring: var(--link);
+    --focus-soft: color-mix(in srgb, var(--focus-ring) 15%, transparent);
+    --brand: var(--accent);
+    --accent-2: var(--o-magenta);
+    --warn-soft: color-mix(in srgb, var(--warn) 11%, transparent);
+    --warn-line: color-mix(in srgb, var(--warn) 55%, transparent);
+    --err-soft: color-mix(in srgb, var(--err) 13%, transparent);
+    --err-line: color-mix(in srgb, var(--err) 55%, transparent);
+    --ok-soft: color-mix(in srgb, var(--ok) 13%, transparent);
+    --wash-ok: color-mix(in srgb, var(--ok) var(--wash-pct), transparent);
+    --wash-err: color-mix(in srgb, var(--err) var(--wash-pct), transparent);
+    --wash-warn: color-mix(in srgb, var(--warn) var(--wash-pct), transparent);
+    --need-edge: var(--warn);
+    --fail-edge: var(--err);
 
-    /* Code */
-    /* --hl-kw: var(--o-magenta); */
-    /* --hl-str: var(--o-green); */
-    /* --hl-num: var(--o-orange); */
-    /* --hl-fn: var(--o-blue); */
-    /* --hl-type: var(--o-yellow); */
-    /* --hl-op: var(--o-cyan); */
-    /* --hl-tag: var(--o-red); */
+    /* Corners, sharp. */
+    --r-mark: 2px;
+    --r-tag: 3px;
+    --r-seg: 4px;
+    --r-row: 5px;
+    --r-control: 5px;
+    --r-card: 6px;
+    --r-window: 8px;
+    --r-sheet: 8px;
+    --r-float: 8px;
+    --radius: var(--r-control);
 
-    /* Type */
-    /* --sans: "Pocket Sans", "Geist", ui-sans-serif, system-ui, sans-serif; */
-    /* --mono: "Pocket Mono", "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo, Consolas, monospace; */
-    /* --ligatures: none; */
+    /* Space and layout. */
+    --gap-out: 6px;
+    --edge-w: 3px;
+    --edge-w-thin: 2px;
+    --leading: 1.55;
+    --transcript-width: clamp(720px, 72%, 1000px);
+    --composer-width: var(--transcript-width);
+    --timeline-x: 22px;
+    --step-mark-size: 20px;
 
-    /* Corners */
-    /* --r-mark: 2px; */
-    /* --r-tag: 4px; */
-    /* --r-seg: 5px; */
-    /* --r-row: 6px; */
-    /* --r-control: 7px; */
-    /* --r-card: 8px; */
-    /* --r-window: 10px; */
-    /* --r-sheet: 12px; */
-    /* --r-float: 12px; */
-    /* --r-pill: 999px; */
-    /* --radius: var(--r-control); */
-
-    /* Space and layout */
-    /* --gap-out: 8px; */
-    /* --gap-in: 4px; */
-    /* --border: 1px; */
-    /* --space-x: 1; */
-    /* --space-y: 1; */
-    /* --leading: 1.65; */
-    /* --transcript-width: clamp(720px, 72%, 1200px); */
-    /* --composer-width: calc(var(--transcript-width) + 48px); */
-    /* --transcript-gutter: 0px; */
-    /* --timeline-x: 22.5px; */
-    /* --step-mark-size: 19px; */
-    /* --step-gap: 10px; */
-    /* --wallpaper: none; */
-
-    /* Windows */
-    /* --window-border: var(--hair); */
-    /* --window-border-active: var(--accent-line); */
-    /* --window-ring: 0 0 0 3px var(--accent-soft); */
-
-    /* Shadows */
-    /* --sh: rgba(0, 0, 0, 0.5); */
-    /* --shadow: 0 18px 40px -18px var(--sh), 0 2px 6px -2px var(--sh); */
-    /* --pop: 0 24px 60px -16px var(--sh), 0 0 0 1px var(--hair-2); */
-
-    /* Motion */
-    /* --ease-out: cubic-bezier(0.23, 1, 0.32, 1); */
-    /* --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1); */
-    /* --ease-almost: cubic-bezier(0.5, 0.5, 0.75, 1); */
-    /* --t-in: 410ms; */
-    /* --t-out: 150ms; */
-    /* --t-fade: 175ms; */
-    /* --t-border: 540ms; */
-    /* --t-hover: 140ms; */
+    /* Depth: a hairline does the work of a shadow. */
+    --sh: rgba(0, 0, 0, 0.7);
+    --shadow: inset 0 1px 0 var(--lip);
+    --pop: 0 0 0 1px var(--hair-2), inset 0 1px 0 var(--lip), 0 20px 40px -16px var(--sh);
+    --window-border: var(--hair);
+    --window-border-active: var(--hair-2);
+    --window-ring: 0 0 0 2px var(--focus-soft);
 }
 
-/* Light colors (a palette with mode = "light") change these. */
-:root[data-mode="light"] {
-    /* --sh: rgba(40, 40, 70, 0.14); */
-    /* --accent-ink: #fff; */
-    /* --scrim: color-mix(in srgb, var(--desk) 55%, transparent); */
-    /* --line: color-mix(in srgb, var(--body) 15%, var(--bg)); */
-    /* --muted: color-mix(in oklab, var(--body) 87%, var(--bg)); */
-    /* --faint: color-mix(in oklab, var(--body) 58%, var(--bg)); */
-    /* --warn: color-mix(in oklab, var(--o-yellow) 62%, var(--o-fg)); */
-    /* --ok: color-mix(in oklab, var(--o-green) 78%, var(--o-fg)); */
-    /* --err: color-mix(in oklab, var(--o-red) 85%, var(--o-fg)); */
-    /* --accent-fill: color-mix(in oklab, var(--accent) 76%, var(--body)); */
-    /* --hl-kw: color-mix(in oklab, var(--o-magenta) 50%, var(--o-fg)); */
-    /* --hl-str: color-mix(in oklab, var(--o-green) 50%, var(--o-fg)); */
-    /* --hl-num: color-mix(in oklab, var(--o-orange) 50%, var(--o-fg)); */
-    /* --hl-fn: color-mix(in oklab, var(--o-blue) 50%, var(--o-fg)); */
-    /* --hl-type: color-mix(in oklab, var(--o-yellow) 40%, var(--o-fg)); */
-    /* --hl-op: color-mix(in oklab, var(--o-cyan) 50%, var(--o-fg)); */
-    /* --hl-tag: color-mix(in oklab, var(--o-red) 50%, var(--o-fg)); */
+/* The status colors keep their hue from the palette and their lightness fixed, so contrast holds on any colors. */
+@supports (color: oklch(from red l c h)) {
+    :root {
+        --accent-l: 0.76;
+        --accent-c: 1.15;
+        --hue-l: 0.76;
+        --hue-c: 1.15;
+        --link: oklch(from var(--o-accent) var(--accent-l) calc(c * var(--accent-c)) h);
+        --accent: oklch(from var(--hue) var(--hue-l) calc(c * var(--hue-c)) h);
+        --accent-fill: oklch(from var(--hue) 0.75 c h);
+        --accent-ink: oklch(from var(--hue) 0.22 0.02 h);
+        --warn: oklch(from var(--o-yellow) 0.83 calc(c * 1.15) h);
+        --err: oklch(from var(--o-red) 0.76 calc(c * 1.1) h);
+        --ok: oklch(from var(--o-green) 0.8 calc(c * 1.05) h);
+    }
+}
+
+/* Pocket neutral: the warm greys this look is drawn for. */
+:root[data-colors="pocket-neutral"] {
+    --step-rail: 70%;
+    --step-list: 30%;
+    --step-well: 22%;
+    --step-field: 45%;
+    --mute: 70%;
+    --hover: color-mix(in srgb, var(--body) 7%, transparent);
+}
+
+@supports (color: oklch(from red l c h)) {
+    :root[data-colors="pocket-neutral"] {
+        --accent-l: 0.72;
+        --accent-c: 1;
+        --hue-l: 0.74;
+        --hue-c: 1;
+    }
 }
 
 /*
- * Examples of changes to the layout. Take the comment marks off one to try it.
- *
- * Your messages as bubbles on the right; other people's stay on the left:
- *
- *     [data-part="prompt"][data-from="me"] {
- *         margin-inline-start: auto;
- *         max-width: 70%;
- *         background: var(--accent-soft);
- *     }
- *
- * A wider conversation:
- *
- *     :root {
- *         --transcript-width: clamp(720px, 80%, 1400px);
- *         --composer-width: var(--transcript-width);
- *     }
- *
- * A square message box:
- *
- *     [data-part="message-box"] {
- *         border-radius: 0;
- *     }
- *
- * Phones (below 700 px wide): no status line under the message box.
- *
- *     @media (max-width: 699px) {
- *         [data-part="status-line"] {
- *             display: none;
- *         }
- *     }
+ * Pocket neutral carries the brand coral (the π mark) as its hue. Its red is close to coral, so the failed color moves
+ * toward crimson to stay apart from it. Its ink on the coral is a fixed dark, and its light mark has a fixed deep coral
+ * where relative colors are missing. Any other palette keeps its own accent and its own red.
  */
+:root[data-colors^="pocket-neutral"] {
+    --hue: #eb927b;
+    --accent-ink: #1f1c19;
+}
+
+@supports (color: oklch(from red l c h)) {
+    :root[data-colors="pocket-neutral"] {
+        --err: oklch(from var(--o-red) 0.72 calc(c * 1.5) calc(h - 12));
+    }
+}
+
+/* Light colors (a palette with mode = "light"). */
+:root[data-mode="light"] {
+    --step-rail: 11%;
+    --step-list: 5%;
+    --step-well: 1.8%;
+    --step-field: 3.5%;
+    --lift-card: 4%;
+    --lift-card-2: 8%;
+    --lift-raised: 12%;
+    --lift-sheet: 0%;
+    --mute: 92%;
+    --faint-pct: 58%;
+    --wash-pct: 4%;
+    --row-on: color-mix(in oklab, var(--body) 15%, var(--bg));
+    --hover: color-mix(in srgb, var(--body) 7%, transparent);
+    --pressed: color-mix(in srgb, var(--body) 14%, transparent);
+    --lip: color-mix(in srgb, white 70%, transparent);
+    --sh: rgba(34, 38, 70, 0.2);
+    --scrim: color-mix(in srgb, var(--o-fg) 38%, transparent);
+    --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+    --warn: color-mix(in oklab, var(--o-yellow) 62%, var(--o-fg));
+    --ok: color-mix(in oklab, var(--o-green) 78%, var(--o-fg));
+    --err: color-mix(in oklab, var(--o-red) 85%, var(--o-fg));
+}
+
+@supports (color: oklch(from red l c h)) {
+    :root[data-mode="light"] {
+        --accent-l: 0.49;
+        --accent-c: 1.3;
+        --hue-l: 0.49;
+        --hue-c: 1.3;
+        --warn: oklch(from var(--o-yellow) 0.48 calc(c * 1.1) h);
+        --err: oklch(from var(--o-red) 0.5 calc(c * 1.1) h);
+        --ok: oklch(from var(--o-green) 0.47 calc(c * 1.05) h);
+        --accent-2: oklch(from var(--o-magenta) 0.5 c h);
+    }
+}
+
+:root[data-mode="light"][data-colors="pocket-neutral-light"] {
+    --step-rail: 5.5%;
+    --step-list: 2.8%;
+    --step-well: 1.6%;
+    --step-field: 0%;
+    --lift-card: 3%;
+    --lift-card-2: 6%;
+    --lift-raised: 10%;
+    --accent: #a44430;
+    --mute: 66%;
+    --faint-pct: 56%;
+    --row-on: color-mix(in oklab, var(--body) 8%, var(--bg));
+    --hover: color-mix(in srgb, var(--body) 5%, transparent);
+    --pressed: color-mix(in srgb, var(--body) 11%, transparent);
+    --sh: rgba(0, 0, 0, 0.16);
+}
+
+@supports (color: oklch(from red l c h)) {
+    :root[data-mode="light"][data-colors="pocket-neutral-light"] {
+        --accent-l: 0.53;
+        --accent-c: 1;
+        --hue-l: 0.47;
+        --hue-c: 1.1;
+        --accent: oklch(from var(--hue) var(--hue-l) calc(c * var(--hue-c)) h);
+        --err: oklch(from var(--o-red) 0.48 calc(c * 1.3) calc(h - 12));
+    }
+}
+
+/* In light colors the accent's ink is dark (its fill is bright), but warm and failed fills are deep: their text stays light. */
+:root[data-mode="light"]
+    :is(.badge.warn, .peeks-jump, .badge-host .badge.err, .board-mark, .board-cell-core) {
+    color: var(--bg);
+}
+
+/* ───────────────────────────── The rail and the session list ───────────────────────────── */
+
+/* The rail is the darkest plane, the list one step up, the conversation the lightest. */
+.places-rail {
+    --place-rail-width: 88px;
+    background: var(--desk);
+    border-right: 0;
+}
+
+/* Only the side rail is spaced and sized here. The bar along the bottom of a phone keeps the app's own padding, which
+   clears a notch and the home bar, and its 44px buttons. */
+.places-rail.desktop-rail {
+    gap: 14px;
+    padding-inline: 12px;
+}
+
+/* The folded sidebar holds the whole rail, which is wider here than the app's 64 px: nothing of a label or a badge is
+   cut off, and a saved narrower width still gives the list the room beside it. */
+@media (min-width: 960px) {
+    .sidebar-clip > .sessions {
+        min-width: min(204px, calc(var(--sidebar-w, 432px) - 88px - 2 * var(--border)));
+    }
+
+    :root[data-rail="on"] .sidebar {
+        width: calc(89px + env(safe-area-inset-left));
+    }
+
+    :root[data-tiling="on"][data-rail="on"] .sidebar {
+        width: calc(88px + 2 * var(--border));
+    }
+}
+
+/* The rail is the darkest plane: its quiet text is measured against it. */
+.places-rail {
+    --muted: color-mix(in oklab, var(--body) min(100%, var(--mute) + 8%), var(--desk));
+}
+
+.places-rail .rail-brand {
+    width: 100%;
+    margin-bottom: 4px;
+    color: var(--brand);
+}
+
+.places-rail.desktop-rail .rail-place {
+    min-height: 60px;
+}
+
+.places-rail .rail-place {
+    gap: 4px;
+    border-radius: var(--r-card);
+    font-size: var(--text-xs, 0.68rem);
+    font-weight: 500;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out),
+        transform 90ms var(--ease-out);
+}
+
+@media (hover: hover) {
+    .places-rail .rail-place:active {
+        transform: scale(0.97);
+        background: var(--pressed);
+    }
+}
+
+/* The place you are in: its button lifts a plane and a 3px edge stands at the rail's edge. */
+.places-rail .rail-place.on {
+    background: var(--row-on);
+    color: var(--accent);
+}
+
+.places-rail .rail-place.on::before {
+    left: -12px;
+    top: 12px;
+    bottom: 12px;
+    height: auto;
+    width: var(--edge-w);
+    border-radius: 0 var(--r-mark) var(--r-mark) 0;
+    background: var(--accent);
+}
+
+/* How many: a small square, amber for what needs you. */
+.rail-count {
+    top: 6px;
+    right: 8px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: var(--r-tag);
+    background: var(--text);
+    color: var(--bg);
+    box-shadow: none;
+    font-weight: 700;
+}
+
+.rail-count.attn {
+    background: var(--warn);
+    color: var(--bg);
+}
+
+/* The list: a plane of its own. */
+.sessions-head {
+    height: 36px;
+    gap: 8px;
+    padding-left: 8px;
+}
+
+.sessions-name {
+    font-size: var(--text-3xl, 19.2px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+}
+
+.sessions-count {
+    color: var(--muted);
+}
+
+.new-button {
+    height: 32px;
+    padding: 0 12px 0 10px;
+    border-radius: var(--r-control);
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+@media (hover: hover) {
+    .new-button:hover {
+        background: var(--accent-fill-hover);
+    }
+}
+
+.sessions .search,
+.search {
+    min-height: 34px;
+    background: var(--field);
+    border-color: transparent;
+    box-shadow: inset 0 0 0 var(--border) var(--hair);
+}
+
+.sessions .search {
+    margin-top: 12px;
+}
+
+@media (hover: hover) {
+    .sessions .search:hover {
+        border-color: transparent;
+        box-shadow: inset 0 0 0 var(--border) var(--hair-2);
+    }
+}
+
+.sessions .search:has(input:focus),
+.search:has(input:focus) {
+    border-color: transparent;
+    background: var(--field);
+    box-shadow: inset 0 0 0 var(--border) var(--focus-ring);
+}
+
+.sessions .search.filled {
+    border-color: transparent;
+    color: var(--text);
+}
+
+.sessions .search-keys {
+    border-color: var(--hair-2);
+    color: var(--muted);
+}
+
+.session-tabs {
+    margin-top: 10px;
+    padding: 3px;
+    background: var(--field);
+}
+
+.session-tabs button {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.session-tabs button.on {
+    font-weight: 500;
+}
+
+.slide-x {
+    background: var(--raised);
+    box-shadow: inset 0 1px 0 var(--lip);
+}
+
+.tab-count {
+    min-width: 0;
+    padding: 0;
+    background: none;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Find any session, Needs attention, Pinned & working: calm rows, 36px on a desktop. */
+.family-routes {
+    margin: 8px 0 0;
+    padding-bottom: 4px;
+    border-bottom: 0;
+}
+
+.family-index-link {
+    color: var(--body);
+    font-size: 13.5px;
+    border-radius: var(--r-row);
+}
+
+.family-index-link .icon:first-child {
+    color: var(--muted);
+}
+
+.family-index-link[data-family-open="attention"] .icon:first-child {
+    color: var(--warn);
+}
+
+@media (pointer: fine) {
+    .family-index-link {
+        min-height: 36px;
+    }
+}
+
+/* Group heads: air above, a quiet label, lined up with the state marks. Priority's are mono capitals. */
+.group-head {
+    padding: 24px 14px 8px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.session-items > .session-group:first-child > .group-head,
+.session-items > .family-routes + .session-group > .group-head {
+    padding-top: 18px;
+}
+
+.group-name,
+.group-count {
+    color: var(--muted);
+}
+
+.group-count {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.session-group[data-group] .group-head,
+.group-bar .group-head {
+    font-family: var(--mono);
+    font-size: var(--label-size, 10.5px);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.session-group[data-group] .group-head .group-count {
+    font-size: 10.5px;
+    font-weight: 400;
+}
+
+.group-head.attn .group-name {
+    color: var(--warn);
+}
+
+@media (hover: hover) {
+    button.group-head:hover {
+        background: var(--hover);
+        border-radius: var(--r-row);
+    }
+}
+
+/* A session's line: one line at 36px on a desktop (less when the density is tighter), a thumb's size on a touch screen. */
+.session-row {
+    --row-line: calc(22px + 14px * var(--space-y));
+    padding-block: 0;
+}
+
+.session {
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    gap: 0 12px;
+    padding-left: 14px;
+    border-radius: var(--r-row);
+}
+
+.session-mark {
+    width: 10px;
+    height: 10px;
+}
+
+.session-title {
+    font-size: 13.5px;
+    font-weight: 400;
+    color: var(--text);
+}
+
+@media (pointer: fine) {
+    :root[data-density="comfortable"] .sidebar .session-row:not(.with-chips, .needs-you) {
+        --row-line: calc(22px + 14px * var(--space-y));
+        contain-intrinsic-size: auto calc(22px + 14px * var(--space-y));
+    }
+
+    :root[data-density="comfortable"]
+        .sidebar
+        .session-row:not(.with-chips, .needs-you)
+        > .session {
+        height: calc(22px + 14px * var(--space-y));
+    }
+
+    :root[data-density="comfortable"]
+        .sidebar
+        .session-row:not(.with-chips, .needs-you)
+        .session-title:not(.with-hit, .with-crumb) {
+        display: block;
+        -webkit-line-clamp: unset;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        line-height: normal;
+    }
+}
+
+.session-row.active .session {
+    background: var(--row-on);
+}
+
+.session-row.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: var(--edge-w);
+    border-radius: 0 var(--r-mark) var(--r-mark) 0;
+    background: var(--accent);
+    z-index: 1;
+}
+
+.session-row.active .session-title {
+    font-weight: 400;
+}
+
+.session-row.selected .session {
+    background: var(--row-on);
+    border-color: var(--hair-2);
+}
+
+.session-row.marked-unread .session-title,
+.session-row.unseen .session-title,
+.session.unread .session-title,
+.session-row.needs-you .session-title,
+.session-row[data-state="waiting"] .session-title,
+.session-row[data-state="failed"] .session-title {
+    font-weight: 500;
+}
+
+/* The state mark: 10px, the shapes the app draws, the state's own color, and quiet when read. */
+.state-mark {
+    --q: 4px;
+    width: 10px;
+    height: 10px;
+}
+
+.state-mark.fresh {
+    color: var(--text);
+}
+
+.state-mark.seen {
+    color: var(--glyph);
+    opacity: 1;
+}
+
+.state-mark.working {
+    color: var(--accent);
+}
+
+.state-mark.working::before {
+    animation-name: bold-quadrant;
+}
+
+@keyframes bold-quadrant {
+    0% {
+        transform: translate(0, calc(var(--q) + 2px));
+    }
+    25% {
+        transform: translate(0, 0);
+    }
+    50% {
+        transform: translate(calc(var(--q) + 2px), 0);
+    }
+    75% {
+        transform: translate(calc(var(--q) + 2px), calc(var(--q) + 2px));
+    }
+}
+
+.state-mark.waiting {
+    color: var(--warn);
+    background: linear-gradient(90deg, currentColor 0 4px, transparent 0 6px, currentColor 0);
+}
+
+.state-mark.limited {
+    color: var(--warn);
+    background: radial-gradient(circle at center, currentColor 0 1.5px, transparent 1.75px);
+}
+
+.state-mark.failed {
+    color: var(--err);
+}
+
+/* What is on a row's right: one quiet item. */
+.session-side {
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.session-time {
+    color: var(--muted);
+}
+
+.session-needs {
+    height: auto;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    font: 500 12px var(--sans);
+}
+
+.session-working {
+    width: 6px;
+    height: 6px;
+}
+
+.session-fold {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.session-fork {
+    border-radius: var(--r-tag);
+    background: var(--hover);
+    color: var(--text);
+}
+
+.session-fork.failed {
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+.session-background,
+.session-limit {
+    border-radius: var(--r-tag);
+}
+
+/* Priority: a queue of decisions. Each group is a plane tinted by its state. */
+.session-group[data-group="needs"],
+.session-group[data-group="failed"] {
+    margin-bottom: 12px;
+    padding-bottom: 4px;
+    border-radius: var(--r-card);
+}
+
+.session-group[data-group="needs"] {
+    background: var(--wash-warn);
+}
+
+.session-group[data-group="failed"] {
+    background: var(--wash-err);
+}
+
+.session-group[data-group="needs"] > .group-head,
+.session-group[data-group="failed"] > .group-head,
+.session-group[data-group="needs"] > .group-bar > .group-head,
+.session-group[data-group="failed"] > .group-bar > .group-head {
+    padding-top: 14px;
+}
+
+.group-head.fail .group-name,
+.session-group[data-group="failed"] .group-name {
+    color: var(--err);
+}
+
+.group-action {
+    border-radius: var(--r-seg);
+    color: var(--text);
+}
+
+@media (hover: hover) {
+    .group-action:hover {
+        background: var(--hover);
+    }
+}
+
+.quick-pill {
+    height: 26px;
+    border-radius: var(--r-control);
+    border-color: transparent;
+    background: none;
+    box-shadow: inset 0 0 0 var(--border) var(--hair-2);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.quick-pill.attn {
+    border-color: transparent;
+    background: none;
+    color: var(--text);
+}
+
+.quick-pill.attn[aria-expanded="true"] {
+    border-color: transparent;
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+@media (hover: hover) {
+    .quick-pill:hover,
+    .quick-pill.attn:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+    .quick-pill.attn[aria-expanded="true"]:hover {
+        background: var(--accent-fill-hover);
+        color: var(--accent-ink);
+    }
+}
+
+.session-row.asking {
+    box-shadow: inset 0 0 0 1px var(--warn-line);
+    background: var(--code-bg);
+    border-radius: var(--r-card);
+}
+
+.more-needs {
+    border-radius: var(--r-row);
+}
+
+/* ───────────────────────────── The conversation ───────────────────────────── */
+
+/* A neutral hairline around the conversation; the blue ring shows only for the keyboard's focus. */
+:root[data-tiling="on"] .pane {
+    border-color: var(--window-border-active);
+}
+
+/* Links in Pi's answers and in what people write: blue, underlined. */
+a,
+.link,
+.md a {
+    color: var(--link);
+}
+
+.md a {
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--link) 50%, transparent);
+    text-underline-offset: 3px;
+}
+
+::selection {
+    background: color-mix(in srgb, var(--link) 35%, transparent);
+}
+
+.reply {
+    color: var(--reply);
+}
+
+.md strong,
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+    color: var(--text);
+}
+
+.md code {
+    border-radius: var(--r-tag);
+    background: var(--card-2);
+    color: var(--text);
+}
+
+/* Messages from people: one plane up from the conversation. */
+.user-row > .prompt {
+    border-radius: var(--r-card);
+    border-color: var(--hair);
+    background: var(--card);
+}
+
+.prompt-time {
+    color: var(--muted);
+}
+
+/* An agent's or the app's message: a card edged in its tone (the second accent for an agent), no tinted fills. */
+.acard {
+    position: relative;
+    border-color: var(--hair);
+    border-radius: var(--r-card);
+}
+
+.acard::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 1;
+    width: var(--edge-w-thin);
+    background: var(--tone);
+    pointer-events: none;
+}
+
+.acard[data-tone="err"],
+.acard[data-tone="warn"] {
+    border-color: var(--hair);
+}
+
+.acard {
+    --tone: var(--accent-2);
+}
+
+.acard[data-tone="ok"] {
+    --tone: var(--ok);
+}
+
+.acard[data-tone="err"] {
+    --tone: var(--err);
+}
+
+.acard[data-tone="warn"] {
+    --tone: var(--warn);
+}
+
+.acard[data-tone="outside"] {
+    --tone: var(--o-cyan);
+}
+
+.acard-mark {
+    background: none;
+}
+
+.acard-state {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.acard-open {
+    color: var(--tone);
+}
+
+/* What Pi did: one sunken well. Its steps are rows of it; output is the crisp mono layer. */
+.activity {
+    border-color: var(--hair);
+    border-radius: var(--r-card);
+    background: var(--code-bg);
+}
+
+.activity-head {
+    color: var(--muted);
+}
+
+.activity-summary {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.activity-failed {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--err);
+    font-weight: 600;
+}
+
+.activity-time {
+    color: var(--muted);
+}
+
+.activity.open > .activity-head {
+    border-bottom-color: var(--hair);
+}
+
+.timeline::before {
+    background: var(--hair-2);
+}
+
+.step + .step {
+    border-top: var(--border) solid var(--hair);
+}
+
+.step-mark {
+    border-radius: var(--r-seg);
+    background: var(--code-bg);
+    box-shadow: 0 0 0 3px var(--code-bg);
+}
+
+.step-mark.asking {
+    box-shadow: 0 0 0 3px var(--code-bg);
+}
+
+.step-mark.error {
+    font-weight: 800;
+}
+
+.step-label {
+    font-weight: 500;
+}
+
+.step-subject {
+    color: var(--text);
+}
+
+.step-meta {
+    color: var(--muted);
+}
+
+.step-meta.ok,
+.step-meta .ok {
+    color: var(--ok);
+}
+
+.step-meta.err,
+.step-meta .err {
+    color: var(--err);
+}
+
+.step[data-state="failed"] {
+    box-shadow: inset var(--edge-w-thin) 0 0 var(--fail-edge);
+}
+
+.step[data-state="failed"] .step-meta {
+    font-weight: 600;
+}
+
+.step[data-state="waiting"] {
+    box-shadow: inset var(--edge-w-thin) 0 0 var(--need-edge);
+}
+
+.step[data-state="waiting"] .step-meta {
+    color: var(--warn);
+    font-weight: 600;
+}
+
+.step-mark.spinning,
+.step-mark.agent {
+    --tint: transparent;
+}
+
+/* Output and commands inside the well: no boxes of their own. */
+.step-detail pre.output,
+.step-detail pre.cmd,
+.step-body pre.output,
+.step-body pre.cmd {
+    padding: 4px 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font-size: var(--mono-size, 12.5px);
+    line-height: 1.55;
+    color: var(--body);
+}
+
+.step-body pre.cmd {
+    color: var(--text);
+}
+
+.step-body pre.output.error {
+    color: var(--body);
+}
+
+.cmd-sign {
+    color: var(--accent);
+}
+
+.thought-body {
+    border-color: var(--hair);
+    background: none;
+}
+
+/* Diffs: a tint of about 5% and a 2px edge on the changed lines; the signs stay colored. */
+.dv {
+    --dv-add: var(--wash-ok);
+    --dv-del: var(--wash-err);
+    border-color: var(--hair);
+    background: var(--code-bg);
+}
+
+.step-body .dv {
+    border: 0;
+    border-radius: 0;
+}
+
+.dv-head {
+    background: var(--card);
+}
+
+.dv-n.add,
+.dv-n.del {
+    box-shadow: inset var(--edge-w-thin) 0 0 var(--ok);
+}
+
+.dv-n.del {
+    box-shadow: inset var(--edge-w-thin) 0 0 var(--err);
+}
+
+.dv-code.add mark {
+    background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.dv-code.del mark {
+    background: color-mix(in srgb, var(--err) 16%, transparent);
+}
+
+.dv-hunk td {
+    color: var(--muted);
+}
+
+/* The approval: the strongest state in the conversation. */
+.approval {
+    border: 0;
+    border-radius: var(--r-card);
+    background: var(--warn-soft);
+    box-shadow:
+        inset var(--edge-w) 0 0 var(--need-edge),
+        inset 0 0 0 var(--border) var(--warn-line);
+}
+
+.approval-shield {
+    background: none;
+    border-radius: var(--r-control);
+}
+
+.approval-ask {
+    color: var(--warn);
+    font-size: 15px;
+}
+
+.approval-reason {
+    color: var(--body);
+}
+
+.approval pre.cmd {
+    border-radius: var(--r-control);
+    background: var(--code-bg);
+    color: var(--text);
+}
+
+.approval-actions .button {
+    border-radius: var(--r-control);
+}
+
+/* Code blocks in answers sit one plane down, as the tool well does. */
+.code-head {
+    background: var(--card);
+}
+
+.md pre,
+.md pre code {
+    background: var(--code-bg);
+}
+
+/* Cards and their buttons. */
+.button.primary,
+.need-button.primary {
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+@media (hover: hover) {
+    .button.primary:hover,
+    .need-button.primary:not(:disabled):hover {
+        background: var(--accent-fill-hover);
+    }
+}
+
+/* ───────────────────────────── The message box and the status line ───────────────────────────── */
+
+.composer {
+    background: var(--card);
+    border-color: var(--hair-2);
+    box-shadow: var(--shadow);
+}
+
+.composer:focus-within {
+    border-color: var(--focus-ring);
+    box-shadow:
+        var(--shadow),
+        0 0 0 2px var(--focus-soft);
+}
+
+.model-chip,
+.composer-row .plan-chip {
+    height: 32px;
+    border-radius: var(--r-control);
+    font-weight: 500;
+}
+
+.model-chip {
+    background: var(--card-2);
+}
+
+@media (hover: hover) {
+    .model-chip:hover {
+        background: var(--raised);
+    }
+}
+
+.model-chip .model-spark {
+    color: var(--accent);
+}
+
+.composer-row .plan-chip.on {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--text);
+}
+
+.mode-switch {
+    border-radius: var(--r-control);
+    background: var(--code-bg);
+}
+
+.mode-switch button {
+    border-radius: var(--r-seg);
+}
+
+.mode-switch button.on {
+    background: var(--raised);
+    box-shadow: inset 0 1px 0 var(--lip);
+}
+
+.stop-button,
+.send-button {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--r-control);
+}
+
+.stop-button {
+    background: var(--err-soft);
+    box-shadow: inset 0 0 0 var(--border) var(--err-line);
+}
+
+@media (hover: hover) {
+    .stop-button:hover {
+        background: var(--err-line);
+    }
+    .send-button.ready:hover {
+        background: var(--accent-fill-hover);
+    }
+}
+
+.status-line {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+}
+
+.status-line .guard,
+.status-line .background-now,
+.status-line .schedules-now {
+    border-radius: var(--r-tag);
+}
+
+.status-line .background-now {
+    background: var(--hover);
+    color: var(--text);
+}
+
+.meter > span {
+    background: var(--accent);
+}
+
+/* Sheets, menus, and the launcher are the highest plane. */
+.sheet,
+.pop-menu,
+.launcher {
+    background: var(--sheet);
+}
+
+.sheet-host[data-navigation] .sheet {
+    background: var(--sheet);
+}
+
+/* A lighter plane needs stronger quiet text for the same 4.5:1. */
+.sheet,
+.pop-menu,
+.launcher {
+    --muted: color-mix(in oklab, var(--body) min(100%, var(--mute) + 12%), var(--sheet));
+    --faint: color-mix(in oklab, var(--body) min(100%, var(--mute) + 7%), var(--sheet));
+}
+
+/* A person's initials on a tint of their color: darker, in a light palette, so they read at 4.5:1. */
+:root[data-mode="light"] :is(.avatar, .prompt-avatar) {
+    background: color-mix(in srgb, var(--who, var(--accent)) 4%, transparent);
+    color: color-mix(in oklab, var(--who, var(--accent)) 10%, var(--text));
+}

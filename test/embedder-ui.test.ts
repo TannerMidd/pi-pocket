@@ -163,6 +163,7 @@ test(
     `);
         assert.deepEqual(await inPage(`return JSON.stringify(embedderTest.invoked)`), ["settings"]);
         await page.evaluate(`(await import("/store.js")).openSheet({ type: "menu" })`);
+        await page.click({ label: "App settings" });
         await until(
             () =>
                 inPage<boolean>(
@@ -177,9 +178,9 @@ test(
         assert.equal(
             groups.at(-1),
             "Pi Pocket GUI",
-            "the embedder's group comes last, below App, under its title",
+            "the embedder group comes last in App settings",
         );
-        assert.equal(groups.at(-2), "App");
+        assert.ok(groups.includes("Preferences"));
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
         assert.equal(
             await inPage(`return JSON.stringify(embedderTest.pinned.at(-1)[0].state)`),

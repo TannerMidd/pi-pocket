@@ -11,6 +11,7 @@ import {
     scriptedModel,
     until,
 } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -295,21 +296,32 @@ after(async () => {
     cleanUp();
 });
 
-const rail = (title: string) => `.sidebar .rail-ext[title="${title}"]`;
+const rail = (title: string) => `.nav-menu .rail-ext[title="${title}"]`;
+const meterReady = () =>
+    until(
+        () => inPage<boolean>(`return JSON.stringify(Boolean(globalThis.meterPocket))`),
+        "the meter module",
+    );
+
+const openTools = async () => {
+    await inPage(`(await import("/store.js")).openSheet({ type: "tools" }); return "null"`);
+    await until(() => has(".nav-menu"), "Tools");
+};
 
 test(
     "a browser module's rail button opens its page, which calls its route and hears its events",
     real,
     async () => {
         await page.navigate(`${base}/s/${session}`);
-        await until(() => has(rail("Meter")), "the meter's rail button");
+        await meterReady();
+        await page.click({ selector: '.desktop-rail [data-nav="tools"]' });
+        await until(() => has(rail("Meter")), "the meter tool");
         assert.deepEqual(
             await withMeter<string[]>(`return JSON.stringify(Object.keys(pocket).sort())`),
             Object.keys(POCKET_MEMBERS).sort(),
             "pocket has the members of Pocket in types/pocket.d.ts",
         );
-        await settled();
-        await page.click({ selector: rail("Meter") });
+        await clickNavigation(page, { selector: rail("Meter") });
         await until(
             async () => (await text(".ext-page .meter")) === "Reading: 42",
             "the reading from its route",
@@ -332,6 +344,38 @@ test(
     },
 );
 
+test("Tools keeps global pages at home and offers a session panel once", real, async () => {
+    const id = await newSession(app);
+    const dial = '.nav-menu button[aria-label="Dial"]';
+    const count = () =>
+        inPage<number>(`return JSON.stringify(document.querySelectorAll('${dial}').length)`);
+
+    await page.navigate(base);
+    await meterReady();
+    await withMeter(
+        `pocket.rail({ id: 'open-dial', title: 'Dial', panel: 'dial' }); return 'null'`,
+    );
+    await openTools();
+    await until(() => has(rail("Meter")), "the global Meter page at home");
+    assert.equal(await count(), 0, "no Dial panel without a session");
+    await settled();
+    await page.click({ selector: rail("Meter") });
+    await until(
+        async () => /^Reading: \d+$/.test(await text(".ext-page .meter")),
+        "the global page works",
+    );
+
+    await withMeter(`pocket.openConversation(${id}); return 'null'`);
+    await until(() => has(".composer"), "the selected session");
+    await openTools();
+    await until(() => has(dial), "the session panel in Tools");
+    assert.equal(await count(), 1, "the panel tile and rail entry do not duplicate Dial");
+    await settled();
+    await page.click({ selector: dial });
+    await until(() => has(".ext-panel .dial"), "the Dial panel opens");
+    await withMeter(`pocket.closePanel(); return 'null'`);
+});
+
 test(
     "openConversation opens the viewer on an artifact, and ignores a bad option",
     real,
@@ -347,7 +391,7 @@ test(
             );
 
         await page.navigate(base);
-        await until(() => has(rail("Meter")), "the meter's rail button");
+        await meterReady();
         await open(`{ artifact: "plan", version: 2 }`);
         assert.deepEqual(await sheet(), { type: "viewer", id: "plan", version: 2 });
         await open(`{ artifact: "plan", version: 0 }`);
@@ -409,8 +453,10 @@ test(
             `globalThis.appMenu = pocket.menu({ id: "app-row", label: "App row", hint: "default", run: () => { globalThis.menuRan = "app"; } }); globalThis.sessionMenu = pocket.menu({ id: "session-row", label: "Session row", group: "session", run: () => { globalThis.menuRan = "session"; } }); return "null";`,
         );
 
-        const openMenu = () =>
-            inPage(`(await import("/store.js")).openSheet({ type: "menu" }); return "null";`);
+        const openMenu = (section: "ext" | "menu") =>
+            inPage(
+                `(await import("/store.js")).openSheet({ type: "menu", section: ${JSON.stringify(section)} }); return "null";`,
+            );
         const menuLabels = () =>
             inPage<string[]>(
                 `return JSON.stringify([...document.querySelectorAll(".sheet .list-item")].map((each) => each.textContent.trim()))`,
@@ -420,7 +466,11 @@ test(
 
         await inPage(`(await import("/store.js")).navigate(null); return "null";`);
         await until(async () => !(await has(".composer")), "the session closes");
-        await openMenu();
+        await openMenu("menu");
+        await until(() => hasLabel("App row"), "the App row in the menu itself, without a session");
+        await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
+        await until(async () => !(await hasLabel("App row")), "the menu to close");
+        await openMenu("ext");
         await until(() => hasLabel("App row"), "the default App row without a session");
         assert.equal(await hasLabel("Session row"), false, "a Session row needs a session");
         await inPage(`(await import("/store.js")).closeSheet(); return "null";`);
@@ -436,11 +486,9 @@ test(
 
         await inPage(`(await import("/store.js")).navigate(${session}); return "null";`);
         await until(() => has(".composer"), "the session opens");
-        await openMenu();
-        await until(
-            async () => (await hasLabel("App row")) && (await hasLabel("Session row")),
-            "both menu groups",
-        );
+        await openMenu("menu");
+        await until(() => hasLabel("Session row"), "the session extension row in the session menu");
+        assert.equal(await hasLabel("App row"), true, "app rows show in the menu in a session too");
         await inPage(
             `[...document.querySelectorAll(".sheet .list-item")].find((each) => each.textContent.trim().startsWith("Session row")).click(); return "null";`,
         );
@@ -454,12 +502,13 @@ test(
         await withMeter(
             `globalThis.sessionMenu.update({ label: "Session updated", hint: "changed" }); return "null";`,
         );
-        await openMenu();
+        await openMenu("menu");
         await until(() => hasLabel("Session updated"), "the updated Session row");
         assert.equal(await hasLabel("Session row"), false);
         await withMeter(`globalThis.sessionMenu.remove(); return "null";`);
         await until(async () => !(await hasLabel("Session updated")), "the removed Session row");
-        assert.equal(await hasLabel("App row"), true, "the App row remains");
+        await openMenu("ext");
+        await until(() => hasLabel("App row"), "the App row remains");
         await withMeter(`globalThis.appMenu.remove(); return "null";`);
     },
 );
@@ -599,6 +648,7 @@ test(
                 ),
             "the older API's notice",
         );
+        await openTools();
         await until(() => has(rail("fresh")), "the API 2 module's button");
         assert.equal(await has(rail("future")), false);
         assert.equal(await has(rail("past")), false);
@@ -618,6 +668,7 @@ test("a browser module that fails says so, and the rest of the app goes on", rea
             ),
         "the failure's notice",
     );
+    await openTools();
     // What it added before it threw is gone; the others' stay.
     assert.equal(await has(rail("Broken")), false);
     assert.equal(await has(rail("Meter")), true);
@@ -630,7 +681,7 @@ test(
     real,
     async () => {
         await page.navigate(`${base}/s/${session}`);
-        await until(() => has(rail("Meter")), "the meter's rail button");
+        await meterReady();
         await timeTheStop();
         // Each turn of the loop after an await. The page answers again only once the loop ends.
         await withMeter<null>(`
@@ -676,13 +727,15 @@ test("safe mode: ?noext=1 loads no browser modules in the tab, across a reload",
                 ),
             "the notice",
         );
-        assert.equal(await has(".rail-ext"), false);
+        await openTools();
+        assert.equal(await has(".nav-menu .rail-ext"), false);
 
         // A reload in the same tab keeps it.
         await page.navigate(`${base}/s/${session}`);
         await until(() => has(".composer"), "the conversation again");
         await sleep(500);
-        assert.equal(await has(".rail-ext"), false);
+        await openTools();
+        assert.equal(await has(".nav-menu .rail-ext"), false);
     } finally {
         await inPage<null>(`sessionStorage.removeItem("pocket.noext"); return "null"`);
     }
@@ -835,7 +888,7 @@ test("Lancet Guard stays on until its inline confirmation is accepted", real, as
 });
 
 test(
-    "Send, and while Pi works Stop, stay inside the message box on every phone width, with extension buttons and with more",
+    "Send, and while Pi works Stop, stay inside the message box on every phone width, with the extension buttons folded into ⋯ and with more",
     real,
     async () => {
         const busy = (on: boolean) =>
@@ -854,13 +907,12 @@ test(
                 send: number;
                 right: number;
                 shown: number;
-                below: boolean;
+                more: number;
             }>(`
                 const row = document.querySelector(".composer-row");
                 const stop = row.querySelector(".stop-button")?.getBoundingClientRect();
                 const send = row.querySelector(".send-button")?.getBoundingClientRect();
                 const shown = [...row.querySelectorAll(".ext-composer-button")].filter((each) => each.offsetWidth > 0);
-                const end = (stop ?? send).bottom;
 
                 return JSON.stringify({
                     scroll: row.scrollWidth,
@@ -869,7 +921,7 @@ test(
                     send: send?.right ?? 0,
                     right: row.getBoundingClientRect().right,
                     shown: shown.length,
-                    below: shown.every((each) => each.getBoundingClientRect().top >= end),
+                    more: row.querySelectorAll(".more-button").length,
                 });
             `);
 
@@ -896,24 +948,24 @@ test(
 
                     return "null";
                 `);
-                await until(() => has(".ext-composer-button"), "the extension's buttons");
+                await until(() => has(".more-button"), "⋯ for the extension's buttons");
 
-                // Idle: three buttons would push Send out of a phone's box: they take a line under it.
+                // Idle: three buttons would push Send out of a phone's box: they are in ⋯ instead, and the row stays one row.
                 const idle = await fit();
 
                 assert.ok(
                     idle.scroll <= idle.client && idle.send > 0 && idle.send <= idle.right,
                     `Send is out of the row at ${width} px: ${JSON.stringify(idle)}`,
                 );
-                assert.equal(idle.shown, 3, `the buttons show at ${width} px`);
-                assert.ok(idle.below, `the buttons are on a line under Send at ${width} px`);
+                assert.equal(idle.shown, 0, `the buttons are in ⋯ at ${width} px`);
+                assert.equal(idle.more, 1, `⋯ is in the row at ${width} px`);
 
                 await busy(true);
                 const working = await fit();
 
                 inside(width, "with three extension buttons", working);
-                assert.equal(working.shown, 3, "the extension's buttons stay, on their own line");
-                assert.ok(working.below, `the buttons are on a line under Stop at ${width} px`);
+                assert.equal(working.shown, 0, "the extension's buttons stay in ⋯ while Pi works");
+                assert.equal(working.more, 1, `⋯ is in the row at ${width} px`);
 
                 // A touch screen's taller tap layer on each mode (on a phone, the one mode button) still takes a tap
                 // above and below it: the cut that keeps Stop in is sideways only.
@@ -955,17 +1007,17 @@ test(
                     `document.adoptedStyleSheets = document.adoptedStyleSheets.filter((each) => each !== window.__bigText)`,
                 );
 
-                // Something that nothing planned for: the row still keeps Stop.
+                // Something that nothing planned for, a little: the row never wraps, so it keeps Stop by its own slack.
                 await page.evaluate(`
                     const spacer = document.createElement("span");
                     spacer.id = "stress";
-                    spacer.style.cssText = "flex: none; width: 140px; height: 10px";
+                    spacer.style.cssText = "flex: none; width: 30px; height: 10px";
                     document.querySelector(".composer-row > .grow").before(spacer);
                 `);
-                inside(width, "with 140 px more in the row", await fit());
+                inside(width, "with 30 px more in the row", await fit());
                 await page.evaluate(`document.getElementById("stress")?.remove()`);
                 await busy(false);
-                assert.equal((await fit()).shown, 3, "and the buttons are back when Pi stops");
+                assert.equal((await fit()).more, 1, "and ⋯ stays when Pi stops");
             }
         } finally {
             await busy(false);
@@ -974,107 +1026,74 @@ test(
     },
 );
 
-test(
-    "many rail buttons: the rail scrolls as a whole, and fades the edge where more is",
-    real,
-    async () => {
-        const measure = () =>
-            inPage<{
-                more: string | null;
-                scroll: number;
-                client: number;
-                groupScrolls: boolean;
-                lastIn: boolean;
-            }>(`
-                const rail = document.querySelector(".sidebar .rail");
-                const group = rail.querySelector(".rail-exts");
-                const last = [...rail.querySelectorAll(".rail-ext")].at(-1).getBoundingClientRect();
-                const box = rail.getBoundingClientRect();
-
-                return JSON.stringify({
-                    more: rail.dataset.more ?? null,
-                    scroll: rail.scrollHeight,
-                    client: rail.clientHeight,
-                    groupScrolls: group.scrollHeight > group.clientHeight,
-                    lastIn: last.top >= box.top && last.bottom <= box.bottom,
-                });
-            `);
-        const frames = () =>
-            page.evaluate(`
-                for (let frame = 0; frame < 3; frame++) {
-                    await new Promise((resolve) => requestAnimationFrame(resolve));
-                }
-            `);
-
-        try {
-            await page.setViewport({ ...DESKTOP, height: 560 });
-            await page.navigate(`${base}/s/${session}`);
-            await until(() => has(rail("Meter")), "the meter's rail button");
-            await withMeter(`
-                globalThis.manyRail = [];
-
-                for (let at = 0; at < 8; at++) {
-                    globalThis.manyRail.push(
-                        pocket.rail({ id: "many-" + at, title: "Many " + at, icon: "grid", run: () => {} }),
-                    );
-                }
-
+test("many extension buttons scroll in Tools without moving the primary rail", real, async () => {
+    try {
+        await page.setViewport({ ...DESKTOP, height: 560 });
+        await page.navigate(`${base}/s/${session}`);
+        await meterReady();
+        await openTools();
+        await withMeter(`
+                globalThis.manyRail = Array.from({ length: 24 }, (_, at) => pocket.rail({
+                    id: 'many-' + at, title: 'Many ' + at, icon: 'grid',
+                    run: () => { globalThis.clickedTool = at; },
+                }));
                 return "null";
             `);
-            await until(() => has(rail("Many 7")), "the eight buttons");
-            await frames();
-            const top = await measure();
-
-            // One scroller: the extensions' group shows all its buttons, and the rail says that more is below.
-            assert.equal(
-                top.groupScrolls,
-                false,
-                "the extensions' buttons do not scroll on their own",
+        await until(() => has(rail("Many 23")), "the last extension tool");
+        const scrolled = () =>
+            inPage<number>(
+                `return JSON.stringify(document.querySelector('.desktop-rail').scrollTop)`,
             );
-            assert.ok(
-                top.scroll > top.client,
-                `the rail is taller than the window: ${JSON.stringify(top)}`,
-            );
-            assert.equal(top.more, "down");
-            assert.equal(top.lastIn, false);
+        const before = await scrolled();
 
-            await page.evaluate(`document.querySelector(".sidebar .rail").scrollTop = 1e6`);
-            await frames();
-            const end = await measure();
+        assert.ok(
+            await inPage<boolean>(`
+                const body = document.querySelector('.nav-menu .sheet-body');
+                return JSON.stringify(body.scrollHeight > body.clientHeight &&
+                    document.querySelectorAll('.desktop-rail [data-nav]').length === 4 &&
+                    !document.querySelector('.desktop-rail .rail-ext'));
+            `),
+        );
+        await page.click({ selector: rail("Many 23") });
+        await until(
+            () => inPage<boolean>(`return JSON.stringify(globalThis.clickedTool === 23)`),
+            "the last tool runs",
+        );
+        assert.equal(await scrolled(), before, "opening the last tool does not scroll the rail");
 
-            assert.equal(end.more, "up");
-            assert.equal(end.lastIn, true, "the last button scrolls into view");
+        await page.evaluate(`
+            (await import("/theme.js")).setPrefs({ density: "tight" });
+            return "null";
+        `);
+        await page.setViewport({ width: 390, height: 844, scale: 2, mobile: true });
+        await openTools();
+        await until(() => has(rail("Many 0")), "the first tool on a phone");
+        const touch = await inPage<{ tool: number; all: number }>(`
+            const height = (el) => parseFloat(getComputedStyle(el).minHeight);
+            const all = [...document.querySelectorAll(".nav-menu .menu-name")]
+                .find((el) => el.textContent.trim() === "All places")
+                .closest(".list-item");
+            return JSON.stringify({
+                tool: height(document.querySelector(${JSON.stringify(rail("Many 0"))})),
+                all: height(all),
+            });
+        `);
 
-            // Room for all: no fade.
-            await page.setViewport({ ...DESKTOP, height: 1400 });
-            await frames();
-            await until(
-                async () => (await measure()).more === null,
-                "no fade once everything shows",
-            );
-        } finally {
-            await withMeter(`
-                for (let at = 0; at < 8; at++) {
-                    globalThis.manyRail?.[at]?.remove();
-                }
-
-                return "null";
-            `);
-            await page.setViewport(DESKTOP);
-        }
-    },
-);
+        assert.equal(touch.tool, 44);
+        assert.equal(touch.all, 44);
+    } finally {
+        await withMeter(`globalThis.manyRail?.forEach(handle => handle.remove()); return "null";`);
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "comfortable" });`);
+        await page.setViewport(DESKTOP);
+    }
+});
 
 test(
     "pocket.pip.ask drafts into PiP's box, sends only right after a tap, and tells a guest PiP is not there",
     real,
     async () => {
         await page.navigate(`${base}/s/${session}`);
-        await until(() => has(rail("Meter")), "the meter's rail button");
-        await until(
-            () => inPage<boolean>(`return JSON.stringify(Boolean(globalThis.meterPocket))`),
-            "the meter's pocket",
-        );
+        await meterReady();
         // The submit goes nowhere: the test is about what the app sends, not about PiP's answer.
         await page.evaluate(`
             (await import("/person-storage.js")).personStorage.set("pip.draft", null);
@@ -1175,7 +1194,7 @@ test(
         // Exercise the test renderer, not the built-in renderer that normally takes precedence.
         await app.setExtensionEnabled(owner(app), "diagrams.ts", false);
         await page.navigate(`${base}/s/${session}`);
-        await until(() => has(rail("Meter")), "the meter's browser module");
+        await meterReady();
 
         const before = await inPage<{ revision: number; math: boolean }>(`
         const markdown = await import("/markdown-ext.js");
@@ -1347,7 +1366,7 @@ test(
     real,
     async () => {
         await page.navigate(`${base}/s/${session}`);
-        await until(() => has(rail("Meter")), "the meter's browser module");
+        await meterReady();
 
         const shown = await withMeter<{
             error: boolean;
@@ -1391,7 +1410,7 @@ test(
 
 test("turning the module off takes away its button and closes its page", real, async () => {
     await page.navigate(`${base}/s/${session}`);
-    await until(() => has(rail("Meter")), "the meter's rail button");
+    await meterReady();
 
     const mathBefore = await inPage<boolean>(`
         return JSON.stringify((await import("/markdown-ext.js")).mathOn());
@@ -1429,14 +1448,18 @@ test("turning the module off takes away its button and closes its page", real, a
     `);
 
     assert.deepEqual(rendered, { registered: true, custom: true });
-    await settled();
-    await page.click({ selector: rail("Meter") });
+    // Out of the page again while the app is used: this host is not part of it, and it lengthens the page the sheet
+    // is placed in. The checks below render into it where it is.
+    await inPage(`globalThis.markdownUnloadHost.remove(); return "null"`);
+    await openTools();
+    await until(() => has(rail("Meter")), "the meter tool");
+    await clickNavigation(page, { selector: rail("Meter") });
     await until(() => has(".ext-page .meter"), "the page");
     await app.setExtensionEnabled(owner(app), "meter.ts", false);
-    await until(
-        async () => !(await has(".ext-page")) && !(await has(rail("Meter"))),
-        "the page and button gone",
-    );
+    await until(async () => !(await has(".ext-page")), "the extension page gone");
+    await openTools();
+    await until(() => has(rail("Shared")), "the shared tool");
+    assert.equal(await has(rail("Meter")), false, "the disabled tool is gone");
     const removed = await inPage<{
         registered: boolean;
         custom: boolean;

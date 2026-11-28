@@ -16,6 +16,7 @@ import {
     chooseLook,
     chooseTheme,
     colorsOnly,
+    DEFAULT_COLORS,
     folderPaletteIds,
     lookIds,
     paletteOf,
@@ -467,7 +468,7 @@ function ColorsTools() {
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(own.id)}`, undefined, { method: "DELETE" });
-            setPrefs({ theme: "desktop" });
+            setPrefs({ theme: DEFAULT_COLORS });
         });
 
     return html`<div class="look-tools">
@@ -497,10 +498,10 @@ function DefaultTools() {
         ? p.look
         : BASE_LOOK;
     const colors = paletteOf(p.theme).id;
-    // What new browsers get already: the default, or with none, Pocket and the desktop's colors.
+    // What new browsers get already: the default, or with none, Pocket and Pocket neutral.
     const same = current
         ? current.look === look && current.colors === colors
-        : look === BASE_LOOK && p.theme === "desktop";
+        : look === BASE_LOOK && p.theme === DEFAULT_COLORS;
     // A theme with its own colors is named once: "My Lantern", not "My Lantern with My Lantern". The desktop's colors
     // are Tokyo Night where the server has no desktop.
     const name = (look, colors) =>
@@ -520,7 +521,7 @@ function DefaultTools() {
 
     return html`<div class="look-tools">
         <span class="muted small grow">
-            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, "desktop")}.`}
+            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, DEFAULT_COLORS)}.`}
         </span>
         ${
             !same &&
@@ -580,6 +581,7 @@ function SlotLayout({ slot }) {
                 const at = movable.indexOf(item.id);
                 const detail = [
                     item.module && `From ${item.module}`,
+                    item.note,
                     hiddenBy && `Hidden by ${hiddenBy}`,
                     item.fixed && "Always shown",
                 ]

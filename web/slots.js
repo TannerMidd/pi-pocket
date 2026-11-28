@@ -167,6 +167,18 @@ export function slotItems(slot, context = {}) {
 }
 
 /**
+ * The items of a slot that can fold into a menu when their place is narrow (`fold`: 1 first, 2 only when it is tighter),
+ * each as `{ id, fold, ...what item.more(context) gives }`, in the slot's order. Hidden items and items that have nothing
+ * to give now are not here. The message box folds its buttons into its ⋯ button this way (`composer-more.js`).
+ */
+export function slotMore(slot, context = {}) {
+    return arranged(slot)
+        .filter(({ hidden, item }) => !hidden && item.fold !== undefined)
+        .map(({ item }) => ({ id: item.id, fold: item.fold, ...item.more?.(context) }))
+        .filter((entry) => entry.name !== undefined);
+}
+
+/**
  * What a slot holds and how it is arranged, as one string: for a place that draws again only when its inputs change
  * (the transcript's answers), so a change to the slot draws it again.
  */

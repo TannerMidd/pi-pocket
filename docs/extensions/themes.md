@@ -13,13 +13,13 @@ They are separate, so a theme's layout stays when the colors change, as they do 
 
 A theme can bring a pair of palettes, dark and light. Colors then shows three cards for it: the pair, which follows the system's light or dark setting (the one a theme brings when you choose it), and each half alone.
 
-Each person chooses for each browser, as for the rest of Appearance. Guests choose too. Only the owner adds, changes, and removes themes. The owner can also choose the theme and colors that browsers start with: in Appearance, **Use these for new browsers** makes the ones in use the default for every browser whose person has not chosen their own, guests' included (**Reset** goes back to Pocket and the desktop's colors).
+Each person chooses for each browser, as for the rest of Appearance. Guests choose too. Only the owner adds, changes, and removes themes. The owner can also choose the theme and colors that browsers start with: in Appearance, **Use these for new browsers** makes the ones in use the default for every browser whose person has not chosen their own, guests' included (**Reset** goes back to Pocket and Pocket neutral). With no default and no choice, a browser starts with **Pocket** in **Pocket neutral**, the greys the look is drawn for (**Pocket neutral light** is its light half, a card of its own under Colors; neither follows the system's light or dark). **Desktop** stays one of the colors to choose.
 
 Besides Appearance: the launcher's **Themes** (Ctrl/⌘+K, then `#`) lists the themes before the colors, and `/theme <name>` in the message box chooses a theme by its name (`/theme paper`), or else colors (`/theme gruvbox`, `/theme desktop`).
 
 ## Make a theme
 
-1. Open Appearance: the palette button on the rail, Menu → **Appearance**, or **Appearance** in the launcher (Ctrl/⌘+K).
+1. Open Appearance: Menu → **Appearance**, or **Appearance** in the launcher (Ctrl/⌘+K).
 2. Choose the theme to start from, and tap **Duplicate**. Give it a name. Pi Pocket copies it into a folder of its own and chooses it. **Duplicate colors** does the same for the colors in use.
 3. Tap **Edit with Pi**. A session starts in the theme's folder, with a message ready that tells Pi where this guide is. Say what you want: "make my messages bubbles on the right", "a warmer accent", "a square message box".
 
@@ -27,7 +27,7 @@ Each save shows at once in every tab that uses the theme. The page does not relo
 
 You can also edit the folder yourself: `~/.pi-pocket/themes/<id>/` (or `themes/` in `PI_POCKET_DIR`). It is the one place in the data folder, with `extensions/`, that you edit by hand. **Remove** moves a theme's folder to `themes/.removed/`, so you can get it back from there. Pi Pocket never deletes what is in `.removed/`, so it grows: delete the folders there you no longer want.
 
-A copy of Pocket starts with a `theme.css` that lists every token with its value, commented out. Take the comment marks off a token and change its value. Leave the others commented out, so they follow the app's updates.
+A copy of Pocket starts with Pocket's own `theme.css`, the look as it is when you copy it: its tokens (planes, text, status colors, corners, space) and the rules for the parts that make it "C · Bold". Change a token's value, or add rules of your own. The copy keeps the look it was copied with; the app's updates change Pocket's, not yours. A token the file does not set follows the app.
 
 ## The folder
 
@@ -198,7 +198,7 @@ To share one of your own themes, choose it in Appearance and tap **Share…**. P
 
 ## Themes that come with Pi Pocket
 
-Two come with it: **Pocket**, the app's own look, and **Lantern**, a calm, warm dark theme with colors of its own (`web/themes/lantern/`: `frame.css` is its frame, `direction.css` and `colors.toml` its turns and palette). Built-in themes are folders in `web/themes/<id>/`, in the same format. They cannot be edited or removed from the app: duplicate one to change it. A change to one is a change to Pi Pocket's code ([self-editing.md](../self-editing.md)).
+Two come with it: **Pocket**, the app's own look (since 0.31.0 "C · Bold": near-black neutral planes that rise by tone, sharp corners of 2 to 8 px, 1px hairlines at about 9% and 16%, one quiet well for what Pi did, an accent (coral in Pocket neutral, the palette's own accent in other colors) for the place you are in and the primary button, with blue only for links and the keyboard's focus, a 2px red edge and the word "Failed" for a failed step, diffs tinted at about 5%, and the amber approval as the strongest state; `web/themes/pocket/theme.css`; its planes, text, and status colors are made from the colors in use, so it follows any palette), and **Lantern**, a calm, warm dark theme with colors of its own (`web/themes/lantern/`: `frame.css` is its frame, `direction.css` and `colors.toml` its turns and palette). Built-in themes are folders in `web/themes/<id>/`, in the same format. They cannot be edited or removed from the app: duplicate one to change it. A change to one is a change to Pi Pocket's code ([self-editing.md](../self-editing.md)).
 
 ## Stability
 

@@ -333,7 +333,6 @@ test(
                 ),
             "the action in the bar",
         );
-        // The bar's: each row has a Note button too, where a mouse hovers.
         await inPage(
             `[...document.querySelectorAll(".sidebar .select-bar .button")].find((each) => each.textContent.trim() === "Note").click(); return "null"`,
         );
@@ -352,22 +351,65 @@ test(
     },
 );
 
-test("an action with an icon is a button on each row too", real, async () => {
-    await inPage(`globalThis.noted = null; return "null"`);
-    assert.equal(
-        await inPage<string>(
-            `return JSON.stringify(document.querySelector('.sidebar .session-row[data-id="${first}"] .session-ext-act')?.getAttribute("aria-label") ?? null)`,
-        ),
-        "Note",
-    );
-    await inPage(
-        `document.querySelector('.sidebar .session-row[data-id="${first}"] .session-ext-act').click(); return "null"`,
-    );
-    await until(
-        async () => ((await value<number[]>("noted")) ?? []).join() === String(first),
-        "the action on that row",
-    );
-});
+test(
+    "an action with an icon draws no button on rows; it is in the row's menu and in a long press's sheet",
+    real,
+    async () => {
+        await inPage(`globalThis.noted = null; return "null"`);
+        const row = `.sidebar .session-row[data-id="${first}"]`;
+
+        assert.equal(
+            await inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(${JSON.stringify(`${row} .session-ext-act, ${row} .session-act`)}).length)`,
+            ),
+            0,
+            "no button on the row",
+        );
+        // A right-click: the menu has the action, and choosing it runs it on that row.
+        await inPage(
+            `const button = document.querySelector(${JSON.stringify(`${row} > .session`)});
+            button.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 60, clientY: 60 }));
+            return "null"`,
+        );
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify([...document.querySelectorAll('[data-part="session-menu"] [role="menuitem"]')].some((each) => each.firstElementChild.textContent.trim() === "Note"))`,
+                ),
+            "the action in the row's menu",
+        );
+        await inPage(
+            `[...document.querySelectorAll('[data-part="session-menu"] [role="menuitem"]')].find((each) => each.firstElementChild.textContent.trim() === "Note").click(); return "null"`,
+        );
+        await until(
+            async () => ((await value<number[]>("noted")) ?? []).join() === String(first),
+            "the action on that row",
+        );
+        // The sheet a long press opens lists it too.
+        await inPage(
+            `const { store } = await import("/store.js"); store.set({ sheet: { type: "session", id: ${first} } }); return "null"`,
+        );
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify([...document.querySelectorAll(".sheet-host:not(.leaving) .list-item")].some((each) => each.firstElementChild.textContent.trim() === "Note"))`,
+                ),
+            "the action in the sheet",
+        );
+        await inPage(
+            `const { closeSheet } = await import("/store.js"); closeSheet(); return "null"`,
+        );
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector(".sheet-host") === null)`,
+                ),
+            "the sheet closed",
+        );
+        // A click soon after a layer closed is let go (back.js): wait it out.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+    },
+);
 
 test(
     "New in the list, while a filter is on, gives the new session to the filter's started",

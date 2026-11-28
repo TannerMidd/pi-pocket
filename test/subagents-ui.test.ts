@@ -13,6 +13,7 @@ import {
     until,
     offerSubagents,
 } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -253,7 +254,8 @@ test("the board shows a sub-tile for each subagent at work, with what it does", 
     await started(0);
     await page.setViewport(VIEWPORTS.desktop);
     await settled();
-    await page.click({ selector: ".rail-agents" });
+    await clickNavigation(page, { selector: '.desktop-rail [data-nav="activity"]' });
+    await clickNavigation(page, { row: "Subagents" });
     await see(
         `return JSON.stringify((await import("/store.js")).store.state.board === "subagents")`,
         "the board",
@@ -327,7 +329,7 @@ test(
         );
         assert.equal(
             await inPage<boolean>(
-                `return JSON.stringify([...document.querySelectorAll(".report-name")].some((name) => name.textContent === "zed"))`,
+                `return JSON.stringify([...document.querySelectorAll(".acard[data-kind=subagent] .acard-name")].some((name) => name.textContent === "zed"))`,
             ),
             false,
         );
@@ -458,7 +460,8 @@ test(
 
         await page.setViewport(VIEWPORTS.desktop);
         await settled();
-        await page.click({ selector: ".rail-running" });
+        await clickNavigation(page, { selector: '.desktop-rail [data-nav="activity"]' });
+        await clickNavigation(page, { row: "Running now" });
         await see(
             `return JSON.stringify((await import("/store.js")).store.state.board === "running" && document.querySelector(".running-board") !== null)`,
             "the Running now board",
@@ -520,7 +523,8 @@ test(
         await page.setViewport(VIEWPORTS.desktop);
         await page.navigate(`${base}/s/${id}`);
         await settled();
-        await page.click({ selector: ".rail-running" });
+        await clickNavigation(page, { selector: '.desktop-rail [data-nav="activity"]' });
+        await clickNavigation(page, { row: "Running now" });
         await see(
             `return JSON.stringify(document.querySelectorAll(".rb-timeline .rb-pin.repeat").length > 1)`,
             "the repeat's times on the timeline",

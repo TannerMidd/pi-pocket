@@ -1,55 +1,91 @@
-// Links between linked sessions, above the transcript. Only the server's list for this person may name one.
-import { useState } from "preact/hooks";
-import { navigate, store } from "./store.js";
-import { html, Icon } from "./ui.js";
+// The server list is the only source of relationship names and counts. The transcript stays in its own session.
+import { useMemo } from "preact/hooks";
+import { descendantCount, familyAttention, familyIndex } from "./session-tree.js";
+import { needOf } from "./sessions.js";
+import { finishedUnseen } from "./seen.js";
+import { collab, isUnread, navigate, openFamily, sessionUnread, store } from "./store.js";
+import { drawnFor, html, Icon } from "./ui.js";
 
-/** Links shown before the rest fold into "+N more": a coordinator's transcript stays near the top on a phone. */
-const SHOWN = 3;
+function Relationships() {
+    const { conversationId, sessions, sessionsLoaded, unread, peekSeen, server } = store.state;
+    const tree = familyIndex(sessions);
+    const counts = useMemo(() => familyAttention(tree, needOf), [tree, unread, peekSeen, server]);
+    const node = tree.nodes.get(conversationId);
+    const lead = node?.parent?.session;
+    const kids = descendantCount(node);
 
-export function LinkedSessions() {
-    const { conversationId, sessions, sessionsLoaded } = store.state;
-    // Unfolded for one session: another one opens folded.
-    const [openFor, setOpenFor] = useState(null);
-    const open = openFor === conversationId;
+    const family = node?.children.length > 0;
 
-    if (!sessionsLoaded) {
+    if (!sessionsLoaded || (!lead && !family)) {
         return null;
     }
 
-    const current = sessions.find((session) => session.id === conversationId);
-    const origin =
-        current?.linkedFrom && sessions.find((session) => session.id === current.linkedFrom.id);
-    const started = sessions.filter((session) => session.linkedFrom?.id === conversationId);
+    const fresh =
+        lead && (isUnread(lead.id) || finishedUnseen(lead) || (collab() && sessionUnread(lead)));
+    const info = counts.get(node);
 
-    if (!origin && !current?.linkedOrigin && !current?.linkedFrom && started.length === 0) {
-        return null;
-    }
-
-    const link = (session, label) => html`<button
-        class="breadcrumb"
-        key=${session.id}
-        onClick=${() => navigate(session.id)}
-    >
-        <${Icon} name="fork" size=${14} />
-        <span>${label}: ${session.title ?? "New session"}</span>
-    </button>`;
-    const shown = open || started.length <= SHOWN ? started : started.slice(0, SHOWN);
-
-    return html`<nav class="linked-sessions" aria-label="Linked sessions">
+    return html`<nav class="family-context" aria-label="Related sessions">
         ${
-            origin
-                ? link(origin, "Started from")
-                : (current?.linkedOrigin || current?.linkedFrom) &&
-                  html`<p class="muted small">
-                Started from another session
-            </p>`
+            lead &&
+            html`<button
+                class="lead-route"
+                data-family-open="lead"
+                onClick=${() => navigate(lead.id)}
+            >
+                <${Icon} name="fork" size=${14} />
+                <span>Lead</span>
+                <strong>${lead.title ?? "New session"}</strong>
+                ${fresh && html`<span class="lead-unread">Unread</span>`}
+                <${Icon} name="chevron" size=${13} />
+            </button>`
         }
-        ${shown.map((session) => link(session, "Linked session"))}
         ${
-            shown.length < started.length &&
-            html`<button class="breadcrumb" onClick=${() => setOpenFor(conversationId)}>
-                +${started.length - shown.length} more
+            family &&
+            html`<button
+                data-family-open="header-family"
+                aria-label=${
+                    kids === 0
+                        ? "Browse archived links"
+                        : "Browse " +
+                          kids +
+                          " linked sessions" +
+                          (info?.waiting ? ", " + info.waiting + " waiting" : "") +
+                          (info?.failed ? ", " + info.failed + " failed" : "")
+                }
+                onClick=${(event) =>
+                    openFamily(
+                        conversationId,
+                        "",
+                        event.currentTarget,
+                        kids === 0 ? "archived" : "all",
+                    )}
+            >
+                <${Icon} name="fork" size=${14} />
+                <strong>
+                    ${kids === 0 ? "Archived links" : kids.toLocaleString() + " linked"}
+                </strong>
+                ${
+                    info?.waiting > 0 &&
+                    html`<span class="family-attn">${info.waiting} waiting</span>`
+                }
+                ${info?.failed > 0 && html`<span class="family-attn">${info.failed} failed</span>`}
+                <${Icon} name="chevron" size=${13} />
             </button>`
         }
     </nav>`;
 }
+
+export const LinkedSessions = drawnFor(
+    [
+        "sessions",
+        "sessionsLoaded",
+        "conversationId",
+        "server",
+        "me",
+        "unread",
+        "peekSeen",
+        "chatRead",
+        "chatReads",
+    ],
+    Relationships,
+);

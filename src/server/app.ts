@@ -139,9 +139,10 @@ import { PIP_COMPACT_CHOICES, PipCompaction } from "./pip-compact.ts";
 import { RepoWatches } from "./repo-watches.ts";
 import { snippet } from "./projection.ts";
 import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./prompts.ts";
-import { BASE_THEME, Themes } from "./themes.ts";
+import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
+import { UsageStore, type UsageProvider, type UsageSnapshot } from "./usage.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
@@ -447,6 +448,8 @@ export class PocketApp {
     readonly customProviders = new CustomProviders(this);
     /** Model requests that hit a limit wait for it to clear, then go on (`limit-gate.ts`). */
     readonly limits: LimitGate;
+    /** What each provider's last response said about its limits (`usage.ts`); only the owner sees it. */
+    readonly usage: UsageStore;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
     readonly schedules = new Schedules(this);
@@ -541,6 +544,7 @@ export class PocketApp {
     /** The session each removed session was forked from: a live fork still reads its uploads through it. */
     #removedForks = new Map<string, SessionMeta["forkedFrom"]>();
     #sessionsTimer: NodeJS.Timeout | undefined;
+    #usageTimer: NodeJS.Timeout | undefined;
     /** The extensions installed now: every conversation runs with them, except PiP's own, which PiP alone selects. */
     #registry: Registry | undefined;
     #unsubscribeCommits: (() => void) | undefined;
@@ -624,7 +628,9 @@ export class PocketApp {
                 };
             },
         });
+        this.usage = new UsageStore({ changed: () => this.#usageChanged() });
         this.limits = new LimitGate({
+            seen: (provider, facts) => this.usage.record(provider, facts),
             hours: () => this.config.limitWaitHours,
             epoch: (provider) => this.providers.signInEpoch(provider),
             conversationOf: (sessionId) => this.#conversationOfSession(sessionId),
@@ -2042,6 +2048,8 @@ export class PocketApp {
     #limitWaiting = new Set<number>();
 
     #limitsChanged(): void {
+        this.#usageChanged();
+
         const now = new Set(this.limits.waits().map((wait) => wait.conversationId));
         const changed = new Set([...this.#limitWaiting, ...now]);
 
@@ -2074,6 +2082,11 @@ export class PocketApp {
         }
     }
 
+    /** A provider came or went, or its sign-in changed: the owner's tabs get the usage list again. */
+    providersChanged(): void {
+        this.#usageChanged();
+    }
+
     /** Every connected tab. */
     get clients(): ReadonlySet<Client> {
         return this.#clients;
@@ -2103,6 +2116,7 @@ export class PocketApp {
         client.send("hello", this.#helloFor(client, hello));
         this.#sendSessions(client, this.sessions(client.user));
         this.#sendPip(client);
+        this.#sendUsage(client);
 
         if (client.user.role === "owner" && this.themes.failure !== undefined) {
             client.send("notice", { level: "warning", message: this.themes.failure });
@@ -2461,6 +2475,117 @@ export class PocketApp {
 
         if (panel?.conversationId !== undefined) {
             this.#leaveRoom(panel, panel.conversationId);
+        }
+    }
+
+    /**
+     * The usage the owner sees: each connected provider (a sign-in or a key) with what its last response said about its
+     * limits, and whether the limit gate holds it. Nothing is asked of any provider.
+     */
+    usageSnapshot(): UsageSnapshot {
+        const now = Date.now();
+        const known = new Map<string, { id: string; name: string; kind: UsageProvider["kind"] }>();
+        const kindOf = (id: string): UsageProvider["kind"] =>
+            this.models.isUsingOAuth(id) ? "subscription" : "key";
+
+        for (const provider of this.providers.list(true)) {
+            if (provider.configured) {
+                known.set(provider.id, {
+                    id: provider.id,
+                    name: provider.name,
+                    kind: kindOf(provider.id),
+                });
+            }
+        }
+
+        // A provider that answered but is not listed as signed in (a key in the environment) still has numbers.
+        for (const id of this.usage.seen()) {
+            if (!known.has(id)) {
+                known.set(id, {
+                    id,
+                    name: this.models.getProvider(id)?.name ?? id,
+                    kind: kindOf(id),
+                });
+            }
+        }
+
+        const gates = this.limits.gates().filter((gate) => gate.scope !== "request");
+
+        return {
+            at: now,
+            providers: [...known.values()].map((provider) => {
+                const mine = gates.filter((gate) => gate.provider === provider.id);
+                const reach = (gate: (typeof mine)[number]) => gate.resetAt ?? gate.until;
+                const whole = mine
+                    .filter((gate) => gate.scope !== "model" || gate.modelId === undefined)
+                    .sort((a, b) => b.until - a.until)[0];
+                const single = new Map<
+                    string,
+                    { modelId: string; until: number; reason: string }
+                >();
+
+                for (const gate of mine) {
+                    if (gate.scope === "model" && gate.modelId !== undefined) {
+                        const before = single.get(gate.modelId);
+
+                        if (before === undefined || reach(gate) > before.until) {
+                            single.set(gate.modelId, {
+                                modelId: gate.modelId,
+                                until: reach(gate),
+                                reason: gate.reason,
+                            });
+                        }
+                    }
+                }
+
+                return this.usage.view(
+                    provider,
+                    whole === undefined ? undefined : { until: reach(whole), reason: whole.reason },
+                    [...single.values()],
+                );
+            }),
+        };
+    }
+
+    /** The owner's usage, or undefined for anyone else: those who may open Providers may see it. */
+    usageFor(user: User): UsageSnapshot | undefined {
+        return user.role === "owner" ? this.usageSnapshot() : undefined;
+    }
+
+    /** Something about usage changed: the owner's tabs get it, at most once each 1.5 seconds. */
+    #usageChanged(): void {
+        if (this.#usageTimer !== undefined || this.#closing !== undefined) {
+            return;
+        }
+
+        this.#usageTimer = setTimeout(() => {
+            this.#usageTimer = undefined;
+            let snapshot: UsageSnapshot | undefined;
+
+            for (const client of this.#clients) {
+                if (client.user.role === "owner") {
+                    snapshot ??= this.usageSnapshot();
+                    this.#sendUsage(client, snapshot);
+                }
+            }
+        }, 1_500);
+        this.#usageTimer.unref();
+    }
+
+    /** Send an owner's tab the usage, unless it is what the tab last got (apart from the time). */
+    #sendUsage(
+        client: Client,
+        snapshot: UsageSnapshot | undefined = this.usageFor(client.user),
+    ): void {
+        if (snapshot === undefined || client.user.role !== "owner") {
+            return;
+        }
+
+        const json = JSON.stringify(snapshot.providers);
+
+        if (json !== client.usageSent) {
+            client.usageSent = json;
+            client.send("usage", snapshot);
         }
     }
 
@@ -4390,8 +4515,8 @@ export class PocketApp {
 
     /**
      * The owner's default after a theme went (removed in Appearance or the gallery, or its folder deleted): a theme that
-     * is gone gives way to Pocket, and colors that went with it (its own) to the desktop's; with both gone, no default.
-     * Everyone's tabs hear it.
+     * is gone gives way to Pocket, and colors that went with it (its own) to the app's own (Pocket neutral); with both
+     * gone, no default. Everyone's tabs hear it.
      */
     async #themeDefaultStillHere(): Promise<void> {
         const before = this.config.themeDefault;
@@ -4405,19 +4530,21 @@ export class PocketApp {
             const lookGone =
                 before.look !== BASE_THEME &&
                 !this.themes.list().some((each) => each.id === before.look);
-            // The desktop's colors are the app's own default: they never go.
+            // The desktop's colors and the app's own default never go.
             const colorsGone =
-                before.colors !== "desktop" && !(await this.themes.hasColors(before.colors));
+                before.colors !== "desktop" &&
+                before.colors !== DEFAULT_COLORS &&
+                !(await this.themes.hasColors(before.colors));
 
             if (!lookGone && !colorsGone) {
                 return;
             }
 
             const look = lookGone ? BASE_THEME : before.look;
-            const colors = colorsGone ? "desktop" : before.colors;
+            const colors = colorsGone ? DEFAULT_COLORS : before.colors;
 
             this.config.themeDefault =
-                look === BASE_THEME && colors === "desktop" ? undefined : { look, colors };
+                look === BASE_THEME && colors === DEFAULT_COLORS ? undefined : { look, colors };
             await this.#refreshClients();
         } catch (error) {
             this.#log(`The default theme could not be checked: ${describe(error)}`);
@@ -4723,6 +4850,7 @@ export class PocketApp {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             clearTimeout(this.#sessionsTimer);
+            clearTimeout(this.#usageTimer);
             this.#stopWebWatch?.();
             this.alerts.close();
             this.surfacePending.close();

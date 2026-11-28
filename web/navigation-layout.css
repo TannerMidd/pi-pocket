@@ -1,0 +1,96 @@
+/* Navigation uses the sheet trail at every size. Only its placement changes. */
+.navigation-keys {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.topbar .navigation-trigger,
+.splash .navigation-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: auto;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    color: var(--text);
+    background: var(--card);
+    font-size: 13px;
+}
+
+.navigation-trigger[aria-expanded="true"] {
+    border-color: var(--accent-line);
+}
+
+@container topbar (max-width: 477px) {
+    .topbar .navigation-trigger {
+        width: 44px;
+        padding: 0;
+        border-color: transparent;
+        background: none;
+    }
+    .topbar .navigation-trigger span {
+        display: none;
+    }
+}
+
+@media (min-width: 700px) {
+    .sheet-host[data-navigation] {
+        --navigation-width: 320px;
+    }
+    .sheet-host[data-navigation] .overlay {
+        inset: 0;
+        justify-content: flex-end;
+        padding: 0;
+    }
+    .sheet-host[data-navigation] .sheet {
+        position: static;
+        width: var(--navigation-width);
+        max-width: 100%;
+        height: 100%;
+        max-height: none;
+        border-left: 1px solid var(--line);
+        border-radius: 0;
+        background: var(--card);
+        box-shadow: var(--shadow);
+    }
+    .sheet-host[data-navigation] .sheet-body {
+        flex: 1;
+    }
+}
+
+/* A sheet inside a navigation trail keeps the same touch targets as the menu that opened it. */
+@media (pointer: coarse), (max-width: 699px) {
+    .sheet-host[data-navigation-trail] .sheet-head > :is(.icon-button, .sheet-back) {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+/* A second side panel (Files, Peeks, an extension, or People) keeps its width. Navigation then floats over it. */
+@media (min-width: 1200px) {
+    .sheet-host[data-navigation="beside"] {
+        display: flex;
+        min-height: 0;
+        flex: 0 0 var(--navigation-width);
+    }
+    .sheet-host[data-navigation="beside"] .overlay {
+        position: static;
+        width: 100%;
+        background: none;
+        z-index: auto;
+    }
+    .sheet-host[data-navigation="beside"] .sheet {
+        box-shadow: none;
+    }
+    :root[data-tiling="on"] .sheet-host[data-navigation="beside"] .sheet {
+        border: var(--border) solid var(--line);
+        border-radius: var(--r-window);
+    }
+}

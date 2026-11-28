@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { sessionActions } from "../extension-ui.js";
-import { deselectInList, selectedInList, selectFromList, setArchived } from "../sessions.js";
+import { finishedUnseen } from "../seen.js";
+import {
+    deselectInList,
+    markRead,
+    selectedInList,
+    selectFromList,
+    setArchived,
+} from "../sessions.js";
 import {
     actions,
     attempt,
@@ -11,6 +18,7 @@ import {
     navigate,
     notify,
     scoped,
+    sessionUnread,
     setUnread,
     store,
 } from "../store.js";
@@ -100,11 +108,16 @@ function sessionItems(session) {
                     hint: "of the pinned",
                     run: () => movePin(id, true),
                 },
-            !session.archived && {
-                label: isUnread(id) ? "Mark read" : "Mark unread",
-                hint: "this browser",
-                run: () => setUnread(id, !isUnread(id)),
-            },
+            // Read for any reason (a mark, a finished run not seen, new chat) offers Mark read, which clears all of them:
+            // rows have no hover button for it.
+            !session.archived &&
+                (isUnread(id) || finishedUnseen(session) || (collab() && sessionUnread(session))
+                    ? { label: "Mark read", hint: "this browser", run: () => markRead([session]) }
+                    : {
+                          label: "Mark unread",
+                          hint: "this browser",
+                          run: () => setUnread(id, true),
+                      }),
         ],
         sessionActions().map((action) => ({
             label: action.label,

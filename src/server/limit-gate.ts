@@ -236,6 +236,11 @@ export type GateDeps = {
     conversationOf: (sessionId: string) => Promise<number | undefined> | number | undefined;
     /** A wait began, changed, or ended: tell the tabs. */
     changed: () => void;
+    /**
+     * A response of this provider's came, of any request that goes through here (a failed one too): its status and
+     * limit headers, for the usage the owner sees (`usage.ts`). Never its body.
+     */
+    seen?: (provider: string, facts: ResponseFacts) => void;
     /** A wait of `longWaitMs` or more began for this conversation. */
     started?: (conversationId: number, view: WaitView) => void;
     log: (line: string) => void;
@@ -413,15 +418,53 @@ export class LimitGate {
             if (marked?.[NO_WAIT] === true) {
                 const { [NO_WAIT]: _marked, ...rest } = marked;
 
-                return underlying(model, context, rest);
+                return underlying(model, context, this.#observing(model, rest));
             }
 
             if (this.#deps.hours() <= 0) {
-                return underlying(model, context, options);
+                return underlying(model, context, this.#observing(model, options));
             }
 
             return this.#stream(underlying, model, context, options);
         };
+    }
+
+    /**
+     * The options with a `fetch` that tells `seen` each response's limit headers, for requests that do not wait here.
+     * Only the adapters that take a `fetch` get it.
+     */
+    #observing(
+        model: Model<Api>,
+        options: SimpleStreamOptions | undefined,
+    ): SimpleStreamOptions | undefined {
+        const seen = this.#deps.seen;
+
+        if (seen === undefined || !RECORDS_FETCH.has(model.api)) {
+            return options;
+        }
+
+        const base: FetchFunction | undefined = options?.fetch;
+
+        const watching: FetchFunction = async (input, init) => {
+            const response = await (base ?? globalThis.fetch)(input, init);
+
+            this.#hear(model.provider, response);
+
+            return response;
+        };
+
+        return { ...options, fetch: watching };
+    }
+
+    /** Hand a response's status and limit headers to `seen`. A failure there never reaches the request. */
+    #hear(provider: string, response: Response): void {
+        try {
+            this.#deps.seen?.(provider, responseFacts(response.status, response.headers));
+        } catch (error) {
+            this.#deps.log(
+                `usage not read: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
     }
 
     /** The wait a conversation's run is in, if it is in one (not one a gate refuses). */
@@ -744,6 +787,8 @@ export class LimitGate {
             facts = undefined;
 
             const response = await (base ?? globalThis.fetch)(input, init);
+
+            this.#hear(model.provider, response);
 
             // The SDK and the copy can read at the same time. Only a pre-content failure needs these facts.
             facts = recordResponse(response);
