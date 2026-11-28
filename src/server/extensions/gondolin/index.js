@@ -7,6 +7,10 @@ const SHIELD_PATH = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M9 12l2 2 4-4";
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
 
+    if (typeof pocket.style === "function") {
+        pocket.style("style.css");
+    }
+
     let snapshot = null;
     const listeners = new Set();
 
@@ -60,24 +64,25 @@ export default function setup(pocket) {
         pocket.menu({
             id: "gondolin",
             label: "Sandbox (Gondolin)",
-            iconPath: SHIELD_PATH,
             group: "app",
+            sheet: "main",
+        });
+    }
+
+    if (typeof pocket.launcher === "function") {
+        pocket.launcher({
+            id: "gondolin",
+            label: "Sandbox (Gondolin)",
+            detail: "Create or manage isolated Gondolin micro-VM sandboxes",
+            iconPath: SHIELD_PATH,
+            keywords: ["sandbox", "gondolin", "vm", "isolated", "diff"],
             sheet: "main",
         });
     }
 
     let currentConversationId = null;
     let currentSandboxId = null;
-
-    const statusHandle =
-        typeof pocket.status === "function"
-            ? pocket.status({
-                  id: "gondolin",
-                  label: "",
-                  hidden: true,
-                  sheet: "diff",
-              })
-            : null;
+    let statusHandle = null;
 
     function updateStatusBar() {
         currentSandboxId =
@@ -85,24 +90,34 @@ export default function setup(pocket) {
                 ? null
                 : (snapshot?.sandboxByConversation?.[currentConversationId] ?? null);
 
-        if (statusHandle === null) {
+        if (typeof pocket.status !== "function") {
             return;
         }
 
         if (currentSandboxId === null) {
-            statusHandle.update({ hidden: true, label: "" });
+            statusHandle?.remove();
+            statusHandle = null;
 
             return;
         }
 
         const found = snapshot?.sandboxes?.find((s) => s.id === currentSandboxId);
         const stateLabel = found?.state ? ` · ${found.state}` : "";
+        const text = `Sandbox${stateLabel}`;
+        const title = `Gondolin sandbox ${currentSandboxId}. Tap to review or apply changes.`;
 
-        statusHandle.update({
-            hidden: false,
-            label: `Sandbox${stateLabel}`,
-            title: `Gondolin sandbox ${currentSandboxId}. Tap to review or apply changes.`,
-        });
+        if (statusHandle === null) {
+            statusHandle = pocket.status({
+                id: "gondolin",
+                text,
+                short: "Sandbox",
+                title,
+                label: "Gondolin sandbox",
+                sheet: "diff",
+            });
+        } else {
+            statusHandle.update({ text, title });
+        }
     }
 
     if (typeof pocket.onConversation === "function") {
@@ -121,8 +136,11 @@ export default function setup(pocket) {
         );
     }
 
-    listeners.add(() => {
-        updateStatusBar();
+    listeners.add(updateStatusBar);
+    pocket.onDispose(() => {
+        listeners.delete(updateStatusBar);
+        statusHandle?.remove();
+        statusHandle = null;
     });
 
     function DiffReview({ sandboxId, onBack }) {
@@ -134,7 +152,6 @@ export default function setup(pocket) {
         const [commitMessage, setCommitMessage] = useState("");
         const [applying, setApplying] = useState(false);
         const [applied, setApplied] = useState(null);
-
         const [reloadCount, setReloadCount] = useState(0);
 
         useEffect(() => {
@@ -152,7 +169,7 @@ export default function setup(pocket) {
                     setData(res);
 
                     if (res.sourceRepo) {
-                        setRepoPath(res.sourceRepo);
+                        setRepoPath((prev) => prev || res.sourceRepo);
                     }
                 })
                 .catch((err) => {
@@ -267,7 +284,7 @@ export default function setup(pocket) {
                     }
                     ${
                         data.files?.length === 0
-                            ? html`<p class="muted">No uncommitted changes in /workspace.</p>`
+                            ? html`<p class="muted">No changes in /workspace.</p>`
                             : html`<div>
                                   <p class="muted">
                                       ${data.files.length} file(s) changed (+${data.totalAdded} /
@@ -567,6 +584,13 @@ export default function setup(pocket) {
                                                   <button
                                                       type="button"
                                                       class="gondolin-btn"
+                                                      onClick=${() => action(sb.id, "/reset")}
+                                                  >
+                                                      Reset
+                                                  </button>
+                                                  <button
+                                                      type="button"
+                                                      class="gondolin-btn"
                                                       onClick=${() => action(sb.id, "", "DELETE")}
                                                   >
                                                       Delete
@@ -591,6 +615,16 @@ export default function setup(pocket) {
         return html`<${DiffReview} sandboxId=${currentSandboxId} />`;
     }
 
-    pocket.sheet("main", { title: "Sandbox (Gondolin)", render: MainSheet });
-    pocket.sheet("diff", { title: "Sandbox diff & export", render: DiffSheet });
+    pocket.sheet({
+        id: "main",
+        title: "Sandbox (Gondolin)",
+        component: MainSheet,
+        wide: true,
+    });
+    pocket.sheet({
+        id: "diff",
+        title: "Sandbox diff & export",
+        component: DiffSheet,
+        wide: true,
+    });
 }

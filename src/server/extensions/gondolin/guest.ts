@@ -95,7 +95,7 @@ export interface HostCheck {
 export interface SandboxDriver {
     installed(): boolean;
     check(settings: { backend: Backend; image: string }): Promise<HostCheck>;
-    setup(progress: (line: string) => void, signal: AbortSignal): Promise<void>;
+    setup(progress: (line: string) => void, signal: AbortSignal, image?: string): Promise<void>;
     start(spec: VmSpec, signal?: AbortSignal, onRunner?: (vm: GuestVm) => void): Promise<GuestVm>;
     reapOrphan?(pid: number, expectedIdentity: string): void;
 }

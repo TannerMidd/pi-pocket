@@ -12,9 +12,9 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { lstatSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -132,6 +132,58 @@ function unsafePathReason(path: string): string | undefined {
     return undefined;
 }
 
+/** Parses a `diff --git <old> <new>` header, handling quoted paths as well as unquoted paths with spaces. */
+function parseDiffGitHeader(line: string): [string, string] | undefined {
+    const quoted = /^diff --git ("(?:[^"\\]|\\.)+") ("(?:[^"\\]|\\.)+")$/.exec(line);
+
+    if (quoted !== null) {
+        return [quoted[1]!, quoted[2]!];
+    }
+
+    const leftQuoted = /^diff --git ("(?:[^"\\]|\\.)+") (b\/.+)$/.exec(line);
+
+    if (leftQuoted !== null) {
+        return [leftQuoted[1]!, leftQuoted[2]!];
+    }
+
+    const rightQuoted = /^diff --git (a\/.+) ("(?:[^"\\]|\\.)+")$/.exec(line);
+
+    if (rightQuoted !== null) {
+        return [rightQuoted[1]!, rightQuoted[2]!];
+    }
+
+    const simple = /^diff --git (\S+) (\S+)$/.exec(line);
+
+    if (simple !== null) {
+        return [simple[1]!, simple[2]!];
+    }
+
+    const rest = line.slice("diff --git ".length);
+
+    if (rest.startsWith("a/")) {
+        // Common unquoted space-containing path (same path on both sides: `a/<p> b/<p>`).
+        const half = Math.floor((rest.length - 1) / 2);
+
+        if (
+            rest.length % 2 === 1 &&
+            rest[half] === " " &&
+            rest.slice(half + 1, half + 3) === "b/" &&
+            rest.slice(2, half) === rest.slice(half + 3)
+        ) {
+            return [rest.slice(0, half), rest.slice(half + 1)];
+        }
+
+        // Unquoted rename with spaces: accept only when there is a single unambiguous ` b/` separator.
+        const firstSep = rest.indexOf(" b/");
+
+        if (firstSep > 2 && rest.indexOf(" b/", firstSep + 1) === -1) {
+            return [rest.slice(0, firstSep), rest.slice(firstSep + 1)];
+        }
+    }
+
+    return undefined;
+}
+
 /**
  * Inspects a unified git diff produced by a sandbox VM. Returns structural file stats, risk warnings, and any
  * security-blocked constructs (symlinks, submodules, binary patches, `.git/` or traversal paths).
@@ -169,9 +221,16 @@ export function inspectPatch(rawPatch: string): PatchInspection {
         };
     }
 
-    const lines = rawPatch.split("\n");
+    const lines =
+        rawPatch === ""
+            ? []
+            : (rawPatch.endsWith("\n") ? rawPatch.slice(0, -1) : rawPatch).split("\n");
     let current: PatchFile | undefined;
     let inHunk = false;
+    let allowNoNewline = false;
+    let oldRemaining = 0;
+    let newRemaining = 0;
+    let sawPathsForCurrent = false;
 
     const recordRisk = (path: string) => {
         if (riskyMap.has(path)) {
@@ -204,18 +263,104 @@ export function inspectPatch(rawPatch: string): PatchInspection {
     for (const rawLine of lines) {
         const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
 
+        if (inHunk) {
+            if (line.startsWith("\\ ")) {
+                continue;
+            }
+
+            if (oldRemaining > 0 || newRemaining > 0) {
+                if (line.startsWith(" ")) {
+                    oldRemaining--;
+                    newRemaining--;
+
+                    if (oldRemaining === 0 && newRemaining === 0) {
+                        inHunk = false;
+                        allowNoNewline = true;
+                    }
+
+                    continue;
+                }
+
+                if (line.startsWith("+") && newRemaining > 0) {
+                    newRemaining--;
+
+                    if (current !== undefined) {
+                        current.added++;
+                        totalAdded++;
+                    }
+
+                    if (oldRemaining === 0 && newRemaining === 0) {
+                        inHunk = false;
+                        allowNoNewline = true;
+                    }
+
+                    continue;
+                }
+
+                if (line.startsWith("-") && oldRemaining > 0) {
+                    oldRemaining--;
+
+                    if (current !== undefined) {
+                        current.removed++;
+                        totalRemoved++;
+                    }
+
+                    if (oldRemaining === 0 && newRemaining === 0) {
+                        inHunk = false;
+                        allowNoNewline = true;
+                    }
+
+                    continue;
+                }
+
+                // Empty line in a hunk with remaining context lines is treated as a blank context line by git apply.
+                if (line === "" && oldRemaining > 0 && newRemaining > 0) {
+                    oldRemaining--;
+                    newRemaining--;
+
+                    if (oldRemaining === 0 && newRemaining === 0) {
+                        inHunk = false;
+                        allowNoNewline = true;
+                    }
+
+                    continue;
+                }
+
+                blocked.push("Truncated or malformed hunk body in patch.");
+                inHunk = false;
+                allowNoNewline = false;
+            } else {
+                inHunk = false;
+                allowNoNewline = true;
+            }
+        }
+
+        if (allowNoNewline && line.startsWith("\\ ")) {
+            allowNoNewline = false;
+            continue;
+        }
+
+        allowNoNewline = false;
+
+        if (line === "") {
+            continue;
+        }
+
         if (line.startsWith("diff --git ")) {
             inHunk = false;
-            const match = /^diff --git ("[^"]+"|\S+) ("[^"]+"|\S+)$/.exec(line);
+            oldRemaining = 0;
+            newRemaining = 0;
+            sawPathsForCurrent = false;
+            const header = parseDiffGitHeader(line);
 
-            if (match === null) {
+            if (header === undefined) {
                 blocked.push(`Malformed diff header: ${line.slice(0, 120)}`);
                 current = undefined;
                 continue;
             }
 
-            const oldPath = unquoteDiffPath(match[1]!);
-            const newPath = unquoteDiffPath(match[2]!);
+            const oldPath = unquoteDiffPath(header[0]);
+            const newPath = unquoteDiffPath(header[1]);
 
             checkPath(oldPath);
             checkPath(newPath);
@@ -233,88 +378,132 @@ export function inspectPatch(rawPatch: string): PatchInspection {
             continue;
         }
 
-        if (!inHunk) {
-            if (line.startsWith("@@ ")) {
-                inHunk = true;
+        if (line.startsWith("@@ ")) {
+            if (current === undefined) {
+                blocked.push("Patch hunk appeared without a preceding 'diff --git' header.");
                 continue;
             }
 
-            if (line === "GIT binary patch" || /^Binary files .* differ$/.test(line)) {
+            const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+
+            if (hunk === null) {
+                blocked.push(`Malformed hunk header: ${line.slice(0, 120)}`);
+                continue;
+            }
+
+            oldRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
+            newRemaining = hunk[4] === undefined ? 1 : Number(hunk[4]);
+            inHunk = oldRemaining > 0 || newRemaining > 0;
+            continue;
+        }
+
+        if (line === "GIT binary patch" || /^Binary files .* differ$/.test(line)) {
+            blocked.push(
+                `Binary patch${current ? ` for "${current.path}"` : ""} is not allowed; apply text patches only.`,
+            );
+            continue;
+        }
+
+        const modeMatch = /^(?:new file mode|deleted file mode|old mode|new mode) ([0-7]+)$/.exec(
+            line,
+        );
+
+        if (modeMatch !== null) {
+            const mode = modeMatch[1]!;
+
+            if (mode === "120000") {
                 blocked.push(
-                    `Binary patch${current ? ` for "${current.path}"` : ""} is not allowed; apply text patches only.`,
+                    `Symlink mode (120000)${current ? ` on "${current.path}"` : ""} is not allowed.`,
+                );
+            } else if (mode === "160000") {
+                blocked.push(
+                    `Submodule/gitlink mode (160000)${current ? ` on "${current.path}"` : ""} is not allowed.`,
+                );
+            } else if (current !== undefined) {
+                if (line.startsWith("new file mode")) {
+                    current.status = "added";
+                } else if (line.startsWith("deleted file mode")) {
+                    current.status = "deleted";
+                }
+            }
+
+            continue;
+        }
+
+        if (line.startsWith("rename from ") || line.startsWith("copy from ")) {
+            if (current === undefined) {
+                blocked.push(
+                    "Rename/copy header appeared without a preceding 'diff --git' header.",
                 );
                 continue;
             }
 
-            const modeMatch =
-                /^(?:new file mode|deleted file mode|old mode|new mode) ([0-7]+)$/.exec(line);
+            const p = unquoteDiffPath(line.slice(line.indexOf("from ") + 5));
 
-            if (modeMatch !== null) {
-                const mode = modeMatch[1]!;
+            checkPath(p);
 
-                if (mode === "120000") {
-                    blocked.push(
-                        `Symlink mode (120000)${current ? ` on "${current.path}"` : ""} is not allowed.`,
-                    );
-                } else if (mode === "160000") {
-                    blocked.push(
-                        `Submodule/gitlink mode (160000)${current ? ` on "${current.path}"` : ""} is not allowed.`,
-                    );
-                } else if (current !== undefined) {
-                    if (line.startsWith("new file mode")) {
-                        current.status = "added";
-                    } else if (line.startsWith("deleted file mode")) {
-                        current.status = "deleted";
-                    }
-                }
-
-                continue;
+            if (p !== undefined) {
+                current.oldPath = p;
+                current.status = "renamed";
             }
 
-            if (line.startsWith("rename from ") || line.startsWith("copy from ")) {
-                const p = unquoteDiffPath(line.slice(line.indexOf("from ") + 5));
-
-                checkPath(p);
-
-                if (current !== undefined && p !== undefined) {
-                    current.oldPath = p;
-                    current.status = "renamed";
-                }
-
-                continue;
-            }
-
-            if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
-                const p = unquoteDiffPath(line.slice(line.indexOf("to ") + 3));
-
-                checkPath(p);
-
-                if (current !== undefined && p !== undefined) {
-                    current.path = p;
-                    current.status = "renamed";
-                }
-
-                continue;
-            }
-
-            if (line.startsWith("--- ")) {
-                checkPath(unquoteDiffPath(line.slice(4)));
-                continue;
-            }
-
-            if (line.startsWith("+++ ")) {
-                checkPath(unquoteDiffPath(line.slice(4)));
-                continue;
-            }
-        } else if (current !== undefined) {
-            if (line.startsWith("+") && !line.startsWith("+++")) {
-                current.added++;
-                totalAdded++;
-            } else if (line.startsWith("-") && !line.startsWith("---")) {
-                current.removed++;
-                totalRemoved++;
-            }
+            continue;
         }
+
+        if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
+            if (current === undefined) {
+                blocked.push(
+                    "Rename/copy header appeared without a preceding 'diff --git' header.",
+                );
+                continue;
+            }
+
+            const p = unquoteDiffPath(line.slice(line.indexOf("to ") + 3));
+
+            checkPath(p);
+
+            if (p !== undefined) {
+                current.path = p;
+                current.status = "renamed";
+            }
+
+            continue;
+        }
+
+        if (line.startsWith("--- ")) {
+            if (current === undefined || sawPathsForCurrent) {
+                blocked.push("Unexpected '---' header outside a 'diff --git' section.");
+                continue;
+            }
+
+            checkPath(unquoteDiffPath(line.slice(4)));
+            continue;
+        }
+
+        if (line.startsWith("+++ ")) {
+            if (current === undefined || sawPathsForCurrent) {
+                blocked.push("Unexpected '+++' header outside a 'diff --git' section.");
+                continue;
+            }
+
+            checkPath(unquoteDiffPath(line.slice(4)));
+            sawPathsForCurrent = true;
+            continue;
+        }
+
+        if (
+            /^(?:index [0-9a-f]+\.\.[0-9a-f]+(?: [0-7]+)?|similarity index \d+%|dissimilarity index \d+%)$/.test(
+                line,
+            )
+        ) {
+            continue;
+        }
+
+        blocked.push(`Unexpected line outside patch hunk: ${line.slice(0, 120)}`);
+    }
+
+    if (inHunk && (oldRemaining > 0 || newRemaining > 0)) {
+        blocked.push("Patch ended with an incomplete hunk.");
     }
 
     const riskyFiles: RiskyFile[] = [...riskyMap.entries()].map(([path, reason]) => ({
@@ -482,7 +671,25 @@ export async function applyPatchToNewBranch(options: {
     patch: string;
     commitMessage?: string;
 }): Promise<{ branch: string; commit: string; filesChanged: number }> {
-    const { repoPath, branchName, patch } = options;
+    const { branchName, patch } = options;
+    const trimmedRepo = options.repoPath.trim();
+    const expandedRepo =
+        trimmedRepo === "~"
+            ? homedir()
+            : trimmedRepo.startsWith("~/")
+              ? join(homedir(), trimmedRepo.slice(2))
+              : trimmedRepo;
+    let repoPath: string;
+
+    try {
+        repoPath = realpathSync(resolve(expandedRepo));
+
+        if (!lstatSync(repoPath).isDirectory()) {
+            throw new Error("not a directory");
+        }
+    } catch {
+        throw new Error(`Target repository folder does not exist: ${trimmedRepo}`);
+    }
 
     if (!validBranchName(branchName)) {
         throw new Error(`Invalid branch name "${branchName}".`);

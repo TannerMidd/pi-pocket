@@ -574,7 +574,11 @@ export class GondolinDriver implements SandboxDriver {
         };
     }
 
-    async setup(progress: (line: string) => void, signal: AbortSignal): Promise<void> {
+    async setup(
+        progress: (line: string) => void,
+        signal: AbortSignal,
+        image = DEFAULT_IMAGE,
+    ): Promise<void> {
         const unsupported = platformUnsupportedReason();
 
         if (unsupported !== undefined) {
@@ -607,10 +611,11 @@ export class GondolinDriver implements SandboxDriver {
         }
 
         const library = await this.#load();
+        const wantedImage = image.trim() || DEFAULT_IMAGE;
 
-        if (!this.#images().some((img) => img.name === DEFAULT_IMAGE)) {
-            progress(`Downloading guest image ${DEFAULT_IMAGE} …`);
-            await library.ensureImageSelector(DEFAULT_IMAGE);
+        if (!this.#images().some((img) => img.name === wantedImage)) {
+            progress(`Downloading guest image ${wantedImage} …`);
+            await library.ensureImageSelector(wantedImage);
         }
 
         signal.throwIfAborted();
@@ -634,12 +639,15 @@ export class GondolinDriver implements SandboxDriver {
         }
 
         const { VM, createHttpHooks } = library;
-        const network =
-            spec.network.mode === "off"
-                ? {}
-                : spec.network.mode === "open"
-                  ? createHttpHooks({})
-                  : createHttpHooks({ allowedHosts: [...spec.network.allowedHosts] });
+        // An empty allow-list disables the VM NIC completely so raw TCP/UDP/DNS are also blocked.
+        const netDisabled =
+            spec.network.mode === "off" ||
+            (spec.network.mode === "allowlist" && spec.network.allowedHosts.length === 0);
+        const network = netDisabled
+            ? {}
+            : spec.network.mode === "open"
+              ? createHttpHooks({})
+              : createHttpHooks({ allowedHosts: [...spec.network.allowedHosts] });
 
         // Strictly zero host VFS mounts: the guest operates solely on its own isolated disk.
         const vm = await VM.create({
@@ -648,11 +656,11 @@ export class GondolinDriver implements SandboxDriver {
                 imagePath: spec.image,
                 memory: `${spec.memoryMb}M`,
                 cpus: spec.cpus,
-                ...(spec.network.mode === "off" ? { netEnabled: false } : {}),
+                ...(netDisabled ? { netEnabled: false } : {}),
             },
             rootfs: { size: spec.diskMb * 1024 * 1024 },
             vfs: { mounts: {} },
-            ...(spec.network.mode === "off" ? {} : { httpHooks: network.httpHooks }),
+            ...(netDisabled ? {} : { httpHooks: network.httpHooks }),
             env: { HOME: "/root", TERM: "xterm-256color" },
             sessionLabel: spec.label,
         });

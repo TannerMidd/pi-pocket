@@ -290,6 +290,32 @@ test("inspectPatch rejects symlinks, submodules, binary patches, .git paths, and
     const binPatch = inspectPatch("diff --git a/a.bin b/a.bin\nGIT binary patch\nliteral 0\n");
 
     assert.equal(binPatch.ok, false);
+
+    // Hunk-smuggled plain unified diff after a valid git hunk MUST be blocked.
+    const smuggled = inspectPatch(
+        [
+            "diff --git a/ok.txt b/ok.txt",
+            "--- a/ok.txt",
+            "+++ b/ok.txt",
+            "@@ -1 +1,2 @@",
+            " hello",
+            "+world",
+            "--- a/ok.txt",
+            "+++ b/.git/hooks/pre-commit",
+            "@@ -0,0 +1 @@",
+            "+#!/bin/sh",
+        ].join("\n"),
+    );
+
+    assert.equal(smuggled.ok, false);
+    assert.ok(smuggled.blocked.length > 0);
+
+    // Plain unified diff without a `diff --git` header MUST be blocked.
+    const noGitHeader = inspectPatch(
+        ["--- a/foo.txt", "+++ b/foo.txt", "@@ -1 +1 @@", "-a", "+b"].join("\n"),
+    );
+
+    assert.equal(noGitHeader.ok, false);
 });
 
 test("applyPatchToNewBranch commits onto a fresh branch without touching the live working tree", async () => {
@@ -836,5 +862,157 @@ test("seedWorkspace rejects symlinked parent folders, preserves executable bits,
         await vm.close();
         rmSync(externalDir, { recursive: true, force: true });
         rmSync(repo, { recursive: true, force: true });
+    }
+});
+
+test("inspectPatch accepts trailing no-newline markers and paths with spaces", () => {
+    const noNewline = inspectPatch(
+        [
+            "diff --git a/my file.txt b/my file.txt",
+            "index 1111111..2222222 100644",
+            "--- a/my file.txt",
+            "+++ b/my file.txt",
+            "@@ -1 +1 @@",
+            "-old",
+            "\\ No newline at end of file",
+            "+new",
+            "\\ No newline at end of file",
+            "",
+        ].join("\n"),
+    );
+
+    assert.equal(noNewline.ok, true);
+    assert.equal(noNewline.files.length, 1);
+    assert.equal(noNewline.files[0]!.path, "my file.txt");
+
+    // Unsafe path with spaces is still rejected.
+    const badSpaces = inspectPatch(
+        [
+            "diff --git a/my file.txt b/../evil file.txt",
+            "--- a/my file.txt",
+            "+++ b/../evil file.txt",
+            "@@ -1 +1 @@",
+            "-a",
+            "+b",
+        ].join("\n"),
+    );
+
+    assert.equal(badSpaces.ok, false);
+});
+
+test("gondolin browser module conforms to Pi Pocket extension UI contract", async () => {
+    const moduleUrl = new URL("../src/server/extensions/gondolin/index.js", import.meta.url).href;
+    const mod = (await import(moduleUrl)) as {
+        pocketApi: number;
+        default: (pocket: Record<string, unknown>) => void;
+    };
+
+    assert.equal(mod.pocketApi, 2);
+
+    const sheets: Record<string, unknown>[] = [];
+    const menus: Record<string, unknown>[] = [];
+    const launchers: Record<string, unknown>[] = [];
+    const styles: string[] = [];
+    let statusSpec: Record<string, unknown> | null = null;
+    let statusRemoved = false;
+    let onConvListener: ((id: number | null) => void) | undefined;
+    const disposes: (() => void)[] = [];
+
+    const mockPocket = {
+        html: () => null,
+        useEffect: () => {},
+        useState: (init: unknown) => [init, () => {}],
+        style: (path: string) => {
+            assert.equal(typeof path, "string");
+            styles.push(path);
+        },
+        api: async (path: string) => {
+            if (path === "status") {
+                return {
+                    installed: true,
+                    check: { ok: true, lines: [] },
+                    sandboxes: [{ id: "sb-abc123", name: "Demo", state: "running" }],
+                    sandboxByConversation: { 7: "sb-abc123" },
+                    setup: { running: false },
+                };
+            }
+
+            return {};
+        },
+        notify: () => {},
+        on: () => () => {},
+        onDispose: (fn: () => void) => {
+            disposes.push(fn);
+        },
+        menu: (spec: Record<string, unknown>) => {
+            assert.equal(typeof spec.id, "string");
+            assert.equal(typeof spec.label, "string");
+            assert.ok(String(spec.label).trim() !== "");
+            menus.push(spec);
+        },
+        launcher: (spec: Record<string, unknown>) => {
+            assert.equal(typeof spec.id, "string");
+            assert.equal(typeof spec.label, "string");
+            launchers.push(spec);
+        },
+        sheet: (spec: Record<string, unknown>) => {
+            assert.equal(typeof spec, "object");
+            assert.equal(typeof spec.id, "string");
+            assert.equal(typeof spec.title, "string");
+            assert.equal(typeof spec.component, "function");
+            sheets.push(spec);
+        },
+        status: (spec: Record<string, unknown>) => {
+            // Mirrors web/extension-ui.js check(): status requires non-empty text.
+            assert.equal(typeof spec.id, "string");
+            assert.equal(typeof spec.text, "string");
+            assert.ok(String(spec.text).trim() !== "", "status.text must be non-empty");
+            statusSpec = { ...spec };
+            statusRemoved = false;
+
+            return {
+                update: (patch: Record<string, unknown>) => {
+                    statusSpec = { ...statusSpec, ...patch };
+                    assert.ok(String(statusSpec.text).trim() !== "");
+                },
+                remove: () => {
+                    statusSpec = null;
+                    statusRemoved = true;
+                },
+            };
+        },
+        onConversation: (listener: (id: number | null) => void) => {
+            onConvListener = listener;
+
+            return () => {
+                onConvListener = undefined;
+            };
+        },
+    };
+
+    mod.default(mockPocket);
+    // Allow initial refresh() microtask to resolve.
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.deepEqual(styles, ["style.css"]);
+    assert.equal(menus.length, 1);
+    assert.equal(launchers.length, 1);
+    assert.deepEqual(
+        sheets.map((s) => s.id),
+        ["main", "diff"],
+    );
+    assert.equal(statusSpec, null, "status item should not show outside a sandbox session");
+
+    // Switching to sandbox conversation #7 adds the status item; leaving removes it.
+    onConvListener?.(7);
+    assert.ok(statusSpec !== null);
+    assert.match(String((statusSpec as Record<string, unknown>).text), /Sandbox/);
+
+    onConvListener?.(99);
+    assert.equal(statusSpec, null);
+    assert.equal(statusRemoved, true);
+
+    for (const fn of disposes) {
+        fn();
     }
 });

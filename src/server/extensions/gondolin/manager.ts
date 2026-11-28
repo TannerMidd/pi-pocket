@@ -747,7 +747,7 @@ export class SandboxManager {
             [
                 "/bin/sh",
                 "-c",
-                'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace add -N -A >/dev/null 2>&1; git -C /workspace -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color "$1"',
+                'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false add -N -A >/dev/null 2>&1; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color "$1"',
                 "sh",
                 base,
             ],

@@ -64,7 +64,11 @@ export default function createGondolin(
 
     const readSettings = (): SandboxSettings => ({
         backend: asBackend(web?.setting("backend")),
-        image: DEFAULT_IMAGE,
+        image:
+            typeof web?.setting("image") === "string" &&
+            (web.setting("image") as string).trim() !== ""
+                ? (web.setting("image") as string).trim()
+                : DEFAULT_IMAGE,
         networkMode: asNetworkMode(web?.setting("networkMode")),
         allowedHosts: parseAllowedHosts(
             typeof web?.setting("allowedHosts") === "string"
@@ -91,6 +95,14 @@ export default function createGondolin(
                     { value: "qemu", label: "QEMU" },
                 ],
                 default: "auto",
+            },
+            {
+                name: "image",
+                label: "Guest image",
+                description:
+                    "Gondolin image selector (default alpine-base:latest, or a custom image built with git/toolchains).",
+                type: "text",
+                default: DEFAULT_IMAGE,
             },
             {
                 name: "networkMode",
@@ -239,16 +251,22 @@ export default function createGondolin(
                 setupRunning = state;
                 web.send("changed");
 
+                const wantedImage = readSettings().image;
+
                 state.promise = driver
-                    .setup((line) => {
-                        state.lines.push(line);
+                    .setup(
+                        (line) => {
+                            state.lines.push(line);
 
-                        if (state.lines.length > 200) {
-                            state.lines.splice(0, state.lines.length - 200);
-                        }
+                            if (state.lines.length > 200) {
+                                state.lines.splice(0, state.lines.length - 200);
+                            }
 
-                        web.send("setup", { line });
-                    }, abort.signal)
+                            web.send("setup", { line });
+                        },
+                        abort.signal,
+                        wantedImage,
+                    )
                     .catch((error: unknown) => {
                         state.error = error instanceof Error ? error.message : String(error);
                         host.notice("error", `Gondolin setup failed: ${state.error}`);
