@@ -65,7 +65,9 @@ Fork-only access does not make a second disk copy. Listing and transfer check th
 
 ## Workspace execution providers
 
-`PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The provider's module, a drop-in outside the core package, owns host-key trust, connections, remote project context, and cleanup. Files/Git actions and managed worktrees remain local-only.
+`PocketApp` selects the execution environment by the session's working folder. Local folders keep the existing Node environment; URI workspaces use the last registered provider for their scheme. Removal restores the previous registration, and a missing provider fails closed. Resolution checks the provider identity and cancellation after awaited work. Only the owner can use a workspace URI. The provider's module, a drop-in or optional built-in module (such as `extensions/gondolin.ts`, off by default), owns host-key trust, connections or micro-VMs, workspace project context, and cleanup (`disposeWorkspace` runs when no active session remains on that URI). Files/Git actions and managed worktrees remain local-only.
+
+When a provider sets `isolated: true` (or when a URI scheme has no active provider, failing closed), core enforces sandbox isolation regardless of which extensions are enabled (`isolated-workspace.ts`): only `ExecutionEnv` tools (`read`, `write`, `edit`, `bash`) and pure Pocket tools (`ask`, `ui`, `tool_search`, `subagent`, `codemode`, `schedule`, `goal`, `plan`, inline `artifact`, and session-scoped `memory`) may run; the host browser, host MCP tools, project/global memory writes, and arbitrary host tools are blocked; host `commandEnv` variables are never injected; sessions cannot be moved across the isolation boundary; and isolated sessions cannot start or message non-isolated linked sessions.
 
 ## Favorite folders
 

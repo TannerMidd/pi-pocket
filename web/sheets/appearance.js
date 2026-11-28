@@ -36,6 +36,7 @@ import { html, Icon, Sheet, Switch } from "../ui.js";
 import { pipAvailable } from "../pip.js";
 import { QUOTE_STYLES, quoteStyleOf } from "../quote-box.js";
 import { galleryAvailable } from "./gallery.js";
+import { memoryAvailable } from "./memory.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
 const touch = matchMedia("(pointer: coarse)").matches;
@@ -843,6 +844,29 @@ export function AppearanceSheet() {
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
                 />
             <//>
+            ${
+                memoryAvailable() &&
+                html`<${SettingRow}
+                    title="Lessons in folded activity"
+                    detail="A lesson Pi saved that still waits for a decision, when its activity is folded. Card: its Approve card stays under the line. Badge: the line says how many wait"
+                >
+                    <div class="segmented">
+                        ${[
+                            ["card", "Card"],
+                            ["badge", "Badge"],
+                        ].map(
+                            ([value, label]) =>
+                                html`<button
+                                    class=${(p.foldedLessons ?? "card") === value ? "on" : ""}
+                                    aria-pressed=${(p.foldedLessons ?? "card") === value}
+                                    onClick=${() => setPrefs({ foldedLessons: value })}
+                                >
+                                    ${label}
+                                </button>`,
+                        )}
+                    </div>
+                <//>`
+            }
             <${SettingRow}
                 title="Reply to a passage"
                 detail="Select words in one of Pi's replies, and a Reply button by them quotes them in your next message"

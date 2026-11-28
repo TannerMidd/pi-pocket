@@ -86,6 +86,11 @@ const DEFAULTS = {
      * thought alone in its group still follows Show thinking. Off until turned on.
      */
     foldActivity: false,
+    /**
+     * A lesson Pi saved, changed, or forgot that still waits for a decision, in an activity group that is folded: "card",
+     * its Approve card under the group's line; or "badge", a badge on the line that says how many wait.
+     */
+    foldedLessons: "card",
     /** A Reply button by words selected in one of Pi's replies, which quotes them in the next message. On by default. */
     quoteReply: true,
     /** PiP's orb by those words, beside Reply if it shows, which asks PiP about them instead. On by default. */

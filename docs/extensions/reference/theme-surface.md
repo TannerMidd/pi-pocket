@@ -154,6 +154,7 @@ Each is a `data-part` attribute. Some elements have two (`data-part="composer-bu
 | `reply-quote`                                   | A passage a message quotes, where it was written in it (since 0.27.0)                                         |
 | `reply-actions`                                 | The row under an answer: react, discuss, pin, copy                                                            |
 | `activity`, `activity-head`, `activity-chevron` | A group of what Pi did, its head (what it did, how long), and the chevron that opens it                       |
+| `activity-lessons`, `activity-lessons-badge`    | A folded group's lessons that wait: their cards under its head, or its badge (since 0.31.0)                   |
 | `timeline`                                      | The open group's steps, on a rule                                                                             |
 | `timeline-earlier`                              | Above a long group's newest steps: shows the earlier ones                                                     |
 | `thinking`, `tool-call`                         | A step: a thought, a tool call                                                                                |

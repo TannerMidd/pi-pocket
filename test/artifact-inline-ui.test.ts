@@ -167,6 +167,32 @@ async function press(nth: number, words: string) {
     `);
 }
 
+/**
+ * Run a card's page, and wait for its frame. A page just signed in can draw its card before the button takes a click
+ * (the card draws again as the rest arrives), so a click is made again while the button still says "▶ Run": once
+ * running, it says "■ Stop".
+ */
+async function run(nth: number, what: string) {
+    await until(
+        async () =>
+            await inPage<boolean>(`
+                const card = document.querySelectorAll(".inline-artifact")[${nth}];
+
+                if (card?.querySelector("iframe.run-frame")) {
+                    return JSON.stringify(true);
+                }
+
+                [...(card?.querySelectorAll(".code-head button") ?? [])]
+                    .find((each) => each.textContent.trim() === "▶ Run")
+                    ?.click();
+
+                return JSON.stringify(false);
+            `),
+        what,
+        SLOW,
+    );
+}
+
 async function shot(name: string) {
     if (SHOTS === undefined) {
         return;
@@ -448,8 +474,7 @@ test("a viewer sees the card and can run it; they get a notice for a follow-up",
     const theirs = await signedIn(viewer.token);
 
     try {
-        await press(0, "▶ Run");
-        await waitFor(".inline-artifact iframe.run-frame", "their running frame");
+        await run(0, "their running frame");
         await new Promise((resolve) => setTimeout(resolve, 800));
         await tap(".inline-artifact iframe.run-frame");
         await until(
@@ -477,8 +502,7 @@ test("someone invited to this session alone sees the card and its source", real,
         await press(1, "Code");
         await waitFor(".inline-artifact pre code", "their source");
         await press(1, "Preview");
-        await press(1, "▶ Run");
-        await waitFor(".inline-artifact iframe.run-frame", "their running frame");
+        await run(1, "their running frame");
     } finally {
         await theirs.closeAll({ final: true });
         page = owners;

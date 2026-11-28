@@ -495,20 +495,23 @@ export function wrapEnv(
     base: ExecutionEnv,
     conversationId: number,
     cwd: string,
-    envs: CommandEnvs,
+    envs: CommandEnvs | undefined,
     hidden: HiddenValues,
 ): ExecutionEnv {
-    if (!envs.any && !hidden.any(conversationId)) {
+    const inject = envs?.any === true;
+
+    if (!inject && !hidden.any(conversationId)) {
         return base;
     }
 
     const exec: ExecutionEnv["exec"] = async (command, options, context) => {
-        const added = envs.any
-            ? await envs.for(
-                  { conversationId, command, cwd: options?.cwd ?? cwd },
-                  context.abortSignal,
-              )
-            : {};
+        const added =
+            envs !== undefined && envs.any
+                ? await envs.for(
+                      { conversationId, command, cwd: options?.cwd ?? cwd },
+                      context.abortSignal,
+                  )
+                : {};
         const stream =
             options?.onOutput !== undefined && hidden.any(conversationId)
                 ? hidden.stream(conversationId, options.onOutput)

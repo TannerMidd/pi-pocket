@@ -304,6 +304,15 @@ function failureDealtWith(record: SubagentRecord): boolean {
     );
 }
 
+/** The time of the newest thing a subagent did: asked, or answered (or failed to). */
+export const newestOf = (record: SubagentRecord): number =>
+    Math.max(record.askedAt ?? 0, record.answeredAt ?? 0);
+
+/** Whether a person hid a subagent from its parent's bar, and it did nothing since. */
+function hidden(record: SubagentRecord): boolean {
+    return record.hiddenAt !== undefined && newestOf(record) <= record.hiddenAt;
+}
+
 /**
  * The model a subagent runs on, as its row shows it: the model's name (its id when the model is not known here), its
  * thinking level, and `other` when it is not the model of the conversation that started it.
@@ -313,7 +322,8 @@ export type SubagentModel = { name: string; thinking?: string; other?: true };
 /**
  * One subagent as the web app shows it, in its parent's subagents bar and on the subagents board: what it was asked and
  * when, whether it works, and how it ended (`stopped` is a `failed` that was stopped; `dealt`, a failure a person
- * dealt with, which needs nobody now), and the model it runs on (`runsOn`).
+ * dealt with, which needs nobody now), whether a person hid it from the bar (`hidden`), and the model it runs on
+ * (`runsOn`).
  */
 export function subagentView(
     name: string,
@@ -339,6 +349,7 @@ export function subagentView(
             ? { error: record.error }
             : {}),
         ...(failureDealtWith(record) ? { dealt: true } : {}),
+        ...(hidden(record) ? { hidden: true } : {}),
         ...(reporting ? { reporting: true } : {}),
     };
 }

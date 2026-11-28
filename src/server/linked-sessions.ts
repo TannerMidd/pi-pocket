@@ -828,10 +828,12 @@ export class LinkedSessions implements LinkedSessionsApi {
         agent: AgentState,
         cwd?: string,
     ): Promise<string> {
+        const inherited = agent.cwd ?? this.#app.cwdOf(source);
+        const sourceIsolated =
+            this.#app.isIsolatedWorkspace(inherited) || this.#app.isIsolatedConversation(source);
+
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
-            const inherited = agent.cwd ?? this.#app.cwdOf(source);
-
             this.#app.requireWorkspaceOwner(user, inherited);
 
             return inherited;
@@ -842,8 +844,16 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         this.#app.requireWorkspaceOwner(user, cwd);
+        const resolved = await this.#app.resolveCwd(cwd);
 
-        return await this.#app.resolveCwd(cwd);
+        if (sourceIsolated && resolved !== inherited) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot start linked sessions in another folder.",
+            );
+        }
+
+        return resolved;
     }
 
     /** Refuse a model the owner does not allow: with a list, the asker's fix is to choose from it. */
@@ -1073,6 +1083,14 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const id = target as unknown as ConversationId;
+
+        if (app.isIsolatedConversation(source) && !app.isIsolatedConversation(id)) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot message non-isolated sessions.",
+            );
+        }
+
         const listed = app.config.subagentModels;
         const runs = (await app.agentState(id))?.model;
 
@@ -1466,7 +1484,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         // One from anyone else (a linked session asking its lead or a sibling) gets an answer only when the target sends
         // one, so it is asked to.
         const answers = this.#leads(source, target)
-            ? `Send to that address only when the sender needs an answer mid-work; your final answer reaches it by itself when your run ends, so do not send it again, and do not send thanks or acknowledgements.`
+            ? `Send one short update to that address when a blocker, handoff, or changed expectation affects the lead's next decision. Answer a question that needs a reply mid-work, but do not send routine progress: your final answer reaches it by itself when your run ends; do not send it again or acknowledge this message.`
             : `Your final answer does not reach that session by itself: when the message asks for an answer or a result, send it to that address, once, when you have it. Do not send thanks or acknowledgements.`;
         const preface =
             ended === undefined
