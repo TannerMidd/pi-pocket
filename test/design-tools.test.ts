@@ -117,6 +117,24 @@ test("design_export writes a real HTML bundle to the default session-local path"
     );
 });
 
+test(
+    "design_export writes a page PNG at Desktop or the exact custom size",
+    { skip: !findBrowser() },
+    async () => {
+        const tool = designTools(host).find((item) => item.name === "design_export")!;
+
+        for (const [viewport, width, height] of [
+            ["desktop", 1920, 1080],
+            [{ width: 1280, height: 800 }, 1280, 800],
+        ] as const) {
+            const result = await call(tool, { id: "test", format: "png", viewport });
+            const png = await readFile((result.details as { path: string }).path);
+
+            assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [width, height]);
+        }
+    },
+);
+
 test("the workspace export writes the file in a visible session's folder and answers its path", async () => {
     let handler: ((request: ConversationWebRequest) => unknown) | undefined;
     let method: string | undefined;
@@ -178,8 +196,16 @@ test(
 
         assert.equal(images.length, 2);
         assert.equal(images[0]!.mimeType, "image/png");
-        assert.equal(Buffer.from(images[0]!.data, "base64").readUInt32BE(16), 390);
-        assert.equal(Buffer.from(images[1]!.data, "base64").readUInt32BE(16), 1280);
+        const sizes = images.map((image) => {
+            const png = Buffer.from(image.data, "base64");
+
+            return [png.readUInt32BE(16), png.readUInt32BE(20)];
+        });
+
+        assert.deepEqual(sizes, [
+            [390, 844],
+            [1920, 1080],
+        ]);
         const details = result.details as { version: number; errors: string[] };
 
         assert.equal(details.version, 1);

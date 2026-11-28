@@ -560,7 +560,7 @@ test("a page's PDF is as wide as the viewport", browser, async () => {
     const desktop = boxes(await exportDesign(mk(content), "pdf", undefined, host));
     const custom = boxes(await exportDesign(mk(content), "pdf", { width: 800, height: 600 }, host));
 
-    assert.deepEqual(desktop[0], [960, 600], "1280 px × 0.75 pt");
+    assert.deepEqual(desktop[0], [1440, 810], "1920 × 1080 CSS pixels at 0.75 pt per pixel");
     assert.deepEqual(custom[0], [600, 450]);
 });
 

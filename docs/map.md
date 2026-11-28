@@ -166,6 +166,8 @@ A module split into parts keeps its name for the part others import, with the re
 | `browser/viewport.ts`, `browser/urls.ts` | Page sizes and their presets; what people and Pi type, made into addresses                                                                 |
 | `browser/local-servers.ts`               | The web servers running on this machine, for the panel's start screen                                                                      |
 
+The Browser panel, browser tool, and Design renderer share their named page sizes in `web/viewport-sizes.js`.
+
 ### Design: `design/`
 
 The agent's side of Design mode. `extensions/design.ts` installs it (see Extensions below).

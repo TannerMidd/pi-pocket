@@ -173,6 +173,15 @@ test(
             );
             await new Promise((done) => setTimeout(done, 500));
             assert.equal(page.url, `${base}/`);
+
+            // A size saved as numbers stays that size, even if it was once a preset.
+            await page.setViewport({ width: 1280, height: 800, scale: 1, mobile: false });
+            await browsers.close(1);
+            const restored = await browsers.open(1);
+
+            assert.equal(restored.url, `${base}/`);
+            assert.equal(await restored.evaluate("`${innerWidth}×${innerHeight}`"), "1280×800");
+            assert.equal(browsers.state(1).preset, undefined);
         } finally {
             await browsers.closeAll({ final: true });
         }
@@ -227,6 +236,12 @@ test(
                     url: base.replace("http://", ""),
                     snapshot: true,
                 });
+            }
+
+            const resize = /resize to (1280x800|desktop)/.exec(text);
+
+            if (resize) {
+                return call({ action: "viewport", viewport: resize[1]! });
             }
 
             if (text.includes("take a screenshot")) {
@@ -296,6 +311,25 @@ test(
                 "image/jpeg",
                 "Pi sees the screenshot",
             );
+
+            const page = app.browsers.page(Number(id))!;
+            const geometry = () => page.evaluate("`${innerWidth}×${innerHeight}`");
+
+            assert.equal(await geometry(), "1920×1080", "fresh page uses Desktop");
+
+            for (const [size, label, dimensions] of [
+                ["1280x800", "custom", "1280×800"],
+                ["desktop", "desktop", "1920×1080"],
+            ] as const) {
+                const count = results.length;
+
+                await say(app, id, `resize to ${size}`);
+                await until(() => results.length > count, `the ${size} viewport result`);
+                const result = results[count]!;
+
+                assert.ok(result.endsWith(`${label} ${dimensions}`), result);
+                assert.equal(await geometry(), dimensions);
+            }
 
             // Everyone who sees the session watches; only people who can steer use the page, and files are the owner's.
             await request(app.config.ownerToken, `c/${id}/browser/navigate`, { url: `${base}/` });

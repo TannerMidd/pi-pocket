@@ -79,15 +79,18 @@ export function loadPrefs() {
     };
 }
 
-/** The size name for `device`: `auto` is the phone's frame in a narrow panel, the tablet's in a middling one, else the desktop's. */
-export function resolveDevice(device, width) {
-    return device !== "auto"
-        ? device
-        : width > 0 && width < 700
-          ? "mobile"
-          : width > 0 && width < 1000
-            ? "tablet"
-            : "desktop";
+/**
+ * The size name for `device`: `auto` is the phone's frame on a phone-sized screen, else the desktop's (1920 × 1080). The
+ * screen decides, not the panel: a panel beside the conversation on a wide screen still shows a desktop page.
+ */
+export function resolveDevice(device, width, screen = globalThis.innerWidth) {
+    if (device !== "auto") {
+        return device;
+    }
+
+    const across = screen > 0 ? screen : width;
+
+    return across > 0 && across < 700 ? "mobile" : "desktop";
 }
 
 export function savePrefs(state) {
