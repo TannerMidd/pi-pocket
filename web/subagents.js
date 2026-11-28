@@ -1,7 +1,8 @@
 // The subagents bar, above the message box: this session's subagents at a glance. It shows while one works or has a
 // report on its way to Pi, and after they finish until it is put away. Folded, one line: how many work and how many
 // are done, and what the newest one does. Unfolded, a row each: what it was asked, what it does this moment (its peek,
-// as tiles have), for how long, whether its report is on its way, Stop, and a tap to open it.
+// as tiles have), for how long, whether its report is on its way, Stop, a tap to open it, and × to hide a finished one
+// for everyone until it does something new or someone opens it.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { nowDoing } from "./agent-now.js";
 import { useOnScreen } from "./peeks.js";
@@ -57,15 +58,26 @@ export function seeFailure(agent) {
     }
 }
 
+/** Hide a finished subagent from its session's bar, for everyone, until it does something newer than what this shows. */
+const hide = (agent) =>
+    api(`c/${agent.conversationId}/hidden`, { hidden: true, at: newest(agent) });
+
+/** A hidden subagent someone who can steer opens shows in its session's bar again. */
+export function showHidden(agent) {
+    if (agent?.hidden && canSteer()) {
+        api(`c/${agent.conversationId}/hidden`, { hidden: false }).catch(() => {});
+    }
+}
+
 /** Open a subagent's conversation, from this session's subagents or the board; a failure it had is seen there. */
 export function openSubagent(id) {
     const { boardAgents, view } = store.state;
-
-    seeFailure(
-        [...(view.subagents ?? []), ...(boardAgents ?? [])].find(
-            (agent) => agent.conversationId === id,
-        ),
+    const agent = [...(view.subagents ?? []), ...(boardAgents ?? [])].find(
+        (each) => each.conversationId === id,
     );
+
+    seeFailure(agent);
+    showHidden(agent);
     navigate(id);
 }
 
@@ -162,6 +174,19 @@ function AgentRow({ agent }) {
                 onClick=${stop}
             >
                 <${Icon} name="stop" size=${13} />
+            </button>`
+        }
+        ${
+            !agent.busy &&
+            !agent.reporting &&
+            canSteer() &&
+            html`<button
+                class="icon-button agent-hide"
+                aria-label=${`Hide ${agent.name}`}
+                title="Hide"
+                onClick=${() => attempt(() => hide(agent))}
+            >
+                <${Icon} name="close" size=${13} />
             </button>`
         }
     </div>`;
@@ -275,13 +300,13 @@ function Bar({ agents, active, open, held }) {
 
 /**
  * This session's subagents, while one works or has a report on its way, and after until put away. Once put away, it
- * counts and lists only those that did something since.
+ * counts and lists only those that did something since. Those someone hid are left out until they do something new.
  */
 export function SubagentsBar() {
     const { view, conversationId, subagentsOpen } = store.state;
     const away = awayMarks()[conversationId] ?? 0;
     const agents = (view.subagents ?? []).filter(
-        (agent) => agent.busy || agent.reporting || newest(agent) > away,
+        (agent) => agent.busy || agent.reporting || (!agent.hidden && newest(agent) > away),
     );
 
     if (agents.length === 0) {

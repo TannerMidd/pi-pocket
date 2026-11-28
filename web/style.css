@@ -17998,7 +17998,8 @@ textarea.notes {
     font-size: 0.76rem;
 }
 
-.agent-stop {
+.agent-stop,
+.agent-hide {
     flex: none;
     margin-right: 0.2rem;
 }
