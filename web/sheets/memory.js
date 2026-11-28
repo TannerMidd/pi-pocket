@@ -584,12 +584,52 @@ export function MemorySheet({ draft: initial = "", conversationId, pendingOnly =
     <//>`;
 }
 
+/** Whether a lesson still waits for a decision: new, with new text, or to be forgotten. */
+const waits = (lesson) => lesson?.pending === true || lesson?.proposal !== undefined;
+
+/**
+ * The lessons Pi saved, changed, or forgot in an activity group that is folded, those that still wait for a decision:
+ * their cards under the group's line, or, with Appearance's Lessons in folded activity on Badge, a badge on it. They go
+ * once decided, here or anywhere: they follow the lessons the server pushes, with no polling of their own.
+ */
+export function FoldedLessons({ lessonIds, conversationId, badge = false }) {
+    const id = conversationId ?? store.state.conversationId;
+    const data = useMemory(id);
+    // A lesson saved, then changed, in the same group shows once.
+    const waiting = [...new Set(lessonIds)].filter((lessonId) =>
+        waits(data?.lessons.find((each) => each.id === lessonId)),
+    );
+
+    if (waiting.length === 0) {
+        return null;
+    }
+
+    if (badge) {
+        const said = `${waiting.length} ${waiting.length === 1 ? "lesson waits" : "lessons wait"}`;
+
+        return html`<span class="activity-lessons-badge" data-part="activity-lessons-badge">
+            <span class="activity-lessons-dot" aria-hidden="true"></span>${said}
+        </span>`;
+    }
+
+    return html`<div class="activity-lessons" data-part="activity-lessons">
+        ${waiting.map(
+            (lessonId) => html`<${LessonCall}
+                key=${lessonId}
+                lessonId=${lessonId}
+                conversationId=${id}
+                folded=${true}
+            />`,
+        )}
+    </div>`;
+}
+
 /**
  * Under Pi's memory call: what became of the lesson it saved, changed, or forgot, in conversation `conversationId` (the
  * one open when absent). While it waits, the owner reads it and approves or discards it right here, without opening
  * the sheet.
  */
-export function LessonCall({ lessonId, conversationId }) {
+export function LessonCall({ lessonId, conversationId, folded = false }) {
     const id = conversationId ?? store.state.conversationId;
     const data = useMemory(id);
 
@@ -631,7 +671,7 @@ export function LessonCall({ lessonId, conversationId }) {
     return html`<div class="lesson-call waiting">
         <div class="grow">
             <div>${what}, for ${reach(lesson)}, waits for ${data.owner ? "you" : "the owner"}:</div>
-            <div class="lesson-text">${text}</div>
+            <div class=${`lesson-text ${folded ? "clamped" : ""}`}>${text}</div>
         </div>
         ${
             data.owner &&
