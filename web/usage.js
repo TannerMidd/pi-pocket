@@ -21,17 +21,24 @@ export function windowState(window, now) {
 const left = (window) => window?.left ?? 101;
 const RANK = { limited: 0, low: 1, ok: 2, reset: 3 };
 
+/** Whether a window applies to the active model (shared windows always apply; model-tiered windows match by family). */
+const appliesToModel = (window, modelId) =>
+    window.model === undefined ||
+    (typeof modelId === "string" && modelId.toLowerCase().includes(window.model));
+
 /** The window that holds a person back: a limited one (the one that clears last), else the one with least left. */
-export function tightestWindow(provider, now) {
+export function tightestWindow(provider, now, modelId) {
     const live = provider.windows.filter((window) => windowState(window, now) !== "reset");
-    const limited = live.filter((window) => window.state === "limited");
+    const matching = live.filter((window) => appliesToModel(window, modelId));
+    const pool = matching.length > 0 ? matching : live;
+    const limited = pool.filter((window) => window.state === "limited");
 
     if (limited.length > 0) {
         return limited.reduce((a, b) => ((b.resetAt ?? 0) > (a.resetAt ?? 0) ? b : a));
     }
 
     return (
-        live.reduce((best, window) => (left(window) < left(best) ? window : best), undefined) ??
+        pool.reduce((best, window) => (left(window) < left(best) ? window : best), undefined) ??
         null
     );
 }
@@ -66,7 +73,7 @@ export function providerView(provider, now, modelId) {
         return { provider, state: provider.status, window: null, until: undefined, holds };
     }
 
-    const window = tightestWindow(provider, now);
+    const window = tightestWindow(provider, now, modelId);
 
     if (window?.state === "limited" || hold.length > 0) {
         const until = Math.max(

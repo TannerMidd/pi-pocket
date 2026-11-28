@@ -58,6 +58,8 @@ export type UsageWindow = {
     detail?: string;
     /** When the window resets, as epoch milliseconds on the server's clock. */
     resetAt?: number;
+    /** Model family substring when a window applies only to one model tier (e.g. `"sonnet"`, `"opus"`). */
+    model?: string;
     state: WindowState;
 };
 
@@ -454,12 +456,30 @@ export function parseAnthropicUsage(body: unknown): UsageWindow[] {
     }
 
     const record = body as Record<string, unknown>;
-    const specs = [
+    const specs: readonly {
+        key: string;
+        id: string;
+        tag: string;
+        label: string;
+        model?: string;
+    }[] = [
         { key: "five_hour", id: "5h", tag: "5h", label: "5-hour window" },
         { key: "seven_day", id: "7d", tag: "7d", label: "Weekly window" },
-        { key: "seven_day_sonnet", id: "7d_sonnet", tag: "7d", label: "Weekly window (Sonnet)" },
-        { key: "seven_day_opus", id: "7d_opus", tag: "7d", label: "Weekly window (Opus)" },
-    ] as const;
+        {
+            key: "seven_day_sonnet",
+            id: "7d_sonnet",
+            tag: "7d",
+            label: "Weekly window (Sonnet)",
+            model: "sonnet",
+        },
+        {
+            key: "seven_day_opus",
+            id: "7d_opus",
+            tag: "7d",
+            label: "Weekly window (Opus)",
+            model: "opus",
+        },
+    ];
     const windows: UsageWindow[] = [];
 
     for (const spec of specs) {
@@ -485,6 +505,7 @@ export function parseAnthropicUsage(body: unknown): UsageWindow[] {
             label: spec.label,
             ...measure(raw, rawUtil >= 100),
             ...(resetAt === undefined ? {} : { resetAt }),
+            ...(spec.model === undefined ? {} : { model: spec.model }),
         });
     }
 
@@ -668,7 +689,9 @@ export class UsageRefresher {
     readonly #now: () => number;
     readonly #cooldownMs: number;
     readonly #cooldownUntil = new Map<string, number>();
+    readonly #epoch = new Map<string, number>();
     readonly #inFlight = new Map<string, Promise<SingleRefreshOutcome>>();
+    readonly #controllers = new Map<string, AbortController>();
 
     constructor(deps: UsageRefresherDeps) {
         this.#deps = deps;
@@ -677,9 +700,13 @@ export class UsageRefresher {
         this.#cooldownMs = deps.cooldownMs ?? USAGE_REFRESH_COOLDOWN_MS;
     }
 
-    /** Clear a provider's cooldown (e.g. after sign-in or sign-out). */
+    /** Clear a provider's cooldown and invalidate any in-flight request (e.g. after sign-in or sign-out). */
     forget(providerId: string): void {
+        this.#epoch.set(providerId, (this.#epoch.get(providerId) ?? 0) + 1);
         this.#cooldownUntil.delete(providerId);
+        this.#inFlight.delete(providerId);
+        this.#controllers.get(providerId)?.abort();
+        this.#controllers.delete(providerId);
     }
 
     /** Refresh one or more refreshable subscription providers, honoring cooldowns and deduplicating concurrent calls. */
@@ -723,18 +750,37 @@ export class UsageRefresher {
             return Promise.resolve({ status: "cooldown", remainingMs: until - now });
         }
 
-        const work = this.#fetchProvider(providerId, signal).finally(() => {
-            this.#inFlight.delete(providerId);
+        const epoch = this.#epoch.get(providerId) ?? 0;
+        const controller = new AbortController();
+        const work = this.#fetchProvider(providerId, epoch, controller, signal).finally(() => {
+            if (this.#inFlight.get(providerId) === work) {
+                this.#inFlight.delete(providerId);
+            }
+
+            if (this.#controllers.get(providerId) === controller) {
+                this.#controllers.delete(providerId);
+            }
         });
 
+        this.#controllers.set(providerId, controller);
         this.#inFlight.set(providerId, work);
 
         return work;
     }
 
-    async #fetchProvider(providerId: string, signal?: AbortSignal): Promise<SingleRefreshOutcome> {
+    async #fetchProvider(
+        providerId: string,
+        epoch: number,
+        controller: AbortController,
+        signal?: AbortSignal,
+    ): Promise<SingleRefreshOutcome> {
+        const stale = () => (this.#epoch.get(providerId) ?? 0) !== epoch;
         const timeout = AbortSignal.timeout(USAGE_REFRESH_TIMEOUT_MS);
-        const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+        const signals =
+            signal === undefined
+                ? [controller.signal, timeout]
+                : [controller.signal, signal, timeout];
+        const combined = AbortSignal.any(signals);
         const startedAt = this.#now();
 
         this.#cooldownUntil.set(providerId, startedAt + this.#cooldownMs);
@@ -742,7 +788,7 @@ export class UsageRefresher {
         try {
             const token = await this.#deps.getToken(providerId, combined);
 
-            if (token === undefined || token.trim() === "") {
+            if (stale() || token === undefined || token.trim() === "") {
                 return { status: "failed" };
             }
 
@@ -778,6 +824,12 @@ export class UsageRefresher {
             });
             const at = this.#now();
 
+            if (stale()) {
+                await response.body?.cancel().catch(() => {});
+
+                return { status: "failed" };
+            }
+
             if (response.status === 429) {
                 const waitMs = retryAfterMs(response.headers, this.#cooldownMs);
 
@@ -794,6 +846,11 @@ export class UsageRefresher {
             }
 
             const text = await readBoundedText(response, MAX_USAGE_BODY_BYTES);
+
+            if (stale()) {
+                return { status: "failed" };
+            }
+
             let windows: UsageWindow[] = [];
 
             if (text !== undefined) {
@@ -812,7 +869,7 @@ export class UsageRefresher {
                 windows = parseUsage(responseFacts(response.status, response.headers), at);
             }
 
-            if (windows.length === 0) {
+            if (stale() || windows.length === 0) {
                 return { status: "failed" };
             }
 

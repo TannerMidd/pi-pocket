@@ -969,3 +969,75 @@ test("UsageRefresher fetches on demand, deduplicates concurrent calls, enforces 
     assert.deepEqual(huge.failed, ["anthropic"]);
     assert.equal(seen.length, 4);
 });
+
+test("model-specific windows only limit matching models, and forget() discards in-flight old-account refreshes", async () => {
+    const { providerView } = (await import(new URL("../web/usage.js", import.meta.url).href)) as {
+        providerView: (provider: unknown, now: number, modelId?: string) => { state: string };
+    };
+    const reset = new Date(AT + 3_600_000).toISOString();
+    const windows = parseAnthropicUsage({
+        five_hour: { utilization: 30, resets_at: reset },
+        seven_day: { utilization: 40, resets_at: reset },
+        seven_day_sonnet: { utilization: 100, resets_at: reset },
+    });
+    const provider = {
+        id: "anthropic",
+        name: "Anthropic",
+        kind: "subscription",
+        status: "reported",
+        asOf: AT,
+        windows,
+    };
+
+    assert.equal(providerView(provider, AT, "claude-opus-4-6").state, "ok");
+    assert.equal(providerView(provider, AT, "claude-sonnet-4-6").state, "limited");
+    assert.equal(providerView(provider, AT).state, "ok");
+
+    // An in-flight refresh started before forget() must never restore the old account's usage or block the new account.
+    let resolveOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+        resolveOld = resolve;
+    });
+    let calls = 0;
+    const store = new UsageStore({ now: () => AT, changed: () => {} });
+    const refresher = new UsageRefresher({
+        store,
+        getToken: async () => `tok-${++calls}`,
+        fetch: (async (_input, init) => {
+            const auth = new Headers(init?.headers).get("authorization");
+
+            if (auth === "Bearer tok-1") {
+                await oldGate;
+
+                return Response.json({
+                    five_hour: { utilization: 95, resets_at: reset },
+                });
+            }
+
+            return Response.json({
+                five_hour: { utilization: 10, resets_at: reset },
+            });
+        }) as typeof fetch,
+        now: () => AT,
+        cooldownMs: 60_000,
+    });
+
+    const staleReq = refresher.refresh(["anthropic"]);
+
+    // Sign out / switch account before tok-1 finishes.
+    store.forget("anthropic");
+    refresher.forget("anthropic");
+
+    const freshRes = await refresher.refresh(["anthropic"]);
+
+    resolveOld();
+    const staleRes = await staleReq;
+
+    assert.deepEqual(freshRes.refreshed, ["anthropic"]);
+    assert.deepEqual(staleRes.refreshed, []);
+    assert.equal(
+        store.view({ id: "anthropic", name: "Anthropic", kind: "subscription" }).windows[0]?.left,
+        90,
+        "new account's 90% left stays intact, never overwritten by old account's 5% left",
+    );
+});

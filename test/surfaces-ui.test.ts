@@ -520,10 +520,11 @@ test(
         assert.equal(await count(owners, ".surf .rogue"), 0);
         await owners.evaluate(`document.querySelectorAll(".surf .star")[2].click(); return "null"`);
         await waitFor(owners, ".surf .stars", /Quality★★★/, "the rating set to 3");
-        assert.equal(
-            Object.values((await app.harness.snapshot(SurfacesDoc, id, context))!.items)[0]!.data
-                .rating,
-            3,
+        await until(
+            async () =>
+                Object.values((await app.harness.snapshot(SurfacesDoc, id, context))!.items)[0]
+                    ?.data.rating === 3,
+            "the server stored rating 3",
         );
 
         // A person invited to one session loads no extension browser module: the card shows the module's text.
