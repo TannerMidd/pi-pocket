@@ -1437,8 +1437,8 @@ test(
         let rows = [];
         const diffed = options.diffed;
 
-        let quiet;
-        let same;
+        let quiet = 0;
+        let same = 0;
 
         options.diffed = (vnode) => {
             if (vnode.type?.name === "SessionRow") {
@@ -1449,13 +1449,32 @@ test(
         };
 
         try {
-            store.set((state) => ({ view: { ...state.view } }));
-            await settle();
-            quiet = rows.length;
-            // The same sessions in a new list: no row has anything new to show.
-            store.set((state) => ({ sessions: [...state.sessions] }));
-            await settle();
-            same = rows.length - quiet;
+            // An extension's async status fetch can bump extensionsRev right after load and redraw every row; retry if
+            // that unrelated revision changed during the quiet/same probe.
+            for (let attempt = 0; attempt < 4; attempt++) {
+                const revBefore = store.state.extensionsRev;
+                const sessionsBefore = store.state.sessions;
+
+                rows = [];
+                store.set((state) => ({ view: { ...state.view } }));
+                await settle();
+                quiet = rows.length;
+                // The same sessions in a new list: no row has anything new to show.
+                store.set((state) => ({ sessions: [...state.sessions] }));
+                await settle();
+                same = rows.length - quiet;
+
+                if (
+                    store.state.extensionsRev === revBefore &&
+                    store.state.sessions.length === sessionsBefore.length &&
+                    (quiet === 0 && same === 0)
+                ) {
+                    break;
+                }
+
+                await settle();
+            }
+
             rows = [];
             // One session renamed: its row, and no other.
             store.set((state) => ({

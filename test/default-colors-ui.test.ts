@@ -326,14 +326,24 @@ test("the folded sidebar holds the whole rail, labels and badges included", real
         "the sidebar folded",
     );
 
-    const fit = JSON.parse(
-        await page.evaluate(`
-            const rail = document.querySelector(".places-rail").getBoundingClientRect();
-            const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+    let fit = { rail: 0, sidebar: 0, width: 0 };
 
-            return JSON.stringify({ rail: Math.round(rail.right), sidebar: Math.round(sidebar.right), width: Math.round(rail.width) });
-        `),
-    ) as { rail: number; sidebar: number; width: number };
+    await until(async () => {
+        fit = JSON.parse(
+            await page.evaluate(`
+                const rail = document.querySelector(".places-rail").getBoundingClientRect();
+                const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+
+                return JSON.stringify({
+                    rail: Math.round(rail.right),
+                    sidebar: Math.round(sidebar.right),
+                    width: Math.round(rail.width),
+                });
+            `),
+        ) as { rail: number; sidebar: number; width: number };
+
+        return fit.width === 88 && fit.rail <= fit.sidebar;
+    }, "the folded sidebar rail to settle at 88 px");
 
     assert.equal(fit.width, 88);
     assert.ok(fit.rail <= fit.sidebar, JSON.stringify(fit));
