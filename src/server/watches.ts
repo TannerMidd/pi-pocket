@@ -336,9 +336,9 @@ export class Watches {
             );
         }
 
-        const person = app.config.userById(personId ?? meta.createdBy ?? "");
+        const person = app.steeringUser(id, personId);
 
-        if (person === undefined || person.role === "viewer") {
+        if (person === undefined) {
             throw new HttpError(403, "A watch works for someone who can steer here.");
         }
 
@@ -475,6 +475,10 @@ export class Watches {
         return app.harness.commit(async (tx) => {
             const doc = await tx.doc(WatchDoc, id);
             const current = doc.watch;
+
+            if (app.steeringUser(id, person.id) === undefined) {
+                throw new HttpError(403, "A watch needs someone who can steer here.");
+            }
 
             if (
                 current !== undefined &&
@@ -749,6 +753,10 @@ export class Watches {
             return runtime.commit(() => finished, context);
         }
 
+        if (app.steeringUser(id, watch.by) === undefined) {
+            return this.#end(runtime, "failed", context, "its person can no longer steer here");
+        }
+
         // Triggers are off: the watch waits, and asks GitHub nothing.
         if (!this.running) {
             return this.#again(runtime, this.timing.quiet, {}, context);
@@ -896,9 +904,9 @@ export class Watches {
             return runtime.commit(() => finished, context);
         }
 
-        const person = app.config.userById(watch.by);
+        const person = app.steeringUser(id, watch.by);
 
-        if (person === undefined || person.role === "viewer" || !app.canSee(person, id)) {
+        if (person === undefined) {
             return this.#end(runtime, "failed", context, "its person can no longer steer here");
         }
 

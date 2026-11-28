@@ -169,10 +169,18 @@ export function NotificationsSheet() {
                     userVisibleOnly: true,
                     applicationServerKey: keyBytes(info.publicKey),
                 });
-                const result = await api("push/subscribe", { subscription: current.toJSON() });
+                await api("push/subscribe", { subscription: current.toJSON() });
+                const updated = await api("push");
 
                 setSubscription(current);
-                setInfo({ ...info, devices: result.devices });
+                setInfo(updated);
+
+                if (updated.endpoint !== current.endpoint) {
+                    throw new Error(
+                        "This browser did not keep its notification sign-in. Turn notifications on again.",
+                    );
+                }
+
                 notify("info", "Notifications are on for this device.");
             } finally {
                 setBusy(false);
@@ -204,7 +212,7 @@ export function NotificationsSheet() {
             notify("info", "Test sent. It shows as a system notification.");
         });
 
-    const on = Boolean(subscription);
+    const on = Boolean(subscription && subscription.endpoint === info?.endpoint);
 
     return html`<${Sheet}
         title="Notifications"

@@ -204,11 +204,18 @@ export class ExtensionCommands {
         input: CommandInput,
         runtime: TaskRuntime<CommandInput, { phase: "run" }, CommandOutcome, object>,
     ): Promise<CommandOutcome> {
-        const user = this.#app.config.userById(input.by);
+        const current = () => {
+            const user = this.#app.steeringUser(runtime.conversationId, input.by);
 
-        if (user === undefined) {
-            throw new HttpError(403, "The person who ran this command no longer has access.");
-        }
+            if (user === undefined || (input.scope === "global" && user.role !== "owner")) {
+                throw new HttpError(403, "The person who ran this command no longer has access.");
+            }
+
+            return user;
+        };
+
+        await this.#authorize(runtime.conversationId, current(), input.scope);
+        const user = current();
 
         const answer = await awaitWithContext(
             Promise.resolve(
@@ -224,7 +231,9 @@ export class ExtensionCommands {
 
                         // The callback's own answer would be a new state for the task: keep `change`'s apart.
                         await runtime.commit(async (tx) => {
+                            current();
                             answer = await change(tx);
+                            current();
 
                             return undefined;
                         }, context);

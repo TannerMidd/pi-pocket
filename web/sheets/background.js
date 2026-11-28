@@ -22,6 +22,124 @@ function took(task) {
         : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
+const stamp = (at) => new Date(at).toLocaleString();
+
+function JobAttempt({ item }) {
+    const observed = item.processObservedAt;
+    const process =
+        item.processFreshness === "unknown" || typeof item.processAlive !== "boolean"
+            ? "Process state unknown"
+            : `Last saw process ${item.processAlive ? "alive" : "absent"} at ${stamp(observed)}${item.processFreshness === "stale" ? " (stale observation)" : ""}`;
+    const output =
+        item.lastOutputAt == null
+            ? "No output observed"
+            : `Output last seen at ${stamp(item.lastOutputAt)}`;
+    const labels = {
+        timeout: "Timed out",
+        failure: "Failed",
+        lost: "Lost",
+        stopped: "Stopped",
+        exited: "Command exited",
+    };
+    const state =
+        labels[item.outcome] ?? (item.status === "starting" ? "Starting" : "No recorded end");
+
+    return html`<li>
+        <strong>${state}${item.code == null ? "" : ` · exit ${item.code}`}</strong>
+        <div>${item.worker === "self" ? "This session" : item.worker} · Job <code>${item.jobId}</code></div>
+        <div>Attempt ${item.attempt}: <code>${item.attemptId}</code>${item.resumedFrom ? ` (resumed from ${item.resumedFrom})` : ""}</div>
+        <div class="small muted">${process} · ${output}</div>
+        ${item.endedAt != null && html`<div class="small muted">End recorded at ${stamp(item.endedAt)}</div>`}
+    </li>`;
+}
+
+function JobStatus({ conversationId }) {
+    const [open, setOpen] = useState(false);
+    const [after, setAfter] = useState("");
+    const [page, setPage] = useState(null);
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        if (!open) {
+            return undefined;
+        }
+
+        let active = true;
+        let timer;
+
+        const load = async () => {
+            try {
+                const data = await api(
+                    `c/${conversationId}/background/jobs${after ? `?after=${encodeURIComponent(after)}` : ""}`,
+                );
+
+                if (active) {
+                    setPage(data);
+                    setError("");
+                }
+            } catch (failure) {
+                if (active) {
+                    setPage(null);
+                    setError(failure.message);
+                }
+            } finally {
+                if (active) {
+                    timer = setTimeout(load, LIST_EVERY_MS);
+                }
+            }
+        };
+
+        setPage(null);
+        setError("");
+        load();
+
+        return () => {
+            active = false;
+            clearTimeout(timer);
+        };
+    }, [conversationId, after, open]);
+
+    const rows = (items, empty) =>
+        items.length === 0
+            ? html`<p class="muted small">${empty}</p>`
+            : html`<ul>${items.map(
+                  (item) => html`<${JobAttempt}
+            key=${`${item.worker}:${item.attemptId}`}
+            item=${item}
+        />`,
+              )}</ul>`;
+
+    return html`<details class="job-status" onToggle=${(event) => setOpen(event.currentTarget.open)}>
+        <summary>Job status and recent outcomes</summary>
+        ${open && error && html`<p role="alert">${error}</p>`}
+        ${open && !error && !page && html`<${Loader} label="Looking" />`}
+        ${
+            open &&
+            page &&
+            html`<div>
+            <h3>Recent timeouts, failures, stops and losses</h3>
+            ${rows(page.failures, "None recorded on this page.")}
+            <h3>Current attempts</h3>
+            ${rows(page.current, "No current attempts on this page.")}
+            ${page.truncated && html`<p class="muted small">Showing a limited set of recent records.</p>`}
+            ${
+                page.next &&
+                html`<button class="button small" onClick=${() => setAfter(page.next)}>
+                More workers
+            </button>`
+            }
+        </div>`
+        }
+        ${
+            open &&
+            after &&
+            html`<button class="button small" onClick=${() => setAfter("")}>
+            First page
+        </button>`
+        }
+    </details>`;
+}
+
 /** One command and what it prints, or a row to pick one of the session's commands. */
 export function BackgroundSheet({ task: opened }) {
     const { view } = store.state;
@@ -29,7 +147,8 @@ export function BackgroundSheet({ task: opened }) {
     const steer = canSteer();
     const [tasks, setTasks] = useState(null);
     const [selected, setSelected] = useState(opened ?? null);
-    const [log, setLog] = useState({ text: "", skipped: 0, item: null });
+    const [received, setLog] = useState(null);
+    const log = received?.attempt === selected ? received : { text: "", skipped: 0, item: null };
     const [follow, setFollow] = useState(true);
     const box = useRef(null);
     const row = useRef(null);
@@ -75,7 +194,7 @@ export function BackgroundSheet({ task: opened }) {
         let looking = false;
 
         from.current = undefined;
-        setLog({ text: "", skipped: 0, item: null });
+        setLog(null);
 
         const load = () => {
             if (ended || looking) {
@@ -98,8 +217,11 @@ export function BackgroundSheet({ task: opened }) {
                         ended = !isLive(data.item);
                         from.current = data.to;
                         setLog((was) => ({
-                            text: (was.text + data.text).slice(-CHARS),
-                            skipped: was.skipped + data.skipped,
+                            attempt: selected,
+                            text: ((was?.attempt === selected ? was.text : "") + data.text).slice(
+                                -CHARS,
+                            ),
+                            skipped: (was?.attempt === selected ? was.skipped : 0) + data.skipped,
                             item: data.item,
                         }));
                     },
@@ -162,6 +284,7 @@ export function BackgroundSheet({ task: opened }) {
         onClose=${closeSheet}
         actions=${live && steer ? html`<button class="button small" onClick=${stop}>Stop</button>` : null}
     >
+        <${JobStatus} conversationId=${conversationId} />
         ${tasks === null && html`<${Loader} label="Looking" />`}
         ${
             tasks?.length === 0 &&

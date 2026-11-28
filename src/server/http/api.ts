@@ -223,6 +223,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "logout" && method === "POST") {
+            auth.endBrowserPush(user, request);
             clearAuthCookie(response);
 
             return json(response, 200, { ok: true });
@@ -233,13 +234,13 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "users" && second !== undefined && third === "remove" && method === "POST") {
-            app.removeUser(user, second);
+            await app.removeUser(user, second);
 
             return json(response, 200, { ok: true });
         }
 
         if (first === "users" && second !== undefined && third === undefined && method === "POST") {
-            app.setAccess(user, second, await readJson(request));
+            await app.setAccess(user, second, await readJson(request));
 
             return json(response, 200, app.people(user));
         }
@@ -526,6 +527,25 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, await runningNow(app, user));
         }
 
+        // Usage left of each provider: for whoever may open the Providers sheet, the owner.
+        if (first === "usage" && second === undefined && method === "GET") {
+            requireOwner(user);
+
+            return json(response, 200, app.usageSnapshot());
+        }
+
+        if (first === "usage" && second === "refresh" && method === "POST") {
+            requireOwner(user);
+
+            const body = await readJson<{ provider?: unknown }>(request);
+            const provider =
+                typeof body.provider === "string" && body.provider.trim() !== ""
+                    ? body.provider.trim()
+                    : undefined;
+
+            return json(response, 200, await app.refreshUsage(provider));
+        }
+
         if (first === "spend" && method === "GET") {
             return json(response, 200, app.spend.summary(user));
         }
@@ -623,7 +643,19 @@ export function createApi(options: HttpOptions, auth: Auth) {
         }
 
         if (first === "approvals" && second !== undefined && method === "POST") {
-            const body = await readJson<{ allow?: boolean; values?: unknown }>(request);
+            const body = await readJson<{
+                allow?: boolean;
+                values?: unknown;
+                source?: unknown;
+                device?: unknown;
+            }>(request);
+
+            if (body.source === "push") {
+                auth.requirePushDevice(user, request, body.device);
+            } else if (body.source !== "app" && parseCookies(request.headers.cookie)[COOKIE]) {
+                // Older workers send only { allow }. Never mistake one for an in-app decision.
+                throw new HttpError(409, "Reload Pi Pocket to answer this approval.");
+            }
 
             // An id may hold a slash, which the path decoded into a part of its own: a codemode script's calls are
             // named `<call>/<n>`. `values` answer an ask's fields (`host.ask`), and go to the asker alone.
@@ -721,6 +753,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                 pipCompactAt?: unknown;
                 subagentModels?: unknown;
                 limitWaitHours?: unknown;
+                classifierModel?: unknown;
             }>(request);
 
             // One at a time: a second that fails must not leave the first changed.
@@ -731,6 +764,7 @@ export function createApi(options: HttpOptions, auth: Auth) {
                     body.pipCompactAt,
                     body.subagentModels,
                     body.limitWaitHours,
+                    body.classifierModel,
                 ].filter((value) => value !== undefined).length > 1
             ) {
                 throw new HttpError(400, "Change one setting at a time.");
@@ -739,6 +773,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             // The models subagents may run on: the owner's (checked in `app.ts`).
             if (body.subagentModels !== undefined) {
                 await app.setSubagentModels(user, body.subagentModels);
+            }
+
+            // The classifier model modules share: the owner's (checked in `app.ts`). Null: none.
+            if (body.classifierModel !== undefined) {
+                await app.setClassifierModel(user, body.classifierModel);
             }
 
             if (body.pipCompactAt !== undefined) {
@@ -760,6 +799,11 @@ export function createApi(options: HttpOptions, auth: Auth) {
             }
 
             return json(response, 200, { ok: true });
+        }
+
+        // The classifier models the owner may choose, from providers they signed in to.
+        if (first === "classifier-models" && second === undefined && method === "GET") {
+            return json(response, 200, app.classifierModels(user));
         }
 
         // One model allowed for subagents, or no longer: the rest stay as they are. The owner's (checked in `app.ts`).

@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import {
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    realpathSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Auth, SIGN_IN_LINK_MS } from "../src/server/auth.ts";
 import { ConfigStore } from "../src/server/config.ts";
 import { readRunning, removeRunning, RUNNING_FILE, writeRunning } from "../src/launcher/desktop.ts";
@@ -142,6 +150,83 @@ async function until<T>(check: () => T | undefined, what: string, timeoutMs = 60
     }
 }
 
+test("a restart completes when the closed server blocks inside process.exit", async () => {
+    const home = mkdtempSync(join(root, "hung-exit-"));
+    const preload = join(home, "hang.mjs");
+    const entered = join(home, "entered");
+    const expired = join(home, "expired");
+    const port = await freePort();
+
+    // Only the first server blocks. A bounded wait also lets the fixture clean itself up on a broken launcher.
+    writeFileSync(
+        preload,
+        `
+        import { existsSync, writeFileSync } from "node:fs";
+        if (process.env.PI_POCKET_LAUNCHER === "1" && process.send && !existsSync(${JSON.stringify(entered)})) {
+            process.once("message", () => process.emit("SIGUSR2"));
+            const exit = process.exit;
+            process.exit = (code) => {
+                if (code === 75) {
+                    writeFileSync(${JSON.stringify(entered)}, String(process.pid));
+                    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 12_000);
+                    writeFileSync(${JSON.stringify(expired)}, "");
+                }
+                exit(code);
+            };
+        }
+    `,
+    );
+    const proc = spawn(
+        process.execPath,
+        [
+            LAUNCHER,
+            "--desktop",
+            "--port",
+            String(port),
+            "--data",
+            join(home, "data"),
+            "--cwd",
+            home,
+        ],
+        {
+            env: {
+                ...process.env,
+                HOME: home,
+                USERPROFILE: home,
+                PI_CODING_AGENT_DIR: join(home, "agent"),
+                NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+            },
+            stdio: ["pipe", "pipe", "pipe"],
+        },
+    );
+    let output = "";
+
+    proc.stdout.on("data", (chunk) => (output += chunk));
+    proc.stderr.on("data", (chunk) => (output += chunk));
+    const exited = once(proc, "exit");
+
+    try {
+        await until(
+            () => output.includes("Server restarted.") || undefined,
+            "the replacement server",
+        );
+        assert.ok(existsSync(entered), "the first server reached process.exit(75)");
+        assert.ok(
+            !existsSync(expired),
+            "the launcher must not wait for the blocked exit to return",
+        );
+        assert.match(
+            output,
+            /Restarting the server…/,
+            "the forced exit keeps the requested restart code",
+        );
+        assert.doesNotMatch(output, /trying again in/);
+    } finally {
+        proc.stdin.end();
+        await exited;
+    }
+});
+
 test("the desktop app's launcher: a ready file, a window that signs in once, no token in its output, and a stop when its input closes", async () => {
     const data = join(root, "desktop", "data");
     const port = await freePort();
@@ -182,6 +267,31 @@ test("the desktop app's launcher: a ready file, a window that signs in once, no 
                 ownerToken: string;
             }
         ).ownerToken;
+        const extensions = await fetch(`${running.url}/api/extensions`, {
+            headers: { authorization: `Bearer ${token}` },
+        });
+
+        assert.equal(extensions.status, 200);
+        const { modules } = (await extensions.json()) as {
+            modules: { file: string; enabled: boolean; error?: string }[];
+        };
+
+        for (const file of [
+            "agent-teams.ts",
+            "pocket-relay.ts",
+            "relay-triage.ts",
+            "run-outcomes.ts",
+        ]) {
+            const module = modules.find((each) => each.file === file);
+
+            assert.equal(
+                module?.enabled,
+                true,
+                `${file} on through the desktop installer's launcher`,
+            );
+            assert.equal(module?.error, undefined);
+        }
+
         const ask = (headers: Record<string, string>) =>
             fetch(`${running.url}/api/sign-in-link`, { method: "POST", headers });
 

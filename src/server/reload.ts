@@ -60,14 +60,19 @@ const ORDER = [
     "pip.ts",
     "triggers.ts",
     "pocket-relay.ts",
+    "relay-triage.ts",
+    "run-outcomes.ts",
+    "classifier-hub.ts",
     "gallery.ts",
     "session-cleanup.ts",
     "session-tags.ts",
     "ask.ts",
     "ask-someone.ts",
+    "surfaces.ts",
     "updates.ts",
     "design.ts",
     "tool-search.ts",
+    "gondolin.ts",
 ];
 
 /** The built-in modules' names (their files' without `.ts`): a drop-in with one of them is never loaded. */
@@ -76,7 +81,7 @@ export const BUILT_IN_MODULES: ReadonlySet<string> = new Set(
 );
 /** Modules the app cannot work without: always on. */
 const REQUIRED = new Set(["prompt.ts"]);
-/** Built-in modules that stay off until the owner turns them on. Drop-ins all do. */
+/** Fallback for profiles with no saved choice. ConfigStore seeds new-profile defaults; drop-ins stay off. */
 const OFF_BY_DEFAULT = new Set([
     "guard.ts",
     "agent-teams.ts",
@@ -84,6 +89,9 @@ const OFF_BY_DEFAULT = new Set([
     "session-tags.ts",
     "ask-someone.ts",
     "pocket-relay.ts",
+    "relay-triage.ts",
+    "run-outcomes.ts",
+    "gondolin.ts",
 ]);
 const TITLES: Record<string, string> = {
     "prompt.ts": "System prompt",
@@ -103,14 +111,19 @@ const TITLES: Record<string, string> = {
     "pip.ts": "PiP",
     "triggers.ts": "Triggers",
     "pocket-relay.ts": "Relay",
+    "relay-triage.ts": "Relay triage",
+    "run-outcomes.ts": "Run outcomes",
+    "classifier-hub.ts": "Classifier Hub",
     "gallery.ts": "Extension gallery",
     "session-tags.ts": "Session tags",
     "session-cleanup.ts": "Session cleanup",
     "ask.ts": "Ask",
     "ask-someone.ts": "Ask someone",
+    "surfaces.ts": "Surfaces",
     "updates.ts": "Pi Pocket updates",
     "design.ts": "Design",
     "tool-search.ts": "Tool search",
+    "gondolin.ts": "Gondolin sandboxes",
 };
 
 /**
@@ -151,6 +164,7 @@ export const BUILT_IN_TOOLS: ReadonlySet<string> = new Set([
     "session_watch_pr",
     "ask",
     "ask_someone",
+    "ui",
     "design_preview",
     "design_export",
     "design_system",
@@ -945,21 +959,34 @@ export class ExtensionLoader {
                 continue;
             }
 
-            try {
-                this.#watchers.push(
-                    watch(
-                        directory,
-                        (_event, name) =>
-                            name !== null && this.#changed(basename(name.toString()), directory),
-                    ),
-                );
-            } catch (error) {
+            const warn = (error: unknown) =>
                 this.#notify(
                     "warning",
                     `Extensions in ${directory} are not reloaded when edited: ${describe(error)}`,
                 );
+
+            try {
+                const watcher = watch(
+                    directory,
+                    (_event, name) =>
+                        name !== null && this.#changed(basename(name.toString()), directory),
+                );
+
+                watcher.on("error", warn);
+                this.#watchers.push(watcher);
+            } catch (error) {
+                warn(error);
             }
         }
+    }
+
+    /** Release directory handles without unloading the extensions. */
+    stopWatching(): void {
+        for (const watcher of this.#watchers) {
+            watcher.close();
+        }
+
+        this.#watchers.length = 0;
     }
 
     #changed(file: string, directory: string): void {
@@ -1060,9 +1087,7 @@ export class ExtensionLoader {
             stop();
         }
 
-        for (const watcher of this.#watchers) {
-            watcher.close();
-        }
+        this.stopWatching();
 
         for (const timer of this.#timers.values()) {
             clearTimeout(timer);
@@ -1191,7 +1216,11 @@ function stampOf(path: string): string | undefined {
  * Calls `onChange` shortly after a file or folder under `directory` is added, removed, or written: not after an event
  * that leaves it as it was (`stampOf`).
  */
-export function watchTree(directory: string, onChange: (file: string) => void): () => void {
+export function watchTree(
+    directory: string,
+    onChange: (file: string) => void,
+    warn: (message: string) => void = console.warn,
+): () => void {
     const stamps = new Map<string, string>();
 
     const keep = (name: string, stamp: string | undefined) =>
@@ -1231,6 +1260,10 @@ export function watchTree(directory: string, onChange: (file: string) => void): 
         clearTimeout(timer);
         timer = setTimeout(settle, 200);
     });
+
+    watcher.on("error", (error) =>
+        warn(`Changes under ${directory} will not reload: ${describe(error)}`),
+    );
 
     return () => {
         clearTimeout(timer);

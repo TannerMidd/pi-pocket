@@ -1756,7 +1756,7 @@ kbd {
      * message box, when a session long enough to scroll opens. */
     scrollbar-gutter: stable both-edges;
     position: relative;
-    /* The room it gives, for what may run wider than the column (a reply's code blocks and tables, below): the
+    /* The room it gives, for what may run wider than the column (a reply's code blocks, below): the
      * browser's own measure as it lays out, inside the scroll bar's gutters, so no script restyles the conversation
      * after it is drawn. A fixed or sticky element in it keeps its place: inline-size containment makes neither a
      * containing block nor a stacking context. */
@@ -1784,7 +1784,7 @@ kbd {
 }
 
 /* Turns stand apart: 10px more before each message or report (less at a tighter density). */
-.transcript > :is(.user-row, .report, .report-group):not(:first-child) {
+.transcript > .user-row:not(:first-child) {
     margin-top: calc(10px * var(--space-y));
 }
 
@@ -1976,26 +1976,55 @@ kbd {
     font: 0.83em / 1.6 var(--mono);
 }
 
-/* A linked session's message (`LinkedMessage`): an agent's, not a person's. A head that names the session over its text,
- * a square mark in the color Pi's thoughts use (people's marks are round), and a long message folded to its first lines. */
-.user-row > .prompt.linked-message {
-    gap: 0;
-    padding: 0;
+/* A message from an agent or the app (`AgentCard`): a linked session's answer, a subagent's report, a task's end, a
+ * schedule, something from outside. One card: a head that says what it is and who sent it (a square mark; people's are
+ * round), the content as Markdown, and a quiet footer with the facts and Show raw. The mark's color says the kind:
+ * `data-tone` agent, ok, err, warn, or outside. */
+.acard {
+    --tone: var(--spark);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
     overflow: hidden;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-window);
     background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
 }
 
-@media (hover: hover) {
-    .user-row > .prompt.linked-message.tappable:hover {
-        background: var(--bg);
-    }
-
-    .user-row > .prompt.linked-message.tappable:hover .linked-head {
-        background: var(--card-2);
-    }
+.acard[data-tone="ok"] {
+    --tone: var(--ok);
 }
 
-.linked-head {
+.acard[data-tone="err"] {
+    --tone: var(--err);
+}
+
+.acard[data-tone="warn"] {
+    --tone: var(--warn);
+}
+
+.acard[data-tone="outside"] {
+    --tone: var(--o-cyan);
+}
+
+.acard[data-tone="err"] {
+    border-color: var(--err-line);
+}
+
+.acard[data-tone="warn"] {
+    border-color: var(--warn-line);
+}
+
+/* Cards in one message (reports or tasks that arrived together): a card each. */
+.acard-group {
+    display: flex;
+    flex-direction: column;
+    gap: calc(8px * var(--space-y));
+}
+
+.acard-head {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -2006,18 +2035,33 @@ kbd {
     transition: background-color var(--t-hover) var(--ease-out);
 }
 
-.linked-mark {
+@media (hover: hover) {
+    .acard:hover .acard-head {
+        background: var(--card-2);
+    }
+}
+
+.acard-mark {
     flex: none;
     display: grid;
     place-items: center;
     width: 28px;
     height: 28px;
     border-radius: var(--r-control);
-    background: color-mix(in srgb, var(--spark) 16%, transparent);
-    color: var(--spark);
+    background: color-mix(in srgb, var(--tone) 16%, transparent);
+    color: var(--tone);
 }
 
-.linked-who {
+/* Light themes' bright colors can be faint as text on their ground: toward the foreground, as a thought's mark is. */
+:root[data-mode="light"] :is(.acard-mark, .acard-state, .status-line .schedules-now) {
+    color: color-mix(in oklab, var(--tone, var(--spark)) 60%, var(--body));
+}
+
+:root[data-mode="light"] .sched-sheet {
+    --sched: color-mix(in oklab, var(--spark) 60%, var(--body));
+}
+
+.acard-who {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -2025,28 +2069,31 @@ kbd {
     line-height: 1.3;
 }
 
-.linked-kicker {
+.acard-kicker {
     display: flex;
     gap: 6px;
+    min-width: 0;
     color: var(--muted);
     font-size: 12px;
+    white-space: nowrap;
 }
 
-.linked-tag {
-    color: var(--spark);
+.acard-state {
+    flex: none;
+    color: var(--tone);
     font-weight: 500;
 }
 
-/* Light themes' magenta can be faint as text on their ground: toward the foreground, as a thought's mark is. */
-:root[data-mode="light"] :is(.linked-mark, .linked-tag, .status-line .schedules-now) {
-    color: color-mix(in oklab, var(--spark) 60%, var(--body));
+.acard-source {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-:root[data-mode="light"] .sched-sheet {
-    --sched: color-mix(in oklab, var(--spark) 60%, var(--body));
+.acard-time {
+    flex: none;
 }
 
-.linked-name {
+.acard-name {
     overflow: hidden;
     color: var(--text);
     font-size: 13.5px;
@@ -2055,12 +2102,17 @@ kbd {
     white-space: nowrap;
 }
 
-.linked-name.unknown {
+.acard-name.mono {
+    font-family: var(--mono);
+    font-size: 13px;
+}
+
+.acard-name.unknown {
     color: var(--muted);
     font-weight: 500;
 }
 
-.linked-open {
+.acard-open {
     flex: none;
     display: inline-flex;
     align-items: center;
@@ -2077,35 +2129,77 @@ kbd {
 }
 
 @media (hover: hover) {
-    .linked-open:hover {
+    .acard-open:hover {
         background: var(--hover);
         color: var(--text);
     }
 }
 
-.linked-open:active {
+.acard-open:active {
     background: var(--pressed);
 }
 
-.linked-body {
+.acard-body {
     min-width: 0;
     padding: calc(12px * var(--space-y)) calc(16px * var(--space-x));
     color: var(--body);
+    overflow-wrap: anywhere;
 }
 
 /* Its first line is its main point (agents write it first): it leads, when more follows. */
-.linked-body > .md > p:first-child:not(:last-child) {
+.acard:is([data-kind="linked"], [data-kind="subagent"], [data-kind="pip"])
+    .acard-body
+    > .md
+    > p:first-child:not(:last-child) {
     color: var(--text);
     font-weight: 500;
 }
 
-.linked-message.folds:not(.open) .linked-body {
+.acard.folds:not(.open) .acard-body {
     max-height: 13.5em;
     overflow: hidden;
     mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
 
-.linked-more {
+/* Why it did not answer: its words in its state's color. */
+.acard-lead {
+    margin: 0 0 6px;
+    color: var(--tone);
+    font-size: 13px;
+}
+
+/* A task's command, one line of mono that wraps where it must. */
+.acard-command {
+    margin-bottom: 8px;
+    color: var(--muted);
+    font: 12px / 1.5 var(--mono);
+    overflow-wrap: anywhere;
+}
+
+.acard-quiet {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+/* What came from outside, as plain text, never Markdown: it keeps its lines as written. */
+.acard-plain,
+.acard-fenced {
+    white-space: pre-wrap;
+}
+
+.acard-code {
+    margin: 0;
+    padding: 8px 10px;
+    overflow-x: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card);
+    background: var(--code-bg);
+    font: calc(var(--text-size, 15px) * 5 / 6) / 1.5 var(--mono);
+    white-space: pre;
+}
+
+.acard-more {
     width: 100%;
     min-height: 44px;
     border-top: 1px solid var(--hair);
@@ -2114,10 +2208,71 @@ kbd {
 }
 
 @media (hover: hover) {
-    .linked-more:hover {
+    .acard-more:hover {
         background: var(--hover);
         color: var(--text);
     }
+}
+
+.acard-foot {
+    display: flex;
+    align-items: center;
+    gap: 4px 8px;
+    min-height: 44px;
+    padding-left: calc(16px * var(--space-x));
+    border-top: 1px solid var(--hair);
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.acard-facts {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    min-width: 0;
+    padding: 6px 0;
+}
+
+.acard-outcome {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.acard-outcome[data-outcome="completed"] {
+    color: var(--ok);
+}
+
+.acard-outcome[data-outcome="blocked"] {
+    color: var(--err);
+}
+
+.acard-outcome[data-outcome="needs-input"] {
+    color: var(--warn);
+}
+
+.acard-raw {
+    flex: none;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: var(--r-control);
+    color: var(--muted);
+    font-size: 12px;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .acard-raw:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+.acard-raw:active {
+    background: var(--pressed);
 }
 
 /* An input a module presents (`web.presentEntry`), folded: a card of one line, as Pi's groups are, that opens to the
@@ -2426,10 +2581,10 @@ kbd {
 }
 
 /*
- * A reply's code blocks and tables may run wider than its words, up to the pane's room (the scroller's width, `cqi`)
- * less the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
- * column; a table as wide as its cells, from the column's start toward the pane's edge. On a phone, and in a pane no
- * wider than the column, the room is the column, so nothing changes.
+ * A reply's code blocks may run wider than its words, up to the pane's room (the scroller's width, `cqi`) less
+ * the column's padding. A code block as wide as its longest line, at least the column's width, centered on the
+ * column. On a phone, and in a pane no wider than the column, the room is the column, so nothing changes. A reply's
+ * tables stay in the column instead: a wide one scrolls inside its own card, below, and never runs past the words.
  */
 .transcript {
     --wide-room: max(100%, calc(100cqi - 56px * var(--space-x) - var(--transcript-gutter)));
@@ -2478,12 +2633,9 @@ kbd {
     translate: none;
 }
 
-[data-part~="reply"] :is(.md, .md-part) > table:not(.dv-table) {
-    width: max-content;
-    max-width: calc(100% + (var(--wide-room) - 100%) / 2);
-}
-
-/* A reply's own tables, in a card; a diff it shows draws its table itself. */
+/* A reply's own tables, in a card; a diff it shows draws its table itself. The card is as wide as its cells, no
+ * wider than the column: a wide table, or a cell too long to break, scrolls inside the card rather than widening
+ * the reply or the transcript. */
 .md table:not(.dv-table) {
     display: block;
     max-width: fit-content;
@@ -3156,73 +3308,6 @@ pre.diff .del {
     }
 }
 
-/* A subagent's report: a card. */
-.report {
-    padding: 12px 14px;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-window);
-    background: var(--card);
-}
-
-.report.failed {
-    border-color: var(--err-line);
-}
-
-.report.stalled,
-.report.stopped {
-    border-color: var(--warn-line);
-}
-
-/* Reports that arrived together, as one message to Pi: a card each. */
-.report-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.report-head {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    margin-bottom: 4px;
-    font-size: 13px;
-    color: var(--muted);
-}
-
-/* A background task's end: its command can be one long word, and its output keeps its lines as printed. */
-.background-command {
-    overflow-wrap: anywhere;
-}
-
-.background-output pre {
-    margin: 6px 0 0;
-    padding: 8px 10px;
-    overflow-x: auto;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-card);
-    background: var(--code-bg);
-    font: calc(var(--text-size, 15px) * 5 / 6) / 1.5 var(--mono);
-    white-space: pre;
-}
-
-.report-name {
-    color: var(--text);
-    font-weight: 600;
-    font-family: var(--mono);
-}
-
-.report-why {
-    color: var(--err);
-    font-size: 13px;
-    overflow-wrap: anywhere;
-}
-
-/* A stalled or stopped subagent is no failure: its words are in the warning color. */
-.report.stalled .report-why,
-.report.stopped .report-why {
-    color: var(--warn);
-}
-
 /* Lancet Guard asks before a call: at the end of the turn, until someone answers. */
 .approval {
     display: flex;
@@ -3771,7 +3856,7 @@ pre.diff .del {
     opacity: 0.75;
 }
 
-.history > :is(.user-row, .report, .report-group):not(:first-child) {
+.history > .user-row:not(:first-child) {
     margin-top: 10px;
 }
 
@@ -4228,6 +4313,101 @@ pre.diff .del {
     color: var(--muted);
 }
 
+/* ⋯: the buttons the row has no room for, in a sheet (`composer-more.js`). The dot says that one of them is on or has a
+ * count; the accent says it too. */
+.composer-row .more-button {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-control);
+    color: var(--muted);
+}
+
+.composer-row .more-button.on {
+    color: var(--accent);
+}
+
+.more-button .more-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-fill);
+    box-shadow: 0 0 0 2px var(--card);
+}
+
+@media (max-width: 699px) {
+    .composer-row .more-button {
+        width: 36px;
+        height: 36px;
+    }
+}
+
+/* The sheet's rows: an icon and a name, and on the right what the item says of itself. */
+.more-sheet .sheet-body {
+    padding: 0;
+    gap: 0;
+}
+
+.more-sheet .more-lead,
+.more-sheet .more-foot {
+    margin: 0;
+    padding: 12px 16px 8px;
+}
+
+.more-sheet .more-foot {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--hair);
+}
+
+.more-sheet .more-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 6px 6px;
+}
+
+.more-item {
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.more-item .icon {
+    color: var(--muted);
+}
+
+.more-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--faint);
+}
+
+.more-state.on {
+    color: var(--accent);
+}
+
+.more-count {
+    display: grid;
+    place-items: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: var(--radius);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+@media (pointer: coarse) {
+    .more-item {
+        min-height: 44px;
+    }
+}
+
 /* The model and its thinking level: opens the model menu. */
 .model-chip {
     display: inline-flex;
@@ -4289,84 +4469,17 @@ pre.diff .del {
 }
 
 @container composer (max-width: 400px) {
-    .composer.busy :is(.plan-chip, .model-caret) {
+    .composer.busy :is(.model-spark, .model-caret) {
         display: none;
     }
 }
 
-@container composer (max-width: 355px) {
-    .composer.busy .model-chip .model-spark {
-        display: none;
-    }
-}
-
-/* The buttons that extensions add to the row: any number of them can come. Where they would push Send (or Stop) out of a
- * narrow box (two or more up to 480 px, one up to 340 px), they take a line of their own under the row, where they stay
- * while Pi works. The break is the row's `::after`: a line of no height, so only the buttons' margin parts the lines. A
- * wrapping row breaks before an item that is too wide, not after shrinking one: the model asks for no room, so Send
- * stays on the first line, then takes what is left, up to its whole name. */
-@container composer (max-width: 480px) {
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) {
-        flex-wrap: wrap;
-        row-gap: 0;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .model-chip {
-        flex: 100 1 0;
-        max-width: max-content;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button)::after {
-        content: "";
-        order: 1;
-        flex-basis: 100%;
-        height: 0;
-    }
-
-    .composer-row:has(.ext-composer-button ~ .ext-composer-button) .ext-composer-button {
-        order: 2;
-        margin-top: 4px;
-    }
-}
-
+/* The row is one row, always. In a box up to 480px wide Plan and the buttons that extensions add are in the ⋯ button's
+ * sheet instead (`composer-more.js`), and so is Attach where the model's name would be cut to under eight characters.
+ * Without a ⋯ (nothing else to put in it), a box up to 340px wide that Pi works in gives up Attach, so the model keeps
+ * room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
 @container composer (max-width: 340px) {
-    .composer-row:has(.ext-composer-button) {
-        flex-wrap: wrap;
-        row-gap: 0;
-    }
-
-    .composer-row:has(.ext-composer-button) .model-chip {
-        flex: 100 1 0;
-        max-width: max-content;
-    }
-
-    .composer-row:has(.ext-composer-button)::after {
-        content: "";
-        order: 1;
-        flex-basis: 100%;
-        height: 0;
-    }
-
-    .composer-row:has(.ext-composer-button) .ext-composer-button {
-        order: 2;
-        margin-top: 4px;
-    }
-}
-
-/* One button, on its line in the row: while Pi works it steps aside on a narrow box, so Steer, Queue, Interrupt, and
- * Stop stay inside it. It shows again after. */
-@container composer (340px < width <= 480px) {
-    .composer.busy
-        .composer-row:not(:has(.ext-composer-button ~ .ext-composer-button))
-        .ext-composer-button {
-        display: none;
-    }
-}
-
-/* On a screen up to 360 px wide (an iPhone SE is 320 px; a 360 px screen's box is 334 px), Attach goes while Pi works,
- * so the model keeps room for its name beside the mode button and Stop. Attach comes back when Pi stops. */
-@container composer (max-width: 340px) {
-    .composer.busy .composer-row .attach-button {
+    .composer.busy .composer-row:not(:has(.more-button)) .attach-button {
         display: none;
     }
 }
@@ -4944,6 +5057,613 @@ pre.diff .del {
 .status-line[data-short~="words"] .speed .rate + .wait::before {
     content: "·";
     margin-right: 1ch;
+}
+
+/* ─── Usage: the status line's item, the popover or sheet it opens, and the model sheet's row ───────────────── */
+
+/* A meter of how much is used. The shape says the state, not only the color: solid, striped, hollow. */
+.usage-meter {
+    display: inline-flex;
+    flex: none;
+    width: 36px;
+    height: 4px;
+    border-radius: var(--r-mark);
+    background: var(--hair-2);
+    overflow: hidden;
+}
+
+.usage-meter > i {
+    display: block;
+    width: var(--used, 0%);
+    background: var(--accent);
+}
+
+.usage-meter[data-state="low"] > i {
+    background: repeating-linear-gradient(135deg, var(--warn) 0 3px, var(--warn-line) 3px 6px);
+}
+
+.usage-meter[data-state="limited"] > i {
+    background: var(--err);
+}
+
+.usage-meter[data-state="limited"] {
+    background: repeating-linear-gradient(135deg, var(--err-line) 0 2px, transparent 2px 4px);
+}
+
+.usage-meter[data-state="reset"] {
+    background: none;
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.usage-meter.big {
+    width: 100%;
+    height: 6px;
+    border-radius: var(--r-tag);
+}
+
+.usage-meter.big > i {
+    border-radius: var(--r-tag);
+}
+
+/* Five steps, not a bar: the usage meter does not read as the context meter once both lose their words. */
+.status-line .usage-now .usage-meter {
+    -webkit-mask-image: repeating-linear-gradient(
+        90deg,
+        #000 0 calc(20% - 1px),
+        transparent calc(20% - 1px) 20%
+    );
+    mask-image: repeating-linear-gradient(
+        90deg,
+        #000 0 calc(20% - 1px),
+        transparent calc(20% - 1px) 20%
+    );
+}
+
+.status-line .usage-now {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    margin: -4px -6px;
+    border-radius: var(--r-tag);
+    color: var(--muted);
+    font: inherit;
+    transition:
+        background-color var(--t-hover) var(--ease-out),
+        color var(--t-hover) var(--ease-out);
+}
+
+@media (hover: hover) {
+    .status-line .usage-now:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+.status-line .usage-now:active {
+    background: var(--pressed);
+}
+
+.status-line .usage-now[aria-expanded="true"] {
+    background: var(--accent-soft);
+    color: var(--text);
+}
+
+.status-line .usage-now[data-state="low"] {
+    color: var(--warn);
+}
+
+.status-line .usage-now[data-state="limited"] {
+    color: var(--err);
+}
+
+.usage-now .tag {
+    font: 11px var(--mono);
+}
+
+.usage-now .val {
+    display: inline-flex;
+    white-space: pre;
+}
+
+.usage-now .word {
+    font-weight: 500;
+}
+
+.usage-now .gauge {
+    display: none;
+}
+
+.usage-now.usage-idle .gauge {
+    display: block;
+}
+
+.status-line[data-short~="window"] .usage-now .tag,
+.status-line[data-short~="used"] .usage-now .used,
+.status-line[data-short~="used"] .usage-now:not(.no-count) .word {
+    display: none;
+}
+
+/* Last: the meter goes, and a gauge says what the number is. */
+.status-line[data-short~="bare"] .usage-now[data-state="ok"] .gauge {
+    display: block;
+}
+
+.status-line[data-short~="bare"] .usage-now .usage-meter {
+    display: none;
+}
+
+@media (pointer: coarse) {
+    .status-line .usage-now::after {
+        content: "";
+        position: absolute;
+        inset: -10px -6px;
+    }
+}
+
+/* The model sheet's first row: the session's provider and what is left, with the way to all of them. */
+.model-usage {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: calc(100% - 12px);
+    min-height: 36px;
+    margin: 0 6px 4px;
+    padding: 4px 10px;
+    border-radius: var(--r-row);
+    background: var(--card-2);
+    box-shadow: inset 0 0 0 1px var(--hair);
+    color: var(--muted);
+    font-size: 12px;
+    text-align: left;
+}
+
+@media (hover: hover) {
+    .model-usage:hover {
+        background: var(--pressed);
+    }
+}
+
+.model-usage-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.model-usage-what {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.model-usage[data-state="low"] .model-usage-what {
+    color: var(--warn);
+}
+
+.model-usage[data-state="limited"] .model-usage-what {
+    color: var(--err);
+}
+
+.model-usage-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    white-space: nowrap;
+    color: var(--accent);
+}
+
+@media (pointer: coarse) {
+    .model-usage {
+        min-height: 44px;
+    }
+}
+
+/* The popover above the status line, or the bottom sheet on a phone: its head, a list that scrolls, its foot. */
+.pop-menu.usage-pop,
+.sheet.usage-sheet {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.pop-menu.usage-pop.free {
+    width: min(440px, calc(100vw - 16px));
+}
+
+.usage-head {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex: none;
+    padding: 12px 8px 12px 16px;
+    border-bottom: 1px solid var(--hair-2);
+}
+
+.usage-head-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.usage-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+}
+
+.usage-refresh.spinning svg {
+    animation: usage-spin 0.9s linear infinite;
+}
+
+@keyframes usage-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .usage-refresh.spinning svg {
+        animation: none;
+    }
+}
+
+.usage-head h2 {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: var(--text);
+}
+
+.usage-head p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+}
+
+.usage-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* A row the keys reach is not left under the sticky heading of the others. */
+    scroll-padding-block: 92px 8px;
+}
+
+.usage-group {
+    margin: 0;
+    padding: 12px 16px 4px;
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.usage-group .num {
+    font: 9.5px var(--mono);
+    letter-spacing: 0;
+}
+
+.usage-current {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 16px 12px;
+    border-bottom: 1px solid var(--hair);
+}
+
+.usage-prov-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.usage-prov-head h3 {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.usage-kind {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.usage-asof {
+    flex: none;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.usage-window {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.usage-window-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.usage-window-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 13.5px;
+    color: var(--body);
+}
+
+.usage-window-state,
+.usage-row-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: var(--muted);
+}
+
+.usage-window-state[data-state="low"],
+.usage-row-state[data-state="low"] {
+    color: var(--warn);
+}
+
+.usage-window-state[data-state="limited"],
+.usage-row-state[data-state="limited"] {
+    color: var(--err);
+}
+
+.usage-window-left {
+    min-width: 80px;
+    text-align: right;
+    font: 13.5px var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+.usage-window-sub {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.usage-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--body);
+}
+
+.usage-note .icon {
+    flex: none;
+    margin-top: 4px;
+    color: var(--muted);
+}
+
+.usage-note small {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.usage-pad {
+    padding: 12px 16px;
+}
+
+.usage-held {
+    color: var(--err);
+}
+
+.usage-held .icon {
+    color: var(--err);
+}
+
+.usage-others-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-bottom: 8px;
+    background: var(--panel);
+}
+
+.usage-filter {
+    margin: 0 16px;
+}
+
+.usage-filter input {
+    flex: 1;
+    min-width: 0;
+}
+
+.usage-rows {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 8px;
+}
+
+.usage-row {
+    border-bottom: 1px solid var(--hair);
+}
+
+.usage-row:last-child {
+    border-bottom: 0;
+}
+
+.usage-row[data-open="true"] {
+    background: var(--card);
+    box-shadow: inset 2px 0 0 var(--accent-line);
+}
+
+.usage-row.usage-group-row[data-open="true"] {
+    background: none;
+    box-shadow: none;
+}
+
+.usage-row-button {
+    display: grid;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) 40px 64px 76px 16px;
+    min-height: 36px;
+    padding: 0 16px;
+    text-align: left;
+    color: var(--text);
+}
+
+.usage-row-button.usage-fold {
+    grid-template-columns: minmax(0, 1fr) 16px;
+}
+
+@media (hover: hover) {
+    .usage-row-button:hover {
+        background: var(--hover);
+    }
+}
+
+.usage-row-button:active {
+    background: var(--pressed);
+}
+
+.usage-row-name {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.usage-row-title {
+    flex: none;
+    font-size: 13.5px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.usage-row-kind {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.usage-row-left {
+    text-align: right;
+    font: 12px var(--mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.usage-chevron {
+    color: var(--muted);
+    transition: transform var(--t-hover) var(--ease-out);
+}
+
+.usage-row-button[aria-expanded="true"] .usage-chevron {
+    transform: rotate(90deg);
+}
+
+.usage-row-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 16px 16px;
+}
+
+.usage-row-meta {
+    display: flex;
+    justify-content: flex-end;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.usage-fold-list {
+    border-top: 1px solid var(--hair);
+}
+
+.usage-fold-list .usage-row-button,
+.usage-fold-list .usage-row-body {
+    padding-left: 24px;
+}
+
+.usage-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 16px;
+    color: var(--muted);
+}
+
+.usage-foot {
+    flex: none;
+    padding: 4px 8px 8px;
+    border-top: 1px solid var(--hair-2);
+}
+
+.usage-foot-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 32px;
+    padding: 0 8px;
+    border-radius: var(--r-row);
+    color: var(--text);
+    font-size: 13.5px;
+    text-align: left;
+}
+
+.usage-foot-link:hover {
+    background: var(--hover);
+}
+
+.usage-hint {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+@media (max-width: 699px) {
+    .sheet.usage-sheet {
+        max-height: 80dvh;
+    }
+    .usage-head {
+        padding-top: 20px;
+    }
+    .usage-row-button {
+        min-height: 48px;
+        grid-template-columns: minmax(0, 1fr) 24px 64px 72px 16px;
+    }
+    .usage-row-name {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
+        line-height: 1.3;
+    }
+    .usage-foot-link,
+    .usage-filter {
+        min-height: 44px;
+    }
 }
 
 /* ─── Extensions ───────────────────────────────────────────── */
@@ -5826,116 +6546,112 @@ pre.diff .del {
 }
 
 /*
- * Linked-session branches are decorative; each row keeps its own button and actions. Each line runs down from the middle
- * of its parent's mark, and turns with a soft corner to the row's own.
+ * A parent's count, on the row's own line at the right, in place of its age: ⑂ and how many sessions are linked to it
+ * (`.fold-gap` in the row's side keeps the room), and a mark when some need attention. It is the button that opens the
+ * family's index: 44px wide, as tall as the row's line (or 44px where a finger taps), the title's right edge as its own.
  */
-.session-branches {
-    position: absolute;
-    inset: 0 auto 0 15px;
-    display: flex;
-    pointer-events: none;
-    color: color-mix(in srgb, var(--muted) 60%, transparent);
+.session-row {
+    --row-line: calc(24px + 12px * var(--space-y));
 }
 
-.session-branches > span {
-    position: relative;
-    width: 14px;
-}
-
-.session-branches > .continues::before,
-.session-branches > .elbow::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: -1px;
-    border-left: 1.5px solid currentColor;
-}
-
-.session-branches > .elbow::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -1px;
-    bottom: 50%;
-    width: 8px;
-    border-bottom: 1.5px solid currentColor;
-    border-left: 1.5px solid currentColor;
-    border-bottom-left-radius: calc(var(--r-tag) + 1px);
-}
-
-/* The last child: only the corner, no line on down. */
-.session-branches > .elbow:not(.continues)::before {
-    display: none;
-}
-
-/*
- * A row with linked sessions under it: a button on its right shows how many and folds them away (`sessions.js`). The
- * row's own button keeps its right side clear of it, and the hover actions move in beside it.
- */
 .session-fold {
     position: absolute;
-    /* Inside the row by its focus ring, which the row would cut. */
-    top: 2px;
+    top: 1px;
     right: 0;
-    bottom: 2px;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
+    align-items: flex-start;
+    justify-content: flex-end;
     min-width: 44px;
-    padding: 0 6px;
+    min-height: 44px;
+    height: var(--row-line);
+    padding: 0 11px 0 4px;
     font: 11px var(--mono);
+    font-variant-numeric: tabular-nums;
     color: var(--muted);
 }
 
-/* The control itself: how many, and a chevron, in a quiet pill; the whole 44px beside it takes the tap. */
-.session-fold-pill {
+.family-browse-label,
+.fold-gap {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    height: 20px;
-    padding: 0 6px;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-pill);
-    background: var(--card-2);
-    transition:
-        color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
 }
 
-/* Above the open session: its group stays open, so the fold waits. */
-.session-fold:disabled {
-    cursor: default;
-    opacity: 0.5;
+/* Shorter than the line by the focus ring's room on each side: the ring is not cut by the row's edge. */
+.family-browse-label {
+    height: calc(var(--row-line) - 8px);
+    margin-top: 4px;
+    padding: 0 3px;
+    margin-right: -3px;
+    border-radius: var(--r-tag);
 }
 
-@media (hover: hover) {
-    .session-fold:not(:disabled):hover .session-fold-pill {
-        color: var(--text);
-        border-color: var(--accent-line);
-    }
+/* The room for the count, in the row's side where the age would be. */
+.fold-gap {
+    margin-left: 4px;
+    visibility: hidden;
 }
 
-.session-fold .icon {
-    transition: transform var(--t-in) var(--ease-out);
+.fold-gap .icon,
+.family-browse-label .icon {
+    stroke-width: 2.2;
 }
 
-.session-fold.folded .icon {
-    transform: rotate(-90deg);
+/* Some of the family needs attention: a mark in the warning color, and the button's label says how many. */
+.fold-alert {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-left: 1px;
+    border-radius: 50%;
+    background: var(--warn);
 }
 
-.session-row.with-fold .session {
-    padding-right: 64px;
+.session-fold:hover {
+    color: var(--text);
+}
+.session-fold:hover .family-browse-label {
+    background: var(--hover);
+}
+.session-fold:focus-visible {
+    outline: none;
+}
+.session-fold:focus-visible .family-browse-label {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
 }
 
-.session-row.with-fold .session-actions {
-    right: 62px;
+/* A family's lead in Priority, where the group holds only some of its sessions: quieter than the rows under it. */
+.session-row.lead-row .session-title {
+    color: var(--muted);
+}
+.session-row.lead-row .state-mark {
+    opacity: 0.45;
 }
 
-/* Chips take a line under the title: the fold stays beside the title's line. */
-.session-row.with-chips .session-fold {
-    bottom: 22px;
+/* A family's sessions under their lead, indented one step (`--linked-depth`), the path to a deeper one after its title. */
+.session-title.with-crumb {
+    display: flex;
+    gap: 8px;
+}
+
+.family-more {
+    display: block;
+    width: 100%;
+    height: var(--row-line);
+    padding: 0 10px 0 29px;
+    border-radius: var(--r-row);
+    text-align: left;
+    font: 11px var(--mono);
+    color: var(--muted);
+}
+.family-more:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+.family-more:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 /* One line: the folder's color, the title, and what goes on there on the right. */
@@ -6308,111 +7024,6 @@ pre.diff .del {
     display: none;
 }
 
-/* Archive, pin, and mark unread: on the row's right, shown on hover or while the row has focus. */
-.session-actions {
-    position: absolute;
-    top: 50%;
-    right: 6px;
-    margin-top: -13px;
-    display: flex;
-    gap: 4px;
-}
-
-.session-act {
-    width: 26px;
-    height: 26px;
-    display: grid;
-    place-items: center;
-    color: var(--muted);
-    background: var(--card-2);
-    border: 1px solid var(--hair);
-    border-radius: var(--r-seg);
-    opacity: 0;
-    transform: translateX(4px);
-    transition:
-        opacity var(--t-hover) var(--ease-out),
-        transform var(--t-in) var(--ease-out),
-        color var(--t-hover) var(--ease-out),
-        border-color var(--t-hover) var(--ease-out);
-}
-
-@media (hover: hover) {
-    .session-act:hover {
-        color: var(--accent);
-        border-color: var(--accent-line);
-    }
-}
-
-.session-act + .session-act {
-    transition-delay: 25ms;
-}
-
-.session-pin.on {
-    color: var(--brand);
-}
-
-.session-unread.on {
-    color: var(--accent);
-}
-
-/* Touch screens archive, pin, and mark-unread from a long press on the row instead: an unseen button would take taps meant for it. */
-@media (hover: none) {
-    .session-actions {
-        display: none;
-    }
-}
-
-/* The buttons take the right side's place, widened so a long title ends before them (one to three 26px buttons). */
-@media (hover: hover) {
-    .session-row:hover .session-act,
-    .session-act:focus-visible {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:not(.no-acts):hover .session-side {
-        opacity: 0;
-        min-width: 56px;
-    }
-    .session-row.one-act:hover .session-side {
-        min-width: 26px;
-    }
-    /* Three live buttons: archive, pin, and mark-unread. */
-    .session-row.three-acts:hover .session-side {
-        min-width: 86px;
-    }
-    /* And an extension's action (`pocket.sessionAction` with an icon). */
-    .session-row.four-acts:hover .session-side {
-        min-width: 116px;
-    }
-    /* Keyboard focus in the row shows them too, not the focus a click leaves on the open session's row. Kept apart
-       from the rules above: a browser without :has() drops only these. */
-    .session-row:has(:focus-visible) .session-act {
-        opacity: 1;
-        transform: none;
-    }
-    .session-row:not(.no-acts):has(:focus-visible) .session-side {
-        opacity: 0;
-        min-width: 56px;
-    }
-    .session-row.one-act:has(:focus-visible) .session-side {
-        min-width: 26px;
-    }
-    .session-row.three-acts:has(:focus-visible) .session-side {
-        min-width: 86px;
-    }
-    .session-row.four-acts:has(:focus-visible) .session-side {
-        min-width: 116px;
-    }
-    /* While Ctrl/⌘ drags a selection, rows do not show their buttons. */
-    :root.selecting .session-row .session-act {
-        opacity: 0;
-    }
-    :root.selecting .session-row .session-side {
-        opacity: 1;
-        min-width: 0;
-    }
-}
-
 /*
  * Extensions' chips under a row's title (`pocket.sessionChips`), such as tags. The row's button grows to hold them, so
  * its fill and its click take the whole row; only the chips that do something take clicks of their own.
@@ -6420,10 +7031,6 @@ pre.diff .del {
 .session-row.with-chips .session {
     height: calc(24px + 12px * var(--space-y) + 20px);
     padding-bottom: 20px;
-}
-
-.session-row.with-chips .session-actions {
-    top: calc(13px + 6px * var(--space-y));
 }
 
 .session-chips {
@@ -6483,12 +7090,6 @@ button.session-chip {
 /* While taps select rows (after Select), a tap on a chip selects its row too. */
 .sessions.tap-selecting button.session-chip {
     pointer-events: none;
-}
-
-/* A linked row's branch turns into its title's line, not the middle of the taller row. */
-.session-row.with-chips .session-branches > .elbow::after {
-    bottom: auto;
-    height: calc(14px + 6px * var(--space-y));
 }
 
 /* Extensions' filters beside the search (`pocket.sessionFilter`): lit while one narrows the list. */
@@ -6633,6 +7234,20 @@ div.group-head {
 
 .session-row.needs-you:has(.icon-only) .session {
     padding-right: 42px;
+}
+
+/* A parent that needs you: its count at the right edge, Review beside it. */
+.session-row.needs-you.with-fold .session {
+    padding-right: calc(74px + var(--fold-w) - 4px);
+}
+.session-row.needs-you.with-fold:has(.icon-only) .session {
+    padding-right: calc(42px + var(--fold-w) - 4px);
+}
+.session-row.needs-you.with-fold .session-quick {
+    right: calc(var(--fold-w) + 2px);
+}
+.session-row.needs-you.with-fold .fold-gap {
+    display: none;
 }
 
 .session-row.needs-you .session-title {
@@ -11087,6 +11702,56 @@ textarea.notes {
 /* The words that wait keep a readable width: where Approve and Discard would squeeze them, they go below. */
 .lesson-call.waiting > .grow {
     flex: 1 1 16rem;
+    min-width: 0;
+}
+
+/* Under a folded group's line, a long lesson keeps to two lines: the group opened shows it whole at its step. */
+.lesson-call .lesson-text.clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
+
+/* A folded group's lessons that still wait: their cards under its line. */
+.activity-lessons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 calc(10px * var(--space-x)) calc(10px * var(--space-y));
+}
+
+.activity-lessons > .lesson-call {
+    margin-top: 0;
+}
+
+/* Or, with Appearance's Badge, how many wait, on its line. */
+.activity-lessons-badge {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 7px;
+    border: 1px solid var(--accent-line);
+    border-radius: var(--r-pill);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: 500 11px var(--sans);
+}
+
+.activity-lessons-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: activity-lessons-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes activity-lessons-pulse {
+    50% {
+        opacity: 0.35;
+    }
 }
 
 /* Memory: a lesson Pi keeps, who saved it and where, and what can be done with it. */
@@ -12359,6 +13024,34 @@ textarea.notes {
 }
 
 /* Background: the session's commands in one row, the open one's command, and what it prints as it runs. */
+.job-status {
+    border-bottom: 1px solid var(--hair);
+    padding-bottom: 8px;
+    overflow-wrap: anywhere;
+}
+
+.job-status summary {
+    cursor: pointer;
+    padding: 10px 0;
+    font-weight: 600;
+}
+
+.job-status h3 {
+    font-size: 1em;
+    margin: 10px 0 4px;
+}
+
+.job-status ul {
+    padding: 0;
+    margin: 4px 0;
+    list-style: none;
+}
+
+.job-status li {
+    padding: 8px 0;
+    border-top: 1px solid var(--hair);
+}
+
 .background-tasks {
     display: flex;
     min-width: 0;
@@ -12535,6 +13228,29 @@ textarea.notes {
 .spend-row > .muted {
     width: 100px;
     text-align: right;
+}
+
+.spend-teams > .sheet-list {
+    margin-top: 10px;
+}
+
+.spend-team > .spend-row:not(.spend-team-total) {
+    padding-inline-start: 24px;
+}
+
+.spend-team .grow {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.spend-team-total {
+    background: var(--card);
+}
+
+.spend-team-total h3 {
+    margin: 0;
+    font: inherit;
+    font-weight: 600;
 }
 
 .spend-change {
@@ -16659,13 +17375,11 @@ textarea.notes {
     }
 }
 
-.nav-menu .list-item > :first-child,
 .places-sheet .list-item > :first-child {
     flex: none;
     white-space: nowrap;
 }
 
-.nav-menu .list-item > :last-child:not(:first-child),
 .places-sheet .list-item > :last-child:not(:first-child) {
     flex: 1;
     min-width: 0;
@@ -16687,39 +17401,8 @@ textarea.notes {
 }
 
 @media (min-width: 700px) {
-    /* Sheet still owns focus and Esc; its existing sheet trail owns Back, even from a child sheet. */
-    .nav-menu-host .overlay {
-        padding: 0;
-        background: none;
-    }
-    .nav-menu {
-        position: fixed;
-        left: var(--menu-left, calc(100vw - 368px));
-        top: var(--menu-top, 64px);
-        width: 360px;
-        max-height: var(--menu-height, calc(100dvh - 72px));
-        border-radius: calc(var(--r-window) + 2px);
-        box-shadow: var(--pop);
-        animation: pop 0.25s var(--ease-out);
-    }
-    .nav-menu .sheet-head {
-        height: auto;
-        min-height: 0;
-        padding: 10px 12px 2px 16px;
-        border: 0;
-    }
-    .nav-menu .grip,
-    .nav-menu .sheet-head h2::before {
+    .nav-menu .grip {
         display: none;
-    }
-    .nav-menu .sheet-head h2 {
-        margin: 0;
-        font-size: 13px;
-        font-weight: 600;
-    }
-    .nav-menu .sheet-head .icon-button {
-        width: 28px;
-        height: 28px;
     }
 }
 
@@ -17109,6 +17792,7 @@ textarea.notes {
         height: calc(30px + 10px * var(--space-y));
     }
     .session-row {
+        --row-line: calc(30px + 10px * var(--space-y));
         contain-intrinsic-size: auto calc(30px + 10px * var(--space-y));
     }
     .session:active {
@@ -17173,6 +17857,12 @@ textarea.notes {
     .composer-row .composer-mic {
         width: 32px;
         height: 36px;
+    }
+    /* ⋯: 36px, and its tap layer reaches 44px each way. */
+    .composer-row .more-button::before {
+        content: "";
+        position: absolute;
+        inset: -4px;
     }
     .composer-row .stop-button,
     .composer-row .send-button {
@@ -17900,7 +18590,8 @@ textarea.notes {
     font-size: 0.76rem;
 }
 
-.agent-stop {
+.agent-stop,
+.agent-hide {
     flex: none;
     margin-right: 0.2rem;
 }
@@ -19217,6 +19908,35 @@ textarea.notes {
     overflow-wrap: anywhere;
 }
 
+/* The classifier's verdict on a followed session's answer, and what it is worth. */
+.pip-report-outcome {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.pip-report-outcome b {
+    margin-right: 6px;
+    color: var(--text);
+    font-weight: 500;
+}
+
+.pip-report-outcome b[data-outcome="completed"] {
+    color: var(--ok);
+}
+
+.pip-report-outcome b[data-outcome="blocked"] {
+    color: var(--err);
+}
+
+.pip-report-outcome b[data-outcome="needs-input"] {
+    color: var(--warn);
+}
+
+.pip-report:not(.open) .pip-report-outcome {
+    display: none;
+}
+
 .pip-report:not(.open) .pip-report-data {
     display: none;
 }
@@ -19680,23 +20400,55 @@ textarea.notes {
 
 /* ─── Extension gallery ────────────────────────────────────── */
 
-.sheet.extension-hub {
+.sheet:is(.extension-hub, .extension-library-sheet) {
     position: relative;
-    max-width: 1180px;
+    max-width: 1040px;
+    height: min(820px, 88dvh);
 }
 
-.extension-hub .sheet-head h2 {
-    flex: 0 0 auto;
+:is(.extension-hub, .extension-library-sheet) .sheet-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding: 18px 24px 0;
+}
+
+.sheet-eyebrow {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font: 500 11px / 1.5 var(--mono);
+}
+
+.sheet-eyebrow .icon {
+    color: var(--accent);
+}
+:is(.extension-hub, .extension-library-sheet) .sheet-back {
+    grid-area: 2 / 1;
+}
+:is(.extension-hub, .extension-library-sheet) .sheet-head h2 {
+    grid-area: 2 / 1 / 3 / 3;
+    font-size: 22px;
+    letter-spacing: -0.025em;
+}
+:is(.extension-hub, .extension-library-sheet) .sheet-back ~ h2 {
+    grid-column-start: 2;
+}
+:is(.extension-hub, .extension-library-sheet) .sheet-head > :last-child {
+    grid-area: 2 / 3;
+}
+.extension-library-sheet .sheet-head {
+    padding-bottom: 12px;
 }
 
 .ext-tabs {
+    grid-column: 1 / -1;
     display: flex;
-    gap: 2px;
-    margin-right: auto;
-    padding: 2px;
-    border: 1px solid var(--hair-2);
-    border-radius: var(--r-control);
-    background: var(--bg);
+    gap: 16px;
+    padding-top: 6px;
 }
 
 .ext-tabs button {
@@ -19704,24 +20456,21 @@ textarea.notes {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    height: 28px;
-    padding: 0 12px;
-    border-radius: var(--r-seg);
+    min-height: 42px;
+    padding-inline: 4px;
+    border-bottom: 3px solid transparent;
     color: var(--muted);
-    font-size: 12.5px;
+    font-size: 14px;
     font-weight: 500;
-    transition:
-        background-color var(--t-hover) var(--ease-out),
-        color var(--t-hover) var(--ease-out);
 }
 
 .ext-tabs button.on {
-    background: var(--raised);
+    border-bottom-color: var(--accent);
     color: var(--text);
 }
 
 @media (hover: hover) {
-    .ext-tabs button:not(.on):hover {
+    .ext-tabs button:hover {
         color: var(--text);
     }
 }
@@ -19853,8 +20602,7 @@ textarea.notes {
 }
 
 .ext-section + .ext-section,
-.ext-section + .ext-where,
-.extension-management.hub > .ext-section + .ext-section {
+.ext-section + .ext-where {
     border-top: 1px solid var(--hair-2);
 }
 
@@ -20072,34 +20820,6 @@ textarea.notes {
     font-size: 12px;
 }
 
-/* What sits under a row, lined up with its words. */
-.ext-row-under {
-    grid-column: 1 / -1;
-    margin: 0 0 10px 24px;
-}
-
-.ext-row-under:empty {
-    display: none;
-}
-
-.ext-row-under > .setting {
-    margin-top: 0;
-}
-
-.ext-row-more {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-card);
-    background: var(--bg);
-}
-
-.ext-row-more > .setting {
-    margin-top: 0;
-}
-
 .ext-state {
     display: inline-flex;
     align-items: center;
@@ -20156,70 +20876,6 @@ textarea.notes {
     background: var(--card);
     color: var(--text);
     font-size: 12.5px;
-}
-
-.ext-row-under.guard-confirm {
-    margin-top: 0;
-}
-
-.extension-management {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-width: 0;
-}
-
-.extension-management.hub {
-    gap: 0;
-}
-
-.extension-management .group {
-    display: flex;
-    flex-direction: column;
-}
-
-.extension-management.hub > :is(.setting, .error-box) {
-    margin: 12px 16px 0;
-}
-
-/* Built in comes first, open: its count of what is on beside the title. */
-.ext-section-head {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding-right: 16px;
-}
-
-.ext-intro {
-    margin: 0;
-    color: var(--muted);
-    font-size: 12.5px;
-    line-height: 1.5;
-}
-
-.ext-footer {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding-top: 14px;
-    border-top: 1px solid var(--hair);
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.55;
-}
-
-.extension-management.hub > .ext-footer {
-    padding: 12px 16px 16px;
-    border-top-color: var(--hair-2);
-}
-
-.ext-footer .link {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    min-height: 24px;
-    text-decoration: none;
 }
 
 .ext-themes {
@@ -20782,20 +21438,17 @@ textarea.notes {
 }
 
 @media (max-width: 699px) {
-    .extension-hub .sheet-head {
-        flex-wrap: wrap;
-        padding-bottom: 8px;
+    .sheet:is(.extension-hub, .extension-library-sheet) {
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+        padding-top: env(safe-area-inset-top);
     }
-    .extension-hub .sheet-head h2 {
-        flex: 1 1 0%;
+    :is(.extension-hub, .extension-library-sheet) .sheet-head {
+        padding-inline: 16px;
     }
-    .extension-hub .ext-tabs {
-        order: 3;
-        flex: 1 0 100%;
-        margin-right: 0;
-    }
-    .extension-hub .ext-tabs button {
-        flex: 1;
+    :is(.extension-hub, .extension-library-sheet) .grip {
+        display: none;
     }
     .gallery-entry-content {
         padding: 12px 16px 24px;
@@ -20873,11 +21526,365 @@ textarea.notes {
     }
 }
 
-.extension-gallery {
+/* Installed: the list and inspector scroll separately. On a phone the list stays mounted behind its detail. */
+.extension-library-sheet > .sheet-body,
+.extension-hub > .sheet-body:has(> .extension-library) {
+    overflow: hidden;
+    padding: 0;
+}
+
+.extension-library {
+    display: grid;
+    flex: 1 1 0;
+    grid-template-columns: minmax(0, 45.5%) minmax(0, 1fr);
+    min-height: 0;
+}
+
+.library-list,
+.library-detail,
+.library-groups {
+    min-width: 0;
+    min-height: 0;
+}
+.library-list {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    border-right: 1px solid var(--hair-2);
+}
+.library-tools {
+    flex: none;
+    padding: 16px 24px 4px;
+}
+.library-search {
+    position: relative;
+    display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 10px;
+}
+.library-search > .icon {
+    position: absolute;
+    left: 12px;
+    color: var(--muted);
+    pointer-events: none;
+}
+.library-search input {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 38px;
+    border: 1px solid var(--edge);
+    border-radius: var(--r-control);
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+}
+.library-search kbd {
+    position: absolute;
+    right: 12px;
+    color: var(--muted);
+    pointer-events: none;
+}
+.library-filters {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+.library-filters button {
+    position: relative;
+    isolation: isolate;
+    padding-inline: 12px;
+    min-height: 40px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.library-filters button[aria-pressed="true"] {
+    color: var(--text);
+}
+.library-filters button[aria-pressed="true"]::before {
+    position: absolute;
+    z-index: -1;
+    content: "";
+    inset: 8px 4px;
+    border-radius: var(--r-tag);
+    background: var(--accent-soft);
+}
+.library-groups,
+.library-detail {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.library-groups {
+    flex: 1;
+    padding: 0 12px 16px;
+}
+.library-group h3,
+.library-crumb {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 12px;
+}
+.library-group h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 12px 4px;
+}
+.library-group h3::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--hair-2);
+}
+.library-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 64px;
+    padding: 8px 12px;
+    color: var(--text);
+    text-align: start;
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+}
+@media (hover: hover) {
+    .library-row:hover {
+        background: var(--hover);
+    }
+}
+.library-row[aria-current="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+}
+.library-icon,
+.ext-inspector-icon {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--muted);
+}
+.library-row[aria-current="true"] .library-icon,
+.ext-inspector-icon {
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+.library-copy {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+.library-name,
+.library-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.library-name {
+    font-size: 15px;
+    font-weight: 500;
+}
+.library-line,
+.library-state {
+    font-size: 12px;
+    color: var(--muted);
+}
+.library-line.warn {
+    color: var(--warn);
+}
+.library-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+.library-state::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--muted);
+    border-radius: 50%;
+}
+.library-state.enabled::before {
+    border-color: var(--ok);
+    background: var(--ok);
+}
+.library-chevron,
+.library-back {
+    display: none;
+}
+.library-guide,
+.library-empty {
+    margin: 12px;
+    font-size: 13px;
+    color: var(--muted);
+}
+.library-guide summary {
+    cursor: pointer;
+    padding-block: 12px;
+}
+.library-guide code {
+    overflow-wrap: anywhere;
+}
+.library-detail {
+    padding: 24px 32px;
+    background: var(--card);
+    overflow-wrap: anywhere;
+}
+.library-detail:focus {
+    outline: none;
+}
+.library-detail .gallery-entry-content {
+    padding: 0;
+}
+.library-crumb {
+    margin: 2px 0 28px;
+}
+.library-crumb span {
+    margin-inline: 5px;
+}
+.ext-inspector {
+    min-width: 0;
+}
+.ext-inspector-hero {
+    position: relative;
+    padding-bottom: 24px;
+}
+.ext-team-branches {
+    position: absolute;
+    top: -8px;
+    right: 0;
+    width: 140px;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.2;
+    pointer-events: none;
+}
+.ext-inspector-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--r-sheet);
+    background: var(--accent-soft);
+}
+.ext-inspector-hero h3 {
+    margin: 12px 0 6px;
+    font-size: 22px;
+    line-height: 1.25;
+    letter-spacing: -0.025em;
+}
+.ext-inspector-hero p,
+.ext-inspector-section p {
+    color: var(--body);
+    line-height: 1.55;
+}
+.ext-inspector-pills {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.ext-inspector .ext-inspector-toggle {
+    margin: 0;
+    padding: 14px 0;
+    border-block: 1px solid var(--hair-2);
+}
+.ext-inspector-section {
+    padding: 16px 0;
+}
+.ext-inspector-section h4 {
+    margin: 0 0 4px;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+}
+.ext-inspector > .error-box,
+.ext-inspector > .warn,
+.ext-inspector > .ext-confirm {
+    margin-block: 12px;
+}
+.ext-inspector-details {
+    border-top: 1px solid var(--hair-2);
+}
+.ext-inspector-details:last-child {
+    border-bottom: 1px solid var(--hair-2);
+}
+.ext-inspector-details summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    list-style: none;
+    color: var(--text);
+    cursor: pointer;
+}
+.ext-inspector-details summary::after {
+    content: "+";
+    margin-left: auto;
+    color: var(--muted);
+}
+.ext-inspector-details[open] > summary::after {
+    content: "−";
+}
+.ext-inspector-details[open] {
+    padding-bottom: 14px;
+}
+.ext-inspector-details > div + div {
+    margin-top: 10px;
+}
+.ext-inspector-details .ext-settings {
+    border: 0;
+    padding: 0;
+}
+.ext-inspector-details .ext-step-actions {
+    flex-wrap: wrap;
+}
+
+@media (max-width: 999px) {
+    .extension-library {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .extension-library.has-selection .library-list,
+    .extension-library:not(.has-selection) .library-detail,
+    .sheet:has(.extension-library.has-selection) > .sheet-head {
+        display: none;
+    }
+    .library-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        margin-bottom: 6px;
+        color: var(--text);
+    }
+    .ext-team-branches {
+        display: none;
+    }
+    .library-chevron {
+        display: block;
+        flex: none;
+        color: var(--muted);
+    }
+    .library-list {
+        border: 0;
+    }
+    .library-tools {
+        padding-inline: 16px;
+    }
+    .library-groups {
+        padding-inline: 8px;
+    }
+    .library-detail {
+        padding: 12px 16px 24px;
+    }
+    .library-crumb {
+        margin-bottom: 24px;
+    }
+    .library-search kbd {
+        display: none;
+    }
 }
 
 .pi-tag.gallery-on {
@@ -21991,4 +22998,534 @@ pre.gallery-code {
     background: var(--accent-soft, var(--card));
     color: var(--accent);
     font: 12px var(--mono);
+}
+
+/* ─── Pocket Surfaces: Pi's interactive card in the transcript (surfaces.js) ─────────────────────────────────── */
+
+/* A fixed frame that Pi's content cannot restyle: its own border, label and title, and the line under it. */
+.surf {
+    min-width: 0;
+    max-width: 100%;
+    margin: 0.5rem 0;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-card);
+    background: var(--card);
+    color: var(--body);
+    overflow: hidden;
+}
+
+.surf-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hair-2);
+    background: var(--card-2);
+}
+
+.surf-tag {
+    flex: none;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.surf-title-line {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.surf-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px;
+}
+
+.surf-foot {
+    padding: 8px 12px;
+    border-top: 1px solid var(--hair-2);
+    color: var(--muted);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
+/* A short error under the body: it leaves by itself after a few seconds. */
+.surf-error {
+    margin: 0;
+    padding: 8px 12px;
+    border-top: 1px solid var(--err-line);
+    background: var(--err-soft);
+    color: var(--text);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+/* A fork's or an old card's text, as the server wrote it. */
+.surf-copy {
+    margin: 0;
+    color: var(--body);
+    font: 13px/1.5 var(--mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Layout. */
+.surf-col,
+.surf-row {
+    display: flex;
+    min-width: 0;
+}
+
+.surf-col {
+    flex-direction: column;
+}
+
+/* A row wraps by default: three buttons on a phone go to the next line, never break inside a word. */
+.surf-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.surf-row > * {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.surf-nowrap {
+    flex-wrap: nowrap;
+}
+
+.surf-gap-s {
+    gap: 6px;
+}
+
+.surf-gap-m {
+    gap: 10px;
+}
+
+.surf-gap-l {
+    gap: 16px;
+}
+
+.surf-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-control);
+    background: var(--bg);
+}
+
+.surf-box-title {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.surf-divider {
+    width: 100%;
+    margin: 2px 0;
+    border: 0;
+    border-top: 1px solid var(--hair-2);
+}
+
+/* Text is plain text: its line breaks show, nothing else is read in it. */
+.surf-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.surf-title {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.surf-caption {
+    color: var(--muted);
+    font-size: 12.5px;
+}
+
+.surf-mono {
+    font: 13px/1.5 var(--mono);
+}
+
+.surf-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--r-control);
+}
+
+.surf-chip {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 12px;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-control);
+    color: var(--accent);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+/* Buttons. */
+.surf-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: center;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition:
+        border-color var(--t-hover) var(--ease-out),
+        background-color var(--t-hover) var(--ease-out);
+}
+
+.surf-btn-primary {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+    color: var(--accent-ink);
+}
+
+.surf-btn-danger {
+    border-color: var(--err-line);
+    background: var(--err-soft);
+    color: var(--err);
+}
+
+.surf-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.surf-btn[aria-busy="true"] {
+    opacity: 0.7;
+}
+
+/* A button with the reason it is off under it. */
+.surf-btn-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Words for screen readers only. */
+.surf-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+@media (hover: hover) {
+    .surf-btn:not(:disabled):hover {
+        border-color: var(--accent-line);
+    }
+}
+
+/* "Delete the selected paths?" with Yes and Cancel, in the place of the button. */
+.surf-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-control);
+    background: var(--warn-soft);
+}
+
+.surf-confirm-text {
+    flex: 1 1 14rem;
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-confirm-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+/* Inputs. The app's own field style applies; these set the label and the touch size. */
+.surf-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.surf-label {
+    color: var(--muted);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+}
+
+.surf-input {
+    min-height: 40px;
+    padding: 8px 10px;
+    background: var(--bg);
+    font-size: 14px;
+}
+
+textarea.surf-input {
+    resize: vertical;
+}
+
+.surf-input:disabled {
+    opacity: 0.6;
+}
+
+.surf-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    min-width: 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.surf-check input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+}
+
+.surf-check input:disabled + span {
+    opacity: 0.6;
+}
+
+.surf-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.surf-option {
+    min-height: 40px;
+    max-width: 100%;
+    padding: 0 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-control);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-option[aria-checked="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* The chosen one shows in a mark too, not by color alone. */
+.surf-option[aria-checked="true"]::before {
+    content: "✓ ";
+    color: var(--accent);
+}
+
+.surf-option:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* A table: a real table when its card has room (a container query, not the window's width), stacked rows with the column's label before each value when not. */
+.surf-table-wrap {
+    min-width: 0;
+    max-width: 100%;
+    container-type: inline-size;
+}
+
+.surf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+}
+
+.surf-table th {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--hair-2);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+}
+
+.surf-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--hair);
+    color: var(--body);
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+}
+
+.surf-pick {
+    width: 44px;
+}
+
+.surf-pick-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    min-height: 40px;
+    cursor: pointer;
+}
+
+.surf-pick-box input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+}
+
+@container (max-width: 31rem) {
+    .surf-table,
+    .surf-table tbody,
+    .surf-table tr,
+    .surf-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .surf-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+
+    .surf-table tr {
+        padding: 6px 0;
+        border-bottom: 1px solid var(--hair-2);
+    }
+
+    .surf-table td {
+        border-bottom: 0;
+    }
+
+    .surf-table td[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        color: var(--muted);
+        font-size: 11.5px;
+    }
+
+    .surf-table td.surf-pick {
+        width: auto;
+        padding-bottom: 0;
+    }
+}
+
+/* Status: a dot with a word beside it (never color alone), a detail line, and a bar. */
+.surf-status {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.surf-status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.surf-status-label {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.surf-status-word {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.surf-status-detail {
+    overflow-wrap: anywhere;
+}
+
+.surf-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: var(--r-pill);
+    background: var(--faint);
+}
+
+.surf-dot-running {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.surf-dot-ok {
+    background: var(--ok);
+}
+
+.surf-dot-warn {
+    background: var(--warn);
+}
+
+.surf-dot-error {
+    background: var(--err);
+}
+
+.surf-bar {
+    height: 6px;
+    border-radius: var(--r-pill);
+    background: var(--hair-2);
+    overflow: hidden;
+}
+
+.surf-bar-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
 }

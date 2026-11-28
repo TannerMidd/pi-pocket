@@ -230,6 +230,9 @@ export class Providers {
         this.#expired.delete(providerId);
         // What a gate knew of a limit was about the account that is gone.
         this.#app.limits.reset(providerId);
+        // And so were the numbers of its last response.
+        this.#app.usage.forget(providerId);
+        this.#app.usageRefresher.forget(providerId);
     }
 
     /** A mark came or went: tabs get the models marked again, and sessions' views their model's state. */
@@ -238,6 +241,7 @@ export class Providers {
             this.#app.log(`Models not sent: ${describe(error)}`),
         );
         this.#app.refreshViews();
+        this.#app.providersChanged();
     }
 
     /** Every provider and its sign-in. What a provider said when it refused to renew one is for the `owner` only. */
@@ -265,6 +269,7 @@ export class Providers {
                         ? null
                         : (auth.oauth.loginLabel ?? auth.oauth.name ?? "Subscription"),
                 models: models.getModels(provider.id).length,
+                classifiers: models.getModelsOfType("classifier", provider.id).length,
                 ...(expired === undefined
                     ? {}
                     : { needsSignIn: owner ? expired : "its provider would not renew it" }),

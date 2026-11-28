@@ -1,0 +1,236 @@
+/* The shared navigation frame contains real sheets. Its host owns drawer placement. */
+.grouped-menu {
+    --menu-pad: calc(20px * var(--space-x));
+    background: var(--card);
+}
+
+.grouped-menu .sheet-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding: calc(20px * var(--space-y)) var(--menu-pad) calc(16px * var(--space-y));
+    border-bottom: var(--border) solid var(--hair);
+}
+
+.grouped-menu .sheet-eyebrow {
+    grid-area: 1 / 1;
+    color: var(--muted);
+    font: 500 10px / 1.5 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+}
+
+.grouped-menu .sheet-eyebrow .icon,
+.grouped-menu .sheet-head h2::before {
+    display: none;
+}
+
+.grouped-menu .sheet-head h2 {
+    grid-area: 2 / 1;
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.3;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.grouped-menu .sheet-head > .icon-button {
+    width: 34px;
+    height: 34px;
+    color: var(--muted);
+}
+
+.grouped-menu .sheet-head > :last-child {
+    grid-area: 1 / 2 / 3;
+}
+
+.grouped-menu .sheet-head > .sheet-back {
+    grid-area: 3 / 1;
+    justify-self: start;
+    justify-content: start;
+    gap: 3px;
+    width: auto;
+    padding: 0 8px;
+    margin: 0 0 -12px -8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.grouped-menu .sheet-back::after {
+    content: "Back";
+}
+
+.grouped-menu .sheet-body {
+    gap: 0;
+    padding: calc(12px * var(--space-y)) var(--menu-pad) calc(16px * var(--space-y));
+}
+
+.grouped-menu .menu-group {
+    padding: calc(8px * var(--space-y)) 0 calc(12px * var(--space-y));
+    margin: 0;
+    border: 0;
+}
+
+.grouped-menu .menu-group + .menu-group {
+    padding-top: calc(12px * var(--space-y));
+    border-top: var(--border) solid var(--hair);
+}
+
+.menu-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: calc(24px + 8px * var(--space-y));
+    margin-bottom: 2px;
+}
+
+.grouped-menu .group-title {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0;
+    margin: 0;
+}
+
+.menu-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 36px;
+    margin-right: calc(-8px * var(--space-x));
+    padding: 0 calc(8px * var(--space-x));
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: var(--r-control);
+}
+
+.grouped-menu .places {
+    gap: 8px;
+    padding: 0;
+}
+
+.grouped-menu .place {
+    gap: 8px;
+    min-width: 0;
+    min-height: calc(40px + 12px * var(--space-y));
+    height: auto;
+}
+
+.grouped-menu .place:not(.on) {
+    background: var(--bg);
+    color: var(--text);
+}
+
+.grouped-menu .place-label {
+    font-size: 13.5px;
+}
+
+.grouped-menu .list-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0 12px;
+    width: calc(100% + 16px * var(--space-x));
+    min-height: calc(32px + 12px * var(--space-y));
+    padding: calc(8px * var(--space-y)) calc(8px * var(--space-x));
+    margin: 0 calc(-8px * var(--space-x));
+    font-size: 13.5px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--text);
+}
+
+.grouped-menu .list-item > span:first-child,
+.grouped-menu .menu-row > .menu-row-label,
+.grouped-menu .menu-row > .menu-row-label:last-child {
+    display: block;
+    flex: 1 1 0%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    color: inherit;
+    font-size: inherit;
+    text-align: start;
+}
+
+.grouped-menu .list-item > .small:not(:first-child),
+.grouped-menu .menu-row-label small {
+    display: block;
+    flex: 0 0 100%;
+    color: var(--muted);
+    white-space: normal;
+    text-align: start;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.65;
+}
+
+.grouped-menu .menu-row > .icon,
+.grouped-menu .menu-all > .icon {
+    flex: none;
+    color: var(--muted);
+}
+
+.grouped-menu .menu-row > .menu-chevron:last-child {
+    flex: none;
+    margin-left: auto;
+    color: var(--muted);
+}
+
+@media (hover: hover) {
+    .menu-all:hover,
+    .grouped-menu .place:hover {
+        background: var(--hover);
+        color: var(--text);
+    }
+}
+
+@media (pointer: coarse), (max-width: 699px) {
+    .grouped-menu .list-item,
+    .grouped-menu .place,
+    .menu-all {
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 699px) {
+    .grouped-menu .sheet-head {
+        padding-block: 18px 8px;
+    }
+
+    .grouped-menu .sheet-head h2 {
+        font-size: 16px;
+    }
+
+    .grouped-menu .sheet-head > .sheet-back {
+        margin-bottom: 0;
+    }
+
+    .grouped-menu .sheet-body {
+        padding-top: 4px;
+        padding-bottom: 0;
+    }
+
+    .grouped-menu .menu-group,
+    .grouped-menu .menu-group + .menu-group {
+        padding-block: 8px 12px;
+    }
+
+    .grouped-menu .sheet-head > .icon-button {
+        width: 40px;
+        height: 40px;
+    }
+}
+
+/* Touch keeps the app's thumb-sized controls, even when desktop spacing is compact. */
+@media (pointer: coarse), (max-width: 699px) {
+    .grouped-menu .sheet-head > :is(.icon-button, .sheet-back) {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

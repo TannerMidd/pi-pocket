@@ -300,11 +300,11 @@ export function createWorkspace(env) {
         const [open, setOpen] = useState(null);
         const narrow = env.sizeClass(s) === "narrow";
         const devices = [
-            { value: "mobile", icon: DEVICES.mobile.icon, title: "Phone, 390 × 844" },
-            { value: "tablet", icon: DEVICES.tablet.icon, title: "Tablet, 820 × 1180" },
-            deck
-                ? { value: "slide", icon: "monitor", title: "Slide, 1280 × 720" }
-                : { value: "desktop", icon: DEVICES.desktop.icon, title: "Desktop, 1280 × 800" },
+            ...["mobile", "tablet", deck ? "slide" : "desktop"].map((value) => {
+                const { label, w, h, icon } = DEVICES[value];
+
+                return { value, icon, title: `${label}, ${w} × ${h}` };
+            }),
             ...(narrow ? [] : [{ value: "custom", icon: "fit", title: "Custom size" }]),
         ];
         const open_ = openOf(s.notes[design.id]?.comments ?? []).length;

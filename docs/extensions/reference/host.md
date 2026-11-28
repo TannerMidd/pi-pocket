@@ -120,6 +120,42 @@ Since 0.13.1 · Stable
 
 Why Pi cannot use a model now, in words that Pi can tell a person. For example, Pi Pocket does not know the model, its provider is not signed in, or its sign-in expired. It is `undefined` when Pi can use the model. With `fresh: true`, it asks the provider about the sign-in again first.
 
+### `classifierModel`
+
+```ts
+classifierModel(): string | undefined;
+```
+
+Since 0.31.0 · Experimental
+
+The classifier model the owner chose in Menu → Providers, as `provider/modelId`, or `undefined` when none is chosen. Pi Pocket names no classifier model on its own: a module that has no model of its own, and finds none here, does nothing.
+
+### `classify`
+
+```ts
+classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
+```
+
+Since 0.31.0 · Experimental
+
+One classifier-model call: typed questions about JSON state, answered by the model that `request.model` names, or by the owner's chosen classifier (`classifierModel`) when it names none. Classifier models are a class of their own (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna): they do not chat, and they answer a choice, a score, or yes/no. The call runs through Pi's model runtime and uses the owner's stored provider sign-ins and keys, exactly as a session's own model calls do. It never wakes a session. What you put in `state` and `images` goes to that provider: say so in your module's settings, so the owner knows what leaves the machine.
+
+- `model` is `provider/modelId` of a classifier model; the id may hold more slashes. A bare id works when it names one classifier only. A chat model is refused with an error. Leave it out to use the owner's choice. Find the ids with Pi's model listing, such as `models.getAvailableOfType("classifier")` in a codemode script.
+- `state` is what the model judges. `questions` maps ids to questions, in pi-ai's `ClassifierQuestion` shapes: `{ type: "choice", instructions, criteria: { label: meaning } }`, `{ type: "score", instructions, criteria: [lowest, …, highest] }`, or `{ type: "bool", instructions, criteria: { true: meaning, false: meaning } }`. At least one question.
+- It resolves to the answers by question id, in pi-ai's `ClassifierAnswer` shapes: `{ type: "choice", choice, probabilities, confidence }`, `{ type: "score", score, confidence }`, or `{ type: "bool", probability }`.
+- It throws when no classifier model is named and the owner chose none ("No classifier model is chosen: pick one in Providers"), when no such classifier exists, when the spec names a chat model, when its provider has no stored sign-in or key, or when the call fails. Nothing is sent without the owner's stored key, and the owner can see the cost with the provider as any other model call.
+
+A module that runs on a server older than 0.31.0 checks `typeof host.classify === "function"` first and works without it.
+
+### `ClassifyRequest`
+
+Since 0.31.0 · Experimental
+
+- `model`: the classifier model, `provider/modelId`, as `classify` above takes it. Optional: left out, the owner's choice is used.
+- `state`: what the model judges, one JSON object.
+- `images`: images judged together with `state`. Only classifier models whose input accepts images answer them.
+- `questions`: what it answers, by question id, with the shapes of pi-ai's `ClassifierQuestion`.
+
 ### `registerModelProvider`
 
 ```ts
@@ -183,6 +219,8 @@ Since 0.28.0 · Experimental
 Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd` returns the canonical address. It must keep the same scheme. Pi Pocket stores that address and refuses to use the local machine when no provider is active. The returned disposer removes only its own registration. See [Execution environments for workspaces](../workspaces.md).
 
 `WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. `signal` is optional: in 0.28, session creation and settings do not pass one yet.
+
+Since 0.31.0 · Experimental: `WorkspaceProvider` also accepts `isolated?: boolean`, `disposeWorkspace?(cwd: string): Promise<void> | void`, and `unavailable?(cwd: string): string | undefined`. Setting `isolated: true` tells core to enforce sandbox boundaries on sessions using that scheme: host-reaching tools (host browser, MCP, host-only extension tools, project/global memory writes, and cross-boundary linked sessions) are blocked, host `commandEnv` variables are not injected, and sessions cannot be moved across the isolation boundary. An unregistered URI scheme fails closed as isolated. `disposeWorkspace` is called when no active session remains on `cwd` (after archive or removal). `unavailable` returns a human-readable reason when a workspace is gone (for example, a deleted sandbox) so Pi Pocket locks the session read-only and refuses new messages.
 
 ### `requesterOf`
 
@@ -349,7 +387,7 @@ ask(request: AskRequest, context: Context): Promise<AskAnswer>;
 
 Since 0.22.0 · Experimental
 
-Asks the person Pi works for, on a card in the session, as an approval asks. The card shows the request's `title`, its `text`, a field for each of its `fields` (a hidden one for a `secret`), and a button. Only the person Pi works for can send it (the owner, when nobody is known); anyone who can steer can decline it. It notifies that person, as an approval does.
+Asks the person Pi works for, on a card in the session, as an approval asks. The card shows the request's `title`, its `text`, a field for each of its `fields` (a hidden one for a `secret`), and a button. Only the original requester can send it, while they can still steer. Anyone who can steer can decline it. A replay without its original requester is declined instead of asking someone else. It notifies that person, as an approval does.
 
 What they type comes back in the answer's `values`, and nowhere else: not to Pi, into the transcript, or to the other people in the session. A plain Allow, such as from a notification, is refused: each field must be filled in. Do not keep the values in a memo or a document, where a restart would find them. Without a memo, a call that a restart cut off comes back as interrupted, and asks again when Pi tries again. See [`AskRequest`](#askrequest) and [`AskAnswer`](#askanswer).
 

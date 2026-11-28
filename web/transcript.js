@@ -3,6 +3,8 @@
 import { Component } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { activityOpen } from "./activity-fold.js";
+import { AgentCard } from "./agent-card.js";
+import { parseAgentMessage } from "./agent-messages.js";
 import {
     noteRevealed,
     onPresentationMode,
@@ -17,13 +19,13 @@ import { routeSliding } from "./back.js";
 import { browserAvailable, setBrowserOpen } from "./browser.js";
 import { describeCall, describersRevision } from "./calls.js";
 import { DiffBlock } from "./diff.js";
-import { LinkedSessions } from "./linked-sessions.js";
 import { markdownRevision } from "./markdown-ext.js";
 import { personStorage } from "./person-storage.js";
 import { quoteParts } from "./quote-text.js";
 import { fromServer } from "./seen.js";
 import { defineItem, slotItems, slotKey } from "./slots.js";
 import { Highlighted, InlineArtifact } from "./rich.js";
+import { SurfaceCard } from "./surfaces.js";
 import {
     actions,
     attempt,
@@ -74,33 +76,7 @@ import {
     splitAttachments,
     Thumb,
 } from "./ui.js";
-import { LessonCall, memoryAvailable } from "./sheets/memory.js";
-
-const REPORT = /^\[subagent (\S+) (answered|failed|stopped|stalled)([^\]]*)\]\s?([\s\S]*)$/;
-/** Where the next report starts, in a message of several that arrived together (`extensions/subagents.ts`). */
-const NEXT_REPORT = /\n\n(?=\[subagent \S+ (?:answered|failed|stopped|stalled))/;
-
-/**
- * A background task's message to Pi (`background.ts`): its head line, its command, and the end of its output fenced.
- * Its time is short ("2m 04s"), which keeps a long line that is not one quick to turn down.
- */
-const BACKGROUND =
-    /^\[background\] Task (\S+) (.+?) after ([^.\n]{1,20})\.\nCommand: (.*)\n([\s\S]*)$/;
-/** Where the next task's message starts, in a message of several that ended together (`background.ts`). */
-const NEXT_BACKGROUND = /\n\n(?=\[background\] Task )/;
-const OUTPUT_OPEN = "<background-output>\n";
-const OUTPUT_CLOSE = "\n</background-output>";
-
-/** The output fenced in a background task's message, or undefined when it printed nothing. */
-function fencedOutput(rest) {
-    const start = rest.indexOf(OUTPUT_OPEN);
-    const end = start < 0 ? -1 : rest.indexOf(OUTPUT_CLOSE, start + OUTPUT_OPEN.length);
-
-    return end < 0 ? undefined : rest.slice(start + OUTPUT_OPEN.length, end);
-}
-
-/** How a scheduled message starts (see src/server/schedules.ts). */
-const SCHEDULED = "[scheduled] ";
+import { FoldedLessons, LessonCall, memoryAvailable } from "./sheets/memory.js";
 
 /** A message the app sent for a person, and what sent it: PiP, a PR watch, a webhook (`submit` in src/server/commands.ts). */
 const VIA = /^\[via ([^\]\n]{1,300})\] /;
@@ -137,10 +113,6 @@ function FencedText({ text }) {
 
     return parts;
 }
-
-/** A goal's check that did not pass, as Pi is told about it (see src/server/extensions/goals.ts): what, then its output. */
-const GOAL_CHECK =
-    /^\[goal\] `([\s\S]*?)` (still fails|was cut off by a server restart) \(([^)]*)\)\. ([\s\S]*)$/;
 
 /** A skill run with `/skill:name`, as Pi gets it (see `expandSkillCommand` in src/server/prompts.ts): its name, file, and the request. */
 const SKILL = /^<skill name="([^"]+)" location="([^"]+)">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
@@ -333,76 +305,6 @@ function CodedText({ text }) {
     return parts;
 }
 
-/** A subagent's report: who, whether it answered or failed, and what it said. */
-function Report({ report, view, fresh }) {
-    const [, name, verb, after, text] = report;
-    const child = view.subagents.find((agent) => agent.name === name);
-    // One that did not answer says why: "failed: Bad request", "stalled again: no progress for 1 h…". Its words
-    // before the colon stay in its head ("stopped by Pi Pocket").
-    const said = verb === "answered" ? undefined : /^([^:]*):\s*([\s\S]*)$/.exec(after);
-    const why = said?.[2] ?? "";
-    const more = said?.[1]?.trim() ?? "";
-
-    return html`<div
-        class=${`report ${verb === "answered" ? "" : verb} ${fresh ? "enter" : ""}`}
-    >
-        <div class="report-head">
-            <span class="report-name">${name}</span> ${verb}${more && ` ${more}`}
-            ${
-                child &&
-                html`<button class="link" onClick=${() => openSubagent(child.conversationId)}>
-                    Open →
-                </button>`
-            }
-        </div>
-        ${why && html`<div class="report-why">${why}</div>`}
-        ${text && html`<${Collapsible} text=${text} />`}
-    </div>`;
-}
-
-/** A background task that ended, as a card for people: its id and outcome, its command, and its output folded away. */
-function BackgroundReport({ match }) {
-    const [, id, outcome, took, command, rest] = match;
-    const output = fencedOutput(rest);
-
-    return html`<div class="report background-report">
-        <div class="report-head">
-            <span class="report-name">${id}</span> ${outcome} · ${took}
-        </div>
-        ${command !== undefined && html`<div class="background-command muted small mono">${command}</div>`}
-        ${
-            output === undefined
-                ? html`<div class="muted small">It printed nothing.</div>`
-                : html`<${BackgroundOutput}
-                      text=${output}
-                      clipped=${rest.startsWith("The end of its output")}
-                  />`
-        }
-    </div>`;
-}
-
-/** Lines of a background task's output shown while it is folded: its last ones, where an error usually is. */
-const OUTPUT_LINES = 8;
-
-/** A background task's output as it printed it, folded to its last lines; `clipped` when the task printed more. */
-function BackgroundOutput({ text, clipped }) {
-    const [open, setOpen] = useState(false);
-    const lines = text.split("\n");
-    const folds = lines.length > OUTPUT_LINES;
-    const shown = folds && !open ? lines.slice(-OUTPUT_LINES).join("\n") : text;
-
-    return html`<div class="background-output">
-        ${clipped && html`<div class="muted small">The end of its output:</div>`}
-        <pre>${shown}</pre>
-        ${
-            folds &&
-            html`<button class="link" onClick=${() => setOpen(!open)}>
-                ${open ? "Show less" : `Show all ${lines.length} lines`}
-            </button>`
-        }
-    </div>`;
-}
-
 /** A span of time: "18s", "2m 04s", "1h 02m". */
 function span(ms) {
     const seconds = Math.max(0, Math.round(ms / 1000));
@@ -576,96 +478,65 @@ function PresentedText({ entry, text }) {
     `;
 }
 
-/** How the app marks a linked session's message (`linked-sessions.ts`): the sender's address in this session. */
-const LINKED_VIA = /^linked session (\S+)$/;
-
-/** A linked session's message folds past this many lines, or this many characters. */
-const LINKED_FOLD_LINES = 10;
-const LINKED_FOLD_CHARS = 900;
-
 /**
- * A message from a linked session: an agent, not a person, in a card of its own. Its head names the session and opens
- * it when this person may (`linkedPeers`, by address); its text shows as Markdown, as Pi's replies do, and a long one
- * folds to its first lines. Tapping the card opens its message sheet, as a person's message does.
+ * A message from an agent or the app: a card for each report or task in it (`AgentCard`). A card names a linked
+ * session by its title (`linkedPeers`, and the sessions this person sees), never its address, and opens it when this
+ * person may; Show raw, and a tap, open the message sheet with the exact text Pi received.
  */
-function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
-    const [open, setOpen] = useState(false);
-    const id = view.linkedPeers?.[address];
-    const session =
-        id === undefined ? undefined : store.state.sessions.find((each) => each.id === id);
-    const name = session ? (session.title ?? "New session") : undefined;
-    const lines = text.split("\n").length;
-    const folds = lines > LINKED_FOLD_LINES || text.length > LINKED_FOLD_CHARS;
+function AgentMessage({ entry, view, cards, attachments, fresh }) {
+    const time = entry.at ? clock(entry.at) : undefined;
+    const raw = () => openSheet({ type: "message", entryId: entry.id });
+
+    const draw = (card, index) => {
+        // A linked session is named by its title, from the view's `linkedPeers` and the sessions this person sees,
+        // never by its address.
+        const peer =
+            card.address === undefined
+                ? undefined
+                : store.state.sessions.find((each) => each.id === view.linkedPeers?.[card.address]);
+        const child =
+            card.subagent === undefined
+                ? undefined
+                : view.subagents.find((agent) => agent.name === card.subagent);
+        const title = peer ? (peer.title ?? "New session") : undefined;
+        const go = peer
+            ? { label: `Open ${title}`, run: () => navigate(peer.id) }
+            : child
+              ? {
+                    label: `Open ${card.subagent}`,
+                    run: () => openSubagent(child.conversationId),
+                }
+              : undefined;
+
+        return html`<${AgentCard}
+            key=${index}
+            card=${card}
+            id=${`${entry.id}-${index}`}
+            time=${time}
+            who=${card.address === undefined ? card.name : (title ?? "A session you cannot open")}
+            unknown=${card.address === undefined ? card.unknown : title === undefined}
+            go=${go}
+            extras=${
+                index === 0
+                    ? html`<${MessageExtras} entry=${entry} attachments=${attachments} />`
+                    : undefined
+            }
+            onRaw=${raw}
+            renderFenced=${(text) => html`<${FencedText} text=${text} />`}
+        />`;
+    };
 
     return html`<div
-        class=${`user-row ${fresh ? "enter" : ""}`}
+        class=${`user-row acard-row ${fresh ? "enter" : ""}`}
         data-part="prompt-row"
         data-entry-kind=${entry.presentation?.entryKind}
         id=${`entry-${entry.id}`}
     >
-        <div
-            class=${`prompt linked-message tappable ${folds ? "folds" : ""} ${open ? "open" : ""}`}
-            data-part="prompt"
-            data-from="linked"
-            title="Edit, send again, or copy"
-            tabindex="0"
-            onClick=${(event) => openMessage(event, entry.id)}
-            onKeyDown=${(event) => {
-                if (
-                    (event.key === "Enter" || event.key === " ") &&
-                    event.target === event.currentTarget
-                ) {
-                    event.preventDefault();
-                    openMessage(event, entry.id);
-                }
-            }}
-        >
-            <div class="linked-head" data-part="linked-head">
-                <span class="linked-mark" data-part="linked-mark" aria-hidden="true">
-                    <${Icon} name="fork" size=${16} />
-                </span>
-                <span class="linked-who">
-                    <span class="linked-kicker">
-                        <span class="linked-tag">Linked session</span>
-                        ${entry.at && html`<span>· ${clock(entry.at)}</span>`}
-                    </span>
-                    <span
-                        class=${`linked-name ${name ? "" : "unknown"}`}
-                        data-part="linked-name"
-                    >
-                        ${name ?? "A session you cannot open"}
-                    </span>
-                </span>
-                ${
-                    session &&
-                    html`<button
-                        class="linked-open"
-                        data-part="linked-open"
-                        aria-label=${`Open ${name}`}
-                        onClick=${() => navigate(session.id)}
-                    >
-                        Open
-                        <${Icon} path="M5 12h14M13 6l6 6-6 6" size=${14} />
-                    </button>`
-                }
-            </div>
-            <div class="linked-body" data-part="linked-body" id=${`linked-body-${entry.id}`}>
-                <${Markdown} text=${text} />
-                <${MessageExtras} entry=${entry} attachments=${attachments} />
-            </div>
-            ${
-                folds &&
-                html`<button
-                    class="linked-more"
-                    data-part="linked-more"
-                    aria-expanded=${open ? "true" : "false"}
-                    aria-controls=${`linked-body-${entry.id}`}
-                    onClick=${() => setOpen(!open)}
-                >
-                    ${open ? "Show less" : `Show all · ${lines} lines`}
-                </button>`
-            }
-        </div>
+        ${
+            cards.length === 1
+                ? draw(cards[0], 0)
+                : html`<div class="acard-group">${cards.map(draw)}</div>`
+        }
     </div>`;
 }
 
@@ -673,101 +544,38 @@ function LinkedMessage({ entry, view, address, text, attachments, fresh }) {
 function UserMessage({ entry, view, users }) {
     const [fresh] = useState(() => settledFor !== null && settledFor === view.conversation?.id);
 
-    // A report has nobody's name on it: a person's message that looks like one is theirs.
-    if (REPORT.test(entry.text) && entry.from === undefined && !view.authors?.[entry.id]) {
-        // Several that arrived together came as one message: a card each. A part that is not a report's start is
-        // more of the report before it.
-        const parts = [];
-
-        for (const part of entry.text.split(NEXT_REPORT)) {
-            if (parts.length > 0 && !REPORT.test(part)) {
-                parts[parts.length - 1] += `\n\n${part}`;
-            } else {
-                parts.push(part);
-            }
-        }
-
-        const reports = parts.map((part) => REPORT.exec(part)).filter(Boolean);
-
-        return reports.length === 1
-            ? html`<${Report} report=${reports[0]} view=${view} fresh=${fresh} />`
-            : html`<div class="report-group">
-                  ${reports.map((report) => html`<${Report} report=${report} view=${view} fresh=${fresh} />`)}
-              </div>`;
-    }
-
-    // A background task's message: nobody typed it, so a person writing "[background]" themselves keeps it theirs.
-    const background =
-        entry.from === undefined && !view.authors?.[entry.id] ? BACKGROUND.exec(entry.text) : null;
-
-    if (background) {
-        // Several tasks that ended together came as one message: a card each. A part that is not a task's start is
-        // more of the one before it.
-        const parts = [];
-
-        for (const part of entry.text.split(NEXT_BACKGROUND)) {
-            if (parts.length > 0 && !BACKGROUND.test(part)) {
-                parts[parts.length - 1] += `\n\n${part}`;
-            } else {
-                parts.push(part);
-            }
-        }
-
-        const tasks = parts.map((part) => BACKGROUND.exec(part)).filter(Boolean);
-
-        return tasks.length === 1
-            ? html`<${BackgroundReport} match=${tasks[0]} />`
-            : html`<div class="report-group">
-                  ${tasks.map((match) => html`<${BackgroundReport} match=${match} />`)}
-              </div>`;
-    }
-
-    const check = GOAL_CHECK.exec(entry.text);
-
-    if (check) {
-        const [, command, what, how, output] = check;
-
-        return html`<div class="report failed">
-            <div class="report-head">
-                <span class="report-name mono">${command}</span> ${what} · ${how}
-            </div>
-            <${Collapsible} text=${output} limit=${300} />
-        </div>`;
-    }
-
     const authorId = view.authors?.[entry.id];
     const author =
         authorName(entry.id, view, users) ??
         entry.from ??
         (view.conversation?.kind === "subagent" ? "Main agent" : undefined);
     const [written, attachments] = splitAttachments(entry.text);
-    // Set up earlier to go out now: by a person (who shows as its author) or by Pi.
-    // Only a message nobody typed: someone writing "[via …]" themselves gets no label.
-    const via = authorId === undefined ? VIA.exec(written) : null;
-    const sent = via ? written.slice(via[0].length) : written;
-    const scheduled = sent.startsWith(SCHEDULED);
-    // A linked session's message: shown by its label and its fence alone, so the words before the fence (which tell Pi
-    // how to read it) can change without changing how older messages show.
-    const peerText =
-        via && LINKED_VIA.test(via[1])
-            ? /\n<linked-session-message>\n([\s\S]*)\n<\/linked-session-message>$/.exec(sent)?.[1]
-            : undefined;
+    // What an agent or the app sent is a card; nothing a person typed is, whatever it starts with.
+    const cards = parseAgentMessage({
+        text: entry.text,
+        written,
+        named: entry.from !== undefined,
+        author,
+        authored: authorId !== undefined,
+    });
 
-    if (peerText !== undefined) {
-        return html`<${LinkedMessage}
+    if (cards !== null && cards.length > 0) {
+        return html`<${AgentMessage}
             entry=${entry}
             view=${view}
-            address=${LINKED_VIA.exec(via[1])[1]}
-            text=${peerText}
+            cards=${cards}
             attachments=${attachments}
             fresh=${fresh}
         />`;
     }
 
-    const body = scheduled ? sent.slice(SCHEDULED.length) : sent;
+    // A message through a label that has no card (an unknown envelope): its label and its words as they came.
+    const via = authorId === undefined ? VIA.exec(written) : null;
+    const sent = via ? written.slice(via[0].length) : written;
+    const body = sent;
     // `/skill:name request`: the skill by name, and the request.
     const skill = SKILL.exec(body);
-    const name = author ?? (scheduled ? "Pi" : undefined);
+    const name = author;
     // Your own messages take the accent; someone else's, their color; one from someone the app does not know (a name
     // the message carries, the main agent, Pi's own schedule), a quiet one.
     const mark =
@@ -824,7 +632,6 @@ function UserMessage({ entry, view, users }) {
                     </span>`
                 }
                 ${entry.at && html`<span class="prompt-time">${clock(entry.at)}</span>`}
-                ${scheduled && html`<span class="prompt-time">· scheduled</span>`}
                 ${via && html`<span class="prompt-time">· via ${via[1]}</span>`}
             </span>
             <div class="prompt-body" data-part="prompt-text">
@@ -869,28 +676,13 @@ function QuotedText({ text }) {
     );
 }
 
-function Collapsible({ text, limit = 600 }) {
-    const [open, setOpen] = useState(false);
-
-    if (text.length <= limit) {
-        return html`<${Markdown} text=${text} />`;
-    }
-
-    return html`<div class=${`collapsible ${open ? "open" : ""}`}>
-        <${Markdown} text=${open ? text : `${text.slice(0, limit)}…`} />
-        <button class="link" onClick=${() => setOpen(!open)}>
-            ${open ? "Show less" : "Show more"}
-        </button>
-    </div>`;
-}
-
 // ─── What Pi did: its thinking and tool calls, a line each on a timeline ───────────────
 
 /** The tools that publish artifacts: `artifact_inline` (from before 0.28) is `artifact` with `inline: true`. */
 const isArtifactCall = (name) => name === "artifact" || name === "artifact_inline";
 
 /** What a step's mark says, by how the call went; a call still running shows a spinner instead. */
-const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!" };
+const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval: "!", running: "●" };
 
 /**
  * The waiting and running calls' statuses as the mark's own look names: `approval` and `running` are also the card
@@ -898,7 +690,10 @@ const MARKS = { done: "✓", error: "×", denied: "×", stopped: "–", approval
  */
 const MARK_LOOKS = { approval: "asking", running: "spinning" };
 
-/** A step's mark: a small circle that says how it went. A thought is ✦, and a subagent's call ⑂ unless it failed. */
+/**
+ * A step's mark: a small circle that says how it went. A call that runs shows a still ●, never a spinner: nothing in a
+ * running step moves. A thought is ✦, and a subagent's call ⑂ unless it failed.
+ */
 function StepMark({ status, kind }) {
     const agent = kind === "agent" && (status === "done" || status === "running");
     const spinning = kind !== "thought" && !agent && status === "running";
@@ -910,7 +705,7 @@ function StepMark({ status, kind }) {
         data-part="step-mark"
         aria-hidden=${spinning ? undefined : "true"}
     >
-        ${spinning ? html`<${Spinner} />` : mark}
+        ${spinning ? html`<span role="img" aria-label="Working">${mark}</span>` : mark}
     </span>`;
 }
 
@@ -1439,6 +1234,7 @@ function ToolStep({
     const lesson =
         call.name === "memory" &&
         typeof details?.lesson === "string" &&
+        lessonCardAt(details.lesson, call.id) &&
         memoryAvailable(conversationId)
             ? details.lesson
             : null;
@@ -1550,6 +1346,19 @@ function ToolStep({
         ${body}
     </div>`;
 }
+
+/**
+ * Which memory calls show a lesson's card. Pi can name one lesson in several calls (it saves it, then changes it), and
+ * each call shows the lesson as it is now: by default (`newestOnly` false) every one does, and any of them approves it.
+ * Set `newestOnly` to true to show it at the newest call that names it alone, folded or open.
+ */
+export const LESSON_CARDS = { newestOnly: false };
+/** Each lesson's newest call in the transcript shown, by the lesson's id: `Transcript` fills it from the results. */
+let newestLessonCall = new Map();
+
+/** Whether call `callId` shows the card of `lesson`. */
+const lessonCardAt = (lesson, callId) =>
+    !LESSON_CARDS.newestOnly || newestLessonCall.get(lesson) === callId;
 
 /** Groups opened or closed by hand, per conversation and group, for as long as the page is open. */
 const openedGroups = new Map();
@@ -1684,6 +1493,24 @@ function ActivityGroup({
             decisionOf(store.state.view.decisions, step.block, result)?.allow !== false
         );
     }).length;
+    // The lessons Pi saved, changed, or forgot in the steps it draws, by step: folded, those that still wait show on or
+    // under its line, as opened they show at their steps. `item.before`'s are in rows not shown, as opened.
+    const lessonAt =
+        open || lone || !memoryAvailable(conversationId)
+            ? []
+            : item.steps.flatMap((step, index) => {
+                  const lesson =
+                      step.block.type === "toolCall" && step.block.name === "memory"
+                          ? (results.get(step.block.id)?.details?.lesson ??
+                            slots.get(step.block.id)?.details?.lesson)
+                          : undefined;
+
+                  return typeof lesson === "string" && lessonCardAt(lesson, step.block.id)
+                      ? [{ lesson, index }]
+                      : [];
+              });
+    const lessons = lessonAt.map((each) => each.lesson);
+    const lessonBadge = prefs().foldedLessons === "badge";
     const first = all[0];
     let start = first.entry?.at === undefined ? undefined : fromServer(first.entry.at);
 
@@ -1753,14 +1580,34 @@ function ActivityGroup({
             onClick=${() => {
                 unrolled.current = open ? -Infinity : performance.now();
                 keep(openedGroups, id, !open);
+
+                // A lesson that waits shows at its step, also when that step is among the earlier ones not drawn.
+                if (lessonAt.some((each) => each.index < hidden)) {
+                    keep(wholeGroups, id, true);
+                }
+
                 redraw((n) => n + 1);
             }}
         >
             <${Icon} name="chevron" size=${14} class="chev" part="activity-chevron" />
             <span class="activity-summary">${summarize(all, thinking)}</span>
             ${failed > 0 && html`<span class="activity-failed">${failed} failed</span>`}
+            ${
+                lessons.length > 0 &&
+                lessonBadge &&
+                html`<${FoldedLessons}
+                    lessonIds=${lessons}
+                    conversationId=${conversationId}
+                    badge=${true}
+                />`
+            }
             <${GroupTime} id=${id} start=${start} end=${end} live=${live} />
         </button>
+        ${
+            lessons.length > 0 &&
+            !lessonBadge &&
+            html`<${FoldedLessons} lessonIds=${lessons} conversationId=${conversationId} />`
+        }
         ${
             open &&
             lone &&
@@ -1854,6 +1701,7 @@ function ActivityGroup({
 /**
  * A page Pi showed in its reply (`artifact` with `inline: true`): its card once the call has published, between the words around
  * it. Until then, and if the call failed, was denied, or stopped, its step as the timeline draws it, so the reason shows.
+ * A `ui` call shows its surface as a card (`SurfaceCard`, which follows the store itself) and, with none, its step.
  */
 function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
     const { block, entry, canRun } = item.step;
@@ -1871,6 +1719,22 @@ function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
         typeof details.id === "string" &&
         Number.isInteger(details.version);
 
+    const step = html`<div class="activity open">
+        <div class="timeline">
+            <${ToolStep}
+                call=${block}
+                result=${result}
+                slot=${slot}
+                approval=${approval}
+                entryId=${entry?.id}
+                streaming=${entry === undefined}
+                canRun=${canRun}
+                busy=${busy}
+                conversationId=${conversationId}
+            />
+        </div>
+    </div>`;
+
     return html`<div class="inline-row">
         ${item.anchors.map(
             (entryId) => html`<span class="entry-anchor" id=${`entry-${entryId}`}></span>`,
@@ -1883,21 +1747,14 @@ function InlineRow({ item, results, slots, approvals, busy, conversationId }) {
                       title=${details.title ?? details.id}
                       version=${details.version}
                   />`
-                : html`<div class="activity open">
-                      <div class="timeline">
-                          <${ToolStep}
-                              call=${block}
-                              result=${result}
-                              slot=${slot}
-                              approval=${approval}
-                              entryId=${entry?.id}
-                              streaming=${entry === undefined}
-                              canRun=${canRun}
-                              busy=${busy}
-                              conversationId=${conversationId}
-                          />
-                      </div>
-                  </div>`
+                : block.name === "ui" && !result?.isError
+                  ? html`<${SurfaceCard}
+                        conversationId=${conversationId}
+                        callId=${block.id}
+                        details=${details}
+                        fallback=${step}
+                    />`
+                  : step
         }
     </div>`;
 }
@@ -2875,6 +2732,14 @@ function callDeps(block, results, slots, approvals) {
         deps.push(agentsKey(view));
     }
 
+    // With `LESSON_CARDS.newestOnly`, a later call that names the same lesson takes its card away.
+    if (block.name === "memory") {
+        deps.push(
+            LESSON_CARDS.newestOnly,
+            LESSON_CARDS.newestOnly && newestLessonCall.get(results.get(block.id)?.details?.lesson),
+        );
+    }
+
     // Whether the browser is there to watch (`browserAvailable`), and open already.
     if (block.name === "browser") {
         deps.push(store.state.browserOpen, store.state.server);
@@ -3026,6 +2891,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             prefs().showThinking === true,
             // Keep activity folded: a group drawn before the switch moved opens or folds with it.
             prefs().foldActivity === true,
+            // Lessons in folded activity: cards under the line, or a badge on it.
+            prefs().foldedLessons === "badge",
         ];
 
         // The calls before the rows shown count in the group's line: their results, for its time.
@@ -3665,6 +3532,19 @@ export function Transcript() {
         () => new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot])),
         [view.live.tools],
     );
+
+    // Each lesson's newest call, oldest results first: the steps read it as they draw (`lessonCardAt`).
+    newestLessonCall = useMemo(() => {
+        const map = new Map();
+
+        for (const [callId, entry] of results) {
+            if (entry.name === "memory" && typeof entry.details?.lesson === "string") {
+                map.set(entry.details.lesson, callId);
+            }
+        }
+
+        return map;
+    }, [results]);
     const [fetching, setFetching] = useState(false);
     // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
     // function returns), to keep it there after.
@@ -4137,7 +4017,6 @@ export function Transcript() {
             data-part="transcript"
             ref=${column}
         >
-            <${LinkedSessions} />
             ${
                 conversation.forkedFrom &&
                 sessionsLoaded &&

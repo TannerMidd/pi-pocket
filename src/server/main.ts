@@ -10,7 +10,7 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 // Only types from the app here: its modules load below, after the signal handlers (loading takes a moment).
 import type { AccessInfo, PocketApp } from "./app.ts";
 import { APP_ROOT, dataDir } from "./config.ts";
@@ -120,8 +120,6 @@ const STOP_LIMIT_MS = 10_000;
 
 let app: PocketApp | undefined;
 
-let stopWatching = () => {};
-
 let stopping = false;
 /** A stop asked for while starting, done once the start finishes. */
 let stopWhenStarted: number | undefined;
@@ -138,7 +136,6 @@ const stop = async (code: number) => {
     }
 
     stopping = true;
-    stopWatching();
     // Closing also removes the socket file (`--socket`): Node unlinks the path it listened on.
     server.close();
     server.closeAllConnections();
@@ -151,6 +148,24 @@ const stop = async (code: number) => {
         await Promise.race([app.close(), limit]);
     } catch (error) {
         console.error("Close failed:", error);
+    }
+
+    if (launcher && process.connected && process.send !== undefined) {
+        // Give the launcher the intended code before process.exit can block. Do not wait on broken IPC.
+        await new Promise<void>((resolve) => {
+            const fallback = setTimeout(resolve, 250);
+
+            const done = () => {
+                clearTimeout(fallback);
+                resolve();
+            };
+
+            try {
+                process.send?.({ type: "stopping", code }, done);
+            } catch {
+                done();
+            }
+        });
     }
 
     process.exit(code);
@@ -244,15 +259,15 @@ try {
 
 server.on("error", (error) => console.error("Server error:", error));
 
-const [{ PocketApp: App }, { createHandler: makeHandler }, { watchTree }] = await Promise.all([
+const [{ PocketApp: App }, { createHandler: makeHandler }] = await Promise.all([
     import("./app.ts"),
     import("./http.ts"),
-    import("./reload.ts"),
 ]);
 const opened = await App.open({
     dataDir: options.data,
     defaultCwd: options.cwd,
     supervised: process.env.PI_POCKET_SUPERVISED === "1",
+    rotateOwnerToken: options.rotateToken,
     // For updates of Pi Pocket itself, which restart the server once the new version is in place.
     restart: () => void stop(RESTART_CODE),
 });
@@ -260,7 +275,6 @@ const opened = await App.open({
 app = opened;
 
 if (options.rotateToken) {
-    opened.config.rotateOwnerToken();
     console.log("Rotated the owner token; old owner links no longer work.");
 }
 
@@ -272,23 +286,9 @@ handle = makeHandler({
             : { socket: options.socket },
     restart: () => void stop(RESTART_CODE),
 });
-stopWatching = (() => {
-    const stops = [
-        watchTree(
-            join(APP_ROOT, "web"),
-            (file) => !opened.reloadsPaused && opened.reloadClients(file),
-        ),
-    ];
-
-    opened.loader.watch();
-    opened.themes.watch();
-
-    return () => {
-        for (const each of stops) {
-            each();
-        }
-    };
-})();
+// The live-edit watchers start once the server serves: the web tree, the extension modules, the themes, and the
+// browser modules (`PocketApp.watchLiveFiles`). Closing them is the app's too, for an npm update's package swap.
+opened.watchLiveFiles();
 
 const token = encodeURIComponent(opened.config.ownerToken);
 

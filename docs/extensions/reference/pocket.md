@@ -421,7 +421,7 @@ rail(spec: RailSpec): Added<RailSpec>;
 
 Since 0.14.0 · Stable
 
-Adds a button on the rail, after the app's own tools. It shows in the sidebar, in the drawer, and on a phone's home screen. See [`RailSpec`](#railspec).
+Adds a button under **Tools** in the navigation rail or phone's bottom bar. See [`RailSpec`](#railspec).
 
 ### `menu`
 
@@ -501,7 +501,7 @@ composerButton(spec: ComposerButtonSpec): Added<ComposerButtonSpec>;
 
 Since 0.19.0 · Experimental
 
-Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. In a narrow message box (a phone's), where they would push Send or Stop out of it, these buttons take a line of their own under the row: two or more up to 480 px wide, one up to 340 px. A single button in a box from 341 to 480 px wide stays in the row, and steps aside while Pi works, as the model chip does, so Stop stays in the row; it comes back when Pi stops. See [`ComposerButtonSpec`](#composerbuttonspec).
+Adds a button on the left of the message box's row, after the app's own (Attach, the model, Plan). Send, Stop, the mic, and Steer, Queue and Interrupt stay on the right. The row is always one row. In a message box up to 480 px wide (a phone's), these buttons are not in the row: they are in one **⋯** button after the model, which opens a sheet that lists them by icon and title, in the order of the row, with a dot on ⋯ and the badge's count in the sheet when a button has one. A choice runs what the button runs. So give each button a clear `title`, which names it in the sheet, and keep its `icon` simple. Above 480 px they are in the row as before. See [`ComposerButtonSpec`](#composerbuttonspec).
 
 ### `replyAction`
 
@@ -589,6 +589,16 @@ fence(spec: FenceSpec): Added<FenceSpec>;
 Since 0.28.0 · Experimental
 
 Registers a component for one or more fenced-code languages. The app renders it with exactly `{ source, lang, streaming }`: the code text, the language label from the fence, and whether the Markdown is still streaming. The component uses the app's Preact and can use the Preact functions in `pocket`. Language matching ignores case. When registrations match the same language, the first one in server module order, then registration order, wins. See [`FenceSpec`](#fencespec), [`FenceProps`](#fenceprops), and [`Added`](#added).
+
+### `surfaceComponent`
+
+```ts
+surfaceComponent(spec: SurfaceRenderSpec): Added<SurfaceRenderSpec>;
+```
+
+Since 0.31.0 · Experimental
+
+Draws a surface component that the module registered on the server with [`web.surfaceComponent`](web.md#surfacecomponent). The app renders it with `{ props, value, set, act, disabled }` ([`SurfaceRenderProps`](#surfacerenderprops)), in a Preact component of the module's own. The renderer is the owner's installed code, never the card's. A surface component in a browser without this module shows its text. See [`SurfaceRenderSpec`](#surfacerenderspec) and [`Added`](#added).
 
 ### `mathInline`
 
@@ -783,7 +793,7 @@ A button on the rail.
 - `iconPath`: an icon of your own, as the `d` of a stroked SVG path in a 24 × 24 box.
 - `badge`: a short count or word on the button. `0`, `NaN`, `-Infinity`, `""`, `"0"`, `null`, and `false` show no badge, as the app's own counts do at 0. A count that is too large shows a maximum with `+`. Long text is cut, also in the button's label, without cutting a character in two. [Limits](limits.md#browser-modules) gives the numbers.
 
-Modules' rail buttons have a fixed height together. When they need more, they scroll.
+The Tools drawer scrolls to show all the buttons.
 
 ### `MenuSpec`
 
@@ -1064,7 +1074,7 @@ Since 0.20.0 · Experimental
 
 An action on sessions: its `label` (past 24 characters, cut with "…"), and `run` or `sheet`. By default (`access: "steer"`), only people who can steer see it. Give `access: "view"` for an action that changes nothing, which viewers may use too.
 
-With `icon` or `iconPath`, the action is also a button on each row, beside archive, pin, and mark unread, where a mouse hovers or the keyboard focuses. Only the first such action gets a button: rows keep room for their titles. Touch screens use the row's sheet. `run` gets the ids of the sessions. The sheet gets them as the prop `sessions`. From the bar, they are the selected sessions that the list shows, and the selection then ends. From a row's sheet, it is that session. When `run` throws or rejects, a notice says so.
+Rows draw no buttons on hover: the action is in the menu of a right-click (or Shift+F10, or the Menu key, on a focused row), in the sheet of a long press, and in the bar. `icon` and `iconPath` no longer draw a button on rows. `run` gets the ids of the sessions. The sheet gets them as the prop `sessions`. From the bar, they are the selected sessions that the list shows, and the selection then ends. From a row's sheet, it is that session. When `run` throws or rejects, a notice says so.
 
 ### `SessionFilterSpec`
 
@@ -1289,6 +1299,35 @@ type SheetProps<P extends object = object> = P & PageProps;
 Since 0.14.0 · Stable
 
 What a sheet's component gets: the fields of the `props` that `openSheet` gave, and `pocket` and `close`.
+
+### `SurfaceRenderSpec`
+
+```ts
+interface SurfaceRenderSpec {
+    type: string;
+    render: ComponentType<SurfaceRenderProps>;
+}
+```
+
+Since 0.31.0 · Experimental
+
+The type the server registered, and the Preact component the app renders for each component of it.
+
+### `SurfaceRenderProps`
+
+```ts
+interface SurfaceRenderProps {
+    props: Record<string, unknown>;
+    value: unknown;
+    set(next: unknown): void;
+    act(button: string): void;
+    disabled: boolean;
+}
+```
+
+Since 0.31.0 · Experimental
+
+What the renderer gets. `props` are the component's props, with expressions worked out. `value` is the data at its `bind` path, and `set` changes it for everyone, after the server checks it against `bind`. `act` presses a Button of the card by its id: a component makes no new kinds of action. `disabled` is true when the card ended or this person may not use it.
 
 ### `FenceSpec`
 

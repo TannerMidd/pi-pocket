@@ -11,6 +11,7 @@ import {
     createHmac,
     createPrivateKey,
     randomBytes,
+    randomUUID,
     sign,
 } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -40,6 +41,8 @@ export const DEFAULT_PREFS: PushPrefs = Object.freeze({
 });
 export type StoredSubscription = PushSubscriptionJson & {
     userId: string;
+    device: string;
+    credential: string;
     createdAt: number;
     userAgent?: string;
 };
@@ -226,7 +229,13 @@ export async function sendPush(
     subscription: PushSubscriptionJson,
     message: PushMessage,
     vapid: VapidKeys,
-    options: { subject?: string; ttl?: number; urgency?: Urgency; fetch?: typeof fetch } = {},
+    options: {
+        subject?: string;
+        ttl?: number;
+        urgency?: Urgency;
+        fetch?: typeof fetch;
+        device?: string;
+    } = {},
 ): Promise<number> {
     const payload: PushMessage = {
         title: clip(message.title, MAX_TITLE),
@@ -242,7 +251,10 @@ export async function sendPush(
         payload.approval = message.approval;
     }
 
-    const body = encryptPayload(JSON.stringify(payload), subscription.keys);
+    const body = encryptPayload(
+        JSON.stringify({ ...payload, device: options.device }),
+        subscription.keys,
+    );
     const headers: Record<string, string> = {
         "Content-Encoding": "aes128gcm",
         "Content-Type": "application/octet-stream",
@@ -355,8 +367,11 @@ interface PushFile {
 export class PushStore {
     readonly file: string;
     #data: PushFile;
+    readonly #credential: (id: string) => string | undefined;
+    #revision = 0;
 
-    constructor(directory: string) {
+    constructor(directory: string, credential: (id: string) => string | undefined) {
+        this.#credential = credential;
         mkdirSync(directory, { recursive: true, mode: 0o700 });
         this.file = join(directory, "push.json");
 
@@ -370,7 +385,11 @@ export class PushStore {
                 prefs: loaded.prefs ?? {},
             };
 
-            if (loaded.vapid === undefined) {
+            const count = this.#data.subscriptions.length;
+
+            this.#data.subscriptions = this.#active();
+
+            if (loaded.vapid === undefined || this.#data.subscriptions.length !== count) {
                 this.save();
             }
         } else {
@@ -387,44 +406,108 @@ export class PushStore {
         return { ...this.#data.vapid };
     }
 
+    #active(userId?: string): StoredSubscription[] {
+        return this.#data.subscriptions.filter(
+            (sub) =>
+                (userId === undefined || sub.userId === userId) &&
+                typeof sub.device === "string" &&
+                sub.device !== "" &&
+                typeof sub.credential === "string" &&
+                sub.credential === this.#credential(sub.userId),
+        );
+    }
+
+    get revision(): number {
+        return this.#revision;
+    }
+
     subscriptions(userId?: string): StoredSubscription[] {
-        return this.#data.subscriptions
-            .filter((sub) => userId === undefined || sub.userId === userId)
-            .map((sub) => ({ ...sub }));
+        return this.#active(userId).map((sub) => ({ ...sub }));
+    }
+
+    deviceUser(device: string): string | undefined {
+        return this.#active().find((sub) => sub.device === device)?.userId;
+    }
+
+    #saveSubscriptions(next: StoredSubscription[]): void {
+        const previous = this.#data.subscriptions;
+
+        this.#data.subscriptions = next;
+
+        try {
+            this.save();
+        } catch (error) {
+            this.#data.subscriptions = previous;
+
+            throw error;
+        }
     }
 
     /** Add a browser subscription; one with the same endpoint is replaced (it may move to another user). */
-    subscribe(userId: string, subscription: PushSubscriptionJson, userAgent?: string): void {
+    subscribe(
+        userId: string,
+        subscription: PushSubscriptionJson,
+        userAgent?: string,
+        previousDevice?: string,
+    ): string {
         const clean = validateSubscription(subscription);
-        const stored: StoredSubscription = { ...clean, userId, createdAt: Date.now() };
+        const credential = this.#credential(userId);
+
+        if (!credential) {
+            throw new Error("Sign in first");
+        }
+
+        const stored: StoredSubscription = {
+            ...clean,
+            userId,
+            credential,
+            device: randomUUID(),
+            createdAt: Date.now(),
+        };
 
         if (userAgent !== undefined && userAgent !== "") {
             stored.userAgent = userAgent.slice(0, 300);
         }
 
-        const others = this.#data.subscriptions.filter((sub) => sub.endpoint !== clean.endpoint);
+        const others = this.#active().filter(
+            (sub) =>
+                sub.endpoint !== clean.endpoint &&
+                (sub.userId !== userId || sub.device !== previousDevice),
+        );
         const theirs = others.filter((sub) => sub.userId === userId);
         const dropped = new Set(theirs.slice(0, Math.max(0, theirs.length - (MAX_DEVICES - 1))));
 
-        this.#data.subscriptions = [...others.filter((sub) => !dropped.has(sub)), stored];
-        this.save();
+        this.#revision++;
+        this.#saveSubscriptions([...others.filter((sub) => !dropped.has(sub)), stored]);
+
+        return stored.device;
     }
 
     /** Remove a subscription; when `userId` is given, only if it belongs to them. */
     unsubscribe(endpoint: string, userId?: string): boolean {
-        const before = this.#data.subscriptions.length;
-
-        this.#data.subscriptions = this.#data.subscriptions.filter(
+        const next = this.#data.subscriptions.filter(
             (sub) => sub.endpoint !== endpoint || (userId !== undefined && sub.userId !== userId),
         );
 
-        if (this.#data.subscriptions.length === before) {
+        if (this.#data.subscriptions.length === next.length) {
             return false;
         }
 
-        this.save();
+        this.#saveSubscriptions(next);
 
         return true;
+    }
+
+    /** Without a matching browser binding, no device of this person can safely keep its subscription. */
+    revokeDevice(userId: string, device?: string): void {
+        this.#revision++;
+        const known = this.#active(userId).some((sub) => sub.device === device);
+
+        this.#saveSubscriptions(
+            this.#active().filter(
+                (sub) => sub.userId !== userId || (known && sub.device !== device),
+            ),
+        );
     }
 
     removeUser(userId: string): void {
@@ -460,7 +543,7 @@ export class PushStore {
         message: PushMessage,
         options: { urgency?: Urgency; fetch?: typeof fetch; subject?: string } = {},
     ): Promise<number> {
-        const targets = this.subscriptions(userId);
+        const targets = this.#active(userId);
 
         if (targets.length === 0) {
             return 0;
@@ -470,6 +553,7 @@ export class PushStore {
         const results = await Promise.allSettled(
             targets.map((sub) =>
                 sendPush(sub, message, vapid, {
+                    device: sub.device,
                     urgency: options.urgency,
                     fetch: options.fetch,
                     subject: options.subject,
@@ -477,7 +561,7 @@ export class PushStore {
             ),
         );
         let accepted = 0;
-        const gone = new Set<string>();
+        const gone = new Set<StoredSubscription>();
 
         results.forEach((result, index) => {
             if (result.status !== "fulfilled") {
@@ -487,16 +571,13 @@ export class PushStore {
             if (result.value >= 200 && result.value < 300) {
                 accepted++;
             } else if (result.value === 404 || result.value === 410) {
-                gone.add(targets[index]?.endpoint ?? "");
+                gone.add(targets[index]!);
             }
         });
 
         if (gone.size > 0) {
             try {
-                this.#data.subscriptions = this.#data.subscriptions.filter(
-                    (sub) => !(sub.userId === userId && gone.has(sub.endpoint)),
-                );
-                this.save();
+                this.#saveSubscriptions(this.#data.subscriptions.filter((sub) => !gone.has(sub)));
             } catch {
                 // Saving failed (disk full, permissions); the stale subscription is retried and dropped next time.
             }

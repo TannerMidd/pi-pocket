@@ -71,6 +71,7 @@ export async function createWorktree(
     cwd: string,
     folder: string,
     label: string,
+    guard?: { root(): void; created(tree: Worktree): void; check(tree: Worktree): void },
 ): Promise<{ worktree: Worktree; cwd: string; skipped: string[] }> {
     if (workspaceScheme(cwd) !== undefined) {
         throw new HttpError(400, "Remote workspaces do not support worktrees.");
@@ -106,8 +107,14 @@ export async function createWorktree(
     const name = `${slug}-${randomUUID().slice(0, 6)}`;
     const worktree: Worktree = { path: join(folder, name), branch: `pocket/${name}`, source: cwd };
 
-    mkdirSync(folder, { recursive: true });
+    if (guard === undefined) {
+        mkdirSync(folder, { recursive: true });
+    } else {
+        guard.root();
+    }
+
     await git(root, ["worktree", "add", "-b", worktree.branch, worktree.path, "HEAD"]);
+    guard?.created(worktree);
 
     try {
         // Uncommitted changes to tracked files, as a commit object that changes nothing here; empty when there are none.
@@ -121,7 +128,7 @@ export async function createWorktree(
 
         return { worktree, cwd: resolve(worktree.path, within), skipped };
     } catch (error) {
-        await discardWorktree(worktree).catch(() => undefined);
+        await discardWorktree(worktree, () => guard?.check(worktree)).catch(() => undefined);
 
         throw new HttpError(500, `The worktree could not be set up: ${describe(error)}`);
     }
@@ -171,7 +178,13 @@ export async function sourceFolders(worktree: Worktree): Promise<(cwd: string) =
  * Remove a worktree's folder; its branch stays, with whatever was committed on it. One with uncommitted changes is
  * kept, unless `force`.
  */
-export async function removeWorktree(worktree: Worktree, force: boolean): Promise<void> {
+export async function removeWorktree(
+    worktree: Worktree,
+    force: boolean,
+    check?: () => void,
+): Promise<void> {
+    check?.();
+
     if (!existsSync(worktree.path)) {
         return;
     }
@@ -181,6 +194,8 @@ export async function removeWorktree(worktree: Worktree, force: boolean): Promis
     if (root === undefined) {
         throw new HttpError(409, `${worktree.source} is not in a git repository anymore.`);
     }
+
+    check?.();
 
     try {
         await git(root, ["worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
@@ -197,8 +212,8 @@ export async function removeWorktree(worktree: Worktree, force: boolean): Promis
 }
 
 /** Undo a worktree that a session never got: its folder and its branch. */
-export async function discardWorktree(worktree: Worktree): Promise<void> {
-    await removeWorktree(worktree, true);
+export async function discardWorktree(worktree: Worktree, check?: () => void): Promise<void> {
+    await removeWorktree(worktree, true, check);
     const root = await repositoryOf(worktree.source);
 
     if (root !== undefined) {

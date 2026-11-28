@@ -3,12 +3,13 @@
  * conversation yet. `pocket.deleted` keeps each removed session, the queue for such a purge. A removal is one commit,
  * then the files: after a restart, `resume` goes on with the files.
  */
-import { existsSync } from "node:fs";
-import { lstat, opendir, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import type { BigIntStats } from "node:fs";
+import { lstat, opendir, rmdir, unlink } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
+import { retireArtifacts, startAssetSweep } from "./artifacts.ts";
 import {
     ArtifactSharesDoc,
     DeletedDoc,
@@ -22,6 +23,7 @@ import {
 } from "./docs.ts";
 import { describe, HttpError } from "./errors.ts";
 import { git } from "./git.ts";
+import type { ManagedFolderProof } from "./managed-storage.ts";
 import { sessionKey } from "./memory.ts";
 import { isEnvFile } from "./secrets.ts";
 import { inWorktree, removeWorktree, type Worktree } from "./worktrees.ts";
@@ -45,8 +47,7 @@ export type SessionPlan = {
     archived: boolean;
     blocked?: string;
     worktree?: { path: string; branch: string; bytes: number; state: WorktreeState };
-    /** Its uploads; `kept`: a live fork reads them, so they stay. */
-    uploads: { bytes: number; kept: boolean };
+    uploads: UploadEstimate;
     logs: number;
     ends: {
         schedules: number;
@@ -59,6 +60,17 @@ export type SessionPlan = {
         lessons: number;
     };
 };
+
+type UploadEstimate = {
+    bytes: number;
+    removableBytes: number;
+    retainedBytes: number;
+    kept: boolean;
+};
+
+function noUploads(): UploadEstimate {
+    return { bytes: 0, removableBytes: 0, retainedBytes: 0, kept: false };
+}
 
 export type CleanupOutcome = { id: number; done: boolean; why?: string; bytes?: number };
 
@@ -166,6 +178,98 @@ async function hasIgnoredEnv(path: string): Promise<boolean> {
     return false;
 }
 
+type UploadHold = "all" | Set<string> | undefined;
+type UploadRetention = (owner: number) => UploadHold;
+
+function validId(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** Retention is not authorization. A damaged catalogue must not grant reads or lose files. */
+function uploadRetention(
+    sessions: Record<string, SessionMeta> | undefined,
+    deleted: Record<string, RemovedSession>,
+    leaving: ReadonlySet<number>,
+): UploadRetention {
+    const holds = new Map<number, Exclude<UploadHold, undefined>>();
+    let unknownOwner = sessions === undefined;
+
+    for (const [key, meta] of Object.entries(sessions ?? {})) {
+        if (leaving.has(Number(key))) {
+            continue;
+        }
+
+        holds.set(Number(key), "all");
+
+        if (meta.forkedFrom === undefined && meta.inheritedUploads === undefined) {
+            continue;
+        }
+
+        const ancestors = new Set<number>();
+        let uncertain = !Array.isArray(meta.inheritedUploads);
+        let link = meta.forkedFrom;
+
+        while (link !== undefined) {
+            if (!validId(link?.id) || ancestors.has(link.id)) {
+                unknownOwner = true;
+                uncertain = true;
+                break;
+            }
+
+            ancestors.add(link.id);
+            const source = sessions?.[String(link.id)] ?? deleted[String(link.id)];
+
+            if (source === undefined) {
+                // A missing record can hide an earlier source whose ID we cannot recover.
+                unknownOwner = true;
+                uncertain = true;
+                break;
+            }
+
+            link = source.forkedFrom;
+        }
+
+        for (const ref of Array.isArray(meta.inheritedUploads) ? meta.inheritedUploads : []) {
+            const match = typeof ref === "string" && /^([1-9]\d*)\/([^/\\\x00-\x1f]+)$/u.exec(ref);
+            const owner = match ? Number(match[1]) : NaN;
+
+            if (!match || !validId(owner) || match[2] === "." || match[2] === "..") {
+                uncertain = true;
+                // A damaged name can still identify a source outside the surviving lineage.
+                const source = typeof ref === "string" ? Number(ref.split("/", 1)[0]) : NaN;
+
+                if (validId(source)) {
+                    ancestors.add(source);
+                }
+
+                continue;
+            }
+
+            if (!ancestors.has(owner)) {
+                uncertain = true;
+                ancestors.add(owner);
+            }
+
+            const names = holds.get(owner) ?? new Set<string>();
+
+            if (names !== "all") {
+                names.add(match[2]!);
+                holds.set(owner, names);
+            }
+        }
+
+        if (uncertain) {
+            unknownOwner ||= ancestors.size === 0;
+
+            for (const owner of ancestors) {
+                holds.set(owner, "all");
+            }
+        }
+    }
+
+    return (owner) => (unknownOwner ? "all" : holds.get(owner));
+}
+
 export class SessionCleanup {
     readonly #app: PocketApp;
 
@@ -193,47 +297,139 @@ export class SessionCleanup {
         });
     }
 
-    #uploads(id: number): string {
-        return join(this.#app.dataDir, "uploads", String(id));
+    async #retention(leaving: ReadonlySet<number>): Promise<UploadRetention> {
+        const sessions = await this.#app.harness.snapshot(SessionsDoc, context);
+        const deleted = await this.#app.harness.snapshot(DeletedDoc, context);
+
+        return uploadRetention(sessions?.items, deleted?.items ?? {}, leaving);
     }
 
-    #logs(id: number): string {
-        return join(this.#app.dataDir, "background", String(id));
-    }
+    /** The plan and sweep use the same classification. An unknown layout stays, even without known readers. */
+    async #flatFiles(
+        store: "uploads" | "background",
+        id: number,
+        hold: UploadHold,
+        sweep?: { proof: ManagedFolderProof | undefined; removed(bytes: number): void },
+    ): Promise<UploadEstimate> {
+        const result = noUploads();
+        const storage = this.#app.managedStorage;
+        const checkedFolder = () =>
+            sweep === undefined
+                ? storage.folder(store, String(id))
+                : storage.verifiedFolder(store, String(id), sweep.proof);
+        const folder = checkedFolder();
 
-    /**
-     * The sessions whose uploads a live session reads: itself, and the sessions it was forked from (`workspace.ts`).
-     * `items`: the sessions as a transaction reads them, instead of the app's.
-     */
-    #readByForks(leaving: ReadonlySet<number>, items?: Record<string, SessionMeta>): Set<number> {
-        const read = new Set<number>();
-        const live =
-            items === undefined
-                ? this.#app.sessions().map((session) => session.id)
-                : Object.entries(items)
-                      .filter(([, meta]) => meta.pip === undefined)
-                      .map(([key]) => Number(key));
-        const forkedFrom = (id: number) =>
-            items?.[String(id)]?.forkedFrom ??
-            this.#app.forkedFrom(id as unknown as ConversationId);
+        if (folder === undefined) {
+            return result;
+        }
 
-        for (const id of live) {
-            if (leaving.has(id)) {
-                continue;
+        const keepAll = async () => {
+            if (checkedFolder() !== folder) {
+                throw new Error("The managed folder changed.");
             }
 
-            let at = forkedFrom(id);
+            result.kept = true;
 
-            for (let depth = 0; at !== undefined && depth < 64; depth++) {
-                read.add(at.id);
-                at = forkedFrom(at.id);
+            if (sweep === undefined) {
+                result.bytes = result.retainedBytes = await sizeOf(folder);
+            }
+
+            return result;
+        };
+
+        if (hold === "all") {
+            return keepAll();
+        }
+
+        const entries = new Map<string, Pick<BigIntStats, "size" | "dev" | "ino" | "ctimeNs">>();
+        const dir = await opendir(folder);
+
+        for await (const entry of dir) {
+            if (!entry.isFile() || entries.size >= MAX_COUNTED) {
+                return keepAll();
+            }
+
+            const stat = await lstat(join(folder, entry.name), { bigint: true });
+
+            if (!stat.isFile() || !stat.ino || stat.nlink !== 1n) {
+                return keepAll();
+            }
+
+            const { size, dev, ino, ctimeNs } = stat;
+
+            entries.set(entry.name, { size, dev, ino, ctimeNs });
+        }
+
+        if (hold !== undefined && [...hold].some((name) => !entries.has(name))) {
+            return keepAll();
+        }
+
+        result.kept = hold !== undefined;
+
+        for (const [name, stat] of entries) {
+            const size = Number(stat.size);
+
+            result.bytes += size;
+
+            if (hold?.has(name)) {
+                result.retainedBytes += size;
+            } else {
+                result.removableBytes += size;
+
+                if (sweep !== undefined) {
+                    const path = join(folder, name);
+                    const current = await lstat(path, { bigint: true });
+
+                    if (
+                        checkedFolder() !== folder ||
+                        current.dev !== stat.dev ||
+                        current.ino !== stat.ino ||
+                        current.ctimeNs !== stat.ctimeNs
+                    ) {
+                        throw new Error("The file changed during cleanup.");
+                    }
+
+                    await unlink(path);
+                    sweep.removed(size);
+                }
             }
         }
 
-        return read;
+        if (sweep !== undefined && !result.kept) {
+            if (checkedFolder() !== folder) {
+                throw new Error("The managed folder changed.");
+            }
+
+            await rmdir(folder);
+        }
+
+        return result;
+    }
+
+    #worktreeName(worktree: Worktree): string {
+        const name = basename(worktree.path);
+
+        if (
+            !name ||
+            name === "." ||
+            name === ".." ||
+            resolve(this.#app.dataDir, "worktrees", name) !== worktree.path
+        ) {
+            throw new Error("Not a managed worktree folder.");
+        }
+
+        return name;
+    }
+
+    #worktreeFolder(worktree: Worktree): string | undefined {
+        return this.#app.managedStorage.folder("worktrees", this.#worktreeName(worktree));
     }
 
     async #worktree(id: ConversationId, worktree: Worktree): Promise<SessionPlan["worktree"]> {
+        if (this.#worktreeFolder(worktree) === undefined) {
+            return undefined;
+        }
+
         const app = this.#app;
         const inside = (cwd: string) => inWorktree(worktree, cwd);
         const mine = new Set(app.conversationsOf(id).map(Number));
@@ -252,13 +448,7 @@ export class SessionCleanup {
         ) {
             state = "shared";
         } else {
-            const status = await git(worktree.path, ["status", "--porcelain"]).catch(
-                () => undefined,
-            );
-
-            if (status === undefined) {
-                return undefined;
-            }
+            const status = await git(worktree.path, ["status", "--porcelain"]);
 
             if (status.trim() !== "") {
                 state = "changes";
@@ -277,7 +467,6 @@ export class SessionCleanup {
 
     async #plan(
         id: ConversationId,
-        readByForks: ReadonlySet<number>,
         docs: {
             hooks: { target: number }[];
             watches: { target: number }[];
@@ -297,7 +486,6 @@ export class SessionCleanup {
         const numbers = new Set(tree.map(Number));
         let schedules = 0;
         let background = 0;
-        let uploads = 0;
         let logs = 0;
 
         for (const each of tree) {
@@ -305,13 +493,27 @@ export class SessionCleanup {
             background += (await app.background.list(each)).filter(
                 (task) => task.status === "running" || task.status === "starting",
             ).length;
-            uploads += await sizeOf(this.#uploads(Number(each)));
-            logs += await sizeOf(this.#logs(Number(each)));
+
+            try {
+                logs += (await this.#flatFiles("background", Number(each), undefined))
+                    .removableBytes;
+            } catch {
+                // An unverified folder contributes no removable bytes.
+            }
         }
 
         const watch = await app.watches.get(id);
-        const worktree =
-            meta.worktree === undefined ? undefined : await this.#worktree(id, meta.worktree);
+        let worktree;
+        let unverified: string | undefined;
+
+        if (meta.worktree !== undefined) {
+            try {
+                worktree = await this.#worktree(id, meta.worktree);
+            } catch {
+                unverified = "Its worktree could not be verified.";
+            }
+        }
+
         const busy = tree.some((each) => app.isBusy(each));
         const blocked =
             meta.archived !== true
@@ -324,7 +526,7 @@ export class SessionCleanup {
                       ? "Its worktree has uncommitted changes. Commit or discard them first."
                       : worktree?.state === "env"
                         ? ENV_STAYS
-                        : undefined;
+                        : unverified;
 
         return {
             id: Number(id),
@@ -333,7 +535,7 @@ export class SessionCleanup {
             archived: meta.archived === true,
             ...(blocked === undefined ? {} : { blocked }),
             ...(worktree === undefined ? {} : { worktree }),
-            uploads: { bytes: uploads, kept: readByForks.has(Number(id)) },
+            uploads: noUploads(),
             logs,
             ends: {
                 schedules,
@@ -367,15 +569,33 @@ export class SessionCleanup {
     async plan(userId: string, ids: readonly unknown[]): Promise<SessionPlan[]> {
         this.#requireOwner(userId);
         const chosen = this.#ids(ids);
-        const readByForks = this.#readByForks(new Set(chosen.map(Number)));
         const docs = await this.#docs();
         const plans: SessionPlan[] = [];
 
         for (const id of chosen) {
-            const plan = await this.#plan(id, readByForks, docs);
+            const plan = await this.#plan(id, docs);
 
             if (plan !== undefined) {
                 plans.push(plan);
+            }
+        }
+
+        const retention = await this.#retention(
+            new Set(plans.filter((plan) => !plan.blocked).map((plan) => plan.id)),
+        );
+
+        for (const plan of plans) {
+            for (const each of this.#app.conversationsOf(plan.id as unknown as ConversationId)) {
+                const uploads = await this.#flatFiles(
+                    "uploads",
+                    Number(each),
+                    plan.blocked ? "all" : retention(Number(each)),
+                ).catch(() => ({ ...noUploads(), kept: true }));
+
+                plan.uploads.bytes += uploads.bytes;
+                plan.uploads.removableBytes += uploads.removableBytes;
+                plan.uploads.retainedBytes += uploads.retainedBytes;
+                plan.uploads.kept ||= uploads.kept;
             }
         }
 
@@ -401,17 +621,27 @@ export class SessionCleanup {
                 continue;
             }
 
-            if (
-                existsSync(meta.worktree.path) &&
-                (await hasIgnoredEnv(meta.worktree.path).catch(() => true))
-            ) {
+            let folder;
+
+            try {
+                folder = this.#worktreeFolder(meta.worktree);
+            } catch (error) {
+                outcomes.push({ id: Number(id), done: false, why: describe(error) });
+                continue;
+            }
+
+            if (folder !== undefined && (await hasIgnoredEnv(folder).catch(() => true))) {
                 outcomes.push({ id: Number(id), done: false, why: ENV_STAYS });
                 continue;
             }
 
-            const bytes = await sizeOf(meta.worktree.path);
+            const bytes = folder === undefined ? 0 : await sizeOf(folder);
 
             try {
+                if (this.#worktreeFolder(meta.worktree) !== folder) {
+                    throw new Error("The worktree changed during cleanup.");
+                }
+
                 await this.#app.commands.removeWorktree(id, user, false);
                 outcomes.push({ id: Number(id), done: true, bytes });
             } catch (error) {
@@ -459,6 +689,7 @@ export class SessionCleanup {
         }
 
         if (removed.size > 0) {
+            startAssetSweep(this.#app);
             await this.#releaseUploads().catch((error: unknown) =>
                 this.#app.log(`Kept uploads could not be checked: ${describe(error)}`),
             );
@@ -473,7 +704,7 @@ export class SessionCleanup {
         leaving: ReadonlySet<number>,
     ): Promise<CleanupOutcome> {
         const app = this.#app;
-        const plan = await this.#plan(id, this.#readByForks(leaving), await this.#docs());
+        const plan = await this.#plan(id, await this.#docs());
 
         if (plan === undefined) {
             return { id: Number(id), done: false, why: "There is no such session." };
@@ -483,12 +714,10 @@ export class SessionCleanup {
             return { id: Number(id), done: false, why: plan.blocked };
         }
 
-        const tree = app.conversationsOf(id).map(Number);
+        const conversations = app.conversationsOf(id);
+        const tree = conversations.map(Number);
         const numbers = new Set(tree);
-        const worktree =
-            plan.worktree?.state === "clean" ? app.sessionMeta(id)?.worktree : undefined;
         const watchTasks: TaskId[] = [];
-        let keepUploads = false;
 
         // The plan took a while (sizes): a run that started meanwhile keeps the session.
         if (tree.some((each) => app.isBusy(each as unknown as ConversationId))) {
@@ -503,21 +732,50 @@ export class SessionCleanup {
                 throw new HttpError(409, "It is not archived.");
             }
 
+            const deleted = await tx.doc(DeletedDoc);
+            // A fork can finish while the plan runs. Include it before queuing any removal.
+            const retention = uploadRetention(sessions.items, deleted.items, leaving);
+
+            const keepUploads = tree.filter((each) => retention(each) !== undefined);
+            const worktree = plan.worktree?.state === "clean" ? meta.worktree : undefined;
+
+            if (
+                worktree !== undefined &&
+                (worktree.path !== plan.worktree?.path || worktree.branch !== plan.worktree.branch)
+            ) {
+                throw new HttpError(409, "The session worktree changed during cleanup.");
+            }
+
+            const folders: NonNullable<RemovedSession["folders"]> = { uploads: {}, background: {} };
+
+            for (const each of tree) {
+                const name = String(each);
+
+                folders.uploads[name] = app.managedStorage.capture("uploads", name);
+                folders.background[name] = app.managedStorage.capture("background", name);
+            }
+
+            if (worktree !== undefined) {
+                folders.worktree = app.managedStorage.capture(
+                    "worktrees",
+                    this.#worktreeName(worktree),
+                );
+            }
+
             delete sessions.items[String(id)];
-            // From this transaction: a fork made while the plan ran reads these uploads too.
-            keepUploads = this.#readByForks(leaving, sessions.items).has(Number(id));
             const record: RemovedSession = {
                 ...(meta.title === undefined ? {} : { title: meta.title }),
                 cwd: meta.cwd,
                 ...(meta.forkedFrom === undefined ? {} : { forkedFrom: meta.forkedFrom }),
                 conversations: tree,
+                folders,
                 by: userId,
                 at: Date.now(),
                 ...(worktree === undefined ? {} : { worktree }),
-                ...(keepUploads ? { keepUploads: [Number(id)] } : {}),
+                ...(keepUploads.length === 0 ? {} : { keepUploads }),
             };
 
-            (await tx.doc(DeletedDoc)).items[String(id)] = record;
+            deleted.items[String(id)] = record;
             const hooks = await tx.doc(HooksDoc);
 
             for (const [key, hook] of Object.entries(hooks.items)) {
@@ -535,12 +793,8 @@ export class SessionCleanup {
                 }
             }
 
-            const shares = await tx.doc(ArtifactSharesDoc);
-
-            for (const [key, share] of Object.entries(shares.items)) {
-                if (numbers.has(Number(share.conversation))) {
-                    delete shares.items[key];
-                }
+            for (const conversation of conversations) {
+                await retireArtifacts(tx, conversation, null);
             }
 
             const links = await tx.doc(PublicLinksDoc);
@@ -566,24 +820,14 @@ export class SessionCleanup {
 
         const record = (await app.harness.snapshot(DeletedDoc, context))?.items[String(id)];
 
-        if (record !== undefined) {
-            await this.#finish(id, record);
-        }
+        const bytes = record === undefined ? 0 : await this.#finish(id, record);
 
-        const worktreeGone = worktree !== undefined && !existsSync(worktree.path);
-
-        return {
-            id: Number(id),
-            done: true,
-            bytes:
-                (worktreeGone ? plan.worktree!.bytes : 0) +
-                (keepUploads ? 0 : plan.uploads.bytes) +
-                plan.logs,
-        };
+        return { id: Number(id), done: true, bytes };
     }
 
     /** Each step can run again: a restart runs what is left. */
-    async #finish(id: ConversationId, record: RemovedSession): Promise<void> {
+    async #finish(id: ConversationId, record: RemovedSession): Promise<number> {
+        let bytes = 0;
         const app = this.#app;
         const left: string[] = [];
 
@@ -619,30 +863,64 @@ export class SessionCleanup {
 
         await step("its PR watch", () => app.watches.stop(id));
 
-        if (record.worktree !== undefined) {
-            await step(`its worktree ${record.worktree.path}`, async () => {
-                // One may have come since the plan, or before a restart.
-                if (
-                    existsSync(record.worktree!.path) &&
-                    (await hasIgnoredEnv(record.worktree!.path).catch(() => true))
-                ) {
+        const tree = record.worktree;
+
+        if (tree !== undefined) {
+            await step(`its worktree ${tree.path}`, async () => {
+                const name = this.#worktreeName(tree);
+                const checkedFolder = () =>
+                    app.managedStorage.verifiedFolder("worktrees", name, record.folders?.worktree);
+                const folder = checkedFolder();
+
+                if (folder === undefined) {
+                    return;
+                }
+
+                if (await hasIgnoredEnv(folder).catch(() => true)) {
                     throw new Error(ENV_STAYS);
                 }
 
-                await removeWorktree(record.worktree!, false);
+                const size = await sizeOf(folder);
+
+                await removeWorktree(tree, false, () => {
+                    if (checkedFolder() !== folder) {
+                        throw new Error("The worktree changed during cleanup.");
+                    }
+                });
+                bytes += size;
             });
         }
 
-        for (const each of record.conversations) {
-            if (!(record.keepUploads ?? []).includes(each)) {
-                await step("its uploads", () =>
-                    rm(this.#uploads(each), { recursive: true, force: true }),
-                );
-            }
+        const retention = await this.#retention(new Set());
+        const kept: number[] = [];
 
-            await step("its background logs", () =>
-                rm(this.#logs(each), { recursive: true, force: true }),
-            );
+        const removed = (size: number) => {
+            bytes += size;
+        };
+
+        for (const each of record.conversations) {
+            // Leave the root queued if its guard or a filesystem operation fails.
+            kept.push(each);
+            await step("its uploads", async () => {
+                const uploads = await this.#flatFiles("uploads", each, retention(each), {
+                    proof: record.folders?.uploads?.[String(each)],
+                    removed,
+                });
+
+                if (!uploads.kept) {
+                    kept.pop();
+                }
+            });
+            await step("its background logs", async () => {
+                const logs = await this.#flatFiles("background", each, undefined, {
+                    proof: record.folders?.background?.[String(each)],
+                    removed,
+                });
+
+                if (logs.kept) {
+                    throw new Error("Its background logs have an unexpected layout.");
+                }
+            });
         }
 
         if (left.length > 0) {
@@ -655,28 +933,51 @@ export class SessionCleanup {
             if (item !== undefined) {
                 item.done = Date.now();
 
+                if (kept.length > 0) {
+                    item.keepUploads = kept;
+                } else {
+                    delete item.keepUploads;
+                }
+
                 if (left.length > 0) {
                     item.left = left;
                 }
             }
         }, context);
+
+        return bytes;
     }
 
     /** Once no session that stays reads them. */
     async #releaseUploads(): Promise<void> {
         const items = (await this.#app.harness.snapshot(DeletedDoc, context))?.items ?? {};
-        const read = this.#readByForks(new Set());
+        const retention = await this.#retention(new Set());
 
         for (const [key, record] of Object.entries(items)) {
             const gone: number[] = [];
 
             for (const each of record.keepUploads ?? []) {
-                if (!read.has(each)) {
-                    await rm(this.#uploads(each), { recursive: true, force: true }).then(
-                        () => gone.push(each),
-                        (error: unknown) =>
-                            this.#app.log(`Uploads ${each} could not go: ${describe(error)}`),
-                    );
+                const proof = record.folders?.uploads?.[String(each)];
+
+                if (
+                    record.done === undefined ||
+                    !record.conversations.includes(each) ||
+                    proof === undefined
+                ) {
+                    continue;
+                }
+
+                try {
+                    const uploads = await this.#flatFiles("uploads", each, retention(each), {
+                        proof,
+                        removed: () => {},
+                    });
+
+                    if (!uploads.kept) {
+                        gone.push(each);
+                    }
+                } catch (error) {
+                    this.#app.log(`Uploads ${each} could not go: ${describe(error)}`);
                 }
             }
 

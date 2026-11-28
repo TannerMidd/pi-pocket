@@ -38,15 +38,29 @@ test("on a phone the zoom that nobody chose is the width of the room, and the pa
 
 test("a frame's size is its device's, or the person's own kept between 200 and 4000", () => {
     assert.deepEqual(devices.sizeOf("mobile"), { w: 390, h: 844 });
-    assert.deepEqual(devices.sizeOf("desktop"), { w: 1280, h: 800 });
+    assert.deepEqual(devices.sizeOf("desktop"), { w: 1920, h: 1080 });
     assert.deepEqual(devices.sizeOf("slide"), { w: 1280, h: 720 });
     assert.deepEqual(devices.sizeOf("custom", { w: 100, h: 9000 }), { w: 200, h: 4000 });
     assert.deepEqual(devices.sizeOf("custom", { w: "700", h: "x" }), { w: 700, h: 600 });
-    assert.deepEqual(devices.sizeOf("nonsense"), { w: 1280, h: 800 });
+    assert.deepEqual(devices.sizeOf("nonsense"), { w: 1920, h: 1080 });
     assert.equal(devices.exportViewport("tablet", {}), "tablet");
     assert.equal(devices.exportViewport("custom", { w: 400, h: 400 }), "mobile");
     assert.equal(devices.exportViewport("custom", { w: 900, h: 400 }), "tablet");
     assert.equal(devices.exportViewport("slide", { w: 1280, h: 720 }), "desktop");
+});
+
+test("with no size chosen, the canvas shows a desktop page on a wide screen and a phone's on a phone", async () => {
+    const { resolveDevice } = await load("state");
+
+    // The panel beside the conversation is narrow, but the screen is wide: a desktop page.
+    assert.equal(resolveDevice("auto", 600, 1920), "desktop");
+    assert.equal(resolveDevice("auto", 900, 1440), "desktop");
+    assert.equal(resolveDevice("auto", 390, 390), "mobile");
+    // No screen width known: the panel's decides.
+    assert.equal(resolveDevice("auto", 390, 0), "mobile");
+    assert.equal(resolveDevice("auto", 1200, 0), "desktop");
+    // A size someone chose is kept.
+    assert.equal(resolveDevice("tablet", 390, 390), "tablet");
 });
 
 test("fit never scales a page past 100%, and keeps a margin; a number is a number", () => {

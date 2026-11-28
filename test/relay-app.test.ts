@@ -40,6 +40,7 @@ export default (_host, web) => {
     globalThis.relayMock = { push: (events) => { queue.push(events); wake(); } };
     const connector = {
         kind: "mock",
+        authenticatedAuthors: true,
         label: "Mock",
         shape: "stream",
         fields: [{ name: "token", label: "Token", type: "secret", required: true }],

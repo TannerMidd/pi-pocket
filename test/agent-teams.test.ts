@@ -37,7 +37,6 @@ before(async () => {
 
     app = await openApp(model);
     offerSubagents(app);
-    await app.setExtensionEnabled(owner(app), "agent-teams.ts", true);
 });
 after(async () => {
     await app?.close();
@@ -56,6 +55,12 @@ test("the team tool and the linked message tell Pi that the answer comes by itse
 
     assert.match(source, /Its final answer comes to you by itself when its run ends/);
     assert.match(source, /do not ask for it, and do not poll/);
+    const leadRequest = requests.find((request) => request.includes("START_A_TEAM"));
+
+    assert.ok(leadRequest);
+    assert.match(leadRequest, /silence as a stall or duplicating the work, check team list once/);
+    assert.match(leadRequest, /proves neither progress nor failure/);
+    assert.match(leadRequest, /Ask the worker for the missing fact only if you still need it/);
 
     await until(
         async () =>
@@ -66,8 +71,10 @@ test("the team tool and the linked message tell Pi that the answer comes by itse
     );
     const target = (await modelTexts(app, started.id as never)).join("\n");
 
-    assert.match(target, /your final answer reaches it by itself when your run ends/);
-    assert.match(target, /do not send thanks or acknowledgements/);
+    assert.match(target, /one short update.*affects the lead's next decision/);
+    assert.match(target, /do not send routine progress/);
+    assert.match(target, /your final answer reaches it by itself when your run ends/i);
+    assert.match(target, /do not send it again or acknowledge/);
 });
 
 test("agents write to each other in their person's language, ASD-STE100 in English: team messages, replies, and subagent tasks (#239)", async () => {

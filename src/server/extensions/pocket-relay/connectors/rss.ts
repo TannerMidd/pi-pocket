@@ -365,6 +365,8 @@ function cut(value: string): string {
 }
 
 async function poll(context: RelayContext): Promise<void> {
+    context.signal.throwIfAborted();
+
     const address = String(context.values.url ?? "").trim();
     const state = context.state;
     const headers: Record<string, string> = {
@@ -419,7 +421,11 @@ async function poll(context: RelayContext): Promise<void> {
         throw new Error(`The feed failed with status ${response.status}.`);
     }
 
-    const feed = parseFeed(await readCapped(response));
+    const raw = await readCapped(response);
+
+    context.signal.throwIfAborted();
+
+    const feed = parseFeed(raw);
     const host = new URL(address).host;
     const seen = Array.isArray(state.seen) ? (state.seen as string[]) : undefined;
     const known = new Set(seen ?? []);
@@ -459,6 +465,7 @@ async function poll(context: RelayContext): Promise<void> {
     const etag = response.headers.get("etag");
     const lastModified = response.headers.get("last-modified");
 
+    context.signal.throwIfAborted();
     context.save({
         seen: [...keys, ...(seen ?? []).filter((key) => !keys.has(key))].slice(0, SEEN_LIMIT),
         ...(etag === null ? {} : { etag }),

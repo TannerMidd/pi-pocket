@@ -103,13 +103,14 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
     const tool = defineTool({
         name: "background",
         description:
-            "Run a command in the background, without waiting for it: a dev server, a watcher, a long build or test run. It runs in the session's folder, as bash does, and goes on across a restart of the server. Actions: start (command; notify, default true: you get a message when it ends, with its exit code and the end of its output; quietMinutes: stop it after so long with no output, 0 for none), output (id: what it printed since you last read, up to 20,000 characters), list (this session's tasks and how they ended), stop (id).",
+            "Run a background command across server restarts. start takes a command. To resume an ended job, also pass jobId and expectedAttempt. Each launch has its own output and attempt ID. output reads new output by id (20,000 characters max); list shows this session's commands. jobs shows current attempts and recent adverse outcomes here and in authorized immediate workers, without their logs. stop takes id for a single task, or jobId and expectedAttempt for a job.",
         parameters: obj(
             {
                 action: union([
                     literal("start"),
                     literal("output"),
                     literal("list"),
+                    literal("jobs"),
                     literal("stop"),
                 ]),
                 command: opt(str({ description: "start: the bash command to run" })),
@@ -124,7 +125,17 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                             "start: stop it after this many minutes with no output; 0: never (a server). Default: the owner's setting",
                     }),
                 ),
-                id: opt(str({ description: "output, stop: the task's id, from start or list" })),
+                id: opt(str({ description: "output, stop: a task ID from this session" })),
+                after: opt(
+                    str({
+                        description:
+                            "jobs: next worker page, from the previous result's next field",
+                    }),
+                ),
+                jobId: opt(str({ description: "start, stop: logical job in this session" })),
+                expectedAttempt: opt(
+                    str({ description: "start, stop: current attempt ID from jobs" }),
+                ),
             },
             { open: true },
         ),
@@ -136,6 +147,37 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
             const key = `${api.taskId}:${api.callId}`;
             const line = (item: BackgroundTask) =>
                 `${item.id}: ${outcome(item)}, ${item.status === "running" ? `for ${duration(Date.now() - item.startedAt)}` : `after ${duration((item.endedAt ?? item.startedAt) - item.startedAt)}`} · ${background.describe(api.conversationId, item, 200)}`;
+
+            const guarded = args.jobId !== undefined || args.expectedAttempt !== undefined;
+
+            if (
+                guarded &&
+                (args.jobId === undefined ||
+                    args.expectedAttempt === undefined ||
+                    args.id !== undefined ||
+                    (args.action !== "start" && args.action !== "stop"))
+            ) {
+                throw new Error(
+                    "For a job start or stop, give both jobId and expectedAttempt, not id.",
+                );
+            }
+
+            if (args.after !== undefined && args.action !== "jobs") {
+                throw new Error("Only jobs takes a page cursor (after).");
+            }
+
+            if (
+                (guarded && typeof background.controlJob !== "function") ||
+                (args.action === "jobs" && typeof host.jobSupervision !== "function")
+            ) {
+                throw new Error("Job supervision needs a newer running server.");
+            }
+
+            if (args.action === "jobs") {
+                return reply(
+                    JSON.stringify(await host.jobSupervision(api.conversationId, args.after)),
+                );
+            }
 
             if (args.action === "list") {
                 const items = await background.list(api.conversationId);
@@ -152,21 +194,31 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                     throw new Error("start needs a command.");
                 }
 
-                const requestedBy = host.requesterOf(api.conversationId);
-                const item = await background.start(
-                    api.conversationId,
-                    {
-                        command: args.command,
-                        key,
-                        ...(args.notify === undefined ? {} : { notify: args.notify }),
-                        ...(typeof args.quietMinutes === "number" &&
-                        Number.isFinite(args.quietMinutes)
-                            ? { quietMinutes: args.quietMinutes }
-                            : {}),
-                        ...(requestedBy === undefined ? {} : { requestedBy }),
-                    },
-                    context.abortSignal,
-                );
+                const request = {
+                    command: args.command,
+                    key,
+                    ...(args.notify === undefined ? {} : { notify: args.notify }),
+                    ...(typeof args.quietMinutes === "number" && Number.isFinite(args.quietMinutes)
+                        ? { quietMinutes: args.quietMinutes }
+                        : {}),
+                };
+                const requestedBy = guarded ? undefined : host.requesterOf(api.conversationId);
+                const item = guarded
+                    ? await background.controlJob(
+                          api.conversationId,
+                          {
+                              action: "start",
+                              ...request,
+                              jobId: args.jobId!,
+                              expectedAttempt: args.expectedAttempt!,
+                          },
+                          context.abortSignal,
+                      )
+                    : await background.start(
+                          api.conversationId,
+                          { ...request, ...(requestedBy === undefined ? {} : { requestedBy }) },
+                          context.abortSignal,
+                      );
 
                 // This call, run again after a restart cut its start off: it is not started twice.
                 if (item.status === "starting") {
@@ -182,8 +234,25 @@ export default function createBackground(host: PocketHost, web: ExtensionWeb) {
                 }
 
                 return reply(
-                    `Started ${item.id} (pid ${item.pid}) in ${item.cwd}. ${item.notify ? "You get a message when it ends." : "You get no message when it ends: check it with list."} Read what it prints with action output, id ${item.id}.`,
+                    `Started ${item.id}${item.jobId === undefined ? "" : ` (attempt ${item.attempt} of job ${item.jobId})`} (pid ${item.pid}) in ${item.cwd}. ${item.notify ? "You get a message when it ends." : "You get no message when it ends: check it with list."} Read what it prints with action output, id ${item.id}.`,
                 );
+            }
+
+            if (args.action === "stop" && guarded) {
+                const item = await background.controlJob(
+                    api.conversationId,
+                    { action: "stop", jobId: args.jobId!, expectedAttempt: args.expectedAttempt! },
+                    context.abortSignal,
+                );
+
+                const remaining =
+                    item.processAlive === undefined
+                        ? " Process identity is unknown; termination is not confirmed."
+                        : item.processAlive
+                          ? " Verified processes still run."
+                          : "";
+
+                return reply(`${item.id}: ${outcome(item)}.${remaining}`);
             }
 
             if (args.id === undefined) {

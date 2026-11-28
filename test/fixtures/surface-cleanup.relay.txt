@@ -1,0 +1,7 @@
+Cleanup dry run (s3). Reply with the card ID and number:
+1 [x] /tmp/a  4.2 GB
+2 [ ] /tmp/b  9.7 GB
+3 Note: (empty)
+4.2 GB selected
+4 Delete   5 Refresh
+Reply "s3 1" to toggle row 1, "s3 4" to press Delete, "s3 3: your text" to fill Note.

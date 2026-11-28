@@ -6,6 +6,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationId, LiveDoc, type TaskGraphNode } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import type { User } from "./config.ts";
+import { UPLOAD_INPUT } from "./entry-format.ts";
 import { projectEntry } from "./projection.ts";
 import { FollowsDoc, RepoWatchesDoc, ScheduleDoc, SubagentsDoc, WatchDoc } from "./docs.ts";
 import { COMMAND_TASK } from "./extension-commands.ts";
@@ -386,7 +387,7 @@ async function lastPrompt(app: PocketApp, id: ConversationId): Promise<BoardProm
                 break;
             }
 
-            if (entry.kind !== "pi.user") {
+            if (entry.kind !== "pi.user" && entry.kind !== UPLOAD_INPUT) {
                 continue;
             }
 

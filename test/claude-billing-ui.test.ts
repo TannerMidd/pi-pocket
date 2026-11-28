@@ -16,6 +16,8 @@ test(
     { skip: findBrowser() === undefined ? "no Chromium-based browser on this machine" : false },
     async (t) => {
         const app = await openApp(scriptedModel());
+
+        app.gallery.fetch = async () => Response.json({ format: 1, extensions: [] });
         const server = createServer(
             createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
         );
@@ -46,6 +48,10 @@ test(
         await page.evaluate(
             `(await import("/store.js")).openSheet({ type: "extensions", tab: "installed" }); return "null"`,
         );
+        const row = '.library-row[data-file="anthropic-subscription.ts"]';
+
+        await see(`document.querySelector(${JSON.stringify(row)}) !== null`, "the billing module");
+        await page.click({ selector: row });
         await see(`document.querySelector(${JSON.stringify(toggle)}) !== null`, "its switch");
         assert.equal(
             await inPage<string>(
@@ -54,15 +60,17 @@ test(
             "false",
         );
 
-        // Its row says so first, where a cut-off line still shows it.
+        // The risk is visible before the owner touches the switch.
         assert.match(
             await inPage<string>(
-                `return JSON.stringify(document.querySelector(${JSON.stringify(toggle)}).closest(".ext-row").querySelector(".ext-row-desc").textContent)`,
+                `return JSON.stringify(document.querySelector(".library-detail").textContent)`,
             ),
-            /^At your own risk, as Anthropic's terms and its help pages disagree on it/,
+            /At your own risk, as Anthropic's terms and its help pages disagree on it/,
         );
 
         // Turning it on asks first, with what Anthropic's terms say.
+        // Back navigation ignores taps immediately after opening a new layer.
+        await new Promise((resolve) => setTimeout(resolve, 450));
         await page.click({ selector: toggle });
         await see(`document.querySelector(".ext-confirm") !== null`, "the question");
         assert.match(
@@ -78,13 +86,14 @@ test(
             "false",
         );
 
+        await new Promise((resolve) => setTimeout(resolve, 450));
         await page.click({ selector: ".ext-confirm .button.primary" });
         await see(
             `document.querySelector(${JSON.stringify(toggle)})?.getAttribute("aria-checked") === "true"`,
             "it on",
         );
         await see(
-            `[...document.querySelectorAll(".ext-row-under.warn")].some((line) => line.textContent.startsWith("On at your own risk"))`,
+            `document.querySelector(".library-detail")?.textContent.includes("On at your own risk")`,
             "the line while it is on",
         );
     },

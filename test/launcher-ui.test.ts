@@ -66,7 +66,7 @@ async function home(viewport: Viewport = VIEWPORTS.desktop, session = false): Pr
 
         return JSON.stringify(store.state.sessions.length === ${TITLES.length} &&
             ( ${session} ? document.querySelector(".composer textarea") !== null :
-                document.querySelector(".home-list") !== null));
+                document.querySelector('.home-list, [data-part="home"]') !== null));
     `,
         "the isolated session list",
     );

@@ -22,11 +22,9 @@ import {
     collab,
     navigate,
     notify,
-    openRunning,
     openSheet,
     scoped,
     setUnread,
-    signOut,
     store,
 } from "../store.js";
 import { defineItem, slotItems } from "../slots.js";
@@ -40,7 +38,6 @@ import { copyText, html, Icon, item, PlaceTile, Sheet, shortPath } from "../ui.j
 // Key hints are for people with a keyboard: a touch screen has none.
 const touch = matchMedia("(pointer: coarse)").matches;
 
-/** The Extensions row's hint: that this tab loads none of their browser parts (safe mode), and Lancet Guard. */
 /** The menu's word on the session's schedules: how many go out, and how many are paused. */
 function schedulesHint(schedules) {
     const paused = schedules.filter((each) => each.paused !== undefined).length;
@@ -71,19 +68,21 @@ function extensionsHint() {
  * the branch, and peek tiles. The top bar keeps only the buttons with something to say; these are always here, a
  * thumb's width each.
  */
-function Places() {
+function Places({ common = false }) {
     if (!store.state.view.conversation) {
         return null;
     }
 
-    return filesAvailable() ? html`<${PlacesWithChanges} />` : html`<${PlacesGrid} />`;
+    return filesAvailable()
+        ? html`<${PlacesWithChanges} common=${common} />`
+        : html`<${PlacesGrid} common=${common} />`;
 }
 
 /** Only people who can open Files request its shared changes data, just as the top bar does. */
-function PlacesWithChanges() {
+function PlacesWithChanges({ common }) {
     const { changes } = useChanges();
 
-    return html`<${PlacesGrid} changes=${changes} />`;
+    return html`<${PlacesGrid} changes=${changes} common=${common} />`;
 }
 
 /**
@@ -232,10 +231,15 @@ PLACES.forEach(({ id, label, place }, index) =>
     }),
 );
 
-function PlacesGrid({ changes = null }) {
-    return html`<nav class="places" aria-label="Places">
-        ${slotItems("places", { changes }).map(({ node }) => node)}
-    </nav>`;
+const COMMON = new Set(["core:files", "core:changes", "core:find"]);
+
+function PlacesGrid({ changes = null, common }) {
+    const places = slotItems("places", { changes });
+    const shown = common ? places.filter(({ id }) => COMMON.has(id)) : places;
+
+    return shown.length > 0
+        ? html`<nav class="places" aria-label="Places">${shown.map(({ node }) => node)}</nav>`
+        : !common && html`<p class="muted small">No places are visible in this session.</p>`;
 }
 
 /**
@@ -255,180 +259,281 @@ export function PlacesSheet() {
     <//>`;
 }
 
-/** Keep Sheet's Esc, drag, and focus handling; the sheet trail already owns its back-stack layer. */
-function MenuFrame({ title, children }) {
-    const host = useRef(null);
+// Back restores the same sheet object. Opening the page again creates a new one.
+const bookmarks = new WeakMap();
+const menuControls = "button:not([disabled]), a[href]";
+const controlName = (node) =>
+    node.dataset.place ??
+    node.getAttribute("aria-label") ??
+    node.querySelector(".menu-name, :scope > span:first-child")?.textContent.trim() ??
+    node.textContent.trim();
+
+function menuKeys(event) {
+    if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.keyCode === 229 ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        !["Home", "End", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key) ||
+        event.target.closest("input, textarea, select, [contenteditable]")
+    ) {
+        return;
+    }
+
+    const body = event.currentTarget.querySelector(".sheet-body");
+    const items = [...body.querySelectorAll(menuControls)];
+    const index = items.indexOf(document.activeElement);
+    const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+    const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+    let next;
+
+    if (event.key === "Home" || event.key === "End" || index < 0) {
+        next = event.key === "Home" || forward ? 0 : items.length - 1;
+    } else {
+        const grid = items[index].closest(".places");
+        const step =
+            grid && vertical ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1;
+
+        next = index + (forward ? step : -step);
+
+        if (grid && vertical && !grid.contains(items[next])) {
+            const tiles = items.filter((node) => grid.contains(node));
+
+            next = forward ? items.indexOf(tiles.at(-1)) + 1 : items.indexOf(tiles[0]) - 1;
+        }
+    }
+
+    const target = items[(next + items.length) % items.length];
+
+    if (target) {
+        event.preventDefault();
+        target.focus();
+    }
+}
+
+export function MenuFrame({ title, eyebrow = "Pi Pocket", children }) {
+    const ref = useRef(null);
+    const sheet = store.state.sheet;
 
     useLayoutEffect(() => {
-        const element = host.current;
-        const button = document.querySelector('.topbar [aria-label="Menu"]');
-        const active = document.activeElement;
-        const opener = active === document.body ? button : active;
+        if (!sheet) {
+            return undefined;
+        }
 
-        const place = () => {
-            const rect = button?.getBoundingClientRect();
-            const top = (rect?.bottom ?? 58) + 6;
-            const bottom =
-                (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? innerHeight);
-            const left = Math.max(
-                8,
-                Math.min((rect?.right ?? innerWidth - 8) - 360, innerWidth - 368),
+        const host = ref.current;
+        const body = host.querySelector(".sheet-body");
+        const saved = bookmarks.get(sheet);
+        let name = saved?.name;
+
+        if (saved) {
+            body.scrollTop = saved.top;
+            const target = [...host.querySelectorAll(menuControls)].find(
+                (node) => controlName(node) === name,
             );
 
-            element.style.setProperty("--menu-left", `${left}px`);
-            element.style.setProperty("--menu-top", `${top}px`);
-            element.style.setProperty("--menu-height", `${Math.max(100, bottom - top - 8)}px`);
-        };
-
-        const body = element.querySelector(".sheet-body");
-
-        if (menuScroll !== null) {
-            body.scrollTop = menuScroll;
-            menuScroll = null;
+            target?.focus({ preventScroll: true });
         }
 
-        place();
-        addEventListener("resize", place);
-        visualViewport?.addEventListener("resize", place);
+        const remember = (event) => {
+            const node = event.target.closest(menuControls);
+
+            if (node) {
+                name = controlName(node);
+            }
+        };
+
+        host.addEventListener("focusin", remember);
+        host.addEventListener("click", remember, true);
 
         return () => {
-            removeEventListener("resize", place);
-            visualViewport?.removeEventListener("resize", place);
-
-            // Another sheet open now: the menu is going back under it, not closing.
-            if (store.state.sheet) {
-                menuScroll = body.scrollTop;
-            }
-
-            const focused = document.activeElement;
-            const back = opener?.isConnected ? opener : button;
-            // As sheets.js does: not behind a sheet the menu opened, and not into a text field on a touch screen,
-            // where its keyboard would pop up.
-            const field =
-                matchMedia("(pointer: coarse)").matches &&
-                back?.matches("input, textarea, [contenteditable]");
-
-            if (
-                !store.state.sheet &&
-                !field &&
-                (focused === document.body || element.contains(focused)) &&
-                back?.isConnected
-            ) {
-                back.focus({ preventScroll: true });
-            }
+            bookmarks.set(sheet, { name, top: body.scrollTop });
+            host.removeEventListener("focusin", remember);
+            host.removeEventListener("click", remember, true);
         };
-    }, []);
+    }, [sheet]);
 
-    const onKey = (event) => {
-        if (
-            event.defaultPrevented ||
-            event.isComposing ||
-            event.keyCode === 229 ||
-            event.altKey ||
-            event.ctrlKey ||
-            event.metaKey
-        ) {
-            return;
-        }
-
-        const items = [...host.current.querySelectorAll(".place, .list-item")];
-        const active = document.activeElement;
-        const index = items.indexOf(active);
-        let target;
-
-        if (event.key === "Tab") {
-            // Close stays reachable with Tab, but is not part of the menu's item navigation.
-            const controls = [...items, ...host.current.querySelectorAll(".sheet-head button")];
-            const at = controls.indexOf(active);
-            const next =
-                at < 0
-                    ? event.shiftKey
-                        ? controls.length - 1
-                        : 0
-                    : (at + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
-
-            target = controls[next];
-        } else if (event.key === "Home") {
-            target = items[0];
-        } else if (event.key === "End") {
-            target = items.at(-1);
-        } else if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(event.key)) {
-            const down = event.key === "ArrowDown" || event.key === "ArrowRight";
-            const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
-            const tiles = host.current.querySelectorAll(".place").length;
-            const step = vertical && index >= 0 && index < tiles ? 3 : 1;
-            let next = index < 0 ? (down ? 0 : items.length - 1) : index + (down ? step : -step);
-
-            // Down from the grid's last row enters the first text row; Up from its first row wraps to the last item.
-            if (vertical && index >= 0 && index < tiles) {
-                next = next < 0 ? items.length - 1 : Math.min(next, tiles);
-            }
-
-            target = items[(next + items.length) % items.length];
-        }
-
-        if (target) {
-            event.preventDefault();
-            target.focus();
-        }
-    };
-
-    return html`<div class="nav-menu-host" data-part="menu" ref=${host} onKeyDown=${onKey}>
-        <${Sheet} title=${title} onClose=${closeSheet} className="nav-menu">
+    return html`<div class="nav-menu-host" data-part="menu" ref=${ref} onKeyDown=${menuKeys}>
+        <${Sheet}
+            title=${title}
+            eyebrow=${eyebrow}
+            onClose=${closeSheet}
+            className="nav-menu grouped-menu"
+        >
             ${children}
         <//>
     </div>`;
 }
 
-/** The menu's scroll, kept while a sheet it opened shows, so back finds the menu where it was left. */
-let menuScroll = null;
+export function menuGroup(title, rows, extra = null) {
+    const visible = [rows].flat(Infinity).filter(Boolean);
 
-store.subscribe(({ sheet }) => {
-    if (!sheet) {
-        menuScroll = null;
+    if (!visible.length && !extra) {
+        return null;
     }
-});
 
-/** The project's trust in a word, once the server said. */
+    return html`<section class="group menu-group">
+        ${
+            (title || extra) &&
+            html`<div class="menu-group-head">
+            ${title && html`<h3 class="group-title">${title}</h3>`}
+            ${extra}
+        </div>`
+        }
+        ${visible}
+    </section>`;
+}
+
+const menuPaths = {
+    rename: "m4 16 .1 4 4-.2L20 7.7a1.7 1.7 0 0 0-3.8-3.3z M14.6 6l3.3 3.4",
+    link: "m9.7 14.3 4.6-4.6 M9.2 10.1l-2.1 2.1a3.8 3.8 0 0 0 5.4 5.4l2.1-2.1 M14.8 13.9l2.1-2.1a3.8 3.8 0 0 0-5.4-5.4L9.4 8.5",
+    sliders: "M4 6h6m4 0h6M4 12h10m4 0h2M4 18h3m4 0h9 M10 4v4 M16 10v4 M9 16v4",
+};
+
+export function menuRow(label, run, { icon, hint, next = false } = {}) {
+    return html`<button type="button" class="list-item menu-row" onClick=${run}>
+        ${icon && html`<${Icon} name=${icon} path=${menuPaths[icon]} size=${19} stroke=${1.65} />`}
+        <span class="menu-row-label">
+            <span class="menu-name">${label}</span>${hint && html`<small>${hint}</small>`}
+        </span>
+        ${next && html`<${Icon} class="menu-chevron" name="chevron" size=${16} stroke=${1.65} />`}
+    </button>`;
+}
+
+const TITLES = {
+    all: "All places",
+    commands: "Session commands",
+    manage: "Manage session",
+    context: "Pi and context",
+    settings: "App settings",
+    ext: "Extensions and integrations",
+};
+
+const openSection = (section) => openSheet({ type: "menu", section });
+const sectionRow = (section, icon, label = TITLES[section]) =>
+    menuRow(label, () => openSection(section), { icon, next: true });
+
 function trustHint() {
     const info = currentTrust();
 
-    if (!info) {
+    if (!info || (info.saved === null && !info.ask && info.defaultProjectTrust === "ask")) {
         return "";
     }
 
-    if (info.ask) {
-        return "not decided";
-    }
-
-    // No decision, and nothing waiting for one: there is nothing to say.
-    if (info.saved === null && info.defaultProjectTrust === "ask") {
-        return "";
-    }
-
-    return info.trusted ? "trusted" : "not trusted";
+    return info.ask ? "not decided" : info.trusted ? "trusted" : "not trusted";
 }
 
-/** The menu; `places` is false when it opens from the places sheet, which just showed the tiles. */
-export function MenuSheet({ places = true }) {
-    const { view, me, server } = store.state;
-    const conversation = view.conversation;
+function sessionAccess() {
+    const { me, view } = store.state;
+    const { conversation, turns } = view;
     const steer = canSteer();
-    const session = conversation?.kind === "session";
-    const turns = view.turns;
-    // While take turns is on, settings belong to the driver.
     const driving = !turns?.on || turns.driver === me?.id;
-    const instructions = view.agent?.instructions;
-    const memory = useMemory();
 
-    // The embedder this page runs in adds its own group at the end, below App, under its own title (`embedder.js`).
-    const embedder = hostMenu();
+    return { conversation, session: conversation?.kind === "session", steer, driving };
+}
 
-    return html`<${MenuFrame} title=${conversation?.title ?? "Menu"}>
-        ${places && html`<${Places} />`}
-        <div class="menu-session">
-            ${
-                conversation &&
+function quickRows() {
+    const { conversation, session, steer } = sessionAccess();
+
+    return [
+        session &&
+            steer &&
+            menuRow("Rename", () => openSheet({ type: "rename" }), { icon: "rename" }),
+        session &&
+            menuRow(
+                isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
+                () => {
+                    togglePin(conversation.id);
+                    closeSheet();
+                },
+                { icon: "pin" },
+            ),
+        conversation &&
+            menuRow(
+                "Copy link",
+                () =>
+                    copyText(location.href).then(
+                        () => notify("info", "Link copied. Other signed-in devices can open it."),
+                        () => notify("error", "Could not copy."),
+                    ),
+                { icon: "link" },
+            ),
+    ];
+}
+
+function overview(places) {
+    const { conversation } = store.state.view;
+    const all = html`<button class="menu-all" onClick=${() => openSection("all")}>
+        All places <${Icon} name="chevron" size=${16} />
+    </button>`;
+
+    return [
+        conversation && places && menuGroup("Places", html`<${Places} common />`, all),
+        conversation &&
+            menuGroup("This session", [
+                ...quickRows(),
+                // A module's session rows (`pocket.menu` with `group: "session"`) show here, one tap from the menu.
+                ...(conversation.kind === "session"
+                    ? extensionMenuItems("session").map((each) =>
+                          menuRow(each.label, each.run, { icon: "grid", hint: each.hint }),
+                      )
+                    : []),
+                sectionRow("commands", "more", "More session commands"),
+            ]),
+        menuGroup("Application", [
+            menuRow("Appearance", () => openSheet({ type: "appearance" }), {
+                icon: "palette",
+                next: true,
+            }),
+            sectionRow("settings", "sliders"),
+            // A module's app rows (`pocket.menu`), one tap from the menu, with or without a session.
+            ...extensionMenuItems().map((each) =>
+                menuRow(each.label, each.run, { icon: "grid", hint: each.hint }),
+            ),
+        ]),
+    ];
+}
+
+function workspaceGroups() {
+    const { server, view } = store.state;
+    const { conversation, session, steer, driving } = sessionAccess();
+    const { turns } = view;
+
+    return [
+        menuGroup("Workspace", [
+            conversation?.worktree && steer
+                ? item(
+                      "Worktree",
+                      () => openSheet({ type: "worktree" }),
+                      conversation.worktree.branch,
+                  )
+                : conversation &&
+                  steer &&
+                  driving &&
+                  !scoped() &&
+                  item(
+                      "Working directory",
+                      () => openSheet({ type: "cwd", mode: "change" }),
+                      shortPath(view.agent?.cwd, server?.home),
+                  ),
+            conversation &&
+                trustAvailable() &&
+                item("Project trust", () => openSheet({ type: "trust" }), trustHint()),
+            conversation &&
+                browserAvailable() &&
+                store.state.browserOpen &&
+                item(
+                    "Close the browser",
+                    () => {
+                        setBrowserOpen(false);
+                        closeSheet();
+                    },
+                    store.state.browser?.open && displayUrl(store.state.browser.url),
+                ),
+        ]),
+        menuGroup("Collaboration", [
+            conversation &&
                 collab() &&
                 canToggleTurns() &&
                 item(
@@ -441,71 +546,63 @@ export function MenuSheet({ places = true }) {
                     turns?.on
                         ? "anyone here can send to Pi again"
                         : "one person drives Pi at a time",
-                )
-            }
-            ${session && steer && item("Rename", () => openSheet({ type: "rename" }))}
-            ${
-                session &&
+                ),
+        ]),
+        menuGroup(
+            "Subagents",
+            view.subagents.map((agent) =>
                 item(
-                    isPinned(conversation.id) ? "Unpin from the top" : "Pin to the top",
-                    () => {
-                        togglePin(conversation.id);
-                        closeSheet();
-                    },
-                    "this browser",
-                )
-            }
-            ${
-                session &&
+                    html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
+                    () => openSubagent(agent.conversationId),
+                    agent.busy ? "working" : "idle",
+                ),
+            ),
+        ),
+    ];
+}
+
+function contextGroups(memory) {
+    const { view } = store.state;
+    const { conversation, steer, driving, session } = sessionAccess();
+
+    return [
+        menuGroup("Agent", [
+            session &&
+                steer &&
+                driving &&
                 item(
-                    "Mark unread",
-                    () => {
-                        setUnread(conversation.id, true);
-                        closeSheet();
-                        navigate(null);
-                    },
-                    "this browser; opening it again clears it",
-                )
-            }
-            ${
-                conversation?.worktree && steer
-                    ? item(
-                          "Worktree",
-                          () => openSheet({ type: "worktree" }),
-                          conversation.worktree.branch,
-                      )
-                    : conversation &&
-                      steer &&
-                      driving &&
-                      !scoped() &&
-                      item(
-                          "Working directory",
-                          () => openSheet({ type: "cwd", mode: "change" }),
-                          shortPath(view.agent?.cwd, server?.home),
-                      )
-            }
-            ${
-                conversation &&
-                browserAvailable() &&
-                store.state.browserOpen &&
+                    "Instructions for Pi",
+                    () => openSheet({ type: "instructions" }),
+                    view.agent?.instructions ? "on" : "none",
+                ),
+            conversation &&
+                steer &&
+                driving &&
                 item(
-                    "Close the browser",
-                    () => {
-                        setBrowserOpen(false);
-                        closeSheet();
-                    },
-                    store.state.browser?.open && displayUrl(store.state.browser.url),
-                )
-            }
-            ${conversation && trustAvailable() && item("Project trust", () => openSheet({ type: "trust" }), trustHint())}
-            ${session && extensionMenuItems("session").map((each) => item(each.label, each.run, each.hint))}
-            ${session && steer && driving && item("Instructions for Pi", () => openSheet({ type: "instructions" }), instructions ? "on" : "none")}
-            ${conversation && steer && driving && item("Compact context", () => openSheet({ type: "compact" }), "summarize older messages")}
-            ${conversation && steer && driving && item("New context", () => openSheet({ type: "reset" }), "Pi starts fresh; history stays")}
-            ${conversation && memoryAvailable() && item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory))}
-            ${schedulesAvailable() && item("Scheduled messages", () => openSheet({ type: "schedules" }), schedulesHint(view.schedules))}
-            ${
-                watchAvailable() &&
+                    "Compact context",
+                    () => openSheet({ type: "compact" }),
+                    "summarize older messages",
+                ),
+            conversation &&
+                steer &&
+                driving &&
+                item(
+                    "New context",
+                    () => openSheet({ type: "reset" }),
+                    "Pi starts fresh; history stays",
+                ),
+            conversation &&
+                memoryAvailable() &&
+                item("Memory", () => openSheet({ type: "memory" }), memoryHint(memory)),
+        ]),
+        menuGroup("Automation", [
+            schedulesAvailable() &&
+                item(
+                    "Scheduled messages",
+                    () => openSheet({ type: "schedules" }),
+                    schedulesHint(view.schedules),
+                ),
+            watchAvailable() &&
                 steer &&
                 view.watch?.status !== "watching" &&
                 item(
@@ -515,73 +612,99 @@ export function MenuSheet({ places = true }) {
                         attempt(() => watchPr());
                     },
                     "fix CI, answer reviews",
-                )
-            }
-            ${
-                conversation &&
-                item("Copy link", () =>
-                    copyText(location.href).then(
-                        () => notify("info", "Link copied. Other signed-in devices can open it."),
-                        () => notify("error", "Could not copy."),
-                    ),
-                )
-            }
-            ${
-                conversation &&
+                ),
+        ]),
+    ];
+}
+
+function ContextPage() {
+    return contextGroups(useMemory());
+}
+
+function commands() {
+    const { conversation, session, steer } = sessionAccess();
+
+    return [
+        menuGroup("Organize", [
+            ...quickRows(),
+            session &&
+                item(
+                    "Mark unread",
+                    () => {
+                        setUnread(conversation.id, true);
+                        closeSheet();
+                        navigate(null);
+                    },
+                    "this browser; opening it again clears it",
+                ),
+            conversation &&
                 html`<a class="list-item" href=${`/api/c/${conversation.id}/export`} download>
                     <span>Export as Markdown</span>
                     <span class="muted small">the whole history</span>
-                </a>`
-            }
-            ${
-                session &&
+                </a>`,
+            session &&
                 steer &&
                 item(conversation.archived ? "Unarchive" : "Archive", () => {
                     closeSheet();
                     setArchived([conversation.id], !conversation.archived);
-                })
-            }
-        </div>
-        ${
-            view.subagents.length > 0 &&
-            html`<div class="group">
-                <div class="group-title">Subagents</div>
-                ${view.subagents.map((agent) =>
-                    item(
-                        html`${agent.busy ? html`<span class="pulse"></span> ` : ""}${agent.name}`,
-                        () => openSubagent(agent.conversationId),
-                        agent.busy ? "working" : "idle",
-                    ),
-                )}
-            </div>`
-        }
-        <div class="group">
-            <div class="group-title">App</div>
-            ${item("Appearance", () => openSheet({ type: "appearance" }), lookLabel())}
-            ${!touch && item("Keyboard shortcuts", () => openSheet({ type: "shortcuts" }), "?")}
-            ${
-                me?.role === "owner" &&
+                }),
+        ]),
+        menuGroup("Session setup", [
+            workspaceGroups().some(Boolean) && sectionRow("manage", "folder"),
+            contextGroups(null).some(Boolean) && sectionRow("context", "sliders"),
+        ]),
+    ];
+}
+
+function settings() {
+    const { me, server } = store.state;
+    const embedder = hostMenu();
+    const owner = me?.role === "owner";
+
+    return [
+        menuGroup("Preferences", [
+            item("Appearance", () => openSheet({ type: "appearance" }), lookLabel()),
+            !touch && item("Keyboard shortcuts", () => openSheet({ type: "shortcuts" }), "?"),
+            owner &&
                 defaultsKept() &&
                 item(
                     "Default model",
                     () => openSheet({ type: "model", id: "default", forDefault: true }),
                     defaultLabel(server?.defaultModel, store.state.models) ||
                         "project, last picked, then Pi global",
-                )
-            }
-            ${item("Your name", () => openSheet({ type: "name" }), me?.name)}
-            ${collab() ? item("People", () => openSheet({ type: "people" }), me?.role === "viewer" ? "you can view" : "") : item("Sign in another device", () => openSheet({ type: "invite" }))}
-            ${collab() && item("Notifications", () => openSheet({ type: "notifications" }), "Pi finished, approvals, chat")}
-            ${item("Running now", openRunning, "everything Pi is doing")}
-            ${view.conversation && item("Background", () => openSheet({ type: "background" }), "what commands print as they run")}
-            ${item("Spend", () => openSheet({ type: "spend" }), me?.role === "owner" ? "by person and session, limits" : "yours")}
-            ${triggersOn() && me?.role !== "viewer" && item("Webhooks and watches", () => openSheet({ type: "hooks" }), "GitHub, other services")}
-            ${me?.role === "owner" && item("Providers", () => openSheet({ type: "providers" }))}
-            ${modelRefreshAvailable() && item("Refresh models", refreshModels, store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers")}
-            ${extensionMenuItems().map((each) => item(each.label, each.run, each.hint))}
-            ${item("Extensions", () => openSheet({ type: "extensions" }), extensionsHint())}
-            ${
-                me?.role === "owner" &&
+                ),
+            collab() &&
+                item(
+                    "Notifications",
+                    () => openSheet({ type: "notifications" }),
+                    "Pi finished, approvals, chat",
+                ),
+        ]),
+        menuGroup("Administration", [
+            collab()
+                ? item(
+                      "People",
+                      () => openSheet({ type: "people" }),
+                      me?.role === "viewer" ? "you can view" : "",
+                  )
+                : item("Sign in another device", () => openSheet({ type: "invite" })),
+            item(
+                "Spend",
+                () => openSheet({ type: "spend" }),
+                owner ? "by person and session, limits" : "yours",
+            ),
+            owner && item("Providers", () => openSheet({ type: "providers" })),
+            modelRefreshAvailable() &&
+                item(
+                    "Refresh models",
+                    refreshModels,
+                    store.state.modelRefresh.loading ? "refreshing…" : "models.json and providers",
+                ),
+            sectionRow("ext"),
+        ]),
+        menuGroup(
+            "Server",
+            owner &&
                 server?.supervised &&
                 item(
                     "Restart server",
@@ -592,16 +715,64 @@ export function MenuSheet({ places = true }) {
                             notify("info", "Restarting. Running work continues after the restart.");
                         }),
                     "running work resumes",
-                )
-            }
-            ${item(html`<span class="menu-signout">Sign out</span>`, signOut)}
-        </div>
-        ${
-            embedder.items.length > 0 &&
-            html`<div class="group">
-                ${embedder.title && html`<div class="group-title">${embedder.title}</div>`}
-                ${embedder.items.map((each) => item(each.label, each.run, each.hint))}
-            </div>`
-        }
+                ),
+        ),
+        menuGroup(
+            embedder.title,
+            embedder.items.map((each) => item(each.label, each.run, each.hint)),
+        ),
+    ];
+}
+
+function extensionGroup() {
+    return menuGroup("Application", [
+        item("Extensions", () => openSheet({ type: "extensions" }), extensionsHint()),
+        triggersOn() &&
+            store.state.me?.role !== "viewer" &&
+            item(
+                "Webhooks and watches",
+                () => openSheet({ type: "hooks" }),
+                "GitHub, other services",
+            ),
+        extensionMenuItems().map((each) => item(each.label, each.run, each.hint)),
+    ]);
+}
+
+export function MenuSheet({ section = "menu", places = true }) {
+    let body;
+    let eyebrow = "Session menu";
+
+    switch (section) {
+        case "all":
+            body = menuGroup("In this session", html`<${Places} />`);
+            break;
+        case "commands":
+            body = commands();
+            break;
+        case "manage":
+            eyebrow = TITLES.commands;
+            body = workspaceGroups();
+            break;
+        case "context":
+            eyebrow = TITLES.commands;
+            body = html`<${ContextPage} />`;
+            break;
+        case "settings":
+            eyebrow = "Pi Pocket";
+            body = settings();
+            break;
+        case "ext":
+            eyebrow = TITLES.settings;
+            body = extensionGroup();
+            break;
+        default:
+            body = overview(places);
+    }
+
+    return html`<${MenuFrame}
+        title=${TITLES[section] ?? store.state.view.conversation?.title ?? "Menu"}
+        eyebrow=${eyebrow}
+    >
+        ${body}
     <//>`;
 }

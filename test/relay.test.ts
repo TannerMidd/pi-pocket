@@ -116,6 +116,7 @@ function scripted(kind = "mock") {
 
     const connector: RelayConnector = {
         kind,
+        authenticatedAuthors: true,
         label: "Mock",
         shape: "stream",
         mentions: true,
@@ -165,7 +166,8 @@ test("what came is delivered once, also after a restart in the middle", async ()
     const mock = scripted();
 
     first.register(mock.connector);
-    await first.put(config("mock"));
+    const firstConfig = await first.put(config("mock"));
+
     mock.push(event("1"));
     await until(() => delivered.length === 1, "the first event");
 
@@ -212,7 +214,7 @@ test("what came is delivered once, also after a restart in the middle", async ()
     await second.stop();
     assert.deepEqual(
         delivered.map((each) => each.key),
-        ["relay-c-mock-1", "relay-c-mock-2", "relay-c-mock-3"],
+        ["1", "2", "3"].map((id) => `relay-${firstConfig.revision}-${id}`),
     );
 
     // The owner's ids are trusted outside the fence; the reply hint is the relay's own words, after the owner's.
@@ -221,7 +223,39 @@ test("what came is delivered once, also after a restart in the middle", async ()
     assert.equal(one.tag, "relay-message");
     assert.deepEqual(one.sender, { name: "someone", id: "someone", trusted: false });
     assert.match(one.instructions!, /relay_reply with connector "mock one"/);
-    assert.match(one.payload, /^event: 1\nchannel: \(chan\)\n\nmessage 1$/);
+    assert.match(one.payload, /^event: e-[A-Za-z0-9_-]+\nchannel: \(chan\)\n\nmessage 1$/);
+});
+
+test("account proof follows the routed event, not its native id or author label", async (t) => {
+    const { inbox, delivered } = fakeInbox();
+    const relay = open(folder(), inbox);
+    const chat = scripted("chat");
+    const feed = scripted("feed");
+
+    t.after(() => relay.stop());
+    relay.register(chat.connector);
+    relay.register({ ...feed.connector, authenticatedAuthors: undefined });
+    const first = await relay.put(config("chat", { values: {} }));
+
+    chat.push(event("1", "me"));
+    await until(() => relay.stateOf(first.id).recent.length === 1, "the chat event");
+    const reference = (index: number) => /^event: (.+)$/m.exec(delivered[index]!.payload)![1]!;
+    const original = reference(0);
+
+    assert.equal(delivered[0]!.sender?.trusted, true);
+    assert.equal(relay.heard(first, original)?.authenticatedAccount, "me");
+    const next = await relay.put({ ...first, kind: "feed" });
+
+    feed.push(event("1", "me"));
+    await until(() => relay.stateOf(next.id).recent.length === 1, "the feed event");
+    const fresh = reference(1);
+
+    assert.notEqual(original, fresh);
+    assert.equal(relay.heard(next, original), undefined);
+    assert.equal(relay.heard(next, "1"), undefined);
+    assert.equal(relay.heard(next, fresh)?.id, "1");
+    assert.equal(relay.heard(next, fresh)?.authenticatedAccount, undefined);
+    assert.equal(delivered[1]!.sender?.trusted, false);
 });
 
 test("a remove whose files cannot be written says so, as a save does", async () => {
@@ -263,7 +297,7 @@ test("bots, messages without a mention, and authors past their limit are not del
     await until(() => delivered.length === 5, "the deliveries");
     await relay.stop();
     assert.deepEqual(
-        delivered.map((each) => each.key.replace("relay-c-mock-", "")),
+        delivered.map((each) => each.key.replace(`relay-${relay.config("c-mock")!.revision}-`, "")),
         ["x1", "x2", "me1", "me2", "me3"],
     );
     assert.equal(delivered[2]!.sender?.trusted, true);
@@ -283,7 +317,7 @@ test("an author named as an object's key (constructor, __proto__) has a limit an
     await until(() => delivered.length === 4, "the deliveries");
     await relay.stop();
     assert.deepEqual(
-        delivered.map((each) => each.key.replace("relay-c-mock-", "")),
+        delivered.map((each) => each.key.replace(`relay-${relay.config("c-mock")!.revision}-`, "")),
         [...names.map((name) => `${name}1`), "last"],
     );
 });
@@ -434,24 +468,29 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
     const mock = scripted();
 
     relay.register(mock.connector);
-    await relay.put(config("mock"));
+    const current = await relay.put(config("mock"));
+
     mock.push(event("7"));
     await until(() => delivered.length === 1, "the event");
 
     const signal = new AbortController().signal;
-    const request = { text: "hello", replyTo: "7", key: "task:call" };
+    const request = {
+        text: "hello",
+        replyTo: /^event: (.+)$/m.exec(delivered[0]!.payload)![1]!,
+        key: "task:call",
+    };
 
     // Two calls with one key at once, then again: one send.
     const both = await Promise.all([
-        relay.reply(config("mock"), request, signal),
-        relay.reply(config("mock"), request, signal),
+        relay.reply(current, request, signal),
+        relay.reply(current, request, signal),
     ]);
 
     assert.deepEqual(both, ["Sent.", "Sent."]);
-    assert.equal(await relay.reply(config("mock"), request, signal), "Sent already.");
+    assert.equal(await relay.reply(current, request, signal), "Sent already.");
     assert.deepEqual(mock.replies, [{ text: "hello", key: "task:call", to: "7" }]);
     await assert.rejects(
-        relay.reply(config("mock"), { ...request, replyTo: "nope", key: "other" }, signal),
+        relay.reply(current, { ...request, replyTo: "nope", key: "other" }, signal),
         /No recent event/,
     );
 
@@ -460,7 +499,7 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
     };
 
     await assert.rejects(
-        relay.reply(config("mock"), { ...request, key: "third" }, signal),
+        relay.reply(current, { ...request, key: "third" }, signal),
         (error: Error) =>
             !error.message.includes("very-secret") && /\[secret\]/.test(error.message),
     );
@@ -468,12 +507,12 @@ test("a reply sends once for its key, to the event it answers, with secrets kept
     // A send that failed, or that a restart cut off, may have gone: a connector whose service does not keep a key once
     // does not send it again.
     assert.match(
-        await relay.reply(config("mock"), { ...request, key: "third" }, signal),
+        await relay.reply(current, { ...request, key: "third" }, signal),
         /may have gone out already/,
     );
     relay.stateOf("c-mock").replies.cut = { at: 1, sending: true };
     assert.match(
-        await relay.reply(config("mock"), { ...request, key: "cut" }, signal),
+        await relay.reply(current, { ...request, key: "cut" }, signal),
         /may have gone out already/,
     );
     await relay.stop();

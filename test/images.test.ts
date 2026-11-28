@@ -15,4 +15,5 @@ test("an upload's type comes from its name when the browser does not know it", (
     assert.equal(uploadMime("photo.heic", undefined), "image/heic");
     assert.equal(uploadMime("photo.heif", "application/octet-stream"), "image/heif");
     assert.equal(uploadMime("notes.txt", "text/plain; charset=utf-8"), "text/plain");
+    assert.equal(uploadMime("photo.heic", "unknown type"), "image/heic");
 });

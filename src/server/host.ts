@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord/context";
 import { awaitWithContext } from "@earendil-works/chord/context";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, ClassifierAnswer, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type {
     ConversationId,
     DocumentReader,
@@ -11,6 +11,7 @@ import type {
     Tx,
 } from "@earendil-works/pi-durable";
 import type { Browsers } from "./browser.ts";
+import type { ClassifyRequest } from "./classify.ts";
 import type { Gallery } from "./gallery.ts";
 import type { Role, User } from "./config.ts";
 import type { Goals } from "./goals.ts";
@@ -21,6 +22,7 @@ import type { PipCompaction } from "./pip-compact.ts";
 import type { Schedules } from "./schedules.ts";
 import type { SessionCleanup } from "./session-cleanup.ts";
 import type { BackgroundTasks } from "./background.ts";
+import type { JobSupervision } from "./job-supervision.ts";
 import type { Updates } from "./updates.ts";
 import type { RepoWatches } from "./repo-watches.ts";
 import type { Watches } from "./watches.ts";
@@ -32,6 +34,8 @@ import type { AppEventName, AppEvents } from "./app-events.ts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { SettingField, SettingValue } from "./extension-settings.ts";
 import type { ApprovalTransition, PendingApprovalsApi } from "./pending-approvals.ts";
+import type { SurfaceComponentSpec } from "./surfaces/components.ts";
+import type { SurfacesRelayApi } from "./surfaces/relay.ts";
 
 export type { SettingField, SettingValue } from "./extension-settings.ts";
 
@@ -61,6 +65,8 @@ export interface LinkedActivity {
     address: string;
     /** Changes while it makes any progress: a new message, a call, output, its answer as it streams. */
     progress: string;
+    /** Its last tool calls and the tail of its output, trimmed, for a stall verdict to read. */
+    recent?: { calls: { tool: string; arguments: string }[]; output?: string };
     /** When its newest message came. */
     at?: number;
     /** What it waits on, in words: "its bash call", "its model". */
@@ -199,6 +205,12 @@ export interface InboxDelivery {
 export interface InboxApi {
     /** Deliver to `target`. `sent: false`: its key delivered it before. */
     deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }>;
+    /** Internal: the relay rechecks its route inside the admission transaction. */
+    deliverCurrent?(
+        target: ConversationId,
+        delivery: InboxDelivery,
+        checkCurrent: () => void,
+    ): Promise<{ sent: boolean }>;
 }
 
 /** Human-facing linked sessions, bound to the signed-in person and source of one route request. */
@@ -359,9 +371,14 @@ export class Approvals {
     readonly #observers = new Set<(change: ApprovalTransition) => void>();
     readonly #requesterOf: (conversationId: ConversationId) => string | undefined;
 
-    /** `requesterOf`: who Pi works for in a conversation right now. */
-    constructor(requesterOf: (conversationId: ConversationId) => string | undefined) {
+    readonly #canSteer: (id: ConversationId, by: string) => boolean;
+
+    constructor(
+        requesterOf: (conversationId: ConversationId) => string | undefined,
+        canSteer: (id: ConversationId, by: string) => boolean,
+    ) {
         this.#requesterOf = requesterOf;
+        this.#canSteer = canSteer;
     }
 
     request(asked: ApprovalRequest, context: Context): Promise<ApprovalAnswer> {
@@ -396,7 +413,12 @@ export class Approvals {
     answer(id: string, answer: ApprovalAnswer): boolean {
         const pending = this.#pending.get(id);
 
-        if (pending === undefined) {
+        if (
+            pending === undefined ||
+            (answer.allow &&
+                (pending.request.requestedBy === undefined ||
+                    !this.#canSteer(pending.request.conversationId, pending.request.requestedBy)))
+        ) {
             return false;
         }
 
@@ -490,6 +512,12 @@ export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknow
 export interface WorkspaceProvider {
     env(cwd: string): ExecutionEnv;
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+    /** Marks workspaces of this scheme as untrusted sandboxes enforced by core. @experimental @since 0.31.0 */
+    readonly isolated?: boolean;
+    /** Optional cleanup when a session is archived, removed, or the server closes. @experimental @since 0.31.0 */
+    disposeWorkspace?(cwd: string): Promise<void> | void;
+    /** Optional reason why `cwd` can no longer run (e.g. a deleted sandbox); undefined when available. @experimental @since 0.31.0 */
+    unavailable?(cwd: string): string | undefined;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */
@@ -532,6 +560,23 @@ export interface PocketHost {
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
     /**
+     * The classifier model the owner chose in Providers (`provider/modelId`), or undefined when none is chosen. Pi
+     * Pocket names no classifier on its own.
+     *
+     * @experimental @since 0.31.0
+     */
+    classifierModel(): string | undefined;
+    /**
+     * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model`
+     * names, or by the owner's chosen classifier when it names none (`classify.ts`). It runs through Pi's model
+     * runtime with the owner's stored provider sign-ins and keys, exactly as a session's own model calls do. It throws
+     * when no classifier is named or chosen, when the model is not a classifier here, when its provider has no stored
+     * sign-in or key, or when the call fails; it never wakes a session.
+     *
+     * @experimental @since 0.31.0
+     */
+    classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
+    /**
      * Register a model provider with Pi's model runtime, as a Pi extension does: `config` is Pi's own provider
      * configuration, including the models it starts with and how it refreshes them. The last registration of a name
      * wins. Returns how to remove it again, which puts back the registration before it; a removal of a registration
@@ -561,6 +606,8 @@ export interface PocketHost {
      * @experimental In 0.27: it can change in a minor release (docs/extensions/policies/api-stability.md).
      */
     roleOf(personId: string): Role | undefined;
+    /** Internal: check the current steering access of the person recorded on deferred work. */
+    canSteer(conversationId: ConversationId, personId: string | undefined): boolean;
     /**
      * Listen to what happens in the app: sessions made, renamed, and archived, messages people send to Pi, and
      * runs that start and end. Returns how to stop; pass that to `web.onDispose`. PiP's conversations send none.
@@ -622,6 +669,12 @@ export interface PocketHost {
     waitsForLimit(conversationId: ConversationId): boolean;
     /** Tell the owner that work in a session passed a hard limit: a notice in their tabs, and a push notification. */
     alertOwner(conversationId: ConversationId, title: string, body: string): void;
+    /** Internal: optional final-answer verdict shared by parent reports and notifications. */
+    classifyRunOutcome?(
+        conversationId: ConversationId,
+        answerId: number,
+        answer: string,
+    ): Promise<string | undefined>;
     /**
      * Why work Pi would start in a conversation with nobody asking (a subagent's report, say) may not start now: the
      * spend limit its session or whoever pays there reached. Undefined when it may.
@@ -657,10 +710,20 @@ export interface PocketHost {
     readonly schedules: Pick<Schedules, "add" | "cancel" | "limits" | "list" | "task">;
     /** Archived sessions cleaned up and removed from the app. */
     readonly sessionCleanup: Pick<SessionCleanup, "plan" | "cleanUp" | "remove">;
+    /** A bounded status view for this session and its visible immediate workers. */
+    jobSupervision(source: ConversationId, after?: string): Promise<JobSupervision>;
     /** Commands Pi runs in the background: the background tool starts, reads, and stops them. */
     readonly background: Pick<
         BackgroundTasks,
-        "start" | "read" | "stop" | "list" | "limits" | "task" | "describe"
+        | "start"
+        | "read"
+        | "stop"
+        | "stopJob"
+        | "controlJob"
+        | "list"
+        | "limits"
+        | "task"
+        | "describe"
     >;
     /** Sessions' goals: the goals extension runs their checks and counts them. */
     readonly goals: Pick<Goals, "get" | "run" | "record" | "mayContinue">;
@@ -700,6 +763,13 @@ export interface PocketHost {
     readonly repoWatches: Pick<RepoWatches, "task">;
     /** Lessons Pi keeps across sessions (`memory.ts`): the memory tool saves them, and its section lists them. */
     readonly memory: Pick<Memory, "project" | "applying" | "inForce" | "add" | "change">;
+    /**
+     * Surfaces in a chat (`surfaces/relay.ts`), for the relay: the numbered text of a card and where it went, and a
+     * message from a chat read as an action on it. Internal: the relay's module is the one caller. `fromRelay` trusts the
+     * `ownerIds` its caller gives it, as `inbox.deliver` trusts a `trusted` sender: every module runs in the server with
+     * the owner's own rights, and the owner turns drop-ins on, so a module that lies here could do more by other ways.
+     */
+    readonly surfaces?: SurfacesRelayApi;
     /**
      * Text from elsewhere made safe for Pi to read (`fence.ts`): `quoted` gives one line, cut to `max`, without
      * invisible characters or any tag, in quotes it cannot close; `defang` keeps the lines, but no closing tag survives,
@@ -747,6 +817,10 @@ export type WebMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface WebRequest {
     /** @experimental @since 0.28.0 */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    /** Archive or unarchive a session from an owner-only route. @experimental @since 0.31.0 */
+    archiveSession?(id: number, archived?: boolean): Promise<void>;
+    /** The owner's default folder and favorite folders, for owner-only pickers. @experimental @since 0.31.0 */
+    folders?(): Promise<{ defaultCwd: string; favorites: string[] }>;
     readonly method: WebMethod;
     /** The path's `:name` parts, by name. */
     readonly params: Readonly<Record<string, string>>;
@@ -943,6 +1017,12 @@ export interface ExtensionWeb {
      * An optional `userPrefix` matches only a user message nobody wrote.
      */
     presentEntry(spec: PresentEntry): void;
+    /**
+     * A component for surfaces (Pi's cards, `ui`): a type `x.<module>.<Name>` with a pi-schema for its props, an
+     * optional schema for the one value it binds, and a `text` function for the plain forms. Its browser half is
+     * `pocket.surfaceComponent`. It goes when the module goes.
+     */
+    surfaceComponent(spec: SurfaceComponentSpec): void;
     /**
      * Draw the module's public pages: what anyone with one of its links (`web.links`) sees, with no sign-in, at
      * `/l/<token>`. GET shows the page; a form on it posts back to the same address. One handler for each module.

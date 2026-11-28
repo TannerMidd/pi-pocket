@@ -13,6 +13,7 @@ import {
     scriptedModel,
     until,
 } from "./helpers.ts";
+import { noDirectoryWatch } from "./directory-watch.ts";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -208,7 +209,11 @@ export default (_host, web) => {
     assert.equal(shared.cleaned!.halves, 1);
 });
 
-test("what the loader says about modules goes to the owner alone", async () => {
+test("what the loader says about modules goes to the owner alone", async (t) => {
+    if (noDirectoryWatch) {
+        return t.skip(noDirectoryWatch);
+    }
+
     const { dropIn, loader, notices } = setUp();
 
     writeFileSync(join(dropIn, "tell.ts"), gated("tell", 1));
@@ -275,7 +280,11 @@ export default (_host, web) => {
     assert.equal(told, 2);
 });
 
-test("while paused for an update, an edited module loads nothing; after the pause, edits load again", async () => {
+test("while paused for an update, an edited module loads nothing; after the pause, edits load again", async (t) => {
+    if (noDirectoryWatch) {
+        return t.skip(noDirectoryWatch);
+    }
+
     const { dropIn, loader, installed } = setUp();
 
     writeFileSync(join(dropIn, "paused.ts"), gated("paused", 1));
@@ -296,7 +305,11 @@ test("while paused for an update, an edited module loads nothing; after the paus
     }
 });
 
-test("an event that leaves a module's file as it was loads nothing: Windows reports a read too", async () => {
+test("an event that leaves a module's file as it was loads nothing: Windows reports a read too", async (t) => {
+    if (noDirectoryWatch) {
+        return t.skip(noDirectoryWatch);
+    }
+
     const { dropIn, loader, notices, installed } = setUp();
     const file = join(dropIn, "still.ts");
 

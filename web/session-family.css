@@ -1,0 +1,180 @@
+.family-context {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    padding: 0 max(12px, var(--inset-l));
+    border-bottom: 1px solid var(--hair);
+}
+.family-context button,
+.family-index-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 44px;
+    text-align: left;
+    color: var(--muted);
+    border-radius: var(--r-control);
+    padding: 0 6px;
+}
+.family-context button {
+    max-width: 100%;
+}
+.family-context button:hover,
+.family-index-link:hover {
+    background: var(--hover);
+}
+.family-context strong {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text);
+    font-weight: 600;
+}
+.family-context .icon,
+.lead-unread {
+    flex: none;
+}
+.lead-unread {
+    color: var(--accent);
+    font-size: 12px;
+}
+.lead-unread::before {
+    content: "•";
+    margin-right: 4px;
+}
+.family-attn,
+.family-index-link[data-family-open="attention"] {
+    color: var(--warn);
+}
+.family-routes {
+    margin: 4px 0 8px;
+    border-bottom: 1px solid var(--hair);
+}
+.family-index-link {
+    width: 100%;
+    padding: 0 8px;
+    color: var(--text);
+    font-size: 13px;
+}
+.family-index-link span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-row:has(.session-title.with-hit) > .session {
+    min-height: 44px;
+}
+.topbar .topbar-back.index-back {
+    display: inline-flex;
+}
+.family-explorer {
+    width: min(100%, 840px);
+    align-self: center;
+    padding: 24px clamp(12px, 3vw, 40px) 12px;
+}
+.family-head {
+    border-bottom: 1px solid var(--hair);
+    padding: 0 0 12px;
+}
+.family-head p {
+    margin: 16px 0 4px;
+    color: var(--muted);
+    font: 12px var(--mono);
+}
+.family-heading {
+    margin: 0;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+}
+.family-explorer .search {
+    min-height: 44px;
+    margin-bottom: 8px;
+}
+.family-filters,
+.family-pager,
+.family-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.family-filters select {
+    min-width: 0;
+    min-height: 44px;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    padding: 0 8px;
+    font: inherit;
+}
+.family-range,
+.family-pager {
+    color: var(--muted);
+    font: 12px var(--mono);
+    padding: 10px 0;
+}
+.family-range {
+    border-bottom: 1px solid var(--hair);
+}
+.family-pager {
+    border-top: 1px solid var(--hair);
+}
+.family-pager span {
+    margin-right: auto;
+}
+.family-pager button,
+.family-head button {
+    min-width: 44px;
+    min-height: 44px;
+}
+/* A page has at most 12 rows. Measure all of them before restoring the reader's scroll position. */
+.family-explorer .session-row {
+    content-visibility: visible;
+    border-bottom: 1px solid var(--hair);
+}
+.session-title.with-context {
+    display: grid;
+    gap: 2px;
+}
+.session-title.with-context .session-name {
+    max-width: 100%;
+}
+.session-row.with-fold .session-time {
+    display: none;
+}
+.family-explorer .session-row:has(.session-title.with-hit) > .session {
+    height: auto;
+    min-height: 64px;
+}
+.family-explorer .session-name,
+.family-explorer .session-hit {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.family-explorer .session-row .session-time {
+    display: inline;
+    color: var(--muted);
+}
+@media (max-width: 699px) {
+    .family-explorer {
+        padding: 8px max(12px, var(--inset-r)) 0 max(12px, var(--inset-l));
+    }
+    .family-head p {
+        margin-top: 8px;
+    }
+    .family-heading {
+        font-size: 20px;
+    }
+    .family-context {
+        column-gap: 4px;
+    }
+    .family-context button {
+        font-size: 12px;
+    }
+}

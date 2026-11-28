@@ -13,6 +13,7 @@ import {
     until,
     work,
 } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -225,8 +226,10 @@ after(async () => {
 
 test("Board: the ways in open it, and Back, Alt+A, and its × close it", real, async () => {
     await fresh("board");
-    await page.click({ selector: ".rail-pip" });
-    await boarded("the rail button");
+    await clickNavigation(page, { selector: '.desktop-rail [data-nav="tools"]' });
+    assert.ok(await page.waitFor({ selector: ".nav-menu .rail-pip" }), "the Tools drawer");
+    await clickNavigation(page, { selector: ".nav-menu .rail-pip" });
+    await boarded("the tool button");
     await page.evaluate(`history.back()`);
     await shut("Back");
     await backTo(background, "the session after Back");
@@ -257,7 +260,12 @@ test("Board: the ways in open it, and Back, Alt+A, and its × close it", real, a
     await type(BOARD_BOX, "");
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session");
-    assert.equal(await inPage(`document.querySelector('.pane .composer textarea').value`), "");
+    await see(
+        `${STORE}.store.state.view.conversation?.id === ${Number(background)} &&
+            document.querySelector('${BOX}') !== null`,
+        "the original session's composer after closing PiP",
+    );
+    assert.equal(await inPage(`document.querySelector('${BOX}').value`), "");
 
     // A notification's link, from a fresh tab at home.
     await page.navigate(`${base}/?pip=1`);
@@ -276,7 +284,7 @@ test("Board: the session under it stays marked open, and is where it closes to",
     assert.equal(await markedOpen(), Number(background));
 
     // Kept on PiP's history entry: through a reload, and back to it from another session.
-    await page.evaluate(`location.reload()`);
+    await page.reload();
     await boarded("PiP after a reload");
     await see(`document.querySelector('.sidebar .session-row') !== null`, "the list");
     assert.equal(await markedOpen(), Number(background));
@@ -288,13 +296,16 @@ test("Board: the session under it stays marked open, and is where it closes to",
     assert.equal(await markedOpen(), Number(background));
 
     // Running now takes PiP's place.
-    await page.click({ selector: ".rail-running" });
+    await clickNavigation(page, { selector: '.desktop-rail [data-nav="activity"]' });
+    await clickNavigation(page, { row: "Running now" });
     await see(
         `document.querySelector('.running-board') !== null && !${PIP}.pipShown()`,
         "Running now",
     );
     await settle();
-    await page.click({ selector: ".rail-pip" });
+    await clickNavigation(page, { selector: '.desktop-rail [data-nav="tools"]' });
+    assert.ok(await page.waitFor({ selector: ".nav-menu .rail-pip" }), "the Tools drawer");
+    await clickNavigation(page, { selector: ".nav-menu .rail-pip" });
     await boarded("PiP over Running now");
     await page.evaluate(`${PIP}.closePip()`);
     await backTo(background, "the session it was first opened over");
@@ -348,7 +359,7 @@ test("Phones: × closes past the Files tile, and PiP opens again without it", re
     await page.evaluate(`sessionStorage.setItem('pocket.files', '1')`);
 
     for (const when of ["the update's reload", "another reload"]) {
-        await page.evaluate(`location.reload()`);
+        await page.reload();
         await boarded(`PiP after ${when}`);
         await settle();
         assert.equal(await inPage(`${STORE}.store.state.filesOpen`), false, when);
@@ -686,7 +697,7 @@ test("A queued message's Edit during a send: kept through a reload or a move", r
         await see(`window.reached`, "on the server, its answer lost");
         await edit(true);
         await see(`Object.keys(localStorage).some((key) => key.includes(':takenBack.'))`, "kept");
-        await page.evaluate(`location.reload()`);
+        await page.reload();
         await see(`${STORE}.store.state.streamId`, "loaded again");
         await back("hello", "only the words of the send");
         await page.press("Enter");
@@ -820,4 +831,43 @@ test("A message goes once: refused, its answer lost to a reload, sent again", re
     await type(BOX, "> another part\n\nkeep me");
     await page.press("Enter");
     await until(async () => (await sent()) === 6, "another quote");
+});
+
+test("Floating PiP stays under the menu: a tool row takes the click", real, async () => {
+    await fresh("floating");
+    await page.evaluate(`${PIP}.openPip()`);
+    await floating("PiP floating over the session");
+    await settle();
+
+    await clickNavigation(page, { selector: '.desktop-rail [data-nav="tools"]' });
+    assert.ok(await page.waitFor({ selector: ".nav-menu .rail-pip" }), "the Tools drawer");
+    await settle();
+
+    // The drawer is over PiP where they overlap. Beside it, its rows are under PiP's own box, which takes the click.
+    const over = await inPage<boolean>(`(() => {
+        const sheet = document.querySelector(".nav-menu")?.closest(".sheet");
+        const pip = document.querySelector(".pip-panel:not(.leaving)");
+        const drawn = sheet?.getBoundingClientRect();
+        const box = pip?.getBoundingClientRect();
+        const left = Math.max(drawn?.left ?? 0, box?.left ?? 0);
+        const right = Math.min(drawn?.right ?? 0, box?.right ?? 0);
+        const top = Math.max(drawn?.top ?? 0, box?.top ?? 0);
+        const bottom = Math.min(drawn?.bottom ?? 0, box?.bottom ?? 0);
+
+        if (right - left < 8 || bottom - top < 8) {
+            return false;
+        }
+
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+
+        return hit !== null && sheet.contains(hit);
+    })()`);
+
+    assert.ok(over, "the drawer is over floating PiP, where they overlap");
+
+    // A real click on a row of the drawer reaches that row, and PiP stays as it was.
+    await clickNavigation(page, { row: "All artifacts" });
+    await see(`${STORE}.store.state.sheet?.type === 'all-artifacts'`, "the artifacts drawer");
+    await floating("PiP still floating");
+    await page.evaluate(`${PIP}.closePip()`);
 });

@@ -22,12 +22,29 @@ export interface RelayField {
 
 export type RelayValues = Readonly<Record<string, string | number | boolean | undefined>>;
 
-/** Who wrote a message, as the service says. `id` is what the owner lists as trusted. */
+/** A source's attribution. Only a connector with `authenticatedAuthors` identifies an account. */
 export interface RelayAuthor {
     id: string;
     name: string;
     /** A bot or a service's own post: the relay drops these, so it never hears itself. */
     bot?: boolean;
+}
+
+/** Names and feed keys identify no account, even when they match a configured owner ID. */
+export function authenticatedAccount(
+    connector: RelayConnector,
+    author: RelayAuthor,
+): string | undefined {
+    return connector.authenticatedAuthors === true &&
+        author.bot !== true &&
+        typeof author.id === "string" &&
+        author.id.trim() !== ""
+        ? author.id
+        : undefined;
+}
+
+export function isOwnerAccount(ownerIds: readonly string[], account?: string): boolean {
+    return account !== undefined && ownerIds.includes(account);
 }
 
 /** One thing that came: a chat message, a feed's item, an API's record. */
@@ -44,6 +61,11 @@ export interface RelayEvent {
     thread?: string;
     /** It names the connector's own account (a mention), or it came in a direct message. */
     mentioned?: boolean;
+    /**
+     * The id of the message it answers, when the service says so (`RelayEvent.id` of that message, or the service's own
+     * id for it): a reply to a card Pi showed then goes to that card. Since 0.31.0.
+     */
+    replyTo?: string;
     /** A link to it, when it has one. */
     url?: string;
     /** When it was sent, in ms since 1970. */
@@ -96,8 +118,17 @@ export interface RelayContext {
 }
 
 /** What a reply sends: Pi's text, and where it goes. */
+export interface RelayReceipt {
+    id?: string;
+    /** The chat destination of a complete, untruncated card delivery. Omit it if not confirmed. */
+    channel?: string;
+    thread?: string;
+}
+
 export interface RelayReply {
     text: string;
+    /** A card or its echo: do not truncate, and confirm its destination after the whole send succeeds. */
+    confirmDestination?: boolean;
     /** The event it answers, when Pi named one: its channel and thread are the reply's. */
     to?: RelayEvent;
     /** Where it goes: the event's channel, else the connector's default. */
@@ -118,6 +149,8 @@ export interface RelayConnector {
     fields: readonly RelayField[];
     /** It can tell mentions (`RelayEvent.mentioned`): the owner can then take only those. */
     mentions?: boolean;
+    /** Every non-bot author.id is a stable account ID authenticated by the configured service. */
+    authenticatedAuthors?: true;
     /**
      * poll: `poll` is called every `interval` seconds (the owner's `interval` field when the connector has one).
      * stream: `run` keeps a connection; the relay calls it again, with backoff, when it ends or throws.
@@ -154,7 +187,7 @@ export interface RelayConnector {
     reply?(
         context: Pick<RelayContext, "values" | "signal" | "log">,
         reply: RelayReply,
-    ): Promise<{ id?: string } | void>;
+    ): Promise<RelayReceipt | void>;
 }
 
 /**
@@ -184,4 +217,80 @@ export function relayErrorOf(error: unknown): { retryAfter?: number; fatal: bool
         ...(typeof retryAfter === "number" && Number.isFinite(retryAfter) ? { retryAfter } : {}),
         fatal: fatal === true,
     };
+}
+
+/**
+ * One reply an outbound hook screens, before it leaves: the connector it goes through, where, and the text as it
+ * will be sent. Never a secret of the connector's fields.
+ */
+export interface RelayOutboundEvent {
+    /** The connector's name and kind, as the reply's tool names them. */
+    connector: string;
+    kind: string;
+    /** Where it goes (the event's channel), when the reply answers one. */
+    channel?: string;
+    /** The reply's text, as it will be sent. */
+    text: string;
+    /** Files it sends, by name only: never their content. */
+    files: readonly { name: string }[];
+}
+
+/** What an outbound hook says about one reply about to leave: send it, or hold it back. */
+export type RelayOutboundVerdict = "send" | "block";
+
+/**
+ * Screens one reply before it leaves, the path the `relay_reply` tool takes. `"send"` sends it as it is; `"block"`
+ * holds it back, with one line in the server's log and an error to the tool's caller, so the agent knows its reply was
+ * held and nothing went out. Failures and timeouts send as if no hook was set: the relay caps one call at ten seconds.
+ */
+export type RelayOutbound = (
+    event: RelayOutboundEvent,
+) => Promise<RelayOutboundVerdict> | RelayOutboundVerdict;
+
+/**
+ * One delivery a triage hook screens, before it reaches the session: the connector it came through, who wrote it,
+ * and the message as it will go. Never a secret of the connector's fields.
+ */
+export interface RelayTriageEvent {
+    /** The connector's name and kind, as the delivery shows them. */
+    connector: string;
+    kind: string;
+    author: { name: string; id: string };
+    /** Where it came (a channel, a chat, a room). */
+    channel?: string;
+    /** The message's text, as it will be delivered. */
+    text: string;
+    /** Its attachments, by name and type: never their content. */
+    files: readonly { name: string; type: string }[];
+}
+
+/** What a triage hook says about one delivery: send it as it is, drop it, or send it with one label line. */
+export type RelayTriageVerdict = "deliver" | "drop" | { label: string };
+
+/**
+ * Screens one delivery from a sender the owner did not mark as trusted, before it reaches the session. `"deliver"`
+ * sends it as it is; `"drop"` drops it with one line in the connector's status; `{ label }` sends it with a
+ * `Triage: <label>` line first inside the fence, so the model knows what arrived. Failures and timeouts deliver as
+ * is: never hold a delivery back on a hook's account, and never hang (the relay caps one call at ten seconds).
+ */
+export type RelayTriage = (
+    event: RelayTriageEvent,
+) => Promise<RelayTriageVerdict> | RelayTriageVerdict;
+
+/** The service `pocket-relay` offers to modules through `web.provide` (api 3). */
+export interface RelayService {
+    /** The service's version: 3 adds `outbound` to 2's `triage`. */
+    api: number;
+    /** Add a kind of connector. The return removes it again. */
+    register: (connector: RelayConnector) => () => void;
+    /**
+     * Set the hook that screens each delivery from a sender the owner did not mark (api 2). The last set wins; the
+     * return unsets it, and the hook goes with the relay when its module reloads.
+     */
+    triage: (hook: RelayTriage) => () => void;
+    /**
+     * Set the hook that screens each reply before it leaves, the path the `relay_reply` tool takes (api 3). The last
+     * set wins; the return unsets it, and the hook goes with the relay when its module reloads.
+     */
+    outbound: (hook: RelayOutbound) => () => void;
 }

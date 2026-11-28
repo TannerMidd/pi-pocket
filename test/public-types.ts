@@ -79,13 +79,17 @@ type Internal =
     | "schedules"
     | "sessionCleanup"
     | "background"
+    | "jobSupervision"
     | "goals"
     | "browsers"
     | "memory"
+    | "surfaces"
+    | "canSteer"
     | "toolNames"
     | "stopToolCall"
     | "waitsForLimit"
-    | "alertOwner";
+    | "alertOwner"
+    | "classifyRunOutcome";
 
 type PublicHost = Pick<PocketHost, keyof Host>;
 

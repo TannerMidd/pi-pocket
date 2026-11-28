@@ -12,6 +12,7 @@ import {
     until,
     work,
 } from "./helpers.ts";
+import { clickNavigation } from "./navigation-click.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -26,6 +27,7 @@ import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
 import { VIEWPORTS } from "../src/server/browser/viewport.ts";
 import { createHandler } from "../src/server/http.ts";
+import { issueUpload } from "../src/server/upload-references.ts";
 
 const chromium = findBrowser();
 const real = {
@@ -35,6 +37,22 @@ const real = {
 /** "risky please" calls a tool, which Lancet Guard asks about; everything else is echoed. */
 const route: FauxResponseStep = (request) => {
     const { text } = lastText(request as never);
+
+    if (text.startsWith("remember ")) {
+        return fauxAssistantMessage(
+            [fauxToolCall("memory", { action: "add", text: text.slice(9), scope: "project" })],
+            { stopReason: "toolUse" },
+        );
+    }
+
+    if (text.startsWith("relesson ")) {
+        const [, id = "", ...rest] = text.split(" ");
+
+        return fauxAssistantMessage(
+            [fauxToolCall("memory", { action: "update", id, text: rest.join(" ") })],
+            { stopReason: "toolUse" },
+        );
+    }
 
     if (text === "ask me") {
         const options = [
@@ -139,6 +157,11 @@ async function fresh(): Promise<void> {
             }
         }
     `);
+    // A layer still open (a sheet) closes by going back in history, which the page starts a moment after the viewport
+    // changed. A traversal that the old page queues while this goes to "/" lands after it, on the session before it:
+    // the page is then in that session, and shows no list. Wait for the layers to close and history to follow.
+    await page.evaluate(`(await import("/store.js")).closeSheet()`);
+    await until(async () => (await where()).layers === 0, "the layers closed", 10_000);
     await page.navigate(`${base}/`);
     await until(
         async () =>
@@ -257,6 +280,425 @@ test("back closes the open file, then the Files tile, then leaves the session", 
     await back();
     await reach({ path: "/" }, "back to the list");
 });
+
+test(
+    "Places navigation: desktop menu docks beside the session and keeps its draft",
+    real,
+    async () => {
+        await fresh();
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        const box = ".pane .composer textarea";
+        const menu = '.topbar [aria-label="Menu"]';
+
+        assert.ok(await page.waitFor({ selector: box }));
+        await page.type({ selector: box }, "Navigation draft");
+        await page.click({ selector: menu });
+        await reach({ sheet: "menu" }, "the session menu");
+        const layout = await inPage<{ nav: string[]; quick: string[]; adjacent: boolean }>(`
+        const tile = document.querySelector('.place[data-place="files"]');
+        const panel = tile.closest('.sheet, [role="region"]');
+        const area = panel.getBoundingClientRect();
+        const pane = document.querySelector('.pane').getBoundingClientRect();
+        const list = document.querySelector('.sidebar').getBoundingClientRect();
+        return JSON.stringify({
+            nav: [...document.querySelectorAll('.desktop-rail [data-nav]')].map(el => el.dataset.nav),
+            quick: [...panel.querySelectorAll('.place')].map(el => el.dataset.place),
+            adjacent: list.width > 0 && pane.left >= list.right - 2 &&
+                area.left >= pane.right - 2 && Math.abs(area.right - innerWidth) <= 24,
+        });
+    `);
+
+        assert.deepEqual(layout.nav, ["sessions", "activity", "tools", "account"]);
+        assert.deepEqual(layout.quick, ["files", "changes", "find"]);
+        assert.ok(layout.adjacent, "the drawer does not cover the list or conversation");
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="region"]' }));
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1024 });
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="dialog"][aria-modal="true"]' }));
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        assert.ok(await page.waitFor({ selector: '.nav-menu[role="region"]' }));
+        await clickNavigation(page, { selector: ".nav-menu .menu-all" });
+        assert.ok(await page.waitFor({ selector: '.place[data-place="artifacts"]' }));
+        await page.press("Escape");
+        await reach({ sheet: "menu" }, "one step back to the session menu");
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.activeElement.innerText.trim() === 'All places')`,
+                ),
+            "focus returns to All places",
+        );
+        await page.press("Escape");
+        await reach({ sheet: null }, "the conversation");
+        await until(
+            () =>
+                inPage<boolean>(`return JSON.stringify(document.activeElement.matches('${menu}'))`),
+            "focus returns to Menu",
+        );
+        assert.equal(
+            await inPage(`return JSON.stringify(document.querySelector('${box}').value)`),
+            "Navigation draft",
+        );
+        await page.type({ selector: box }, "");
+    },
+);
+
+/** Reload this tab in safe mode, which loads no theme, so the app's own stylesheets show as they are. */
+async function withoutTheme(t: { after: (hook: () => Promise<void>) => void }): Promise<void> {
+    t.after(async () => {
+        await page.evaluate(`sessionStorage.removeItem("pocket.noext")`);
+    });
+    await page.evaluate(`sessionStorage.setItem("pocket.noext", "1")`);
+    await page.navigate(`${base}/`);
+    await until(
+        async () =>
+            (await inPage<boolean>(
+                `return JSON.stringify(document.querySelector("#pocket-theme") === null && document.querySelector(${JSON.stringify(row(first))}) !== null)`,
+            )) === true,
+        "the session list without a theme",
+        20_000,
+    );
+}
+
+test(
+    "Places navigation: with no theme, rail and menu use the app's row scale at every density",
+    real,
+    async (t) => {
+        await fresh();
+        await withoutTheme(t);
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        await reach({ path: `/s/${first}` }, "the session");
+        assert.ok(await page.waitFor({ selector: ".pane .composer textarea" }));
+        await page.click({ selector: '.topbar [aria-label="Menu"]' });
+        await reach({ sheet: "menu" }, "the menu");
+
+        try {
+            for (const [density, height] of [
+                ["comfortable", "44px"],
+                ["compact", "40.4px"],
+                ["tight", "37.4px"],
+            ] as const) {
+                await page.evaluate(`
+                    (await import("/theme.js")).setPrefs({ density: ${JSON.stringify(density)} });
+                `);
+                const measured = await inPage<{ density: string; minimum: string }>(`
+                    const style = getComputedStyle(document.querySelector(".desktop-rail .rail-place"));
+                    return JSON.stringify({
+                        density: document.documentElement.dataset.density,
+                        minimum: style.minHeight,
+                    });
+                `);
+
+                assert.equal(measured.minimum, height, `${density} rail rows`);
+                assert.equal(measured.density, density);
+                const scale = await inPage<{
+                    rail: number;
+                    drawer: number;
+                    brand: number;
+                    row: number;
+                    title: number;
+                    label: number;
+                }>(`
+                    const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+                    const style = (selector) => getComputedStyle(document.querySelector(selector));
+                    return JSON.stringify({
+                        rail: parseFloat(style(".desktop-rail").width),
+                        drawer: parseFloat(style(".nav-menu").width),
+                        brand: parseFloat(style(".rail-brand").width),
+                        row: parseFloat(style(".nav-menu .menu-row").minHeight),
+                        title: parseFloat(style(".nav-menu h2").fontSize),
+                        label: parseFloat(style(".rail-label").fontSize),
+                    });
+                `);
+
+                assert.ok(Math.abs(scale.rail - 64) < 0.1);
+                assert.ok(Math.abs(scale.drawer - 320) < 0.1);
+                assert.ok(Math.abs(scale.brand - 32) < 0.1);
+                assert.equal(scale.row, parseFloat(height));
+                assert.equal(scale.title, 16);
+                assert.equal(scale.label, 11);
+            }
+        } finally {
+            await page.evaluate(
+                `(await import("/theme.js")).setPrefs({ density: "comfortable" });`,
+            );
+        }
+
+        await page.setViewport({ ...VIEWPORTS.mobile, width: 844, height: 390 });
+        const landscape = await inPage<{ visible: number; height: number }>(`
+            const buttons = [...document.querySelectorAll(".mobile-rail .rail-place")]
+                .filter((el) => el.getClientRects().length);
+            return JSON.stringify({
+                visible: buttons.length,
+                height: Math.min(...buttons.map((el) => el.getBoundingClientRect().height)),
+            });
+        `);
+
+        assert.equal(landscape.visible, 4, "all destinations remain available on a short screen");
+        assert.ok(landscape.height >= 44);
+
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "tight" });`);
+        await page.setViewport({ ...VIEWPORTS.tablet, width: 1024, height: 768 });
+        assert.ok(await page.waitFor({ selector: ".desktop-rail .rail-brand" }));
+        assert.ok(await page.waitFor({ selector: ".nav-menu .menu-row" }));
+        const touch = await inPage<{ brand: number; nav: number; row: number; tile: number }>(`
+            const height = (selector) =>
+                parseFloat(getComputedStyle(document.querySelector(selector)).minHeight);
+            return JSON.stringify({
+                brand: parseFloat(getComputedStyle(document.querySelector(".rail-brand")).height),
+                nav: height(".desktop-rail .rail-place"),
+                row: height(".nav-menu .menu-row"),
+                tile: height(".nav-menu .place"),
+            });
+        `);
+
+        assert.equal(touch.brand, 44);
+        assert.equal(touch.nav, 44);
+        assert.equal(touch.row, 44);
+        assert.equal(touch.tile, 44);
+        const targetHeight = (selector: string) =>
+            inPage<number>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(selector)}).offsetHeight)`,
+            );
+
+        // Read layout size, not a rectangle scaled by the sheet's entrance animation.
+        for (const width of [390, 1024]) {
+            await page.setViewport({ ...VIEWPORTS.tablet, width, height: 844 });
+
+            for (const density of ["compact", "tight"]) {
+                await page.evaluate(
+                    `(await import('/theme.js')).setPrefs({density:${JSON.stringify(density)}})`,
+                );
+                assert.ok((await targetHeight(".nav-menu .menu-all")) >= 44, "All places");
+                assert.ok(
+                    (await targetHeight(".nav-menu .sheet-head > .icon-button")) >= 44,
+                    "Close",
+                );
+                await page.evaluate("(await import('/store.js')).openSheet({type:'tools'})");
+                assert.ok(await page.waitFor({ selector: ".grouped-menu .tool-place-row .place" }));
+                assert.ok(
+                    (await targetHeight(".grouped-menu .tool-place-row .place")) >= 44,
+                    "Tools",
+                );
+                await page.evaluate("(await import('/store.js')).openSheet({type:'menu'})");
+                assert.ok(await page.waitFor({ selector: ".nav-menu .menu-all" }));
+            }
+        }
+
+        await clickNavigation(page, { row: "App settings" });
+        await reach({ sheet: "menu" }, "App settings");
+        await clickNavigation(page, {
+            selector: ".nav-menu .menu-group .list-item:first-of-type",
+        });
+        await reach({ sheet: "appearance" }, "Appearance");
+        const sheetControls = await inPage<{ back: number; close: number }>(`
+            const size = (selector) => {
+                const style = getComputedStyle(document.querySelector(selector));
+                return Math.min(parseFloat(style.width), parseFloat(style.height));
+            };
+            return JSON.stringify({
+                back: size(".sheet-back"),
+                close: size(".sheet-head > .icon-button"),
+            });
+        `);
+
+        assert.equal(sheetControls.back, 44);
+        assert.equal(sheetControls.close, 44);
+    },
+);
+
+test(
+    "Places navigation: Pocket's own look has an 88 px side rail of 60 px buttons, and 44 px buttons on a phone",
+    real,
+    async () => {
+        await fresh();
+        await until(
+            async () =>
+                (await inPage<boolean>(
+                    `return JSON.stringify(document.getElementById("pocket-theme")?.dataset.urls?.includes("/themes/pocket/") === true)`,
+                )) === true,
+            "Pocket's look is on the page",
+        );
+        await page.evaluate(`(await import("/theme.js")).setPrefs({ density: "comfortable" });`);
+        await page.setViewport({ ...VIEWPORTS.desktop, width: 1920, height: 1080 });
+        await goTo(first);
+        assert.ok(await page.waitFor({ selector: ".desktop-rail .rail-place" }));
+        const side = await inPage<{ rail: number; button: number; brand: number }>(`
+            const style = (selector) => getComputedStyle(document.querySelector(selector));
+            return JSON.stringify({
+                rail: parseFloat(style(".desktop-rail").width),
+                button: parseFloat(style(".desktop-rail .rail-place").minHeight),
+                brand: parseFloat(style(".rail-brand").height),
+            });
+        `);
+
+        assert.equal(side.rail, 88);
+        assert.equal(side.button, 60);
+        assert.ok(side.brand >= 32);
+
+        for (const [width, height] of [
+            [390, 844],
+            [844, 390],
+        ] as const) {
+            await page.setViewport({ ...VIEWPORTS.mobile, width, height });
+            assert.ok(await page.waitFor({ selector: ".mobile-rail .rail-place" }));
+            const phone = await inPage<number[]>(`
+                return JSON.stringify([...document.querySelectorAll(".mobile-rail .rail-place")]
+                    .filter((el) => el.getClientRects().length)
+                    .map((el) => el.getBoundingClientRect().height));
+            `);
+
+            assert.equal(phone.length, 4, `${width}x${height}: every destination shows`);
+            assert.ok(
+                phone.every((each) => each >= 44),
+                `${width}x${height}: ${JSON.stringify(phone)} are touch targets`,
+            );
+        }
+    },
+);
+
+test(
+    "Places navigation: phone rail opens a modal and Sessions returns to the list",
+    real,
+    async () => {
+        await fresh();
+        await tap(row(first));
+        await reach({ path: `/s/${first}` }, "the conversation");
+        const rail = ".mobile-rail";
+        const buttons = await inPage<{ name: string; x: number; y: number; height: number }[]>(`
+        return JSON.stringify([...document.querySelectorAll('${rail} [data-nav]')]
+            .filter(el => el.getClientRects().length).map(el => {
+                const rect = el.getBoundingClientRect();
+                return { name: el.dataset.nav, x: rect.x, y: rect.y, height: rect.height };
+            }));
+    `);
+
+        assert.deepEqual(
+            buttons.map(({ name }) => name),
+            ["sessions", "activity", "tools", "account"],
+        );
+        assert.ok(
+            buttons.every(
+                (b, i) =>
+                    b.height >= 40 && b.y === buttons[0]!.y && (!i || b.x > buttons[i - 1]!.x),
+            ),
+        );
+
+        assert.ok(
+            buttons[0]!.y + buttons[0]!.height >= VIEWPORTS.mobile.height - 12,
+            "the rail is at the bottom edge",
+        );
+
+        for (const id of ["activity", "tools", "account"]) {
+            const opener = `${rail} [data-nav="${id}"]`;
+
+            await page.click({ selector: opener });
+            await reach({ sheet: id, path: `/s/${first}` }, `the ${id} drawer`);
+            assert.ok(await page.waitFor({ selector: '[role="dialog"][aria-modal="true"]' }));
+            await page.press("Tab");
+            assert.ok(
+                await inPage<boolean>(
+                    `return JSON.stringify(!!document.activeElement.closest('[role="dialog"]'))`,
+                ),
+                "Tab stays in the dialog",
+            );
+            await back();
+            await reach(
+                { sheet: null, layers: 0, path: `/s/${first}` },
+                "Back closes only the drawer",
+            );
+        }
+
+        await page.click({ selector: `${rail} [data-nav="sessions"]` });
+        await reach({ path: "/" }, "the session list");
+        assert.ok(await page.waitFor({ selector: row(first) }));
+    },
+);
+
+for (const size of ["desktop", "mobile"] as const) {
+    test(
+        `Places navigation: Escape from Appearance restores App settings on ${size}`,
+        real,
+        async () => {
+            await fresh();
+            await page.setViewport(VIEWPORTS[size]);
+            await page.evaluate(`(await import('/store.js')).openSheet({ type: 'appearance' })`);
+            await reach({ sheet: "appearance", layers: 1 }, "standalone Appearance");
+            await page.press("Escape");
+            await reach({ sheet: null, layers: 0 }, "Escape closes standalone Appearance");
+
+            await clickNavigation(page, { selector: '[data-nav="account"]' });
+            await clickNavigation(page, { label: "App settings" });
+            assert.ok(await page.waitFor({ selector: '.nav-menu[aria-label="App settings"]' }));
+            await clickNavigation(page, {
+                selector: ".nav-menu .menu-group .list-item:first-of-type",
+            });
+            await reach({ sheet: "appearance", layers: 3 }, "Appearance from Account");
+            await page.press("Escape");
+            await reach({ sheet: "menu", layers: 2 }, "Back to App settings");
+            await until(
+                () =>
+                    inPage<boolean>(`const button = document.activeElement;
+            return JSON.stringify(!!button.closest('.nav-menu[aria-label="App settings"]') &&
+                button.matches('button') && button.firstElementChild?.textContent === 'Appearance');`),
+                "the Appearance row regains focus",
+            );
+        },
+    );
+}
+
+test(
+    "Places navigation: a scoped viewer sees Find but no file tools or owner controls",
+    real,
+    async () => {
+        const viewer = app.config.addUser("Navigation reader", "viewer", [String(first)]);
+        const guests = new Browsers({
+            dataDir: mkdtempSync(join(root, "places-viewer-")),
+            load: async () => undefined,
+            save: () => {},
+        });
+
+        try {
+            const guest = await guests.open(1);
+            const places = async () =>
+                JSON.parse(
+                    await guest.evaluate(
+                        `return JSON.stringify([...document.querySelectorAll('.nav-menu .place')].map(el => el.dataset.place))`,
+                    ),
+                ) as string[];
+
+            await guest.setViewport(VIEWPORTS.mobile);
+            await guest.navigate(`${base}/login?token=${encodeURIComponent(viewer.token)}`);
+            await guest.navigate(`${base}/s/${first}`);
+            assert.ok(await guest.waitFor({ selector: '.topbar [aria-label="Menu"]' }));
+            await guest.click({ selector: '.topbar [aria-label="Menu"]' });
+            assert.ok(await guest.waitFor({ selector: '.nav-menu .place[data-place="find"]' }));
+            assert.deepEqual(await places(), ["find"]);
+            await clickNavigation(guest, { selector: ".nav-menu .menu-all" });
+            assert.ok(
+                await guest.waitFor({ selector: '.nav-menu .place[data-place="artifacts"]' }),
+            );
+
+            for (const id of ["files", "changes", "pip"]) {
+                assert.ok(!(await places()).includes(id), `no ${id} for the viewer`);
+            }
+
+            await guest.press("Escape");
+            await clickNavigation(guest, { label: "App settings" });
+            assert.ok(await guest.waitFor({ selector: '.nav-menu[aria-label="App settings"]' }));
+            const settings = await guest.evaluate(
+                `return document.querySelector('.nav-menu').innerText`,
+            );
+
+            assert.match(settings, /Appearance/);
+            assert.doesNotMatch(settings, /Providers|Restart server|Refresh models/);
+        } finally {
+            await guests.closeAll({ final: true });
+            app.config.removeUser(viewer.user.id);
+        }
+    },
+);
 
 test("local Markdown file links use the viewer", real, async () => {
     const linked = await newSession(app);
@@ -689,6 +1131,177 @@ test("an open activity group draws a thought step", real, async () => {
     );
 });
 
+test(
+    "a folded group keeps a lesson that waits in sight, as a card or a badge, until it is decided",
+    real,
+    async () => {
+        // A real run: the model calls the memory tool, and the server stores and sends the call and its result.
+        const id = await newSession(app);
+
+        await fresh();
+        await goTo(id);
+        await app.commands.submit(id, owner(app), {
+            text: "remember Folded lesson that waits.",
+            requestId: "fold-lesson-1",
+        });
+        await until(
+            async () => (await modelTexts(app, id)).join().includes("echo:"),
+            "the run that saved the lesson",
+            20_000,
+        );
+        // A later turn: the group is no longer the newest, so it folds.
+        await app.commands.submit(id, owner(app), { text: "again", requestId: "fold-lesson-2" });
+        await until(
+            async () => (await modelTexts(app, id)).join().includes("echo: again"),
+            "the later turn",
+            20_000,
+        );
+
+        const lesson = (await app.memory.view(id, owner(app))).lessons.find(
+            (each) => each.text === "Folded lesson that waits.",
+        )!;
+
+        assert.equal(lesson.pending, true);
+
+        const shown = () =>
+            inPage<{ open: boolean; cards: string[]; badge: string | null }>(`
+            const group = document.querySelector(".activity");
+
+            return JSON.stringify({
+                open: group?.classList.contains("open") ?? false,
+                cards: [...document.querySelectorAll(".activity > .activity-lessons .lesson-text")]
+                    .map((each) => each.textContent),
+                badge: document.querySelector(".activity-head .activity-lessons-badge")?.textContent.trim() ?? null,
+            });
+        `);
+        const setLook = (value: string) =>
+            page.evaluate(`(async () => {
+            (await import("/theme.js")).setPrefs({ foldedLessons: "${value}" });
+        })()`);
+
+        try {
+            await until(async () => {
+                const now = await shown();
+
+                return !now.open && now.cards.join() === "Folded lesson that waits.";
+            }, "the folded group, with the lesson's card under its line");
+            await setLook("badge");
+            await until(async () => {
+                const now = await shown();
+
+                return now.cards.length === 0 && now.badge === "1 lesson waits";
+            }, "the badge on the line instead of the card");
+            // Opened, the card shows at its step alone.
+            await tap(".activity-head");
+            await until(async () => {
+                const now = await shown();
+
+                return now.open && now.badge === null && now.cards.length === 0;
+            }, "the open group, without the badge");
+            await tap(".activity-head");
+            await setLook("card");
+            await until(async () => (await shown()).cards.length === 1, "the card again");
+            // Decided elsewhere: the server's word takes it away, with no polling.
+            await app.memory.change(
+                id,
+                work,
+                { userId: owner(app).id, byPi: false, name: "Owner" },
+                lesson.id,
+                "approve",
+                { text: lesson.text },
+            );
+            await until(async () => {
+                const now = await shown();
+
+                return now.cards.length === 0 && now.badge === null;
+            }, "no card once the lesson is approved");
+        } finally {
+            await setLook("card");
+            // The tests after this one count the project's lessons.
+            await app.memory
+                .change(
+                    id,
+                    work,
+                    { userId: owner(app).id, byPi: false, name: "Owner" },
+                    lesson.id,
+                    "remove",
+                )
+                .catch(() => undefined);
+        }
+    },
+);
+
+test(
+    "a lesson named by two calls shows at both by default, and at the newest alone with LESSON_CARDS.newestOnly",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        // Each turn ends with Pi's words: after a memory call, the echo of its result.
+        const turn = async (text: string, requestId: string, ends: string) => {
+            await app.commands.submit(id, owner(app), { text, requestId });
+            await until(
+                async () => (await modelTexts(app, id)).join().includes(ends),
+                `the turn "${text}"`,
+                20_000,
+            );
+        };
+
+        await fresh();
+        await goTo(id);
+        await turn("remember Twice named lesson.", "twice-1", "echo: Saved [");
+
+        const lesson = (await app.memory.view(id, owner(app))).lessons.find(
+            (each) => each.text === "Twice named lesson.",
+        )!;
+
+        // Pi changes it while it waits: the same lesson, a second call.
+        await turn(
+            `relesson ${lesson.id} Twice named lesson, changed.`,
+            "twice-2",
+            "echo: Updated [",
+        );
+        await turn("again", "twice-3", "echo: again");
+
+        const cards = () =>
+            inPage<number>(
+                `return JSON.stringify(document.querySelectorAll(".activity .lesson-call.waiting").length)`,
+            );
+        const newestOnly = (on: boolean) =>
+            page.evaluate(`(async () => {
+                (await import("/transcript.js")).LESSON_CARDS.newestOnly = ${on};
+                const { store } = await import("/store.js");
+
+                store.set({ memoryRev: (store.state.memoryRev ?? 0) + 1 });
+            })()`);
+
+        try {
+            await until(async () => (await cards()) === 2, "a card under each folded group");
+            await newestOnly(true);
+            await until(async () => (await cards()) === 1, "one card, at the newest call");
+            assert.equal(
+                await inPage<string>(`
+                    const groups = [...document.querySelectorAll(".activity")];
+
+                    return JSON.stringify(groups.findIndex((each) => each.querySelector(".lesson-call.waiting")) === groups.length - 1 ? "newest" : "older");
+                `),
+                "newest",
+            );
+        } finally {
+            await newestOnly(false);
+            await app.memory
+                .change(
+                    id,
+                    work,
+                    { userId: owner(app).id, byPi: false, name: "Owner" },
+                    lesson.id,
+                    "remove",
+                )
+                .catch(() => undefined);
+        }
+    },
+);
+
 test("earlier history does not repeat a message kept after compaction", real, async () => {
     await compactedView();
     await page.evaluate(`
@@ -801,9 +1414,22 @@ test(
         const { h, options, render } = await import("preact");
         const { Markdown } = await import("/ui.js");
         const { store } = await import("/store.js");
+        const { browserModuleState } = await import("/extension-ui.js");
         const settle = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve)));
         const box = document.createElement("div");
 
+        // Extensions' browser modules load after the list shows, and each one that finishes draws every row again
+        // (extensionsRev): not what this measures. Under load that comes late, so wait for them first.
+        while (store.state.server.ui.some((each) => {
+            const status = browserModuleState(each.module)?.status;
+
+            return status !== "ready" && status !== "failed";
+        })) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+
+        await settle();
+        await settle();
         render(h(Markdown, { text: "First block.\\n\\n![x](a.png)\\n\\nSecond", cache: false }), box);
         const first = box.querySelector("p");
 
@@ -811,8 +1437,9 @@ test(
         let rows = [];
         const diffed = options.diffed;
 
-        let quiet;
-        let same;
+        let quiet = 0;
+        let same = 0;
+        let listed = [];
 
         options.diffed = (vnode) => {
             if (vnode.type?.name === "SessionRow") {
@@ -823,26 +1450,43 @@ test(
         };
 
         try {
-            store.set((state) => ({ view: { ...state.view } }));
-            await settle();
-            quiet = rows.length;
-            // The same sessions in a new list: no row has anything new to show.
-            store.set((state) => ({ sessions: [...state.sessions] }));
-            await settle();
-            same = rows.length - quiet;
-            rows = [];
-            // One session renamed: its row, and no other.
-            store.set((state) => ({
-                sessions: state.sessions.map((session) =>
-                    session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
-                ),
-            }));
-            await settle();
+            // An extension's async status fetch can bump extensionsRev right after load and redraw every row; retry if
+            // that unrelated revision changed during the probe.
+            for (let attempt = 0; attempt < 4; attempt++) {
+                const revBefore = store.state.extensionsRev;
+                const sessionsBefore = store.state.sessions;
+
+                rows = [];
+                store.set((state) => ({ view: { ...state.view } }));
+                await settle();
+                quiet = rows.length;
+                // The same sessions in a new list: no row has anything new to show.
+                store.set((state) => ({ sessions: [...state.sessions] }));
+                await settle();
+                same = rows.length - quiet;
+
+                rows = [];
+                // One session renamed: its row, and no other.
+                store.set((state) => ({
+                    sessions: state.sessions.map((session) =>
+                        session.id === ${Number(first)} ? { ...session, title: "Renamed here" } : session,
+                    ),
+                }));
+                await settle();
+                listed = rows;
+
+                if (store.state.extensionsRev === revBefore) {
+                    break;
+                }
+
+                store.set({ sessions: sessionsBefore });
+                await settle();
+            }
         } finally {
             options.diffed = diffed;
         }
 
-        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed: rows, image: box.querySelector("img")?.getAttribute("src") ?? null });
+        return JSON.stringify({ kept: box.querySelector("p") === first, text: box.textContent, quiet, same, listed, image: box.querySelector("img")?.getAttribute("src") ?? null });
     `);
 
         assert.ok(drawn.kept, "the first block stays as it was drawn");
@@ -1700,16 +2344,23 @@ test("a call's mark keeps its circle while it waits for an approval", real, asyn
             const mark = document.querySelector('[data-part~="tool-call"][data-state="waiting"] [data-part~="step-mark"]');
             const shape = mark && getComputedStyle(mark);
 
+            const size = getComputedStyle(document.documentElement).getPropertyValue("--step-mark-size").trim();
+
             return JSON.stringify(shape && { width: shape.width, height: shape.height,
-                padding: shape.paddingTop, border: shape.borderTopWidth });
+                padding: shape.paddingTop, border: shape.borderTopWidth, size });
         `);
 
     await until(async () => (await mark()) !== null, "the call waiting", 20_000);
-    assert.deepEqual(await mark(), {
-        width: "19px",
-        height: "19px",
+    const shape = await mark();
+
+    // The circle is the size the look gives every step mark (19px in the app's own, 20px in Pocket's).
+    assert.match(shape!.size!, /^\d+px$/);
+    assert.deepEqual(shape, {
+        width: shape!.size,
+        height: shape!.size,
         padding: "0px",
         border: "0px",
+        size: shape!.size,
     });
 });
 
@@ -1780,7 +2431,7 @@ test(
             });
             await until(
                 () =>
-                    run<boolean>(`return !!document.querySelector(".home-list > .rail")`).catch(
+                    run<boolean>(`return !!document.querySelector(".mobile-rail")`).catch(
                         () => false,
                     ),
                 "the session list",
@@ -1826,14 +2477,14 @@ test(
                 );
             };
 
-            await clear(".home-list > .rail button, .home-list > .rail .avatar");
+            await clear(".mobile-rail [data-nav]");
             await enter(notched);
             await clear(".topbar button");
             await clear(".composer-wrap .composer");
 
             const plain = await visit(0);
 
-            assert.deepEqual(await edges(plain, ".home-list > .rail"), [{ left: 0, right: 56 }]);
+            assert.deepEqual(await edges(plain, ".mobile-rail"), [{ left: 0, right: WIDTH }]);
             await enter(plain);
             assert.deepEqual(
                 await plain<string[]>(`
@@ -1911,11 +2562,11 @@ test("a sent HEIC photo shows the JPEG the model got", real, async () => {
     });
     const photo = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
     const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+    const file = { path, name: "photo.heic", mime: "image/heic", size: photo.length };
 
     writeFileSync(path, photo);
-    await say(app, id, "look at this", [
-        { path, name: "photo.heic", mime: "image/heic", size: photo.length },
-    ]);
+    await issueUpload(app, id, file);
+    await say(app, id, "look at this", [file]);
 
     await fresh();
     await goTo(id);
@@ -2074,5 +2725,155 @@ test(
         );
         await page.setViewport(VIEWPORTS.mobile);
         await page.evaluate(`(await import("/store.js")).closeSheet()`);
+    },
+);
+
+test(
+    "Spend shows a team total without a limit and keeps member costs separate",
+    real,
+    async (t) => {
+        await fresh();
+        const lead = await newSession(app);
+        const child = await newSession(app);
+        const members = [
+            { id: Number(lead), title: "Plan the release", spent: 2 },
+            { id: Number(child), title: "Review the release", spent: 3 },
+        ];
+        let grouped = true;
+
+        t.mock.method(app.spend, "summary", () => {
+            const budget = app.sessionMeta(lead)?.budget;
+
+            return {
+                total: 7,
+                people: [],
+                sessions: [
+                    { ...members[0], ...(budget === undefined ? {} : { budget, spent: 5 }) },
+                    members[1],
+                    { id: Number(first), title: "Other work", spent: 2 },
+                ],
+                ...(grouped ? { teams: [{ lead: Number(lead), spent: 5, members }] } : {}),
+            };
+        });
+        const open = () =>
+            page.evaluate(`(await import("/store.js")).openSheet({ type: "spend" })`);
+        const rows = () =>
+            inPage<
+                string[][]
+            >(`return JSON.stringify([...document.querySelectorAll('.spend-row')].map(row =>
+        [row.querySelector('.grow').textContent.trim(), row.querySelector('.mono').textContent.trim()]))`);
+        const fits = () =>
+            inPage<boolean>(`return JSON.stringify([...document.querySelectorAll('.spend-row > :not(.grow)')]
+        .every(el => el.getBoundingClientRect().right <= el.closest('.sheet-list').getBoundingClientRect().right))`);
+
+        const setLimit = async (value: number) => {
+            await page.evaluate(`
+                const input = document.querySelector('.limit-edit input');
+                input.value = '${value}';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            `);
+            await tap(".limit-edit .primary:not(:disabled)");
+        };
+
+        const expected = [
+            ["Team total", "$5.00"],
+            ["Plan the release", "$2.00"],
+            ["Review the release", "$3.00"],
+            ["Other work", "$2.00"],
+        ];
+
+        await open();
+        await until(async () => (await rows()).length > 0, "the spend rows");
+        assert.deepEqual(await rows(), expected);
+        assert.equal(await fits(), true, "the amounts and controls fit on a phone");
+        await tap('button[aria-label="Change team limit for Plan the release"]');
+        await setLimit(1_000_001);
+        await until(
+            () =>
+                inPage<boolean>(`return JSON.stringify((await import('/store.js')).store.state.notices
+            .some(notice => notice.message.includes('budget must be'))) `),
+            "the limit error",
+        );
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector('.limit-edit input').value)`,
+            ),
+            "1000001",
+            "a refused change keeps the draft",
+        );
+        await setLimit(10);
+        await until(
+            () =>
+                inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.spend-team-total').textContent.includes('limit $10.00'))`,
+                ),
+            "the saved team limit",
+        );
+        assert.equal(app.sessionMeta(lead)?.budget, 10);
+        assert.equal(app.sessionMeta(child)?.budget, undefined);
+        assert.deepEqual(
+            await rows(),
+            expected,
+            "the team limit does not replace the lead's own cost",
+        );
+        await page.setViewport(VIEWPORTS.desktop);
+        assert.equal(await fits(), true, "the same breakdown fits on desktop");
+
+        grouped = false;
+        await fresh();
+        await open();
+        await until(async () => (await rows()).length > 0, "the legacy summary");
+        assert.deepEqual(await rows(), [["Plan the release", "$5.00"], ...expected.slice(2)]);
+    },
+);
+
+test(
+    "a reply's wide Markdown table stays inside the transcript column on phone and desktop",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(
+            app,
+            id,
+            `Wide table:\n\n| Col1 | Col2 | Col3 | Col4 | Col5 | Col6 | Col7 | Col8 | Col9 | Col10 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| one-unbreakable-run-of-characters-far-longer-than-any-cell-could-hold | b | c | d | e | f | g | h | i | j |`,
+        );
+
+        for (const viewport of [VIEWPORTS.mobile, VIEWPORTS.desktop]) {
+            await page.setViewport(viewport);
+            await page.navigate(`${base}/s/${Number(id)}`);
+            await until(
+                async () =>
+                    (await inPage<boolean>(
+                        `return JSON.stringify(document.querySelector('[data-part~="reply"] .md table') !== null)`,
+                    )) === true,
+                "the reply table",
+                20_000,
+            );
+            const measured = await inPage<{
+                tableRight: number;
+                wordsRight: number;
+                scrollWidth: number;
+                clientWidth: number;
+                scrollerScrollW: number;
+                scrollerClientW: number;
+            }>(`
+            const scroller = document.querySelector(".scroller");
+            const table = document.querySelector('[data-part~="reply"] .md table');
+
+            return JSON.stringify({
+                tableRight: Math.round(table.getBoundingClientRect().right),
+                wordsRight: Math.round(table.closest(".md").getBoundingClientRect().right),
+                scrollWidth: table.scrollWidth,
+                clientWidth: table.clientWidth,
+                scrollerScrollW: scroller.scrollWidth,
+                scrollerClientW: scroller.clientWidth,
+            });
+        `);
+
+            assert.ok(measured.tableRight <= measured.wordsRight + 1);
+            assert.equal(measured.scrollerScrollW, measured.scrollerClientW);
+            assert.ok(measured.scrollWidth > measured.clientWidth);
+        }
     },
 );

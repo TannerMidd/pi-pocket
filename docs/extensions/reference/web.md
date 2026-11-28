@@ -114,6 +114,21 @@ Says how an input this module sends shows in the transcript, while the module is
 
 The module puts a short `summary` string on the entry's data when it submits. The transcript shows `label`, or `label · summary` when that string is there. See [`PresentEntry`](#presententry).
 
+### `surfaceComponent`
+
+```ts
+surfaceComponent(spec: SurfaceComponentSpec): void;
+```
+
+Since 0.31.0 · Experimental
+
+Adds a component to surfaces, the cards that Pi shows with its `ui` tool, while the module is on. See [`SurfaceComponentSpec`](#surfacecomponentspec) and [Surfaces](../surfaces.md).
+
+- `type` is `x.<module>.<Name>`: this module's name, then letters and digits. It cannot clash with a built-in type or another module's.
+- The server checks every card that uses the type: the props against `props`, and a `bind` path against `bind`. A card that fails is refused, so Pi hears why.
+- The component reads props and data, binds at most one value, and makes no new kinds of action. A card never carries code: the renderer is [`pocket.surfaceComponent`](pocket.md#surfacecomponent) in the module's own browser module.
+- With the module off, or in a browser that does not load it (a person invited to one session), the card shows the component's `text`. A module registers 20 components at most. Turning the module off, or a load that fails, drops the registration.
+
 ### `publicPage`
 
 ```ts
@@ -252,6 +267,8 @@ Answers the requests of a route. The value that it returns goes back as JSON, an
 ```ts
 interface WebRequest {
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
+    archiveSession?(id: number, archived?: boolean): Promise<void>;
+    folders?(): Promise<{ defaultCwd: string; favorites: string[] }>;
     readonly method: WebMethod;
     readonly params: Readonly<Record<string, string>>;
     readonly query: URLSearchParams;
@@ -280,6 +297,7 @@ What a handler gets.
 - An unbound catalog save has no source plan, turn, or spend checks. A bound commit also requires the source's current steering and turn rights.
 - Since 0.20.0 (experimental), `sessions()` gives the sessions that the person who asked can see now, as their session list shows them, archived ones too. See [`WebSession`](#websession). Use it to check the ids that a browser sends, and to keep data about sessions from people who cannot see them. Each call reads the list again.
 - Since 0.28.0 (experimental), `createSession` starts an ordinary session on owner-only routes. It refuses anyone but the owner. See [Execution environments for workspaces](../workspaces.md).
+- Since 0.31.0 (experimental), `archiveSession` archives or restores an ordinary session on owner-only routes, and `folders` returns `{ defaultCwd, favorites }` (the default folder and the owner's favorite folders) on owner-only routes. Both refuse anyone but the owner.
 
 ### `WebSession`
 
@@ -513,6 +531,21 @@ interface PresentEntry {
 Since 0.28.0 · Experimental
 
 What [`presentEntry`](#presententry) registers. `kind` is the stored kind. `label` is the line the transcript shows. `userPrefix` matches the start of a user message that nobody wrote.
+
+### `SurfaceComponentSpec`
+
+```ts
+interface SurfaceComponentSpec {
+    type: string;
+    props: object;
+    bind?: object;
+    text(props: Record<string, unknown>, data: Record<string, unknown>): string;
+}
+```
+
+Since 0.31.0 · Experimental
+
+What [`surfaceComponent`](#surfacecomponent) registers. `props` and `bind` are pi-schema schemas. `text` gives plain text, up to 500 characters, for the transcript, an export, a chat, and browsers without the module's renderer; it must not throw.
 
 ### `PublicPageAnswer`
 

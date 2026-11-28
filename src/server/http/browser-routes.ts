@@ -49,6 +49,33 @@ export async function browserRoutes(
         throw new HttpError(404, "The browser is off. The owner turns it on in Extensions.");
     }
 
+    if (app.isIsolatedConversation(id)) {
+        const problem = "The host browser is not available in an isolated sandbox.";
+
+        if (method === "GET") {
+            if (action === undefined) {
+                return json(response, 200, { available: false, open: false, problem });
+            }
+
+            if (action === "frame") {
+                response.writeHead(204, { "cache-control": "no-store", "x-closed": "1" });
+                response.end();
+
+                return;
+            }
+
+            if (action === "console") {
+                return json(response, 200, { entries: [] });
+            }
+
+            if (action === "servers") {
+                return json(response, 200, { servers: [] });
+            }
+        }
+
+        throw new HttpError(403, problem);
+    }
+
     const browsers = app.browsers;
     const key = Number(id);
 

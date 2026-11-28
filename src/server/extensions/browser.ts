@@ -2,6 +2,11 @@
  * Browser: Pi opens, reads, clicks through, and screenshots web pages in a real Chromium on this machine, the same page
  * the people in the conversation watch and use in the Browser panel. Turning it off turns off the panel too.
  *
+ * Screenshot triage (the setting `triageScreenshots`, off by default): a classifier model with image input reads each
+ * screenshot and adds one line that says what it shows — content, an error state, broken layout, or still loading — so
+ * the model knows what the image holds without seeing it; one still loading is shot again once, after half a second.
+ * A classifier that fails or runs out of time attaches no line.
+ *
  * A call is not replayed after a restart (clicking twice is not harmless), and the page itself does not survive one:
  * its address comes back when it opens again, but not what was typed or clicked on it.
  */
@@ -11,8 +16,10 @@ import { bool, num, obj, opt, str } from "@earendil-works/pi-schema";
 import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
 import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
-import { presetOf, viewportFrom } from "../browser/viewport.ts";
-import type { PocketHost } from "../host.ts";
+import { presetOf, viewportFrom, VIEWPORTS, type ViewportPreset } from "../browser/viewport.ts";
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { workspaceScheme } from "../paths.ts";
 
 const ACTIONS = [
@@ -50,14 +57,59 @@ const CHANGING = new Set<Action>([
 ]);
 const MAX_TEXT = 20_000;
 
+/** How long one screenshot-triage classify call may take; past it, the shot goes back with no line. */
+const TRIAGE_TIMEOUT_MS = 5_000;
+/** How long to wait before the one retry of a shot the classifier read as still loading. */
+const LOADING_RETRY_MS = 500;
+
+/** The labels the classifier answers about a screenshot, each with the criterion that earns it. */
+const TRIAGE_CRITERIA = {
+    loading:
+        "The page is still loading: a spinner, a skeleton, a mostly blank body, or a progress bar.",
+    error: "The page shows an error: a failure or not-found message, an error code, a crash screen, or a refused connection.",
+    content: "The page shows its real content: the text, images, or controls people use it for.",
+    "broken-layout":
+        "The page loaded, but its layout is broken: elements overlap or are cut off, or the styles did not load.",
+} as const;
+
+type TriageLabel = keyof typeof TRIAGE_CRITERIA;
+
+/** What each label says in the line the tool attaches beside the screenshot. */
+const TRIAGE_WORDS: Record<TriageLabel, string> = {
+    loading: "still loading",
+    error: "an error state",
+    content: "content",
+    "broken-layout": "broken layout",
+};
+
+const TRIAGE_QUESTIONS: ClassifyRequest["questions"] = {
+    shot: {
+        type: "choice",
+        instructions:
+            "Classify what the screenshot in the images shows, a web page the browser tool just took. Judge the whole image.",
+        criteria: TRIAGE_CRITERIA,
+    },
+};
+
+function presetHint(name: ViewportPreset): string {
+    const { width, height } = VIEWPORTS[name];
+
+    return `${name} (${width}×${height})`;
+}
+
 const GUIDE = `The browser tool is a real Chromium on this machine. The people in this conversation see its page live in the Browser panel and can use it too: show and test web work there (local dev servers, HTML files on this machine, any site).
 - Start a dev server in the background with bash first (\`nohup npm run dev > /tmp/dev.log 2>&1 &\`), then navigate to it.
-- snapshot gives refs like [e12] for click, type, select, and hover, valid until the next snapshot. screenshot shows the layout; viewport changes the size. After a change, check console for errors.`;
+- snapshot gives refs like [e12] for click, type, select, and hover, valid until the next snapshot. screenshot shows the layout; viewport changes the size, for example ${presetHint("desktop")}. After a change, check console for errors.`;
 
 function clip(text: string, max = MAX_TEXT): string {
     return text.length > max
         ? `${text.slice(0, max)}\n… (${text.length - max} more characters)`
         : text;
+}
+
+/** A page address without its query and fragment, which can hold tokens: what a classifier may read of it. */
+function withoutQuery(url: string): string {
+    return url.replace(/[?#].*$/s, "");
 }
 
 /** Where the page is, for the end of every answer. */
@@ -77,7 +129,32 @@ function formatLog(entry: LogEntry): string {
     return `[${entry.level}] ${entry.text}${entry.source === undefined ? "" : ` (${entry.source})`}`;
 }
 
-export default function createBrowser(host: PocketHost) {
+export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
+    // With a web part, the owner can turn screenshot triage on and name its classifier model.
+    if (web !== undefined) {
+        web.settings([
+            {
+                name: "triageScreenshots",
+                label: "Triage screenshots",
+                description:
+                    "A classifier reads each screenshot and adds a line saying what it shows (content, error, broken layout, loading; loading is shot again once). Needs image input. Sends each screenshot, the page address (no query) and title to the classifier's provider. Off by default.",
+                type: "boolean",
+                default: false,
+            },
+            {
+                name: "classifyModel",
+                label: "Screenshot classifier model",
+                description:
+                    "Optional own classifier, provider/modelId, with image input. Empty: the one chosen in Providers. With neither, screenshots get no line.",
+                type: "text",
+                default: "",
+            },
+        ]);
+    }
+
+    /** The classifier model for triage: this module's setting, else the owner's choice; undefined: none. */
+    const model = () => classifierFor(host, web?.setting("classifyModel"));
+
     const browser = defineTool({
         name: "browser",
         description:
@@ -149,8 +226,7 @@ export default function createBrowser(host: PocketHost) {
                 ),
                 viewport: opt(
                     str({
-                        description:
-                            "viewport: mobile (390×844), tablet (820×1180), desktop (1280×800), or WIDTHxHEIGHT.",
+                        description: `viewport: ${presetHint("mobile")}, ${presetHint("tablet")}, ${presetHint("desktop")}, or WIDTHxHEIGHT.`,
                     }),
                 ),
                 fullPage: opt(
@@ -267,7 +343,58 @@ export default function createBrowser(host: PocketHost) {
                     break;
 
                 case "screenshot": {
-                    const shot = await run(page.screenshot({ fullPage: args.fullPage === true }));
+                    let shot = await run(page.screenshot({ fullPage: args.fullPage === true }));
+                    let triage: TriageLabel | undefined;
+
+                    /** One classifier read of a shot: its label, or undefined to attach no line. */
+                    const read = async (
+                        data: string,
+                        mimeType: string,
+                    ): Promise<TriageLabel | undefined> => {
+                        const chosen = model();
+
+                        // Off, no classifier chosen, or a server too old for `host.classify` (this module reloaded
+                        // into it): no line.
+                        if (
+                            web === undefined ||
+                            web.setting("triageScreenshots") !== true ||
+                            chosen === undefined ||
+                            typeof host.classify !== "function"
+                        ) {
+                            return undefined;
+                        }
+
+                        const answers = await classifyFor(
+                            host.classify,
+                            "browser-screenshots",
+                            {
+                                model: chosen,
+                                state: { url: withoutQuery(page.url), title: page.title },
+                                images: [{ type: "image", data, mimeType }],
+                                questions: TRIAGE_QUESTIONS,
+                            },
+                            TRIAGE_TIMEOUT_MS,
+                        );
+                        const answer = answers?.shot;
+
+                        return answer?.type === "choice" &&
+                            Object.hasOwn(TRIAGE_CRITERIA, answer.choice)
+                            ? (answer.choice as TriageLabel)
+                            : undefined;
+                    };
+
+                    // Screenshot triage: one classifier read, and one retry when the shot is still loading, so the
+                    // second image and its label are what the tool returns. A call that fails or runs out of time
+                    // attaches no line, and the shot goes back as it came.
+                    if (web?.setting("triageScreenshots") === true) {
+                        triage = await read(shot.data, shot.mimeType);
+
+                        if (triage === "loading") {
+                            await new Promise((resolve) => setTimeout(resolve, LOADING_RETRY_MS));
+                            shot = await run(page.screenshot({ fullPage: args.fullPage === true }));
+                            triage = await read(shot.data, shot.mimeType);
+                        }
+                    }
 
                     // Models refuse bigger images once a conversation holds many, so a big page comes back smaller.
                     const smaller =
@@ -275,10 +402,17 @@ export default function createBrowser(host: PocketHost) {
                             ? `, shown at ${Math.round(shot.width * shot.scale)}×${Math.round(shot.height * shot.scale)}: multiply a point in it by ${(1 / shot.scale).toFixed(2)} for CSS pixels`
                             : "";
 
-                    image = { type: "image", data: shot.data, mimeType: "image/jpeg" };
+                    image = { type: "image", data: shot.data, mimeType: shot.mimeType };
                     lines.push(
                         `Screenshot of ${args.fullPage === true ? "the whole page" : "the viewport"}, ${shot.width}×${shot.height} CSS pixels${smaller}.`,
                     );
+
+                    if (triage !== undefined) {
+                        lines.push(
+                            `The classifier reads the screenshot as ${TRIAGE_WORDS[triage]}.`,
+                        );
+                    }
+
                     break;
                 }
 

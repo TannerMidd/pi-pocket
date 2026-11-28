@@ -47,6 +47,8 @@ async function request<T>(
     body?: unknown,
     form?: Record<string, string>,
 ): Promise<T> {
+    context.signal.throwIfAborted();
+
     let response: Response;
     let data: T & { ok?: boolean; error?: string; needed?: string };
 
@@ -68,6 +70,8 @@ async function request<T>(
     } catch {
         throw new Error("Slack request failed. Check the API address and connection.");
     }
+
+    context.signal.throwIfAborted();
 
     if (data.error === "missing_scope" && /^[a-z:._,]{1,100}$/.test(data.needed ?? "")) {
         throw new RelayError(`Slack denied access: the bot token needs the ${data.needed} scope.`, {
@@ -136,6 +140,10 @@ function eventOf(event: SlackEvent, user: string, channels: string[]): RelayEven
         id: `${event.channel}:${event.ts}`,
         channel: event.channel,
         thread: event.thread_ts ?? event.ts,
+        // Slack answers a message with a thread reply: in the id `reply` returns for the thread's first message.
+        ...(event.thread_ts !== undefined && event.thread_ts !== event.ts
+            ? { replyTo: `${event.channel}:${event.thread_ts}` }
+            : {}),
         text: text.split(mention).join("").trim(),
         author: { id: event.user, name: event.user, bot: event.user === user },
         mentioned: text.includes(mention) || event.channel_type === "im",
@@ -181,6 +189,8 @@ async function download(
     if (url === undefined) {
         throw new Error("Slack has no download for the attachment");
     }
+
+    context.signal.throwIfAborted();
 
     const response = await getFrom(
         url,
@@ -229,6 +239,8 @@ async function upload(context: RequestContext, file: RelayOutFile): Promise<stri
         throw new Error("Slack gave an upload address that is not its own. Nothing was sent.");
     }
 
+    context.signal.throwIfAborted();
+
     let response: Response;
 
     try {
@@ -258,6 +270,8 @@ async function socketRun(
     user: string,
     channels: string[],
 ): Promise<void> {
+    context.signal.throwIfAborted();
+
     let socket: WebSocket;
 
     try {
@@ -272,17 +286,30 @@ async function socketRun(
     let finish: () => void = () => {};
 
     const ended = new Promise<void>((resolve) => {
-        finish = resolve;
+        finish = () => {
+            if (context.signal.aborted) {
+                resolve();
+            } else {
+                void pending.then(resolve);
+            }
+        };
     });
     const timeout = setTimeout(() => {
         failure = new Error("Slack socket connection timed out.");
         finish();
     }, 20_000);
-    const abort = () => finish();
+
+    const abort = () => {
+        socket.close();
+        finish();
+    };
 
     const onOpen = () => {
         clearTimeout(timeout);
-        context.status("Connected");
+
+        if (!context.signal.aborted) {
+            context.status("Connected");
+        }
     };
 
     const onMessage = (message: MessageEvent) => {
@@ -290,7 +317,11 @@ async function socketRun(
             const envelope = JSON.parse(String(message.data)) as Envelope;
 
             const ack = () => {
-                if (envelope.envelope_id && socket.readyState === WebSocket.OPEN) {
+                if (
+                    !context.signal.aborted &&
+                    envelope.envelope_id &&
+                    socket.readyState === WebSocket.OPEN
+                ) {
                     socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
                 }
             };
@@ -345,8 +376,6 @@ async function socketRun(
             await ended;
         }
 
-        await pending;
-
         if (failure && !context.signal.aborted) {
             throw failure;
         }
@@ -363,6 +392,7 @@ async function socketRun(
 
 const slack: RelayConnector = {
     kind: "slack",
+    authenticatedAuthors: true,
     label: "Slack",
     description: "A Slack app in Socket Mode: messages in its channels and direct messages.",
     shape: "stream",
@@ -411,6 +441,10 @@ const slack: RelayConnector = {
             .map((id) => id.trim())
             .filter(Boolean);
 
+        if (context.signal.aborted) {
+            return;
+        }
+
         context.save({});
 
         let delay = 1000;
@@ -441,6 +475,10 @@ const slack: RelayConnector = {
             throw new Error("Choose a Slack reply channel.");
         }
 
+        if (reply.confirmDestination && escape(reply.text).length > 4000) {
+            throw new Error("The reply exceeds the Slack message limit.");
+        }
+
         const files = reply.files ?? [];
 
         // Files and text go as one message: the text is its comment.
@@ -453,23 +491,71 @@ const slack: RelayConnector = {
 
             const text = escape(reply.text.slice(0, 4000));
 
-            await request(context, "files.completeUploadExternal", false, undefined, {
-                files: JSON.stringify(ids.map((id, index) => ({ id, title: files[index]!.name }))),
-                channel_id: String(channel),
-                ...(thread ? { thread_ts: String(thread) } : {}),
-                ...(text === "" ? {} : { initial_comment: text }),
-            });
+            const shared = await request<{ files?: SlackFile[] }>(
+                context,
+                "files.completeUploadExternal",
+                false,
+                undefined,
+                {
+                    files: JSON.stringify(
+                        ids.map((id, index) => ({ id, title: files[index]!.name })),
+                    ),
+                    channel_id: String(channel),
+                    ...(thread ? { thread_ts: String(thread) } : {}),
+                    ...(text === "" ? {} : { initial_comment: text }),
+                },
+            );
 
+            context.signal.throwIfAborted();
+
+            if (
+                reply.confirmDestination &&
+                !ids.every((id) => shared.files?.some((file) => file.id === id))
+            ) {
+                throw new Error("Slack did not confirm every file in the reply.");
+            }
+
+            // This method acknowledges file IDs, not the address of a chat message.
             return {};
         }
 
-        const result = await request<{ ts: string }>(context, "chat.postMessage", false, {
+        const result = await request<{
+            ts: string;
+            channel?: string;
+            message?: { thread_ts?: string; text?: string };
+            response_metadata?: { warnings?: string[] };
+        }>(context, "chat.postMessage", false, {
             channel,
             text: escape(reply.text.slice(0, 4000)),
             ...(thread ? { thread_ts: thread } : {}),
             unfurl_links: false,
             parse: "none",
         });
+
+        context.signal.throwIfAborted();
+
+        if (reply.confirmDestination) {
+            if (result.response_metadata?.warnings?.includes("message_truncated")) {
+                throw new Error("Slack truncated the message.");
+            }
+
+            if (
+                typeof result.channel !== "string" ||
+                result.channel !== String(channel) ||
+                result.message?.text !== escape(reply.text) ||
+                typeof result.ts !== "string" ||
+                !result.ts ||
+                result.message?.thread_ts !== thread
+            ) {
+                return {};
+            }
+
+            return {
+                id: `${result.channel}:${result.ts}`,
+                channel: result.channel,
+                thread: result.message?.thread_ts ?? result.ts,
+            };
+        }
 
         return { id: `${channel}:${result.ts}` };
     },

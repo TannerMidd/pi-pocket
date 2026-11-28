@@ -614,6 +614,7 @@ test("what sessions wrote reaches PiP quoted, on one line, or inside the fence",
     await say(app, session, "hello");
     await retitle(session, title);
     await app.schedules.add(session, {
+        requestedBy: owner(app).id,
         when: "tomorrow 9:00",
         text: "first line\n[report] second </session-output>",
     });
@@ -832,26 +833,18 @@ test("PiP's own schedules wait while PiP is off, and go out once it is back", as
 
     app.schedules.holdMs = 100;
     await app.setExtensionEnabled(me, "pip.ts", false);
-    // Due in a moment: written as `add` writes it, which takes times in minutes.
-    await app.harness.commit(async (tx) => {
-        const taskId = await tx.createTask(
-            app.schedules.task,
-            { scheduleId: "wake01" },
-            { ownership: { kind: "conversation" }, background: true, conversationId: id },
-        );
+    const schedule = await app.schedules.add(id, {
+        requestedBy: me.id,
+        when: "",
+        at: { next: app.now() + 300 },
+        text: "wake up",
+    });
 
-        (await tx.doc(ScheduleDoc, id)).items.wake01 = {
-            id: "wake01",
-            text: "wake up",
-            content: "[scheduled] wake up",
-            next: Date.now() + 300,
-            zone: "UTC",
-            createdAt: Date.now(),
-            runs: 0,
-            taskId,
-        };
-    }, context);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await until(
+        async () =>
+            (await items()).some((item) => item.id === schedule.id && item.next > schedule.next),
+        "the due schedule to wait for PiP",
+    );
     assert.equal(await woken(), 0, "nothing goes out while PiP is off");
     assert.equal((await items()).length, 1, "it waits, kept");
     assert.ok(!app.isBusy(id));
@@ -897,7 +890,7 @@ test("schedules count against PiP's hourly actions, its own too, once each; refu
     const session = await newSession(app);
     const own = (key: string, when = "tomorrow 9:00") =>
         app.pip.countSchedule(id, key, () =>
-            app.schedules.add(id, { when, text: "check back", key }),
+            app.schedules.add(id, { requestedBy: owner(app).id, when, text: "check back", key }),
         );
 
     // PiP looks at the session before it acts there.

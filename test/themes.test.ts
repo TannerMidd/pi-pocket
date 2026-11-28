@@ -256,3 +256,15 @@ test("a theme's own font stays when Appearance changes another, and its files ar
     assert.throws(() => themes.setFonts("paper", { sans: "Pocket Inter" }), /not a plain file/);
     assert.equal(readFileSync(outside, "utf8"), "/* not the theme's */\n");
 });
+
+test("running tool steps declare no CSS animation in the base or Pocket stylesheet", () => {
+    for (const rel of ["web/style.css", "web/themes/pocket/theme.css"]) {
+        const css = readFileSync(join(import.meta.dirname, "..", rel), "utf8");
+
+        assert.doesNotMatch(
+            css,
+            /\[data-state="running"\][^{]*\{[^}]*animation\s*:/,
+            `${rel} must not animate running steps`,
+        );
+    }
+});

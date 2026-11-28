@@ -47,6 +47,12 @@ const route: FauxResponseStep = (request) => {
         });
     }
 
+    if (role !== "toolResult" && text.includes("need a card")) {
+        return fauxAssistantMessage([fauxToolCall("tool_search", { query: "ui" })], {
+            stopReason: "toolUse",
+        });
+    }
+
     if (role !== "toolResult" && text.includes("need subagents")) {
         return fauxAssistantMessage([fauxToolCall("tool_search", { query: "subagent" })], {
             stopReason: "toolUse",
@@ -255,6 +261,23 @@ test("on any other model, a search leaves the tool list alone and the tool is ca
     );
 
     assert.ok(callable.includes("browser"), "a script can call it");
+});
+
+test("on any other model, the card tool still loads into the list: a script cannot host a card", async () => {
+    const id = await newSession(app);
+
+    await say(app, id, "need a card");
+    await say(app, id, "and now?");
+
+    const { offered } = await agent(id);
+    const result = (await app.transcripts.allEntries(id, false)).find(
+        (entry) =>
+            entry.kind === "toolResult" && (entry as { name?: string }).name === "tool_search",
+    ) as { text?: string } | undefined;
+
+    assert.ok(offered.includes("ui"), "offered to Pi to call directly");
+    assert.match(result?.text ?? "no result", /Loaded ui/);
+    assert.doesNotMatch(result?.text ?? "", /codemode script/);
 });
 
 test("on that route, a screenshot taken by a script reaches the model", async (t) => {

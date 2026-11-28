@@ -13,6 +13,8 @@ import {
     type EntryId,
     type TaskId,
 } from "@earendil-works/pi-durable";
+import type { ManagedFolderProof } from "./managed-storage.ts";
+import type { SurfacesState } from "./surfaces/types.ts";
 import type { Repeat } from "./when.ts";
 import type { Worktree } from "./worktrees.ts";
 
@@ -47,6 +49,10 @@ export type SessionMeta = {
     archived?: boolean;
     /** The session this one was forked from, and the last entry it inherited; no entry: forked before the first message. */
     forkedFrom?: { id: number; entryId?: number };
+    /** Exact uploads on the inherited inputs or the input this fork was created to resend. */
+    inheritedUploads?: string[];
+    /** A retained filename alone is not authority to read mutable bytes. */
+    inheritedUploadContent?: Record<string, { size: number; sha256: string }>;
     /** The session that started this one (`linked-sessions.ts`): a link only, which gives no access and owns nothing. */
     linkedFrom?: { id: number };
     /**
@@ -80,7 +86,13 @@ export type RemovedSession = {
     worktree?: Worktree;
     /** The session it was forked from: a fork of this one still reads that session's uploads through it. */
     forkedFrom?: { id: number; entryId?: number };
-    /** Uploads folders a live fork still reads (`workspace.ts`). */
+    /** Directory scopes captured in the removal commit. Older records authorize no file deletion. */
+    folders?: {
+        uploads: Record<string, ManagedFolderProof>;
+        background: Record<string, ManagedFolderProof>;
+        worktree?: ManagedFolderProof;
+    };
+    /** Upload folders still retained or awaiting owner review. */
     keepUploads?: number[];
     done?: number;
     left?: string[];
@@ -102,6 +114,19 @@ export const SessionsDoc = defineDoc<{ items: Record<string, SessionMeta> }>({
     ...rebased,
     scope: "session",
     initial: () => ({ items: {} }),
+});
+
+/** The server records each completed upload before it returns the descriptor. Forks issue their own uploads. */
+export const IssuedUploadsDoc = defineDoc<{
+    files: Record<string, { name: string; mime: string; size: number; sha256: string }>;
+}>({
+    kind: "pocket.issued-uploads",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ files: {} }),
 });
 
 /** Interrupt handoffs not yet admitted as messages: retries find the same durable task, even after a restart. */
@@ -403,6 +428,11 @@ export type SubagentRecord = {
      * a later time, so it needs them again.
      */
     dealtAt?: number;
+    /**
+     * When a person hid it from its parent's subagents bar: the time of the newest thing it had done then (its `askedAt`
+     * or `answeredAt`). It shows again once it does something newer, or someone opens it.
+     */
+    hiddenAt?: number;
     /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
     stall?: { since: number; told?: true; stopped?: true };
     /** How often the stall watch stopped its work since it last answered: 2 at most, then a person decides. */
@@ -412,7 +442,7 @@ export type SubagentRecord = {
 };
 
 /** A subagent's report waiting to go to its parent: all those waiting go together, as one message. */
-export type PendingReport = { name: string; text: string };
+export type PendingReport = { name: string; text: string; requestedBy?: string };
 
 /** Values codemode scripts keep with `store(key, value)`, read back with `load(key)` in later scripts. */
 export const CodemodeStoreDoc = defineDoc<{ values: Record<string, JsonValue> }>({
@@ -637,8 +667,22 @@ export const ScheduleDoc = defineDoc<{ items: Record<string, Schedule> }>({
 
 /** A command Pi started in the background (`background.ts`), and how it ended. */
 export type BackgroundTask = {
-    /** Short and stable: what Pi uses to read, stop, or name it. */
+    /** Short and stable: identifies this attempt, including its processes and output. */
     id: string;
+    /** A legacy row is a standalone job, never grouped by command or process. */
+    jobId?: string;
+    attempt?: number;
+    resumedFrom?: string;
+    superseded?: true;
+    processObservedAt?: number;
+    processAlive?: boolean;
+    lastOutputAt?: number;
+    outputBytes?: number;
+    /** On a running attempt, the watch committed its quiet stop and must finish it after restart. */
+    timedOut?: true;
+    launchFailed?: true;
+    /** The launcher ended this attempt before it called the process adapter. No process can belong to it. */
+    neverSpawned?: true;
     command: string;
     cwd: string;
     /** Its process, the leader of its own process group; 0 while it is starting. */
@@ -686,16 +730,54 @@ export type BackgroundTask = {
     read: number;
 };
 
+export type BackgroundJobSummary = {
+    jobId: string;
+    attemptId: string;
+    attempt: number;
+    resumedFrom?: string;
+    startedAt: number;
+    endedAt?: number;
+    status: BackgroundTask["status"];
+    outcome?: "exited" | "timeout" | "failure" | "stopped" | "lost";
+    processObservedAt?: number;
+    processAlive?: boolean;
+    lastOutputAt?: number;
+    outputBytes?: number;
+    code?: number;
+};
+
+export type BackgroundState = {
+    items: Record<string, BackgroundTask>;
+    /** Monotonic attempt IDs cannot alias a pruned attempt's processes or its watch. */
+    nextAttemptId?: number;
+    /** Adverse attempts have their own retention, independent of later successful launcher exits. */
+    adverse?: BackgroundJobSummary[];
+};
+
 /** Commands Pi runs in the background. A fork starts without them: their processes belong to the session they were started in. */
-export const BackgroundDoc = defineDoc<{ items: Record<string, BackgroundTask> }>({
+export const BackgroundDoc = defineDoc<BackgroundState>({
     kind: "pocket.background",
     version: 1,
     ...rebased,
     scope: "conversation",
     history: "latest",
     fork: "initial",
-    initial: () => ({ items: {} }),
+    initial: () => ({ items: {}, nextAttemptId: 1 }),
 });
+
+/** One compact receipt per keyed start. Trimming task rows or logs never permits a second launch. */
+export const BackgroundCallDoc = defineDocFamily<{ attemptId: string; requestedBy?: string }, null>(
+    {
+        kind: "pocket.background-call",
+        version: 1,
+        ...rebased,
+        family: true,
+        scope: "conversation",
+        history: "latest",
+        fork: "initial",
+        initial: () => ({ attemptId: "" }),
+    },
+);
 
 /** The last check of a goal: whether it passed, its exit code, and the end of its output. */
 export type GoalCheck = { passed: boolean; code: number; at: number; tail: string };
@@ -1087,4 +1169,20 @@ export const DesignCommentsDoc = defineDoc<{ items: Record<string, DesignItem> }
     history: "latest",
     fork: "current",
     initial: () => ({ items: {} }),
+});
+
+/**
+ * The surfaces Pi showed in a conversation (`surfaces/`, `extensions/surfaces.ts`): interactive cards, each a flat
+ * layout with data and one parked tool call that an action wakes. Singleton: one commit can change it with the signal.
+ * `fork: "initial"`: a fork starts with none, because a copy would name a task of another conversation, and a tap in
+ * the fork would wake it. Stored data: never rename the kind or change these settings.
+ */
+export const SurfacesDoc = defineDoc<SurfacesState>({
+    kind: "pocket.surfaces",
+    version: 1,
+    ...rebased,
+    scope: "conversation",
+    history: "latest",
+    fork: "initial",
+    initial: () => ({ seq: 0, items: {} }),
 });

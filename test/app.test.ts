@@ -42,6 +42,7 @@ import { HeldDoc, InterruptsDoc, TurnsDoc } from "../src/server/docs.ts";
 import type { Interrupt } from "../src/server/resend.ts";
 import createArtifacts from "../src/server/extensions/artifacts.ts";
 import type { PocketHost } from "../src/server/host.ts";
+import { issueUpload } from "../src/server/upload-references.ts";
 
 /** The provider session id each request carried, with the message it answered. */
 const requests: { sessionId: string | undefined; text: string }[] = [];
@@ -386,13 +387,15 @@ test("a pasted image is stored with its message and read back", async () => {
         "base64",
     );
     const path = join(app.workspace.uploadDirectory(id), "dot.png");
+    const file = { path, name: "dot.png", mime: "image/png", size: png.length };
 
     writeFileSync(path, png);
-    await say(id, "look at this", [{ path, name: "dot.png", mime: "image/png", size: png.length }]);
+    await issueUpload(app, id, file);
+    await say(id, "look at this", [file]);
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
     const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
     const entries = await conversation.entries({}, 256, undefined, BACKGROUND_CONTEXT);
-    const user = entries.items.find((entry) => entry.kind === "pi.user")!;
+    const user = entries.items.find((entry) => entry.kind === "pocket.upload-input")!;
     const image = await app.transcripts.entryImage(id, user.id as unknown as number, 0);
 
     assert.equal(image?.mimeType, "image/png");
@@ -442,13 +445,15 @@ test("a big pasted image goes to the model at most 2000 pixels a side", async ()
     });
     const png = greyPng(10, 3000);
     const path = join(app.workspace.uploadDirectory(id), "tall.png");
+    const file = { path, name: "tall.png", mime: "image/png", size: png.length };
 
     writeFileSync(path, png);
-    await say(id, "how tall?", [{ path, name: "tall.png", mime: "image/png", size: png.length }]);
+    await issueUpload(app, id, file);
+    await say(id, "how tall?", [file]);
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
     const conversation = (await app.harness.conversation(id, BACKGROUND_CONTEXT))!;
     const entries = await conversation.entries({}, 256, undefined, BACKGROUND_CONTEXT);
-    const user = entries.items.find((entry) => entry.kind === "pi.user")!;
+    const user = entries.items.find((entry) => entry.kind === "pocket.upload-input")!;
     const image = (await app.transcripts.entryImage(id, user.id as unknown as number, 0))!;
 
     // Pi 1.5 sends the smaller of PNG and JPEG.
@@ -502,9 +507,11 @@ test("a HEIC attachment reaches the model as a JPEG, and its line says so", asyn
     });
     const heic = readFileSync(new URL("./fixtures/photo.heic", import.meta.url));
     const path = join(app.workspace.uploadDirectory(id), "photo.heic");
+    const file = { path, name: "photo.heic", mime: "image/heic", size: heic.length };
 
     writeFileSync(path, heic);
-    await say(id, "look", [{ path, name: "photo.heic", mime: "image/heic", size: heic.length }]);
+    await issueUpload(app, id, file);
+    await say(id, "look", [file]);
     const history = await app.transcripts.history(id, Number.MAX_SAFE_INTEGER);
     const user = history.findLast((entry) => entry.kind === "user")!;
     const image = (await app.transcripts.entryImage(id, user.id, 0))!;
@@ -1743,8 +1750,10 @@ test("a composer Interrupt keeps everyone's queued modes, files, images and entr
         "base64",
     );
     const path = join(app.workspace.uploadDirectory(id), "kept.png");
+    const file = { path, name: "kept.png", mime: "image/png", size: png.length };
 
     writeFileSync(path, png);
+    await issueUpload(app, id, file);
 
     try {
         await app.commands.configure(id, owner(), {
@@ -1754,7 +1763,7 @@ test("a composer Interrupt keeps everyone's queued modes, files, images and entr
         await until(() => app.isBusy(id), "the run to start");
         const picture = await app.commands.submit(id, owner(), {
             text: "mine first with a picture",
-            attachments: [{ path, name: "kept.png", mime: "image/png", size: png.length }],
+            attachments: [file],
             requestId: "cf-2",
         });
 
@@ -1838,7 +1847,7 @@ test("a composer Interrupt keeps everyone's queued modes, files, images and entr
     }
 });
 
-test("a composer Interrupt does not attribute an unowned queued input to the person interrupting", async () => {
+test("a composer Interrupt drops an unowned queued input instead of sending it for the person interrupting", async () => {
     const id = await newSession();
 
     try {
@@ -1855,10 +1864,7 @@ test("a composer Interrupt does not attribute an unowned queued input to the per
         });
         const kept = await queued(app, id);
 
-        assert.equal(kept.length, 1);
-        assert.ok(kept[0]!.text.includes("unowned queued input"));
-        assert.equal(kept[0]!.mode, "followUp");
-        assert.equal(kept[0]!.by, undefined, "the interrupting person did not become its sender");
+        assert.deepEqual(kept, []);
     } finally {
         await app.commands.abort(id, owner());
     }
@@ -2205,6 +2211,7 @@ test("a queued message taken back to edit gives its sender its words and files, 
     const file = { path, name: "notes (v2).txt", mime: "text/plain", size: 3 };
 
     writeFileSync(path, "abc");
+    await issueUpload(app, id, file);
 
     try {
         await app.commands.submit(id, owner(), { text: "stream a long answer", requestId: "e-1" });

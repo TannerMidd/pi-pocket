@@ -145,6 +145,7 @@ test("an approval reaches an embedder with the whole call, and whether its perso
     const id = await newSession(app);
     const embedder = embedderTab(undefined);
 
+    await say(app, id, "request an approval");
     await app.attach(embedder.client);
 
     try {

@@ -213,7 +213,7 @@ test("who asked is fixed when the call asks, a subagent works for whoever its pa
     }
 });
 
-test("whose work Pi does survives a crash before it was written down, and when nobody is known only the owner may allow", async () => {
+test("whose work Pi does survives a crash before it was written down; nobody can allow an unattributed call", async () => {
     const alex = app.config.addUser("Alex C", "guest").user;
     const bea = app.config.addUser("Bea C", "guest").user;
 
@@ -287,11 +287,19 @@ test("whose work Pi does survives a crash before it was written down, and when n
         const unknown = ask(quiet, "rm -rf tmp");
 
         assert.equal(app.approvals.forConversation(quiet)[0]?.requestedBy, undefined);
-        await assert.rejects(app.answerApproval(unknown.request.id, true, bea), {
-            status: 403,
-            message: /only the owner/,
-        });
-        assert.equal(await app.answerApproval(unknown.request.id, true, owner(app)), true);
+
+        for (const rule of ["anyone", "others"] as const) {
+            await app.setApprovalRule(owner(app), rule);
+
+            for (const person of [bea, owner(app)]) {
+                await assert.rejects(app.answerApproval(unknown.request.id, true, person), {
+                    status: 403,
+                    message: /only be declined/,
+                });
+            }
+        }
+
+        assert.equal(await app.answerApproval(unknown.request.id, false, owner(app)), true);
         await unknown.answered;
     } finally {
         await app.setApprovalRule(owner(app), "anyone");
@@ -305,6 +313,8 @@ test("a call inside a codemode script, whose approval id has a slash, is answere
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
     const id = await newSession(app);
+
+    await sayAs(owner(app), id, "test the approval");
     // As the guard names a codemode call: the task, then the script's call id and its call's number.
     const request = { ...ask(id, "rm x").request, id: "7:toolu_01/1" };
     const answered = app.approvals.request(request, context);

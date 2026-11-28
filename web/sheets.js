@@ -1,8 +1,10 @@
 // The open sheet: which component shows it. The sheets themselves are in web/sheets/, and a few beside their features
 // (chat.js, notify.js, share.js).
 import { ChatSheet } from "./chat.js";
+import { ComposerMoreSheet } from "./composer-more.js";
 import { ExtensionSheet, onExtensionsGone } from "./extension-ui.js";
 import { NotificationsSheet } from "./notify.js";
+import { RailPage } from "./places-rail.js";
 import { ShareSheet } from "./share.js";
 import { AppearanceSheet } from "./sheets/appearance.js";
 import { AllArtifactsSheet } from "./sheets/all-artifacts.js";
@@ -25,6 +27,7 @@ import { MessageSheet } from "./sheets/message.js";
 import { ModelPicker } from "./sheets/model.js";
 import { InviteSheet, MyPhoto, PeopleSheet } from "./sheets/people.js";
 import { AuthDialog, ProvidersSheet } from "./sheets/providers.js";
+import { UsageSheet } from "./sheets/usage.js";
 import { HooksSheet } from "./sheets/hooks.js";
 import { SchedulesSheet } from "./sheets/schedules.js";
 import { SessionSheet } from "./sheets/session.js";
@@ -41,19 +44,22 @@ import { PiSessionSheet, PiSessionsSheet, piSessionsAvailable } from "./sheets/p
 import { WorktreeSheet } from "./sheets/worktree.js";
 import { TrustSheet } from "./trust.js";
 import { addLayer, goBack, removeLayer } from "./back.js";
-import { actions, api, signOut, store } from "./store.js";
-import { Boundary, html, Icon, SheetBack, SheetInfo, usePresence } from "./ui.js";
+import { actions, api, openSheet, signOut, store } from "./store.js";
+import { Boundary, html, Icon, NAV_BESIDE, SheetBack, SheetInfo, usePresence } from "./ui.js";
 
 // ─── Back ─────────────────────────────────────────────────────────────────────────
 
 // Identity must not change when Installed turns the gallery module on or off.
-const isExtensionHub = (sheet) => ["extensions", "gallery", "gallery-entry"].includes(sheet.type);
+const isHubDetail = (sheet) => ["gallery-entry", "extension-detail"].includes(sheet.type);
+const isNavigation = (sheet) => ["menu", "activity", "tools", "account"].includes(sheet.type);
+const isExtensionHub = (sheet) =>
+    ["extensions", "gallery"].includes(sheet.type) || isHubDetail(sheet);
 
 /** A hub selection is one step back, even when desktop browsing changes the selected entry. */
 const sheetKey = (sheet) =>
     isExtensionHub(sheet)
-        ? `extension-hub:${sheet.type === "gallery-entry" ? "entry" : "list"}`
-        : `${sheet.type}:${sheet.entryId ?? sheet.id ?? ""}`;
+        ? `extension-hub:${isHubDetail(sheet) ? "entry" : "list"}`
+        : `${sheet.type}:${sheet.section ?? sheet.entryId ?? sheet.id ?? ""}`;
 
 /**
  * The sheets opened one from another, oldest first (the menu, then the model picker it opened): each is a step back,
@@ -64,7 +70,11 @@ const trail = [];
 let trailIn = store.state.conversationId;
 
 store.subscribe(({ sheet, conversationId }) => {
-    if (!sheet || conversationId !== trailIn) {
+    if (
+        !sheet ||
+        conversationId !== trailIn ||
+        (sheet.navigationRoot && !trail.some((step) => step.sheet === sheet))
+    ) {
         trailIn = conversationId;
 
         for (const step of trail.splice(0)) {
@@ -119,6 +129,7 @@ onExtensionsGone((gone) => {
 
 /** What had focus when a sheet opened over the app: it has it again when the last sheet closes. */
 let opener = null;
+let focusRoot = null;
 /** What last had focus outside the sheets and the launcher: a sheet the launcher opens goes back there. */
 let lastFocus = null;
 
@@ -129,15 +140,21 @@ addEventListener("focusin", (event) => {
 });
 
 store.subscribe(({ sheet, launcher }) => {
-    if (sheet && !opener) {
+    if (sheet && (!opener || (sheet.navigationRoot && sheet !== focusRoot))) {
         const active = document.activeElement;
 
-        opener = active?.closest(".launcher-overlay") ? lastFocus : active;
+        // A different rail button can replace a docked drawer without first closing it.
+        if (!opener || (active && active !== document.body && !active.closest(".sheet-host"))) {
+            opener = active?.closest(".launcher-overlay") ? lastFocus : active;
+        }
+
+        focusRoot = sheet;
     } else if (!sheet && opener) {
         const back = opener;
         const active = document.activeElement;
 
         opener = null;
+        focusRoot = null;
 
         // Unless something else took focus meanwhile (a session the sheet opened), or a phone's keyboard would pop up.
         if (
@@ -159,7 +176,7 @@ store.subscribe(({ sheet, launcher }) => {
  * The open sheet, if any. A sheet that closes stays a moment longer, marked as leaving, so it can animate out; one sheet
  * replacing another swaps at once.
  */
-export function Sheets() {
+export function Sheets({ sideOccupied }) {
     const [sheet, leaving] = usePresence(store.state.sheet, 200);
     const auth = store.state.auth && sheet?.type !== "providers" ? html`<${AuthDialog} />` : null;
 
@@ -169,11 +186,29 @@ export function Sheets() {
 
     const key = isExtensionHub(sheet)
         ? "extension-hub"
-        : `${sheet.type}:${sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
+        : `${sheet.type}:${sheet.section ?? sheet.entryId ?? sheet.id ?? sheet.pipId ?? ""}`;
+    const navigationTrail = trail.some((step) => isNavigation(step.sheet));
+    const navigation = isNavigation(sheet)
+        ? NAV_BESIDE.matches && !sideOccupied
+            ? "beside"
+            : "over"
+        : undefined;
 
-    return html`<div class=${`sheet-host ${leaving ? "leaving" : ""}`} inert=${leaving}>
+    return html`<div
+        class=${`sheet-host ${leaving ? "leaving" : ""}`}
+        data-navigation=${navigation}
+        data-navigation-trail=${navigationTrail || undefined}
+        inert=${leaving}
+    >
         <${SheetBack.Provider} value=${trail.length > 1 ? goBack : null}>
-            <${SheetInfo.Provider} value=${{ type: sheet.type, closing: Boolean(leaving) }}>
+            <${SheetInfo.Provider}
+                value=${{
+                    type: sheet.type,
+                    navigation,
+                    navigationTrail,
+                    closing: Boolean(leaving),
+                }}
+            >
                 <${Boundary} key=${key} reset=${sheet}>${sheetBody(sheet)}<//>
             <//>
         <//>
@@ -220,20 +255,46 @@ function sheetBody(sheet) {
         case "providers":
             body = html`<${ProvidersSheet} />`;
             break;
+        // Only the owner has any: the menu's Providers is theirs too.
+        case "usage":
+            body = me?.role === "owner" ? html`<${UsageSheet} />` : null;
+            break;
         case "extensions":
         case "gallery":
         case "gallery-entry":
+
+        case "extension-detail": {
+            const origin =
+                sheet.origin ??
+                (["gallery", "gallery-entry"].includes(sheet.type) ? "gallery" : "extensions");
+            const tab = sheet.tab ?? (origin === "gallery" ? "discover" : "installed");
+            const selectedFile = sheet.type === "extension-detail" ? sheet.file : null;
+            // Source, review, and standalone management can remount the library. Its list step owns the return position.
+            const list = trail.find((step) => step.key === "extension-hub:list");
+            const bookmark = list && (list.library ??= {});
+            const onSelect = (file) => openSheet({ type: "extension-detail", file, tab, origin });
+            const onBack = () => openSheet({ type: origin, tab });
+
             body = galleryAvailable()
                 ? html`<${GallerySheet}
                       selected=${sheet.type === "gallery-entry" ? sheet.id : null}
-                      tab=${sheet.tab ?? "discover"}
-                      origin=${sheet.origin ?? (sheet.type === "gallery" ? "gallery" : "extensions")}
+                      selectedFile=${selectedFile}
+                      bookmark=${bookmark}
+                      tab=${tab}
+                      origin=${origin}
+                      onSelect=${onSelect}
+                      onBack=${onBack}
                       Management=${ExtensionsContent}
                   />`
-                : sheet.type === "extensions"
-                  ? html`<${ExtensionsSheet} />`
-                  : null;
+                : html`<${ExtensionsSheet}
+                      selectedFile=${selectedFile}
+                      bookmark=${bookmark}
+                      onSelect=${onSelect}
+                      onBack=${onBack}
+                  />`;
             break;
+        }
+
         case "gallery-source":
             body = galleryAvailable()
                 ? html`<${GallerySourceSheet} key=${sheet.id} name=${sheet.id} />`
@@ -269,8 +330,13 @@ function sheetBody(sheet) {
         case "notifications":
             body = html`<${NotificationsSheet} />`;
             break;
+        case "activity":
+        case "tools":
+        case "account":
+            body = html`<${RailPage} type=${sheet.type} />`;
+            break;
         case "menu":
-            body = html`<${MenuSheet} places=${!sheet.fromPlaces} />`;
+            body = html`<${MenuSheet} section=${sheet.section} places=${!sheet.fromPlaces} />`;
             break;
         case "session":
             body = store.state.sessions.some((each) => each.id === sheet.id)
@@ -279,6 +345,9 @@ function sheetBody(sheet) {
             break;
         case "places":
             body = view.conversation ? html`<${PlacesSheet} />` : null;
+            break;
+        case "composer-more":
+            body = view.conversation ? html`<${ComposerMoreSheet} />` : null;
             break;
         case "chat":
             body = view.conversation ? html`<${ChatSheet} />` : null;
@@ -334,7 +403,7 @@ function sheetBody(sheet) {
             break;
         case "background":
             body = view.conversation
-                ? html`<${BackgroundSheet} key=${sheet.task ?? ""} task=${sheet.task} />`
+                ? html`<${BackgroundSheet} key=${`${view.conversation.id}:${sheet.task ?? ""}`} task=${sheet.task} />`
                 : null;
             break;
         case "schedules":

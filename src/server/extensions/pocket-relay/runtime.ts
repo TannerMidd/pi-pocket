@@ -2,13 +2,16 @@
  * The relay's runtime. Its files are 0600, in `x.pocket-relay`, which Lancet Guard keeps Pi out of. Nothing here throws
  * into the server: a connector's error is its status.
  */
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { InboxApi } from "../../host.ts";
+import type { SurfacesRelayApi } from "../../surfaces/relay.ts";
 import { MAX_REPLY_BYTES } from "./files.ts";
+import { recoverRelay } from "./recovery.ts";
 import {
     type RelayConnector,
     type RelayContext,
@@ -16,12 +19,20 @@ import {
     type RelayField,
     type RelayFile,
     type RelayOutFile,
+    type RelayOutbound,
+    type RelayReceipt,
+    type RelayTriage,
+    type RelayTriageVerdict,
     type RelayValues,
+    authenticatedAccount,
+    isOwnerAccount,
     relayErrorOf,
 } from "./types.ts";
 
 /** A connector the owner added. `values` holds its fields, secrets too: it never leaves the server as it is. */
 export interface ConnectorConfig {
+    /** Server-assigned identity of this route. Older configuration files have none. */
+    revision?: string;
     id: string;
     name: string;
     kind: string;
@@ -41,24 +52,30 @@ export interface ConnectorConfig {
 
 /** An event the relay heard and keeps for replies: no text. */
 interface Heard {
+    /** Reference in the session; the service id below is only for transport and deduplication. */
+    reference: string;
     id: string;
     channel?: string;
     thread?: string;
     author: string;
+    authenticatedAccount?: string;
     at: number;
     /** Its attachments that Pi can fetch, refs and all: they stay in this folder. */
     files?: RelayFile[];
 }
 
 interface ConnectorState {
+    revision?: string;
     /** `RelayContext.state`. */
     own: Record<string, unknown>;
     /** Oldest first. */
     pending: RelayEvent[];
+    /** Account proof by route-scoped event reference, never from the connector payload. */
+    pendingAccounts?: Record<string, string>;
     /** Newest last: a reply finds its event here. */
     recent: Heard[];
     /** Replies sent, by key: a call that runs again does not send twice. */
-    replies: Record<string, { at: number; id?: string; sending?: boolean }>;
+    replies: Record<string, { at: number; id?: string; sending?: boolean; retired?: boolean }>;
     /** When each author's recent messages came, for the limit per author. */
     authors: Record<string, number[]>;
     delivered: number;
@@ -104,6 +121,37 @@ export const MAX_FETCH = 25 * 1024 * 1024;
 const HOUR = 3_600_000;
 /** setTimeout's longest wait: a longer one fires at once. */
 const TIMER_MAX = 2_147_483_647;
+/** How long one triage hook call may take; past it, the delivery goes on unlabelled. */
+const TRIAGE_CAP_MS = 10_000;
+/** How many triage verdicts are kept by event id, so a delivery that retries is not triaged again. */
+const MAX_VERDICTS = 200;
+/** The longest triage label kept: it goes into the delivered message. */
+const MAX_LABEL = 200;
+
+/**
+ * What a triage hook answered, as the relay uses it: `"drop"`, a label as one plain line (no line breaks or control
+ * characters, so it cannot forge a line of the payload, and capped), or `"deliver"` for anything else.
+ */
+function cleanVerdict(verdict: unknown): RelayTriageVerdict {
+    if (verdict === "drop") {
+        return "drop";
+    }
+
+    const label = (verdict as { label?: unknown } | null | undefined)?.label;
+
+    if (typeof label !== "string") {
+        return "deliver";
+    }
+
+    const line = label
+        .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
+        .trim()
+        .slice(0, MAX_LABEL)
+        .trim();
+
+    return line === "" ? "deliver" : { label: line };
+}
+
 const RETRY_AFTER_MAX = 24 * HOUR;
 const REPLY_LIFETIME = 7 * 24 * HOUR;
 const BACKOFF_MIN = 5_000;
@@ -127,6 +175,52 @@ const fresh = (): ConnectorState => ({
     delivered: 0,
     dropped: 0,
 });
+
+/** A route change discards destinations, credentials' cursors, and pending work. Keep only counts and replay tombstones. */
+function resetRoute(revision: string, previous: ConnectorState | undefined): ConnectorState {
+    const state = fresh();
+
+    state.revision = revision;
+
+    if (previous !== undefined) {
+        state.delivered = previous.delivered;
+        state.dropped = previous.dropped + previous.pending.length;
+        state.replies = Object.fromEntries(
+            Object.entries(previous.replies).map(([key, mark]) => [
+                key,
+                { at: mark.at, retired: true },
+            ]),
+        );
+    }
+
+    return state;
+}
+
+function eventReference(
+    config: ConnectorConfig,
+    event: Pick<RelayEvent, "id" | "channel" | "thread">,
+): string {
+    return (
+        "e-" +
+        createHash("sha256")
+            .update(JSON.stringify([config.revision, event.id, event.channel, event.thread]))
+            .digest("base64url")
+            .slice(0, 24)
+    );
+}
+
+function sameRoute(a: ConnectorConfig, b: ConnectorConfig): boolean {
+    return (
+        a.kind === b.kind &&
+        a.name === b.name &&
+        a.enabled === b.enabled &&
+        a.target === b.target &&
+        a.by === b.by &&
+        a.mentionOnly === b.mentionOnly &&
+        isDeepStrictEqual(a.ownerIds, b.ownerIds) &&
+        isDeepStrictEqual(a.values, b.values)
+    );
+}
 
 const message = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
@@ -288,11 +382,11 @@ function aliveIn(folder: string): Set<Promise<void>> {
     return alive;
 }
 
-async function save(path: string, data: unknown): Promise<void> {
+async function save(path: string, text: string): Promise<void> {
     const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
 
     try {
-        await writeFile(temporary, `${JSON.stringify(data)}\n`, { mode: 0o600 });
+        await writeFile(temporary, `${text}\n`, { mode: 0o600 });
         await rename(temporary, path);
     } catch (error) {
         await unlink(temporary).catch(() => {});
@@ -301,14 +395,6 @@ async function save(path: string, data: unknown): Promise<void> {
     }
 
     await chmod(path, 0o600).catch(() => {});
-}
-
-function load<T>(path: string, empty: T): T {
-    try {
-        return JSON.parse(readFileSync(path, "utf8")) as T;
-    } catch {
-        return empty;
-    }
 }
 
 /** Never rejects. */
@@ -345,7 +431,9 @@ const backoff = (failures: number, min: number, max: number): number =>
 
 interface RelayOptions {
     folder: string;
-    inbox: () => InboxApi | undefined;
+    inbox: () => { deliver: NonNullable<InboxApi["deliverCurrent"]> } | undefined;
+    /** Cards Pi shows in a chat (`surfaces/relay.ts`): a message that acts on one is answered here and not sent to Pi. */
+    surfaces?: () => SurfacesRelayApi | undefined;
     log: (line: string) => void;
     onStatus: (id: string, status: Status) => void;
     hide: (values: { value: string; label: string }[]) => () => void;
@@ -366,7 +454,9 @@ class Runner {
         this.relay = relay;
         this.config = config;
         this.connector = connector;
-        this.done = Promise.all([this.#loop(), this.#deliver()]).then(() => {});
+        this.done = Promise.resolve().then(async () => {
+            await Promise.all([this.#loop(), this.#deliver()]);
+        });
     }
 
     get signal(): AbortSignal {
@@ -385,13 +475,13 @@ class Runner {
 
     #context(): RelayContext {
         const relay = this.relay;
-        const id = this.config.id;
+        const state = relay.stateOf(this.config.id);
         const values = valuesOf(this.config, this.connector.fields);
 
         return {
             values,
             get state() {
-                return relay.stateOf(id).own;
+                return state.own;
             },
             save: (own) => {
                 if (this.signal.aborted) {
@@ -406,7 +496,7 @@ class Runner {
                     return;
                 }
 
-                relay.stateOf(id).own = JSON.parse(text) as Record<string, unknown>;
+                state.own = JSON.parse(text) as Record<string, unknown>;
                 relay.persist();
             },
             emit: async (events) => {
@@ -475,6 +565,7 @@ class Runner {
 
                 if (fatal) {
                     this.#set("stopped", "stopped: edit the connector to try again");
+                    this.abort.abort();
 
                     return;
                 }
@@ -547,7 +638,8 @@ export class Relay {
     #dirty = false;
     #written = true;
     #loaded = false;
-    readonly #replies = new AbortController();
+    /** Registration and start() must not run an edit still waiting for its write. */
+    readonly #stored = new WeakSet<ConnectorConfig>();
     #stopped = false;
     /** The values hidden so far, and how to stop: an old value stays hidden until the relay stops, as core's do. */
     readonly #hidden = new Set<string>();
@@ -559,6 +651,12 @@ export class Relay {
     /** After the last write at a stop: nothing writes the files again. */
     #closed = false;
     readonly #replying = new Map<string, Promise<string>>();
+    /** The triage hook a module set, or none: deliveries from untrusted senders pass it first. */
+    #triage?: RelayTriage;
+    /** The outbound hook a module set, or none: every reply passes it before it leaves. */
+    #outbound?: RelayOutbound;
+    /** Triage verdicts by connector and event id, oldest first: a delivery that retries keeps its verdict. */
+    readonly #verdicts = new Map<string, RelayTriageVerdict>();
     /** Settles when this relay stops: the next one in the process waits for it before it reads the files. */
     readonly #ended: Promise<void>;
     #end: () => void = () => {};
@@ -582,17 +680,53 @@ export class Relay {
 
         alive.add(this.#ended);
         void this.#ended.then(() => alive.delete(this.#ended));
-        this.ready = Promise.all(before).then(() => {
+        this.ready = Promise.all(before).then(async () => {
             if (this.#stopped) {
                 return;
             }
 
-            this.#configs = load(this.#connectorsFile, { connectors: {} }).connectors ?? {};
-            this.#states = load(this.#stateFile, { connectors: {} }).connectors ?? {};
-            this.#loaded = true;
-            this.#safe = this.#hide();
-            this.start();
+            const { configs, states } = recoverRelay(options.folder);
+            let migrated = false;
+
+            for (const config of Object.values(configs)) {
+                if (config.revision !== undefined) {
+                    continue;
+                }
+
+                const state = states[config.id]!;
+
+                config.revision = randomUUID();
+                states[config.id] = resetRoute(config.revision, state);
+                migrated = true;
+
+                if (state.fatal !== undefined) {
+                    states[config.id]!.fatal = state.fatal;
+                }
+            }
+
+            if (migrated) {
+                // Stop waits for this write too, without letting persist() overwrite a failed recovery.
+                const migration = this.#save(configs, states);
+
+                this.#writing = migration.catch(() => {});
+                await migration.catch(() => {
+                    throw new Error(
+                        "Relay recovery could not save its files. Check the relay folder and reload Relay.",
+                    );
+                });
+            }
+
+            if (!this.#stopped) {
+                this.#configs = configs;
+                this.#states = states;
+                this.#safe = this.#hide();
+                Object.values(configs).forEach((config) => this.#stored.add(config));
+                this.#loaded = true;
+                this.start();
+            }
         });
+        // Routes can await the rejection. A module with no requests still reports the failure safely.
+        void this.ready.catch((error: unknown) => this.log(message(error)));
     }
 
     now(): number {
@@ -601,6 +735,36 @@ export class Relay {
 
     log(line: string): void {
         this.#options.log(`relay: ${line}`);
+    }
+
+    /**
+     * Set the hook that screens each delivery from a sender the owner did not mark as trusted, before it reaches
+     * the session. The last set wins; the return unsets it. One call gets `TRIAGE_CAP_MS` at most: past it, or when
+     * it fails, the relay delivers as if no hook was set.
+     */
+    setTriage(hook: RelayTriage): () => void {
+        this.#triage = hook;
+
+        return () => {
+            if (this.#triage === hook) {
+                this.#triage = undefined;
+            }
+        };
+    }
+
+    /**
+     * Set the hook that screens each reply before it leaves, the path the `relay_reply` tool takes. The last set
+     * wins; the return unsets it. One call gets `TRIAGE_CAP_MS` at most: past it, or when it fails, the reply goes
+     * on as if no hook was set.
+     */
+    setOutbound(hook: RelayOutbound): () => void {
+        this.#outbound = hook;
+
+        return () => {
+            if (this.#outbound === hook) {
+                this.#outbound = undefined;
+            }
+        };
     }
 
     register(connector: RelayConnector): () => void {
@@ -645,12 +809,44 @@ export class Relay {
         return Object.hasOwn(this.#configs, id) ? this.#configs[id] : undefined;
     }
 
+    current(config: ConnectorConfig): boolean {
+        const runner = this.#runners.get(config.id);
+
+        return (
+            !this.#stopped &&
+            this.#safe &&
+            config.enabled === true &&
+            this.config(config.id) === config &&
+            runner?.config === config &&
+            !runner.signal.aborted
+        );
+    }
+
+    #signal(config: ConnectorConfig): AbortSignal {
+        if (!this.current(config)) {
+            throw new Error(
+                "The relay connector changed or is not enabled. Nothing more can be sent.",
+            );
+        }
+
+        return this.#runners.get(config.id)!.signal;
+    }
+
     stateOf(id: string): ConnectorState {
         if (!Object.hasOwn(this.#states, id)) {
             this.#states[id] = fresh();
         }
 
         return this.#states[id]!;
+    }
+
+    heard(config: ConnectorConfig, reference: string): Heard | undefined {
+        return this.current(config)
+            ? this.stateOf(config.id).recent.find(
+                  (each) =>
+                      each.reference === reference && reference === eventReference(config, each),
+              )
+            : undefined;
     }
 
     status(id: string): Status {
@@ -720,6 +916,22 @@ export class Relay {
         this.changed(id);
     }
 
+    async #save(
+        configs: Record<string, ConnectorConfig>,
+        states: Record<string, ConnectorState>,
+    ): Promise<void> {
+        // Capture both files before either write yields. A later edit queues its own snapshot.
+        const configText = JSON.stringify({ version: 1, connectors: configs });
+        const stateText = JSON.stringify({
+            version: 1,
+            connectors: Object.fromEntries(Object.keys(configs).map((id) => [id, states[id]])),
+        });
+
+        await mkdir(this.#options.folder, { recursive: true, mode: 0o700 });
+        await save(this.#connectorsFile, configText);
+        await save(this.#stateFile, stateText);
+    }
+
     /** Keep both files soon; writes run one at a time, and the last state wins. */
     persist(): Promise<void> {
         // Before its files are read, a relay has nothing of its own to keep, and must not write over them.
@@ -736,13 +948,11 @@ export class Relay {
             this.#dirty = false;
 
             try {
-                await mkdir(this.#options.folder, { recursive: true, mode: 0o700 });
-                await save(this.#connectorsFile, { version: 1, connectors: this.#configs });
-                await save(this.#stateFile, { version: 1, connectors: this.#states });
+                await this.#save(this.#configs, this.#states);
                 this.#written = true;
-            } catch (error) {
+            } catch {
                 this.#written = false;
-                this.log(`its files could not be written: ${message(error)}`);
+                this.log("its files could not be written; check the relay folder");
             }
         });
 
@@ -838,7 +1048,8 @@ export class Relay {
                 continue;
             }
 
-            const trusted = config.ownerIds.includes(event.author.id);
+            const account = authenticatedAccount(runner.connector, event.author);
+            const trusted = isOwnerAccount(config.ownerIds, account);
 
             if (!trusted && authorLimited) {
                 const previous = Object.hasOwn(state.authors, event.author.id)
@@ -863,12 +1074,22 @@ export class Relay {
             }
 
             if (state.pending.length >= MAX_PENDING) {
-                state.pending.shift();
+                const evicted = state.pending.shift()!;
+
+                delete state.pendingAccounts?.[eventReference(config, evicted)];
                 state.dropped += 1;
             }
 
             const copy = JSON.parse(JSON.stringify(event)) as RelayEvent;
             const files = filesOf(copy.files);
+
+            const reference = eventReference(config, copy);
+
+            if (account !== undefined) {
+                (state.pendingAccounts ??= {})[reference] = account;
+            } else {
+                delete state.pendingAccounts?.[reference];
+            }
 
             delete copy.files;
             state.pending.push(files.length === 0 ? copy : { ...copy, files });
@@ -905,11 +1126,29 @@ export class Relay {
     }
 
     async #deliver(config: ConnectorConfig, event: RelayEvent): Promise<"done" | "retry"> {
+        if (!this.current(config)) {
+            return "done";
+        }
+
+        const signal = this.#signal(config);
         const state = this.stateOf(config.id);
         const inbox = this.#options.inbox();
+        const reference = eventReference(config, event);
+        const account = state.pending.includes(event)
+            ? state.pendingAccounts?.[reference]
+            : undefined;
+        const authenticated = typeof account === "string" && account === event.author.id;
+        const trusted = authenticated && isOwnerAccount(config.ownerIds, account);
 
         const finish = (outcome: "delivered" | "dropped") => {
-            state.pending = state.pending.filter((each) => each.id !== event.id);
+            if (signal.aborted) {
+                return "done" as const;
+            }
+
+            if (state.pending.includes(event)) {
+                state.pending = state.pending.filter((each) => each !== event);
+                delete state.pendingAccounts?.[reference];
+            }
 
             if (outcome === "delivered") {
                 state.delivered += 1;
@@ -923,10 +1162,12 @@ export class Relay {
                 state.recent = [
                     ...state.recent,
                     {
+                        reference,
                         id: event.id,
                         ...(event.channel === undefined ? {} : { channel: event.channel }),
                         ...(event.thread === undefined ? {} : { thread: event.thread }),
                         author: event.author.id,
+                        ...(authenticated ? { authenticatedAccount: account } : {}),
                         at: this.now(),
                         ...(event.files === undefined || event.files.length === 0
                             ? {}
@@ -947,7 +1188,11 @@ export class Relay {
 
         // An event it cannot render (a connector's odd field) is dropped: tried again, it would hold up the queue.
         try {
-            payload = payloadOf(event, typeof this.#kinds.get(config.kind)?.fetch === "function");
+            payload = payloadOf(
+                event,
+                reference,
+                typeof this.#kinds.get(config.kind)?.fetch === "function",
+            );
         } catch (error) {
             this.failed(
                 config.id,
@@ -968,25 +1213,137 @@ export class Relay {
             return "retry";
         }
 
+        // A reply to a card Pi showed here (`3`, `1 2`, `5: text`) is an action on it: the relay answers it itself.
+        const surfaces = this.#options.surfaces?.();
+
+        if (typeof surfaces?.confirm === "function") {
+            try {
+                const outcome = await surfaces.fromRelay(
+                    config.target as unknown as ConversationId,
+                    {
+                        connector: config.id,
+                        routeRevision: config.revision!,
+                        isCurrent: () => !signal.aborted && this.current(config),
+                        ...(event.channel === undefined ? {} : { channel: event.channel }),
+                        ...(event.thread === undefined ? {} : { thread: event.thread }),
+                        ...(event.replyTo === undefined ? {} : { replyTo: event.replyTo }),
+                        eventId: `${config.revision}/${event.id}`,
+                        text: event.text,
+                        author: {
+                            id: event.author.id,
+                            name: String(event.author.name ?? event.author.id),
+                        },
+                        ownerIds: trusted ? [account] : [],
+                        trusted,
+                        by: config.by,
+                    },
+                );
+
+                if (signal.aborted) {
+                    return "done";
+                }
+
+                if (outcome.handled) {
+                    const echo = await this.#say(
+                        config,
+                        event,
+                        outcome.reply,
+                        outcome.echo?.isCurrent,
+                    );
+
+                    // A reply to the echo of a card acts on the card too: the surface keeps its id. Whatever
+                    // happens here, the action is done and the message is not Pi's.
+                    if (
+                        !signal.aborted &&
+                        echo !== undefined &&
+                        outcome.surface !== undefined &&
+                        outcome.echo !== undefined
+                    ) {
+                        await surfaces
+                            .echoed(
+                                config.target as unknown as ConversationId,
+                                outcome.surface,
+                                echo,
+                                outcome.echo,
+                            )
+                            .catch((error: unknown) =>
+                                this.log(
+                                    `${config.name}: an echo was not recorded: ${this.scrub(config, message(error))}`,
+                                ),
+                            );
+                    }
+
+                    return finish("delivered");
+                }
+
+                if (outcome.refusal !== undefined) {
+                    await this.#say(config, event, outcome.refusal);
+                }
+            } catch (error) {
+                this.log(
+                    `${config.name}: a card's action failed: ${this.scrub(config, message(error))}`,
+                );
+            }
+        }
+
+        if (signal.aborted) {
+            return "done";
+        }
+
+        // A triage hook a module set screens deliveries from senders the owner did not mark. It never holds the
+        // queue: past its cap, or when it fails, the message goes on as it came.
+        if (this.#triage !== undefined && !trusted) {
+            const verdict = await this.#screen(config, event, this.#triage);
+
+            if (signal.aborted) {
+                return "done";
+            }
+
+            if (verdict === "drop") {
+                this.failed(
+                    config.id,
+                    `A message from ${String(event.author.name ?? event.author.id)} was dropped by a triage hook.`,
+                    false,
+                );
+
+                return finish("dropped");
+            }
+
+            if (typeof verdict === "object") {
+                payload = `Triage: ${verdict.label}\n${payload}`;
+            }
+        }
+
         try {
-            await inbox.deliver(config.target as unknown as ConversationId, {
-                by: config.by,
-                via: `relay ${config.name}`,
-                instructions: this.instructions(config),
-                tag: "relay-message",
-                attributes: { connector: config.name, kind: config.kind },
-                sender: {
-                    name: String(event.author.name ?? event.author.id),
-                    id: event.author.id,
-                    trusted: config.ownerIds.includes(event.author.id),
+            await inbox.deliver(
+                config.target as unknown as ConversationId,
+                {
+                    by: config.by,
+                    via: `relay ${config.name}`,
+                    instructions: this.instructions(config),
+                    tag: "relay-message",
+                    attributes: { connector: config.name, kind: config.kind },
+                    sender: {
+                        name: String(event.author.name ?? event.author.id),
+                        id: event.author.id,
+                        trusted,
+                    },
+                    payload,
+                    key: `relay-${config.revision}-${event.id}`,
+                    limit: { bucket: `relay:${config.id}`, perHour: config.perHour },
                 },
-                payload,
-                key: `relay-${config.id}-${event.id}`,
-                limit: { bucket: `relay:${config.id}`, perHour: config.perHour },
-            });
+                () => {
+                    signal.throwIfAborted();
+                    this.#signal(config);
+                },
+            );
 
             return finish("delivered");
         } catch (error) {
+            if (signal.aborted) {
+                return "done";
+            }
+
             const status = (error as { status?: unknown }).status;
 
             if (status === 429) {
@@ -1012,6 +1369,100 @@ export class Relay {
         }
     }
 
+    /**
+     * One screening call, with the relay's own cap: a hook that hangs, throws, or answers nothing it recognizes
+     * delivers the message as if no hook was set.
+     */
+    async #screen(
+        config: ConnectorConfig,
+        event: RelayEvent,
+        hook: RelayTriage,
+    ): Promise<RelayTriageVerdict> {
+        const key = `${config.revision}:${event.id}`;
+        const known = this.#verdicts.get(key);
+
+        if (known !== undefined) {
+            return known;
+        }
+
+        const verdict = await this.#askTriage(config, event, hook);
+
+        this.#verdicts.set(key, verdict);
+
+        if (this.#verdicts.size > MAX_VERDICTS) {
+            this.#verdicts.delete(this.#verdicts.keys().next().value!);
+        }
+
+        return verdict;
+    }
+
+    async #askTriage(
+        config: ConnectorConfig,
+        event: RelayEvent,
+        hook: RelayTriage,
+    ): Promise<RelayTriageVerdict> {
+        let timer: NodeJS.Timeout | undefined;
+
+        try {
+            return cleanVerdict(
+                await Promise.race([
+                    hook({
+                        connector: config.name,
+                        kind: config.kind,
+                        author: {
+                            name: String(event.author.name ?? event.author.id),
+                            id: event.author.id,
+                        },
+                        ...(event.channel === undefined ? {} : { channel: event.channel }),
+                        text: event.text,
+                        files: (event.files ?? []).map((file) => ({
+                            name: file.name,
+                            type: file.type ?? "file",
+                        })),
+                    }),
+                    new Promise<RelayTriageVerdict>((resolve) => {
+                        timer = setTimeout(() => resolve("deliver"), TRIAGE_CAP_MS);
+                    }),
+                ]),
+            );
+        } catch {
+            return "deliver";
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * One reply through the outbound hook, with a triage call's cap: a hook that fails or runs long sends, so a
+     * screen never holds a send back on its own account.
+     */
+    async #screenOutbound(
+        config: ConnectorConfig,
+        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        channel: string | undefined,
+    ): Promise<"send" | "block"> {
+        let timer: NodeJS.Timeout | undefined;
+
+        try {
+            return await Promise.race([
+                this.#outbound!({
+                    connector: config.name,
+                    kind: config.kind,
+                    ...(channel === undefined ? {} : { channel }),
+                    text: request.text,
+                    files: (request.files ?? []).map((file) => ({ name: file.name })),
+                }),
+                new Promise<"send">((resolve) => {
+                    timer = setTimeout(() => resolve("send"), TRIAGE_CAP_MS);
+                }),
+            ]);
+        } catch {
+            return "send";
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     instructions(config: ConnectorConfig): string {
         const kind = this.#kinds.get(config.kind);
         const own = config.instructions.trim() || RELAY_INSTRUCTIONS;
@@ -1022,12 +1473,21 @@ export class Relay {
     }
 
     boundTo(target: number): ConnectorConfig[] {
-        return this.configs().filter((config) => config.target === target);
+        return this.configs().filter(
+            (config) => config.enabled === true && config.target === target,
+        );
     }
 
     async reply(
         config: ConnectorConfig,
-        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        request: {
+            text: string;
+            replyTo?: string;
+            key: string;
+            files?: RelayOutFile[];
+            /** Called once a new send went out, with where and the service's id for it. */
+            onSent?: (sent: RelayReceipt, isCurrent: () => boolean) => Promise<void>;
+        },
         signal: AbortSignal,
     ): Promise<string> {
         await this.ready;
@@ -1073,7 +1533,9 @@ export class Relay {
             throw new Error("The relay could not hide its secrets from Pi, so it sends nothing.");
         }
 
-        const running = this.#replying.get(request.key);
+        const route = this.#signal(config);
+        const key = JSON.stringify([config.revision, request.key]);
+        const running = this.#replying.get(key);
 
         if (running !== undefined) {
             return running;
@@ -1083,10 +1545,10 @@ export class Relay {
             config,
             connector as RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
             request,
-            signal,
-        ).finally(() => this.#replying.delete(request.key));
+            AbortSignal.any([signal, route]),
+        ).finally(() => this.#replying.delete(key));
 
-        this.#replying.set(request.key, sending);
+        this.#replying.set(key, sending);
 
         return sending;
     }
@@ -1094,13 +1556,19 @@ export class Relay {
     async #send(
         config: ConnectorConfig,
         connector: RelayConnector & { reply: NonNullable<RelayConnector["reply"]> },
-        request: { text: string; replyTo?: string; key: string; files?: RelayOutFile[] },
+        request: Parameters<Relay["reply"]>[1],
         signal: AbortSignal,
     ): Promise<string> {
         const state = this.stateOf(config.id);
         const kept = Object.hasOwn(state.replies, request.key)
             ? state.replies[request.key]
             : undefined;
+
+        if (kept?.retired) {
+            throw new Error(
+                "This reply belongs to an earlier connector configuration. It was not sent again.",
+            );
+        }
 
         if (kept !== undefined && kept.sending !== true) {
             return "Sent already.";
@@ -1112,9 +1580,7 @@ export class Relay {
         }
 
         const heard =
-            request.replyTo === undefined
-                ? undefined
-                : state.recent.find((each) => each.id === request.replyTo);
+            request.replyTo === undefined ? undefined : this.heard(config, request.replyTo);
 
         if (request.replyTo !== undefined && heard === undefined) {
             throw new Error(
@@ -1133,7 +1599,31 @@ export class Relay {
                       ...(heard.thread === undefined ? {} : { thread: heard.thread }),
                   };
         const values = valuesOf(config, connector.fields);
-        let answer: { id?: string } | void;
+
+        // An outbound hook a module set screens the reply before it leaves. A block throws, so the caller hears that
+        // nothing was sent; a hook that fails or runs long sends as if no hook was set. A reply to a message from an
+        // owner is not screened: the owner is who the reply is for.
+        if (
+            this.#outbound !== undefined &&
+            !(
+                heard !== undefined &&
+                heard.authenticatedAccount === heard.author &&
+                isOwnerAccount(config.ownerIds, heard.authenticatedAccount)
+            )
+        ) {
+            if ((await this.#screenOutbound(config, request, to?.channel)) === "block") {
+                this.log(
+                    `held a reply on ${config.name}: its screen read it as holding something the owner would not want outside`,
+                );
+
+                throw new Error(
+                    `The relay held this reply: its screen read it as holding something the owner would not want outside. Nothing was sent. Send it again without that, or ask the owner to turn the relay's screening off.`,
+                );
+            }
+        }
+
+        signal.throwIfAborted();
+        let answer: RelayReceipt | void;
 
         state.replies[request.key] = { at: this.now(), sending: true };
         await this.persist();
@@ -1145,30 +1635,25 @@ export class Relay {
             throw new Error("The relay could not write its files, so the reply was not sent.");
         }
 
+        // About 1 MB a second more for files: 100 MB has 222 seconds.
+        const timeout = request.files?.length
+            ? 120_000 +
+              Math.ceil(request.files.reduce((sum, file) => sum + file.data.byteLength, 0) / 1024)
+            : 30_000;
+
+        signal = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+        signal.throwIfAborted();
+
         try {
             answer = await connector.reply(
                 {
                     values,
-                    signal: AbortSignal.any([
-                        signal,
-                        this.#replies.signal,
-                        // About 1 MB a second more for files: 100 MB has 222 seconds.
-                        AbortSignal.timeout(
-                            request.files?.length
-                                ? 120_000 +
-                                      Math.ceil(
-                                          request.files.reduce(
-                                              (sum, file) => sum + file.data.byteLength,
-                                              0,
-                                          ) / 1024,
-                                      )
-                                : 30_000,
-                        ),
-                    ]),
+                    signal,
                     log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
                 },
                 {
                     text: request.text,
+                    ...(request.onSent === undefined ? {} : { confirmDestination: true }),
                     ...(to === undefined ? {} : { to }),
                     ...(to?.channel === undefined ? {} : { channel: to.channel }),
                     ...(to?.thread === undefined ? {} : { thread: to.thread }),
@@ -1184,6 +1669,7 @@ export class Relay {
             );
         }
 
+        signal.throwIfAborted();
         const id = typeof answer?.id === "string" ? answer.id.slice(0, 100) : undefined;
 
         state.replies[request.key] = { at: this.now(), ...(id === undefined ? {} : { id }) };
@@ -1200,7 +1686,99 @@ export class Relay {
 
         await this.persist();
 
+        if (request.onSent !== undefined) {
+            signal.throwIfAborted();
+
+            // A replay can get the receipt for the original text, not this freshly rendered card.
+            if (kept?.sending) {
+                return "Sent, but the card is not active: this send resumed an earlier attempt.";
+            }
+
+            if (
+                !this.#written ||
+                !answer?.channel?.trim() ||
+                (to !== undefined && (to.channel !== answer.channel || to.thread !== answer.thread))
+            ) {
+                return "Sent, but the card is not active: its delivery destination was not confirmed.";
+            }
+
+            await request.onSent(answer, () => !signal.aborted && this.current(config));
+        }
+
         return "Sent.";
+    }
+
+    /**
+     * A short answer the relay gives itself, in the place an event came from. A connector that cannot reply says
+     * nothing, and an answer that fails to send is only logged: the action it answers was done. It returns the id the
+     * service gave the message, when it did.
+     */
+    async #say(
+        config: ConnectorConfig,
+        event: RelayEvent,
+        text: string,
+        canEcho?: () => boolean,
+    ): Promise<string | undefined> {
+        const connector = this.#kinds.get(config.kind);
+
+        if (typeof connector?.reply !== "function" || !this.current(config)) {
+            return undefined;
+        }
+
+        const signal = AbortSignal.any([this.#signal(config), AbortSignal.timeout(30_000)]);
+
+        try {
+            // The echo of a card holds the whole card, values typed in the app too: the outbound screen reads it as it
+            // reads a reply of Pi's, and a block means nothing is sent.
+            if (
+                this.#outbound !== undefined &&
+                (await this.#screenOutbound(
+                    config,
+                    { text, key: `surface-${config.revision}-${event.id}` },
+                    event.channel,
+                )) === "block"
+            ) {
+                this.log(`held an answer on ${config.name}: the outbound screen blocked it`);
+
+                return undefined;
+            }
+
+            signal.throwIfAborted();
+
+            if (canEcho !== undefined && !canEcho()) {
+                return undefined;
+            }
+
+            const sent = await connector.reply(
+                {
+                    values: valuesOf(config, connector.fields),
+                    signal,
+                    log: (line) => this.log(`${config.name}: ${this.scrub(config, String(line))}`),
+                },
+                {
+                    text,
+                    confirmDestination: true,
+                    to: { ...event, text: "" },
+                    ...(event.channel === undefined ? {} : { channel: event.channel }),
+                    ...(event.thread === undefined ? {} : { thread: event.thread }),
+                    key: `surface-${config.revision}-${event.id}`,
+                },
+            );
+
+            return !signal.aborted &&
+                sent?.channel &&
+                sent.channel === event.channel &&
+                sent.thread === event.thread &&
+                typeof sent.id === "string"
+                ? sent.id
+                : undefined;
+        } catch (error) {
+            this.log(
+                `${config.name}: an answer was not sent: ${this.scrub(config, message(error))}`,
+            );
+
+            return undefined;
+        }
     }
 
     /** Download attachment `index` (from 1) of a recent event. Its errors have no secrets and no links. */
@@ -1209,7 +1787,7 @@ export class Relay {
         eventId: string,
         index: number,
         signal: AbortSignal,
-    ): Promise<{ name: string; type: string; data: Uint8Array }> {
+    ): Promise<{ name: string; type: string; data: Uint8Array; checkCurrent: () => void }> {
         await this.ready;
 
         const connector = this.#kinds.get(config.kind);
@@ -1224,7 +1802,9 @@ export class Relay {
             throw new Error("The relay cannot fetch now. Try again in a moment.");
         }
 
-        const heard = this.stateOf(config.id).recent.find((each) => each.id === eventId);
+        signal = AbortSignal.any([signal, this.#signal(config), AbortSignal.timeout(120_000)]);
+        signal.throwIfAborted();
+        const heard = this.heard(config, eventId);
 
         if (heard === undefined) {
             throw new Error(
@@ -1236,7 +1816,7 @@ export class Relay {
 
         if (file === undefined) {
             throw new Error(
-                `Event ${heard.id} has ${heard.files?.length ?? 0} attachments to fetch: give a number from 1.`,
+                `Event ${eventId} has ${heard.files?.length ?? 0} attachments to fetch: give a number from 1.`,
             );
         }
 
@@ -1252,11 +1832,7 @@ export class Relay {
             got = await connector.fetch(
                 {
                     values: valuesOf(config, connector.fields),
-                    signal: AbortSignal.any([
-                        signal,
-                        this.#replies.signal,
-                        AbortSignal.timeout(120_000),
-                    ]),
+                    signal,
                     log: (text) => this.log(`${config.name}: ${this.scrub(config, String(text))}`),
                 },
                 file,
@@ -1267,6 +1843,8 @@ export class Relay {
                 `${file.name} could not be fetched: ${this.scrub(config, message(error)).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[link]")}`,
             );
         }
+
+        signal.throwIfAborted();
 
         if (!(got?.data instanceof Uint8Array) || got.data.byteLength > MAX_FETCH) {
             throw new Error(
@@ -1288,11 +1866,23 @@ export class Relay {
             );
         }
 
-        return { name: file.name, type, data: got.data };
+        return {
+            name: file.name,
+            type,
+            data: got.data,
+            checkCurrent: () => {
+                signal.throwIfAborted();
+                this.#signal(config);
+            },
+        };
     }
 
-    async put(config: ConnectorConfig): Promise<void> {
+    async put(config: ConnectorConfig): Promise<ConnectorConfig> {
         await this.ready;
+
+        if (this.#stopped) {
+            throw new Error("The relay stopped.");
+        }
 
         const before = this.config(config.id);
 
@@ -1305,38 +1895,69 @@ export class Relay {
             throw new Error("Its secrets cannot be hidden from Pi, so it was not saved.");
         }
 
-        this.#configs[config.id] = config;
+        const stopping = this.#stop(config.id);
+        const revision =
+            before?.revision !== undefined && sameRoute(before, config)
+                ? before.revision
+                : randomUUID();
+        const next = { ...config, revision };
 
-        if (!this.#safe && this.#hide()) {
-            this.#safe = true;
-            this.start();
+        this.#configs[config.id] = next;
+
+        if (this.#states[config.id]?.revision !== revision) {
+            this.#states[config.id] = resetRoute(revision, this.#states[config.id]);
         }
 
-        await this.#stop(config.id);
+        await stopping;
 
-        // An edit is the owner's answer to a fatal error: try again.
+        if (this.config(config.id) !== next) {
+            throw new Error("Another change replaced this connector.");
+        }
+
+        // An edit is the owner's answer to a fatal error: try again after the write.
         delete this.stateOf(config.id).fatal;
         await this.persist();
-        this.#start(config.id);
-        this.changed(config.id);
 
         if (!this.#written) {
             throw new Error(
                 "The relay could not write its files: the change is lost at a restart.",
             );
         }
+
+        if (this.config(config.id) !== next || this.#stopped) {
+            throw new Error("The connector changed or the relay stopped during the save.");
+        }
+
+        this.#stored.add(next);
+
+        if (!this.#safe && this.#hide()) {
+            this.#safe = true;
+            this.start();
+        } else {
+            this.#start(config.id);
+        }
+
+        this.changed(config.id);
+
+        return next;
     }
 
     async remove(id: string): Promise<boolean> {
         await this.ready;
 
+        if (this.#stopped) {
+            throw new Error("The relay stopped.");
+        }
+
         if (this.config(id) === undefined) {
             return false;
         }
 
-        await this.#stop(id);
+        const stopping = this.#stop(id);
+
         delete this.#configs[id];
         delete this.#states[id];
+        await stopping;
         await this.persist();
 
         if (!this.#written) {
@@ -1372,8 +1993,9 @@ export class Relay {
             !this.#loaded ||
             !this.#safe ||
             config === undefined ||
+            !this.#stored.has(config) ||
             connector === undefined ||
-            !config.enabled ||
+            config.enabled !== true ||
             this.#runners.has(id) ||
             this.stateOf(id).fatal !== undefined
         ) {
@@ -1414,10 +2036,11 @@ export class Relay {
         this.#stopped = true;
 
         try {
-            this.#replies.abort();
             // A drop-in's reply that ignores its abort is not waited for long: the connectors stop all the same.
-            await within(Promise.allSettled([...this.#replying.values()]), 3000);
-            await Promise.all([...this.#runners.keys()].map((id) => this.#stop(id)));
+            await Promise.all([
+                within(Promise.allSettled([...this.#replying.values()]), 3000),
+                ...[...this.#runners.keys()].map((id) => this.#stop(id)),
+            ]);
             // A runner past its deadline may still deliver: its delivery ends before the secrets and the files go.
             await Promise.allSettled([...this.#delivering]);
             await this.persist();
@@ -1461,11 +2084,11 @@ function filesOf(files: unknown): RelayFile[] {
         }));
 }
 
-function payloadOf(event: RelayEvent, fetchable: boolean): string {
+function payloadOf(event: RelayEvent, reference: string, fetchable: boolean): string {
     const files = fetchable ? filesOf(event.files) : [];
 
     const lines = [
-        `event: ${event.id}`,
+        `event: ${reference}`,
         ...(event.channelName !== undefined || event.channel !== undefined
             ? [
                   `channel: ${[event.channelName, event.channel === undefined ? undefined : `(${event.channel})`].filter((part) => part !== undefined).join(" ")}`,

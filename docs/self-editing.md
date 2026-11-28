@@ -35,6 +35,8 @@ npm test         # every test; the browser tests need Chromium
 
 `npm test` takes a few minutes. While you work, run the tests of the part that you changed (`node --test test/<name>.test.ts`). Run all of them before you say that the change is done, or before you ask for a restart. If you do not run a check, say which.
 
+In CI, the Linux job ([`.github/workflows/linux.yml`](../.github/workflows/linux.yml)) runs the whole suite with the runner's Chrome, and fails when the browser is missing or a test skips itself for lack of one. The macOS and Windows jobs leave the browser tests out on purpose (they time out on those runners), so Linux is where a pull request's browser tests run.
+
 Keep [map.md](map.md), [architecture.md](architecture.md), and [features.md](features.md) true. When a change moves code, adds a dependency between parts, or changes what people see, update them in the same change.
 
 ## Check it on a copy

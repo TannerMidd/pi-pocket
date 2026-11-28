@@ -6,18 +6,29 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import {
+    type ConversationId,
     defineTask,
     type EntryId,
     type InputEntry,
     type UserInput,
 } from "@earendil-works/pi-durable";
-import { InterruptsDoc } from "./docs.ts";
+import { InterruptsDoc, SessionsDoc, type SessionMeta } from "./docs.ts";
 import { CONTEXT_BLOCK, FILE_BLOCK } from "./entry-format.ts";
 import { describe } from "./errors.ts";
-import { ownRequest } from "./requests.ts";
+import { ownRequest, requestPerson } from "./requests.ts";
+import { sameContent, uploadContent, type UploadContent } from "./upload-content.ts";
+import { uploadInput } from "./upload-references.ts";
 
 /** What a fork sends: the text, by whom, and the message whose images go along, when the model takes images. */
-export type Resend = { text: string; by: string; images?: { entry: EntryId } };
+export type Resend = {
+    text: string;
+    by: string;
+    uploads?: string[];
+    /** Only set when this exact input was checked against the source policy before creating the fork. */
+    uploadsApproved?: true;
+    contentByRef?: Record<string, UploadContent>;
+    images?: { entry: EntryId };
+};
 
 /** The request id of the message a fork was made to send. */
 export const resendRequest = (resend: Resend) => ownRequest(resend.by, "resend");
@@ -53,44 +64,96 @@ export function userContent(model: unknown): { text: string; images: ImageConten
 export const resendContent = (text: string, images: readonly ImageContent[]) =>
     images.length === 0 ? text : [{ type: "text" as const, text }, ...images];
 
+export function resendDraft(
+    resend: Resend,
+    images: readonly ImageContent[],
+    grants: ReadonlySet<string>,
+    fork?: SessionMeta,
+) {
+    const refs =
+        resend.uploadsApproved === true && Array.isArray(resend.uploads) ? resend.uploads : [];
+
+    const retained = new Set(
+        fork?.forkedFrom && Array.isArray(fork.inheritedUploads) ? fork.inheritedUploads : [],
+    );
+
+    return {
+        type: "input" as const,
+        content: resendContent(resend.text, images),
+        ...uploadInput(
+            refs.filter(
+                (ref) =>
+                    grants.has(ref) &&
+                    retained.has(ref) &&
+                    sameContent(
+                        uploadContent(resend.contentByRef?.[ref]),
+                        uploadContent(fork?.inheritedUploadContent?.[ref]),
+                    ),
+            ),
+        ),
+        requestId: resendRequest(resend),
+    };
+}
+
 const finished = { status: "terminal", outcome: { status: "completed", result: null } } as const;
 
+export type CanSteer = (id: ConversationId, person: string | undefined) => boolean;
+
+/** A deferred input must name its requester. Legacy unowned inputs cannot borrow the driver's access. */
+export function canRequeue(
+    id: ConversationId,
+    requestId: string | undefined,
+    canSteer: CanSteer,
+): boolean {
+    const person = requestPerson(requestId);
+
+    return person !== undefined && canSteer(id, person.userId);
+}
+
 /** Sends a fork's message, with the original's images read from where it was sent first. */
-export const ResendTask = defineTask<Resend, { phase: "send" }, null>({
-    name: "pocket.resend",
-    version: 1,
-    initial: () => ({ phase: "send" }),
-    phases: {
-        send: async (task, runtime, context) => {
-            const resend = task.input;
-            let images: ImageContent[] = [];
-            const original = resend.images?.entry;
+export const resendTask = (
+    canSteer: CanSteer,
+    checkedGrants: (id: ConversationId, input: Resend) => Promise<ReadonlySet<string>>,
+) =>
+    defineTask<Resend, { phase: "send" }, null>({
+        name: "pocket.resend",
+        version: 1,
+        initial: () => ({ phase: "send" }),
+        phases: {
+            send: async (task, runtime, context) => {
+                const resend = task.input;
+                const original = resend.images?.entry;
+                const conversation = await runtime.conversation(runtime.conversationId, context);
+                const grants = canSteer(runtime.conversationId, resend.by)
+                    ? await checkedGrants(runtime.conversationId, resend)
+                    : new Set<string>();
 
-            if (original !== undefined) {
-                // A commit that changes nothing, to read the original message.
                 await runtime.commit(async (tx) => {
-                    images = userContent((await tx.entry(original))?.model?.[0]).images;
+                    const images =
+                        original === undefined
+                            ? []
+                            : userContent((await tx.entry(original))?.model?.[0]).images;
 
-                    return undefined;
+                    const fork =
+                        resend.uploadsApproved === true
+                            ? (await tx.doc(SessionsDoc)).items[String(runtime.conversationId)]
+                            : undefined;
+
+                    if (canSteer(runtime.conversationId, resend.by)) {
+                        await conversation?.submit(tx, resendDraft(resend, images, grants, fork));
+
+                        if (!canSteer(runtime.conversationId, resend.by)) {
+                            throw new Error("The requester can no longer submit this message.");
+                        }
+                    }
+
+                    return finished;
                 }, context);
-            }
-
-            const conversation = await runtime.conversation(runtime.conversationId, context);
-
-            await conversation?.submit(
-                {
-                    type: "input",
-                    content: resendContent(resend.text, images),
-                    requestId: resendRequest(resend),
-                },
-                context,
-            );
-            await runtime.commit(() => finished, context);
+            },
         },
-    },
-    abort: (_task, runtime, context) =>
-        runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
-});
+        abort: (_task, runtime, context) =>
+            runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+    });
 
 /** A queued message that stays queued across an Interrupt: sent again, in its place, under its own request id. */
 export type Requeue = {
@@ -114,7 +177,7 @@ export type Interrupt = {
 };
 
 /** Stops run `run` (a task id) and waits for its end; nothing when it has ended or is not known. */
-export type StopRun = (run: number, context: Context) => Promise<void>;
+export type StopRun = (run: number, context: Context, allowed: () => boolean) => Promise<void>;
 
 /**
  * Stops the run, then sends the message stored by the commit making this task, so a restart in between cannot lose
@@ -123,7 +186,7 @@ export type StopRun = (run: number, context: Context) => Promise<void>;
  * made for by its id (`stopRun`, from the app's harness), never whichever run is going: one that started after it ended
  * goes on.
  */
-export const interruptTask = (stopRun: StopRun) =>
+export const interruptTask = (stopRun: StopRun, canSteer: CanSteer) =>
     defineTask<Interrupt, { phase: "send" }, null>({
         name: "pocket.interrupt",
         version: 1,
@@ -132,6 +195,7 @@ export const interruptTask = (stopRun: StopRun) =>
             send: async (task, runtime, context) => {
                 const { content, requestId, entry, run, others } = task.input;
                 const id = runtime.conversationId;
+                const allowed = () => canRequeue(id, requestId, canSteer);
                 let sent = false;
 
                 // Run again after a restart: after the send, the run it started must not be stopped.
@@ -143,22 +207,26 @@ export const interruptTask = (stopRun: StopRun) =>
 
                 const conversation = await runtime.conversation(id, context);
 
-                if (!sent) {
+                if (!sent && allowed()) {
                     // The message has left the queue: a failure here must say so, not fault the task without a word.
                     try {
                         if (run !== undefined) {
-                            await stopRun(run, context);
+                            await stopRun(run, context, allowed);
                         }
 
                         await runtime.commit(async (tx) => {
+                            const interrupts = await tx.doc(InterruptsDoc, id);
+
+                            if (!allowed()) {
+                                return;
+                            }
+
                             await conversation?.submit(tx, {
                                 type: "input",
                                 content,
                                 requestId,
                                 ...(entry === undefined ? {} : { entry }),
                             });
-                            const interrupts = await tx.doc(InterruptsDoc, id);
-
                             delete interrupts.pending[requestId];
                         }, context);
                     } catch (error) {
@@ -177,16 +245,17 @@ export const interruptTask = (stopRun: StopRun) =>
                 // In their order, behind the message: a request id already known finds its submission.
                 for (const other of others ?? []) {
                     try {
-                        await conversation?.submit(
-                            {
-                                type: "input",
-                                content: other.content,
-                                whenBusy: other.mode,
-                                requestId: other.requestId,
-                                ...(other.entry === undefined ? {} : { entry: other.entry }),
-                            },
-                            context,
-                        );
+                        await runtime.commit(async (tx) => {
+                            if (canRequeue(id, other.requestId, canSteer)) {
+                                await conversation?.submit(tx, {
+                                    type: "input",
+                                    content: other.content,
+                                    whenBusy: other.mode,
+                                    requestId: other.requestId,
+                                    ...(other.entry === undefined ? {} : { entry: other.entry }),
+                                });
+                            }
+                        }, context);
                     } catch (error) {
                         if (context.abortSignal?.aborted === true) {
                             throw error;

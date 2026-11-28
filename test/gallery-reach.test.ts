@@ -199,7 +199,12 @@ test("the scan reports code that can load or run unnamed programs", () => {
     scanCode('"/'.repeat(256_000));
     scanCode("/x".repeat(128_000));
     scanCode("(/[".repeat(40_000));
-    assert.ok(performance.now() - start < 1_000);
+    // Linear time takes about 0.3 s here and 1.3 s on a CI runner with 4 test files at once; a scan that grows with the
+    // square of the input would take far longer on these inputs (the longest is 512 000 characters). The limit sits between: it finds that, not a slow machine.
+    assert.ok(
+        performance.now() - start < 10_000,
+        `took ${Math.round(performance.now() - start)} ms`,
+    );
 });
 
 test("the scan names the files the code writes and the places it reads from", () => {

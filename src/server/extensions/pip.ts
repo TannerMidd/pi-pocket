@@ -18,10 +18,21 @@ import {
     wrapTool,
 } from "@earendil-works/pi-durable";
 import type { PrWatch, RepoEvent, Schedule } from "../docs.ts";
+import { classifierFor, type ClassifyRequest } from "../classify.ts";
+import { classifyFor } from "../classifier-activity.ts";
+import type { ClassifierScoreAnswer } from "@earendil-works/pi-ai";
 import { quoted } from "../fence.ts";
-import type { PocketHost } from "../host.ts";
+import type { ExtensionWeb, PocketHost } from "../host.ts";
 import { withoutInline } from "./artifacts.ts";
-import { ago, PIP_EXTENSION, PIP_NAME, REPORT_HEAD, SESSION_CLOSE, SESSION_OPEN } from "../pip.ts";
+import {
+    ago,
+    PIP_EXTENSION,
+    PIP_NAME,
+    type PipSession,
+    REPORT_HEAD,
+    SESSION_CLOSE,
+    SESSION_OPEN,
+} from "../pip.ts";
 import { snippet } from "../projection.ts";
 import type { RepoWatchView } from "../repo-watches.ts";
 import { endedText } from "../watches.ts";
@@ -29,6 +40,78 @@ import { describeMoment, describeRepeat, WHEN_HELP } from "../when.ts";
 import { literal } from "../tool-schema.ts";
 
 const reply = (text: string) => ({ output: [{ type: "text" as const, text }] });
+
+/** How many of a query's matches the classifier ranks; the rest keep today's order behind them. */
+const RANKED = 8;
+/** How long the one ranking call may take; past it, the list keeps today's order. */
+const RANK_TIMEOUT_MS = 5_000;
+
+/**
+ * One classifier call ranks a query's top matches, so what the words are about comes first in what PiP reads. Each
+ * shortlisted session gets one score question in the single call; any failure keeps today's (newest first) order.
+ */
+export async function rankSessions(
+    classify: PocketHost["classify"],
+    model: string,
+    query: string,
+    sessions: PipSession[],
+): Promise<PipSession[]> {
+    if (sessions.length < 2) {
+        return sessions;
+    }
+
+    const shortlist = sessions.slice(0, RANKED);
+    const answers = await classifyFor(
+        classify,
+        "pip-search",
+        {
+            model,
+            state: {
+                query,
+                sessions: shortlist.map((session) => ({
+                    id: session.id,
+                    title: session.title,
+                    state: session.state,
+                    folder: session.folder,
+                    ...(session.branch === undefined ? {} : { branch: session.branch }),
+                })),
+            },
+            questions: Object.fromEntries(
+                shortlist.map((session, at) => [
+                    `s${String(at)}`,
+                    {
+                        type: "score" as const,
+                        instructions: `How well does the session with id ${String(session.id)} in state.sessions match the words in state.query?`,
+                        criteria: [
+                            "It is not what the words are about.",
+                            "It is related to the words.",
+                            "It is what the words are about.",
+                        ],
+                    },
+                ]),
+            ) as ClassifyRequest["questions"],
+        },
+        RANK_TIMEOUT_MS,
+    );
+
+    // No answer, or one without a score for every shortlisted session: today's order stands.
+    const scores = shortlist.map((_session, at) => answers?.[`s${String(at)}`]);
+
+    if (scores.some((answer) => answer?.type !== "score")) {
+        return sessions;
+    }
+
+    const ranked = shortlist
+        .map((session, at) => ({
+            session,
+            score: (scores[at] as ClassifierScoreAnswer).score,
+        }))
+        // A stable sort: sessions the classifier scores alike keep today's order between them.
+        .sort((one, two) => two.score - one.score)
+        .map((each) => each.session);
+
+    return [...ranked, ...sessions.slice(RANKED)];
+}
 
 /**
  * The owner's standing instructions for PiP, from `pip.md` in the data folder, read again when the file changes;
@@ -181,9 +264,36 @@ function scheduleLine(item: Schedule): string {
     return `${item.id}: ${when} · ${quoted(item.text, 200)}`;
 }
 
-export default function createPip(host: PocketHost) {
+export default function createPip(host: PocketHost, web?: ExtensionWeb) {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const instructions = ownerInstructions(host);
+
+    // With the web part come the module's settings: whether one classifier call ranks a query's session matches.
+    if (web !== undefined) {
+        web.settings([
+            {
+                name: "rankSessions",
+                label: "Rank query matches",
+                description:
+                    "With a search, one classifier-model call ranks the top matches of the sessions tool, so what the words are about comes first in what PiP reads. Off by default; any failure keeps today's order. Sends the words and up to 8 sessions' titles, folders, branches to the classifier's provider.",
+                type: "boolean",
+                default: false,
+            },
+            {
+                name: "classifyModel",
+                label: "Classify model",
+                description:
+                    "Optional own classifier, provider/modelId. Empty: the one chosen in Providers. With neither, matches keep today's order.",
+                type: "text",
+                default: "",
+            },
+        ]);
+    }
+
+    /** Whether one classifier call ranks a query's matches: the setting, off without a web part. */
+    const rankingOn = () => web?.setting("rankSessions") === true;
+
+    const classifyModel = () => classifierFor(host, web?.setting("classifyModel"));
 
     // A session's state after a tool acted on it, so PiP sees what it did; nothing on a server older than that.
     const now = async (api: { conversationId: ConversationId }, session: number) => {
@@ -224,7 +334,27 @@ export default function createPip(host: PocketHost) {
         replay: "safe",
         execute: async (args, api) => {
             const found = host.pip.sessions(api.conversationId, args);
-            const lines = found.sessions.map(sessionLine);
+            let listed = found.sessions;
+            const words = (args.query ?? "").trim();
+
+            // With a query, one classifier call (a setting, off by default) ranks the top matches, so what the words
+            // are about comes first in what PiP reads. Any failure keeps today's newest-first order.
+            const model = classifyModel();
+
+            if (
+                words !== "" &&
+                rankingOn() &&
+                model !== undefined &&
+                typeof host.classify === "function"
+            ) {
+                try {
+                    listed = await rankSessions(host.classify, model, words, listed);
+                } catch {
+                    // A model spec that is wrong, or a provider that refused: today's order.
+                }
+            }
+
+            const lines = listed.map(sessionLine);
 
             if (found.more > 0) {
                 lines.push(`… and ${String(found.more)} more`);

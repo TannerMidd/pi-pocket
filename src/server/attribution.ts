@@ -12,6 +12,7 @@ import type {
     Storage,
     SubmissionId,
     SubmissionRecord,
+    TaskId,
 } from "@earendil-works/pi-durable";
 import type { PocketApp } from "./app.ts";
 import { AuthorsDoc } from "./docs.ts";
@@ -85,8 +86,7 @@ export class Attribution {
         );
 
         if (newest !== undefined) {
-            this.#lastAuthor.set(id, newest[1]);
-            this.#lastAuthorEntry.set(id, Number(newest[0]));
+            this.#track(id, Number(newest[0]), newest[1]);
         }
 
         // Their authors are known: a message settling after the restart is not noted again.
@@ -95,6 +95,18 @@ export class Attribution {
         }
 
         return missing;
+    }
+
+    #track(id: ConversationId, entry: number, by: string | undefined): void {
+        if (entry > (this.#lastAuthorEntry.get(id) ?? -1)) {
+            this.#lastAuthorEntry.set(id, entry);
+
+            if (by === undefined) {
+                this.#lastAuthor.delete(id);
+            } else {
+                this.#lastAuthor.set(id, by);
+            }
+        }
     }
 
     /** Write what `recover` found missing into the authors documents, all in one commit. */
@@ -160,6 +172,10 @@ export class Attribution {
                 const entry = record.entry;
                 const person = requestPerson(record.requestId);
 
+                if (record.type === "input" && entry !== undefined && person === undefined) {
+                    this.#track(id, Number(entry), undefined);
+                }
+
                 if (
                     entry !== undefined &&
                     person !== undefined &&
@@ -193,24 +209,12 @@ export class Attribution {
             !this.#authored.has(key)
         ) {
             const conversationId = record.conversationId;
-            const parent = this.#app.parentOf(conversationId);
-            // Subagent tasks started before they carried their person are the work of whoever the parent works for.
-            const requester =
-                person?.userId ??
-                (record.requestId?.startsWith("subagent:") && parent !== undefined
-                    ? this.requesterOf(parent)
-                    : undefined);
 
-            if (requester !== undefined) {
-                this.#authored.add(key);
-                const entry = Number(record.entry);
+            this.#authored.add(key);
+            this.#track(conversationId, Number(record.entry), person?.userId);
 
-                if (entry >= (this.#lastAuthorEntry.get(conversationId) ?? -1)) {
-                    this.#lastAuthorEntry.set(conversationId, entry);
-                    this.#lastAuthor.set(conversationId, requester);
-                }
-
-                this.#noteAuthor(conversationId, record.entry, requester, person?.wrote === true);
+            if (person !== undefined) {
+                this.#noteAuthor(conversationId, record.entry, person.userId, person.wrote);
             }
         }
     }
@@ -268,11 +272,29 @@ export class Attribution {
         return {};
     }
 
+    /** Select captured tasks, not whole conversations. Only recovery checks work without a recorded person. */
+    revokedRuns(busy: ReadonlyMap<ConversationId, TaskId>, personId?: string): TaskId[] {
+        const revoked: TaskId[] = [];
+
+        for (const [id, task] of busy) {
+            const by = this.requesterOf(id);
+
+            if (
+                (personId === undefined || by === personId) &&
+                this.#app.steeringUser(id, by) === undefined
+            ) {
+                revoked.push(task);
+            }
+        }
+
+        return revoked;
+    }
+
     /**
      * Who Pi works for in a conversation: the last person who wrote to it, or, for a subagent, whoever its parent worked
      * for when it sent the subagent its last message.
      */
     requesterOf(id: ConversationId): string | undefined {
-        return this.#lastAuthor.get(id) ?? this.#lastAuthor.get(this.#app.rootOf(id));
+        return this.#lastAuthor.get(id);
     }
 }

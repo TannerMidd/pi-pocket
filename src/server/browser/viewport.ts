@@ -1,13 +1,15 @@
+import { VIEWPORT_SIZES } from "../../../web/viewport-sizes.js";
+
 /** Page sizes for the built-in browser: the presets people pick and Pi names, and sizes read from either. */
-export type ViewportPreset = "mobile" | "tablet" | "desktop";
+export type ViewportPreset = keyof typeof VIEWPORT_SIZES;
 
 /** A page's size in CSS pixels, its device pixel ratio, and whether it acts as a phone or tablet (touch, mobile layout). */
 export type Viewport = { width: number; height: number; scale: number; mobile: boolean };
 
 export const VIEWPORTS: Readonly<Record<ViewportPreset, Viewport>> = {
-    mobile: { width: 390, height: 844, scale: 2, mobile: true },
-    tablet: { width: 820, height: 1180, scale: 2, mobile: true },
-    desktop: { width: 1280, height: 800, scale: 1, mobile: false },
+    mobile: { ...VIEWPORT_SIZES.mobile, scale: 2, mobile: true },
+    tablet: { ...VIEWPORT_SIZES.tablet, scale: 2, mobile: true },
+    desktop: { ...VIEWPORT_SIZES.desktop, scale: 1, mobile: false },
 };
 
 export const clamp = (value: number, low: number, high: number) =>

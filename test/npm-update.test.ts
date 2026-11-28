@@ -29,6 +29,57 @@ import {
     writePending,
     type PendingUpdate,
 } from "../src/server/update-state.ts";
+import { Updates, type UpdatesOptions } from "../src/server/updates.ts";
+
+/** A global package fixture, no npm: the updater's own checks and renames run on it. */
+function globalPackage() {
+    const dir = mkdtempSync(join(tmpdir(), "pocket-npm-apply-"));
+    const root =
+        process.platform === "win32"
+            ? join(dir, "prefix", "node_modules", "pi-pocket")
+            : join(dir, "prefix", "lib", "node_modules", "pi-pocket");
+
+    manifest(root, "1.0.0");
+
+    return { dir, root };
+}
+
+/** An `Updates` for the global package fixture, with the npm parts stubbed and the hooks recorded. */
+function npmUpdater(root: string, overrides: Partial<UpdatesOptions> = {}) {
+    const released: boolean[] = [];
+    const paused: boolean[] = [];
+    const restarts: number[] = [];
+    const updates = new Updates({
+        appRoot: root,
+        version: "1.0.0",
+        supervised: true,
+        rollback: true,
+        npmRollback: true,
+        restart: () => restarts.push(Date.now()),
+        busy: () => 0,
+        log: () => {},
+        releases: async () => ({
+            tag: "v2.0.0",
+            version: "2.0.0",
+            name: "Pi Pocket 2.0.0",
+            notes: "Fixes.",
+            url: "https://example.com/release",
+            warning: false,
+        }),
+        installKind: async () => "npm-global",
+        quiesce: (on) => paused.push(on),
+        closeOwnWatchers: (closed) => released.push(closed),
+        ...overrides,
+    });
+
+    const settled = async () => {
+        for (let tries = 0; tries < 100 && restarts.length === 0; tries++) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+    };
+
+    return { updates, released, paused, restarts, settled };
+}
 
 function manifest(root: string, version: string): void {
     mkdirSync(root, { recursive: true });
@@ -416,4 +467,50 @@ test("a manual target install clears staging state without replacing packages", 
             assert.equal(version(paths.previous), backup);
         }
     }
+});
+
+test("the updater closes the server's own watchers around the package swap", async (t) => {
+    const { dir, root } = globalPackage();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { updates, released, paused, restarts, settled } = npmUpdater(root, {
+        stage: async () => manifest(stagedPackagePath(root), "2.0.0"),
+    });
+
+    const answer = await updates.apply({ by: "test" });
+
+    assert.deepEqual(answer, { restarting: true, version: "2.0.0" });
+    await settled();
+    assert.equal(restarts.length, 1, "the server is restarted on the new package");
+    assert.equal(version(root), "2.0.0");
+    assert.deepEqual(paused, [true], "the running version stops loading edited files");
+    assert.deepEqual(
+        released,
+        [true],
+        "the watchers inside the package are closed for the swap, and only the restart makes new ones",
+    );
+    assert.equal(readPending(root)?.phase, "switching");
+});
+
+test("a failed swap keeps the old package, notes why, and watches again", async (t) => {
+    const { dir, root } = globalPackage();
+
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { updates, released, paused, restarts } = npmUpdater(root, {
+        // The staged package does not match what was asked for: the swap refuses to run.
+        stage: async () => manifest(stagedPackagePath(root), "9.9.9"),
+    });
+
+    await assert.rejects(updates.apply(), /The npm update failed/);
+
+    assert.equal(version(root), "1.0.0");
+    assert.equal(readPending(root), undefined);
+    assert.match(readOutcome(root)?.message ?? "", /stays at 1\.0\.0/);
+    assert.deepEqual(paused, [true, false], "the running version loads edited files again");
+    assert.deepEqual(
+        released,
+        [true, false],
+        "the watchers are closed for the swap and made again once the old package is back",
+    );
+    assert.equal(restarts.length, 0);
 });

@@ -16,15 +16,22 @@ import {
 } from "./browser.js";
 import { api, attempt, canSteer, notify, panelsBeside, store } from "./store.js";
 import { APPLE, dragWidth, html, Icon, Spinner } from "./ui.js";
+import { VIEWPORT_SIZES } from "./viewport-sizes.js";
 
 const WIDTH_KEY = "pocket.browserWidth";
+
+function sizePreset(id, icon, name) {
+    const { width, height } = VIEWPORT_SIZES[id];
+
+    return { id, icon, label: `${name} ${width}×${height}` };
+}
 
 /** Sizes the size button steps through. Fit makes the page the panel's size, as a browser window is. */
 const PRESETS = [
     { id: "fit", icon: "fit", label: "Fit the panel" },
-    { id: "desktop", icon: "monitor", label: "Desktop 1280×800" },
-    { id: "mobile", icon: "phone", label: "Phone 390×844" },
-    { id: "tablet", icon: "tablet", label: "Tablet 820×1180" },
+    sizePreset("desktop", "monitor", "Desktop"),
+    sizePreset("mobile", "phone", "Phone"),
+    sizePreset("tablet", "tablet", "Tablet"),
 ];
 
 /** The panel's own size as a viewport, pixel for pixel. */

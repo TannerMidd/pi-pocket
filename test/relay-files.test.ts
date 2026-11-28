@@ -195,25 +195,21 @@ test("files go once across a replay; a kind without files refuses and sends noth
 
     relay.register(withFiles.made);
     relay.register(without.made);
-    await relay.put(config("withfiles"));
-    await relay.put(config("plain"));
+    const withConfig = await relay.put(config("withfiles"));
+    const plainConfig = await relay.put(config("plain"));
 
     const signal = new AbortController().signal;
     const request = { text: "here", key: "task:call", files: [file] };
 
-    assert.equal(await relay.reply(config("withfiles"), request, signal), "Sent.");
-    assert.equal(await relay.reply(config("withfiles"), request, signal), "Sent already.");
+    assert.equal(await relay.reply(withConfig, request, signal), "Sent.");
+    assert.equal(await relay.reply(withConfig, request, signal), "Sent already.");
     assert.deepEqual(withFiles.sent, [1]);
     await assert.rejects(
-        relay.reply(
-            config("withfiles"),
-            { ...request, key: "k2", files: [file, file, file] },
-            signal,
-        ),
+        relay.reply(withConfig, { ...request, key: "k2", files: [file, file, file] }, signal),
         /2 files/,
     );
     await assert.rejects(
-        relay.reply(config("plain"), { ...request, key: "k3" }, signal),
+        relay.reply(plainConfig, { ...request, key: "k3" }, signal),
         /cannot send files yet/,
     );
     assert.deepEqual(without.sent, []);
@@ -239,7 +235,8 @@ test("a fetch keeps its caps and type check, and shows no token or link", async 
     const fetching = connector("fetching", { fetch: () => answers.shift()!() });
 
     relay.register(fetching.made);
-    await relay.put(config("fetching"));
+    const c = await relay.put(config("fetching"));
+
     fetching.push([
         {
             id: "e1",
@@ -255,17 +252,18 @@ test("a fetch keeps its caps and type check, and shows no token or link", async 
     assert.ok(!delivered[0]!.payload.includes("cdn.example"));
 
     const signal = new AbortController().signal;
-    const c = config("fetching");
 
-    await assert.rejects(relay.fetch(c, "e1", 1, signal), /came as text\/html/);
-    await assert.rejects(relay.fetch(c, "e1", 1, signal), (error: Error) => {
+    const reference = /^event: (.+)$/m.exec(delivered[0]!.payload)![1]!;
+
+    await assert.rejects(relay.fetch(c, reference, 1, signal), /came as text\/html/);
+    await assert.rejects(relay.fetch(c, reference, 1, signal), (error: Error) => {
         assert.ok(!error.message.includes(TOKEN), error.message);
         assert.ok(!error.message.includes("sig=abc"), error.message);
 
         return true;
     });
-    assert.equal((await relay.fetch(c, "e1", 1, signal)).type, "image/png");
-    await assert.rejects(relay.fetch(c, "e1", 2, signal), /1 attachments/);
+    assert.equal((await relay.fetch(c, reference, 1, signal)).type, "image/png");
+    await assert.rejects(relay.fetch(c, reference, 2, signal), /1 attachments/);
     await relay.stop();
 
     // Discord's download stops at the cap, and never sends the token to the file host.

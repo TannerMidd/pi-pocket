@@ -19,7 +19,7 @@ if (typeof host.ask !== "function") {
 
 ## Ask the person
 
-`host.ask` shows a card in the session, as an approval does: a title, some words, fields, and a button. Only the person Pi works for can send it, and the app notifies them. Anyone who can steer can decline it.
+`host.ask` shows a card in the session, as an approval does: a title, some words, fields, and a button. Only the original requester can send it, while they can still steer, and the app notifies them. Anyone who can steer can decline it. If a replay cannot establish the original requester, it gets a decline, not the current person's answers.
 
 ```typescript
 const answer = await host.ask(

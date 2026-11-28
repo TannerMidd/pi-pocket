@@ -94,25 +94,29 @@ const setBox = (text: string) =>
         return "null";
     `);
 
-/** The Design panel, open: the rail's button, once the module has loaded. */
+/** Open the Design panel from Tools after the module loads. */
 async function openDesign(target = page) {
-    await waitFor(
-        "the Design rail button",
-        `return JSON.stringify(Boolean(document.querySelector('nav[aria-label="Sessions and tools"] button[aria-label="Design"]')))`,
-        target,
-    );
-
     if (
         !(await evaluate<boolean>(
             target,
             `return JSON.stringify(Boolean(document.querySelector(".dsn")))`,
         ))
     ) {
-        await pressed(
-            'nav[aria-label="Sessions and tools"] button[aria-label="Design"]',
-            undefined,
+        const tools = '[data-nav="tools"]';
+        const design = '.nav-menu .rail-ext[title="Design"]';
+
+        await waitFor(
+            "the Tools button",
+            `return JSON.stringify(!!document.querySelector('${tools}'))`,
             target,
         );
+        await pressed(tools, undefined, target);
+        await waitFor(
+            "the Design tool",
+            `return JSON.stringify(!!document.querySelector('${design}'))`,
+            target,
+        );
+        await pressed(design, undefined, target);
     }
 
     await waitFor(
@@ -211,16 +215,23 @@ test("the rail opens the panel, with the newest design in a frame that fits", re
 
 test("device sizes change the frame, and fit scales it to the room", real, async () => {
     await choose("Coffee landing page");
+    await waitFor(
+        "a 1080p page before choosing any device",
+        `const frame = document.querySelector(".dsn-frame");
+        return JSON.stringify(frame?.clientWidth === 1920 && frame?.clientHeight === 1080);`,
+    );
 
     for (const [title, size] of [
         ["Phone, 390 × 844", "390×844"],
         ["Tablet, 820 × 1180", "820×1180"],
-        ["Desktop, 1280 × 800", "1280×800"],
+        ["Desktop, 1920 × 1080", "1920×1080"],
     ] as const) {
         await pressed(`.dsn-seg button[title="${title}"]`);
         await waitFor(
             size,
-            `return JSON.stringify(document.querySelector(".dsn-zoom-size")?.textContent === ${JSON.stringify(size)})`,
+            `const frame = document.querySelector(".dsn-frame");
+            return JSON.stringify(document.querySelector(".dsn-zoom-size")?.textContent === ${JSON.stringify(size)}
+                && frame && [frame.clientWidth, frame.clientHeight].join("×") === ${JSON.stringify(size)});`,
         );
     }
 

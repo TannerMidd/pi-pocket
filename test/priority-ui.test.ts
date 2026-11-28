@@ -7,6 +7,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -21,6 +22,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { Browsers } from "../src/server/browser.ts";
 import { findBrowser } from "../src/server/browser/discovery.ts";
 import type { BrowserPage } from "../src/server/browser/page.ts";
+import { SessionsDoc } from "../src/server/docs.ts";
 import { createHandler } from "../src/server/http.ts";
 import type { ApprovalAnswer } from "../src/server/host.ts";
 
@@ -130,7 +132,7 @@ const gone = (selector: string, what: string) => until(async () => !(await exist
 
 const idsIn = (name: string) =>
     inPage<number[]>(
-        `return JSON.stringify([...document.querySelectorAll(${JSON.stringify(`${group(name)} .session-row`)})].map((row) => Number(row.dataset.id)))`,
+        `return JSON.stringify([...document.querySelectorAll(${JSON.stringify(`${group(name)} .session-row[data-id]`)})].map((row) => Number(row.dataset.id)))`,
     );
 
 test(
@@ -158,6 +160,9 @@ test("calls wait in Needs you, oldest first, and are answered in their rows", re
     const short = await newSession(app);
     const long = await newSession(app);
     const quiet = await newSession(app);
+
+    await say(app, short, "publish the beta");
+    await say(app, long, "run the long command");
     const shortAnswer = ask(short, "npm publish --tag beta", 1_000);
     const longAnswer = ask(long, `echo ${"a very long command ".repeat(10)}`, 2_000);
 
@@ -255,6 +260,8 @@ test(
 
 test("a row answers only the call it shows, not one that took its place", real, async () => {
     const id = await newSession(app);
+
+    await say(app, id, "publish the next version");
     const answer = ask(id, "npm publish --tag next", 3_000);
     const allow = `${rowIn("needs", id)} [data-part="session-allow"]`;
 
@@ -387,5 +394,161 @@ test(
             ),
             "working",
         );
+    },
+);
+
+test(
+    "Priority puts a family's sessions under their lead, five at most, then +N more, and hides a lead nobody sees",
+    real,
+    async () => {
+        const lead = await newSession(app);
+        const kids = [] as ConversationId[];
+        const deep = await newSession(app);
+        const lone = await newSession(app);
+
+        for (let at = 0; at < 7; at++) {
+            kids.push(await newSession(app));
+        }
+
+        await app.harness.commit(async (tx) => {
+            const sessions = (await tx.doc(SessionsDoc)).items;
+
+            sessions[String(lead)]!.title = "Lead L";
+            sessions[String(deep)]!.title = "Deep D";
+            sessions[String(lone)]!.title = "Lone E";
+            sessions[String(deep)]!.linkedFrom = { id: Number(kids[0]) };
+
+            for (const [at, kid] of kids.entries()) {
+                sessions[String(kid)]!.title = `Kid ${at + 1}`;
+                sessions[String(kid)]!.linkedFrom = { id: Number(lead) };
+            }
+        }, context);
+
+        // Oldest first: Kid 1, Deep D (a grandchild), Kid 2 to 7, then a session with no family.
+        const answers = [
+            ask(kids[0]!, "step 1", 1_000),
+            ask(deep, "step d", 1_100),
+            ...kids.slice(1).map((kid, at) => ask(kid, `step ${at + 2}`, 2_000 + at)),
+            ask(lone, "step e", 9_000),
+        ];
+
+        await click('.sidebar .session-tabs [data-tab="priority"]');
+        await present(rowIn("needs", lone), "the lone session in Needs you");
+        const layout = () =>
+            inPage<string[]>(`
+                return JSON.stringify([...document.querySelectorAll(${JSON.stringify(`${group("needs")} .session-row`)})].map((row) =>
+                    row.dataset.lead ? "lead:" + row.dataset.lead
+                    : row.dataset.id ? row.dataset.id + (getComputedStyle(row).getPropertyValue("--linked-depth").trim() === "1" ? ">" : "")
+                    : "more:" + row.textContent.trim()));
+            `);
+
+        assert.deepEqual(
+            await layout(),
+            [
+                `lead:${lead}`,
+                `${kids[0]}>`,
+                `${deep}>`,
+                `${kids[1]}>`,
+                `${kids[2]}>`,
+                `${kids[3]}>`,
+                "more:+3 more",
+                `${lone}`,
+            ],
+            "a muted lead, five of its sessions, +3 more, then the session with no family",
+        );
+        assert.equal(
+            await text(`${group("needs")} [data-lead="${lead}"] .session-title`),
+            "Lead L",
+        );
+        assert.equal(
+            await text(`${rowIn("needs", deep)} [data-part="session-crumb"]`),
+            "Lead L › Kid 1",
+            "a grandchild shows its path",
+        );
+        assert.equal(
+            await exists(`${rowIn("needs", kids[0]!)} [data-part="session-crumb"]`),
+            false,
+        );
+        assert.equal(
+            await inPage<string | null>(
+                `return JSON.stringify(document.querySelector(${JSON.stringify(`${group("needs")} [data-lead="${lead}"] .session-fold`)}).getAttribute("aria-label"))`,
+            ),
+            "Browse 8 linked sessions, 8 need attention",
+        );
+        // Each session keeps its Review, and the lead opens its session.
+        assert.equal(
+            await exists(`${rowIn("needs", kids[3]!)} [data-part="session-review"]`),
+            true,
+        );
+        assert.equal(await exists(`${rowIn("needs", lone)} [data-part="session-review"]`), true);
+
+        // +3 more opens the lead's index, filtered to what needs attention.
+        await click(`${group("needs")} .family-more`);
+        await present(".family-explorer .family-filters", "the family's index");
+        assert.equal(
+            await inPage<string>(
+                `return JSON.stringify(document.querySelector(".family-filters select").value)`,
+            ),
+            "attention",
+        );
+        assert.equal(await text(".family-heading"), "Lead L");
+        assert.equal(await text(".family-range"), "1–8 of 8");
+        await page.navigate(`${base}/`);
+        await present(".sidebar .session-tabs", "the list again");
+
+        // A lead in the group is its own head: no second row for it.
+        const head = ask(lead, "step lead", 500);
+
+        await click('.sidebar .session-tabs [data-tab="priority"]');
+        await present(rowIn("needs", lead), "the lead's own row in Needs you");
+        assert.equal(await exists(`${group("needs")} [data-lead]`), false, "no muted lead row");
+        assert.equal(
+            (await layout()).slice(0, 2).join(),
+            `${lead},${kids[0]}>`,
+            "the lead heads its family",
+        );
+
+        // Someone who sees only one session of the family sees no lead and no path.
+        const viewer = app.config.addUser("Reader", "viewer", [String(deep)]);
+        const guests = new Browsers({
+            dataDir: mkdtempSync(join(root, "priority-guest-")),
+            load: async () => undefined,
+            save: () => {},
+        });
+
+        try {
+            const guest = await guests.open(1);
+
+            await guest.navigate(`${base}/login?token=${encodeURIComponent(viewer.token)}`);
+            await guest.navigate(`${base}/`);
+            assert.ok(await guest.waitFor({ selector: '.sidebar [data-tab="priority"]' }));
+            await guest.click({ selector: '.sidebar [data-tab="priority"]' });
+            assert.ok(
+                await guest.waitFor({ selector: `.sidebar .session-row[data-id="${deep}"]` }),
+            );
+            assert.deepEqual(
+                JSON.parse(
+                    await guest.evaluate(`
+                        const row = document.querySelector('.sidebar .session-row[data-id="${deep}"]');
+
+                        return JSON.stringify({
+                            leads: document.querySelectorAll("[data-lead]").length,
+                            crumb: row.querySelector("[data-part='session-crumb']") !== null,
+                            depth: getComputedStyle(row).getPropertyValue("--linked-depth").trim(),
+                            leaked: /Lead L|Kid 1/.test(document.body.innerText),
+                        });
+                    `),
+                ),
+                { leads: 0, crumb: false, depth: "", leaked: false },
+            );
+        } finally {
+            await guests.closeAll({ final: true });
+        }
+
+        for (const each of [...app.approvals.all()]) {
+            app.approvals.answer(each.id, { allow: false, by: "test" });
+        }
+
+        await Promise.all([...answers, head]);
     },
 );

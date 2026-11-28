@@ -16,6 +16,7 @@ import {
     chooseLook,
     chooseTheme,
     colorsOnly,
+    DEFAULT_COLORS,
     folderPaletteIds,
     lookIds,
     paletteOf,
@@ -36,6 +37,7 @@ import { html, Icon, Sheet, Switch } from "../ui.js";
 import { pipAvailable } from "../pip.js";
 import { QUOTE_STYLES, quoteStyleOf } from "../quote-box.js";
 import { galleryAvailable } from "./gallery.js";
+import { memoryAvailable } from "./memory.js";
 
 // Key hints are for people with a keyboard: a touch screen has none.
 const touch = matchMedia("(pointer: coarse)").matches;
@@ -466,7 +468,7 @@ function ColorsTools() {
         ) &&
         attempt(async () => {
             await api(`themes/${encodeURIComponent(own.id)}`, undefined, { method: "DELETE" });
-            setPrefs({ theme: "desktop" });
+            setPrefs({ theme: DEFAULT_COLORS });
         });
 
     return html`<div class="look-tools">
@@ -496,10 +498,10 @@ function DefaultTools() {
         ? p.look
         : BASE_LOOK;
     const colors = paletteOf(p.theme).id;
-    // What new browsers get already: the default, or with none, Pocket and the desktop's colors.
+    // What new browsers get already: the default, or with none, Pocket and Pocket neutral.
     const same = current
         ? current.look === look && current.colors === colors
-        : look === BASE_LOOK && p.theme === "desktop";
+        : look === BASE_LOOK && p.theme === DEFAULT_COLORS;
     // A theme with its own colors is named once: "My Lantern", not "My Lantern with My Lantern". The desktop's colors
     // are Tokyo Night where the server has no desktop.
     const name = (look, colors) =>
@@ -519,7 +521,7 @@ function DefaultTools() {
 
     return html`<div class="look-tools">
         <span class="muted small grow">
-            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, "desktop")}.`}
+            ${current ? `For new browsers: ${name(current.look, current.colors)}.` : `New browsers start with ${name(BASE_LOOK, DEFAULT_COLORS)}.`}
         </span>
         ${
             !same &&
@@ -579,6 +581,7 @@ function SlotLayout({ slot }) {
                 const at = movable.indexOf(item.id);
                 const detail = [
                     item.module && `From ${item.module}`,
+                    item.note,
                     hiddenBy && `Hidden by ${hiddenBy}`,
                     item.fixed && "Always shown",
                 ]
@@ -628,6 +631,7 @@ export function AppearanceSheet() {
         <div class="look-grid">
             ${lookIds().map((id) => html`<${LookCard} key=${id} id=${id} />`)}
         </div>
+        ${galleryAvailable() && html`<button class="link small" onClick=${() => openSheet({ type: "gallery" })}>Browse the gallery</button>`}
         ${store.state.me?.role === "owner" && html`<${LookTools} />`}
         ${store.state.me?.role === "owner" && html`<${FontTools} />`}
         <div class="label">Colors</div>
@@ -842,6 +846,29 @@ export function AppearanceSheet() {
                     onChange=${() => setPrefs({ foldActivity: !p.foldActivity })}
                 />
             <//>
+            ${
+                memoryAvailable() &&
+                html`<${SettingRow}
+                    title="Lessons in folded activity"
+                    detail="A lesson Pi saved that still waits for a decision, when its activity is folded. Card: its Approve card stays under the line. Badge: the line says how many wait"
+                >
+                    <div class="segmented">
+                        ${[
+                            ["card", "Card"],
+                            ["badge", "Badge"],
+                        ].map(
+                            ([value, label]) =>
+                                html`<button
+                                    class=${(p.foldedLessons ?? "card") === value ? "on" : ""}
+                                    aria-pressed=${(p.foldedLessons ?? "card") === value}
+                                    onClick=${() => setPrefs({ foldedLessons: value })}
+                                >
+                                    ${label}
+                                </button>`,
+                        )}
+                    </div>
+                <//>`
+            }
             <${SettingRow}
                 title="Reply to a passage"
                 detail="Select words in one of Pi's replies, and a Reply button by them quotes them in your next message"

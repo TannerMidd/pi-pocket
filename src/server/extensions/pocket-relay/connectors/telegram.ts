@@ -23,15 +23,17 @@ interface TelegramUser {
 }
 interface Message {
     message_id: number;
+    message_thread_id?: number;
+    is_topic_message?: boolean;
     date?: number;
-    chat: { id: number; type: string; title?: string };
+    chat: { id: number; type: string; title?: string; username?: string };
     from?: TelegramUser;
     sender_chat?: { id: number; title?: string };
     text?: string;
     caption?: string;
     entities?: { type: string; offset: number; length: number }[];
     caption_entities?: { type: string; offset: number; length: number }[];
-    reply_to_message?: { from?: TelegramUser };
+    reply_to_message?: { message_id?: number; from?: TelegramUser };
     photo?: TelegramFile[];
     document?: TelegramFile;
     video?: TelegramFile;
@@ -58,6 +60,8 @@ async function request<T>(
     body?: unknown,
     timeout = 20_000,
 ): Promise<T> {
+    context.signal.throwIfAborted();
+
     let response: Response;
     let data: {
         ok?: boolean;
@@ -81,6 +85,8 @@ async function request<T>(
         // Telegram puts the token in the URL. Never expose a URL or a transport error.
         throw new Error("Telegram request failed. Check the API address and connection.");
     }
+
+    context.signal.throwIfAborted();
 
     const code = response.ok ? data.error_code : response.status;
 
@@ -186,6 +192,8 @@ async function download(
         throw new Error(`Telegram lets a bot download ${Math.round(cap / 1048576)} MB at most`);
     }
 
+    context.signal.throwIfAborted();
+
     let response: Response;
 
     try {
@@ -265,11 +273,22 @@ function eventOf(message: Message, bot: TelegramUser): RelayEvent {
         id: `${message.chat.id}:${message.message_id}`,
         channel: String(message.chat.id),
         channelName: message.chat.title,
+        ...(message.is_topic_message && message.message_thread_id !== undefined
+            ? { thread: String(message.message_thread_id) }
+            : {}),
+        // In the id `reply` returns for a sent message: a reply to a card of Pi's names it.
+        ...(typeof message.reply_to_message?.message_id === "number"
+            ? { replyTo: `${message.chat.id}:${message.reply_to_message.message_id}` }
+            : {}),
         text: stripped.trim(),
         author: {
             id: String(author?.id ?? message.sender_chat?.id ?? "unknown"),
             name: author?.username ?? author?.first_name ?? message.sender_chat?.title ?? "Unknown",
-            bot: author?.is_bot === true || author?.id === bot.id || author === undefined,
+            bot:
+                message.sender_chat !== undefined ||
+                !Number.isSafeInteger(author?.id) ||
+                author?.is_bot === true ||
+                author?.id === bot.id,
         },
         mentioned:
             message.chat.type === "private" ||
@@ -283,6 +302,7 @@ function eventOf(message: Message, bot: TelegramUser): RelayEvent {
 
 const telegram: RelayConnector = {
     kind: "telegram",
+    authenticatedAuthors: true,
     label: "Telegram",
     description: "A Telegram bot: messages to it and in its groups. Make one with @BotFather.",
     shape: "stream",
@@ -316,8 +336,16 @@ const telegram: RelayConnector = {
         if (offset === undefined) {
             const updates = await request<Update[]>(context, "getUpdates", "?offset=-1");
 
+            if (context.signal.aborted) {
+                return;
+            }
+
             offset = updates.reduce((last, update) => Math.max(last, update.update_id + 1), 0);
             context.save({ offset });
+        }
+
+        if (context.signal.aborted) {
+            return;
         }
 
         context.status("Connected");
@@ -336,6 +364,11 @@ const telegram: RelayConnector = {
                 undefined,
                 40_000,
             );
+
+            if (context.signal.aborted) {
+                return;
+            }
+
             const events = updates.flatMap((update) => {
                 const message = update.message;
 
@@ -345,11 +378,16 @@ const telegram: RelayConnector = {
             });
 
             await context.emit(events);
+
+            if (context.signal.aborted) {
+                return;
+            }
+
             offset = updates.reduce((last, update) => Math.max(last, update.update_id + 1), offset);
             context.save({ offset });
 
             // A long poll that answers at once with nothing (a server that ignores the timeout) must not spin.
-            if (updates.length === 0 && Date.now() - asked < 1000) {
+            if (!context.signal.aborted && updates.length === 0 && Date.now() - asked < 1000) {
                 await context.sleep(1000);
             }
         }
@@ -361,6 +399,11 @@ const telegram: RelayConnector = {
             throw new Error("Choose a Telegram reply chat.");
         }
 
+        if (reply.confirmDestination && reply.text.length > 4096) {
+            throw new Error("The reply exceeds the Telegram message limit.");
+        }
+
+        const thread = reply.to?.thread ?? reply.thread;
         const messageId = reply.to?.id.split(":").at(-1);
         const answer =
             messageId === undefined
@@ -369,25 +412,87 @@ const telegram: RelayConnector = {
         const files = reply.files ?? [];
         // A short text goes as the first file's caption; a long one as a message of its own first.
         const caption = files.length > 0 && reply.text.length <= 1024 ? reply.text : undefined;
+        const multipart = files.length > 1 || (files.length === 1 && caption === undefined);
         let first: number | undefined;
+        let destination: { channel: string; thread?: string } | undefined;
+
+        const record = (message: Message, contentMatches: boolean) => {
+            if (reply.confirmDestination || multipart) {
+                const chat = message.chat?.id;
+                const topic = message.is_topic_message ? message.message_thread_id : undefined;
+
+                const alias = message.chat?.username;
+                const matchesChat =
+                    String(channel) === String(chat) ||
+                    (typeof alias === "string" &&
+                        String(channel).toLowerCase() === `@${alias.toLowerCase()}`);
+
+                if (
+                    (reply.confirmDestination && !contentMatches) ||
+                    (destination === undefined && !matchesChat) ||
+                    (topic === undefined ? undefined : String(topic)) !== thread ||
+                    !Number.isSafeInteger(chat) ||
+                    chat === 0 ||
+                    !Number.isSafeInteger(message.message_id) ||
+                    message.message_id <= 0 ||
+                    (message.is_topic_message &&
+                        (topic === undefined || !Number.isSafeInteger(topic) || topic <= 0))
+                ) {
+                    return false;
+                }
+
+                const where = {
+                    channel: String(chat),
+                    ...(topic === undefined ? {} : { thread: String(topic) }),
+                };
+
+                if (
+                    destination &&
+                    (where.channel !== destination.channel || where.thread !== destination.thread)
+                ) {
+                    throw new Error("Telegram sent reply parts to different destinations.");
+                }
+
+                destination = where;
+            }
+
+            first ??= message.message_id;
+
+            return true;
+        };
 
         // Telegram has no idempotency key. The runtime records replies by key.
         if (caption === undefined) {
-            const result = await request<{ message_id: number }>(context, "sendMessage", "", {
+            const result = await request<Message>(context, "sendMessage", "", {
                 chat_id: channel,
+                ...(thread === undefined ? {} : { message_thread_id: Number(thread) }),
                 text: reply.text.slice(0, 4096),
                 ...(answer === undefined ? {} : { reply_parameters: answer }),
                 link_preview_options: { is_disabled: true },
             });
 
-            first = result.message_id;
+            if (!record(result, result.text === reply.text)) {
+                if (files.length) {
+                    throw new Error(
+                        "Telegram did not confirm the text and destination. Files were not sent.",
+                    );
+                }
+
+                return {};
+            }
         }
 
         for (const [index, file] of files.entries()) {
             const send = async (photo: boolean) => {
                 const form = new FormData();
 
-                form.append("chat_id", String(channel));
+                const sendThread = destination === undefined ? thread : destination.thread;
+
+                form.append("chat_id", destination?.channel ?? String(channel));
+
+                if (sendThread !== undefined) {
+                    form.append("message_thread_id", sendThread);
+                }
 
                 if (index === 0 && caption !== undefined && caption !== "") {
                     form.append("caption", caption);
@@ -403,7 +508,7 @@ const telegram: RelayConnector = {
                     file.name,
                 );
 
-                return request<{ message_id: number }>(
+                return request<Message>(
                     context,
                     photo ? "sendPhoto" : "sendDocument",
                     "",
@@ -422,10 +527,31 @@ const telegram: RelayConnector = {
                 throw error;
             });
 
-            first ??= result.message_id;
+            const hasFile = Boolean(
+                result.document?.file_id || result.photo?.some((part) => part.file_id),
+            );
+            const expectedCaption = index === 0 ? (caption ?? "") : "";
+
+            if (!record(result, hasFile && (result.caption ?? "") === expectedCaption)) {
+                if (index < files.length - 1) {
+                    throw new Error(
+                        "Telegram did not confirm the file and destination. Remaining files were not sent.",
+                    );
+                }
+
+                return {};
+            }
         }
 
-        return first === undefined ? {} : { id: `${channel}:${first}` };
+        context.signal.throwIfAborted();
+
+        if (reply.confirmDestination) {
+            return destination && first !== undefined
+                ? { ...destination, id: `${destination.channel}:${first}` }
+                : {};
+        }
+
+        return first === undefined ? {} : { id: `${destination?.channel ?? channel}:${first}` };
     },
 };
 

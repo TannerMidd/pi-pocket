@@ -11,9 +11,13 @@ const KEY = "pocket.appearance";
 const CACHE = "pocket.themeCache";
 const DESKTOP_CACHE = "pocket.desktopTheme";
 const PINNED = "pocket.pinned";
+
+/** The colors of a browser that chose none and has no owner's default: Pocket's own greys (`themes.js`). */
+export const DEFAULT_COLORS = "pocket-neutral";
+/** The palette for colors that are not here: a theme folder that went, or "Desktop" on a machine without one. */
 const FALLBACK = "tokyo-night";
 
-/** The app's own look, which every theme builds on: it loads no stylesheet. */
+/** The app's own look, which every theme builds on. Its folder (`web/themes/pocket/`) is the look; others load theirs instead. */
 export const BASE_LOOK = "pocket";
 
 /** The conversation's text size in pixels: anything from MIN_TEXT to MAX_TEXT, in steps of STEP_TEXT. */
@@ -32,12 +36,15 @@ export function textSizeOf(value) {
     return Math.min(MAX_TEXT, Math.max(MIN_TEXT, Math.round(size / STEP_TEXT) * STEP_TEXT));
 }
 
+export const SIDEBAR_WIDTH = 432;
+
 const DEFAULTS = {
     /**
      * The colors: "desktop" follows the Omarchy theme of the machine Pi Pocket runs on; otherwise a key of THEMES, or the
-     * id of a theme folder with a colors.toml. (Its name is from before themes were folders.)
+     * id of a theme folder with a colors.toml. (Its name is from before themes were folders.) Until someone chooses, the
+     * owner's default, or Pocket neutral.
      */
-    theme: "desktop",
+    theme: DEFAULT_COLORS,
     /** The theme: a theme folder's id, or "pocket", the app's own look. */
     look: BASE_LOOK,
     /** Wide screens: the sidebar and the conversation as Hyprland windows, with gaps and borders. */
@@ -60,8 +67,8 @@ const DEFAULTS = {
     width: "comfortable",
     /** The sidebar on wide screens: "open", or "rail" (icons and numbered sessions only). */
     sidebar: "open",
-    /** The open sidebar's width, its borders, the rail, and the list's: a 254px list. */
-    sidebarWidth: 312,
+    /** A labeled rail and a readable session list. A saved width still wins. */
+    sidebarWidth: SIDEBAR_WIDTH,
     /**
      * How sessions are switched: false for the sidebar's list; true for tabs, a strip of the numbered sessions above the
      * conversation (`session-tabs.js`), which Appearance pairs with the folded sidebar.
@@ -86,6 +93,11 @@ const DEFAULTS = {
      * thought alone in its group still follows Show thinking. Off until turned on.
      */
     foldActivity: false,
+    /**
+     * A lesson Pi saved, changed, or forgot that still waits for a decision, in an activity group that is folded: "card",
+     * its Approve card under the group's line; or "badge", a badge on the line that says how many wait.
+     */
+    foldedLessons: "card",
     /** A Reply button by words selected in one of Pi's replies, which quotes them in the next message. On by default. */
     quoteReply: true,
     /** PiP's orb by those words, beside Reply if it shows, which asks PiP about them instead. On by default. */
@@ -122,7 +134,7 @@ const SOFT_KEY = "pocket.softTiles";
 
 /**
  * What this browser saved. The sidebar's usual width was 300 before the rail went beside the list, then 324, and is
- * 312 with soft tiles. The text size was the whole app's, 12 to 16; it is now the conversation's, a step larger.
+ * was 312 with soft tiles. The text size was the whole app's, 12 to 16; it is now the conversation's, a step larger.
  */
 function savedPrefs() {
     const saved = readJson(KEY, {});
@@ -161,8 +173,8 @@ const WIDTHS = {
     full: { "--transcript-width": "100%", "--composer-width": "100%" },
 };
 
-/** The open sidebar's width as it shows: the rail and its borders, and a list 204–464px wide. */
-const sidebarWidth = (p) => `${Math.min(524, Math.max(264, p.sidebarWidth))}px`;
+/** Keep previously chosen narrow widths, and allow room for the labeled rail beside a 464px list. */
+const sidebarWidth = (p) => `${Math.min(556, Math.max(264, p.sidebarWidth))}px`;
 
 /** This browser's own choices: what it saved, over the defaults. */
 let own = { ...DEFAULTS, ...savedPrefs() };
@@ -170,8 +182,8 @@ let own = { ...DEFAULTS, ...savedPrefs() };
 /** Which of the theme (`look`) and the colors (`theme`) this browser's person chose; the rest follow the owner's default. */
 const CHOSEN = "pocket.themeChosen";
 const chosen = readJson(CHOSEN, null) ?? {
-    // From before there were defaults: colors other than the desktop's were someone's choice.
-    theme: own.theme !== DEFAULTS.theme,
+    // From before there were defaults: colors other than the desktop's (then the default) were someone's choice.
+    theme: own.theme !== "desktop" && own.theme !== DEFAULTS.theme,
     look: own.look !== DEFAULTS.look,
 };
 
@@ -189,7 +201,9 @@ function inForce() {
     return {
         ...own,
         ...(fallback && !chosen.look ? { look: fallback.look } : {}),
-        ...(fallback && !chosen.theme ? { theme: fallback.colors } : {}),
+        // Colors nobody chose are the owner's default, or else the app's: what this browser saved before it chose none
+        // (the desktop's colors, once the default) does not stand.
+        ...(chosen.theme ? {} : { theme: fallback ? fallback.colors : DEFAULTS.theme }),
     };
 }
 
@@ -374,22 +388,29 @@ const themesListed = () => Array.isArray(store.state.themeList);
 
 // ─── Theme folders ──────────────────────────────────────────────────────────────
 
-/** The theme folder this browser uses: the one it chose, if the server offers it; else the app's own look. */
+/**
+ * The theme folder this browser uses: the one it chose, if the server offers it, and Pocket's own when it lists one
+ * with a stylesheet (a server that does not leaves the app's own CSS as it is). None in safe mode.
+ */
 function lookOf(id = prefs().look) {
-    if (safeMode() || id === BASE_LOOK) {
+    if (safeMode()) {
         return null;
     }
 
+    const usable = (each) => each.usable && each.css.length > 0;
+    const list = store.state.themeList ?? [];
+
+    // A chosen theme that is gone or cannot load falls back to Pocket's own look, which is a theme folder too.
     return (
-        store.state.themeList?.find(
-            (each) => each.id === id && each.usable && each.css.length > 0,
-        ) ?? null
+        list.find((each) => each.id === id && usable(each)) ??
+        list.find((each) => each.id === BASE_LOOK && usable(each)) ??
+        null
     );
 }
 
 /** The stylesheets of the theme this tab shows, or null while the server has not listed them yet. */
 function themeSheets() {
-    if (safeMode() || prefs().look === BASE_LOOK) {
+    if (safeMode()) {
         return [];
     }
 
@@ -480,8 +501,10 @@ export function lookLabel() {
     const palette = paletteOf();
     const colors = palette.desktop ? `${palette.name} (desktop)` : palette.name;
 
-    return look && prefs().theme.split("@")[0] === look.id
-        ? look.name
+    // Pocket with the colors it starts with is "Pocket", as a theme with its own colors is named once.
+    return (look && prefs().theme.split("@")[0] === look.id) ||
+        (prefs().look === BASE_LOOK && palette.id === DEFAULT_COLORS)
+        ? (look?.name ?? "Pocket")
         : `${look?.name ?? "Pocket"} · ${colors}`;
 }
 
@@ -599,7 +622,9 @@ export function apply() {
     const cached = readJson(CACHE, {});
     // Colors of a theme folder before the server listed them: keep what index.html put on the page from the cache.
     const palette = paletteKnown(p.theme) ? paletteOf() : null;
-    const vars = palette ? themeVars(palette) : (cached.palette ?? themeVars(paletteOf(FALLBACK)));
+    const vars = palette
+        ? themeVars(palette)
+        : (cached.palette ?? themeVars(paletteOf(DEFAULT_COLORS)));
 
     if (palette) {
         setPalette(vars);

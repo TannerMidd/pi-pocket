@@ -11,6 +11,8 @@ import { AuthorsDoc, ChatDoc } from "./docs.ts";
 import { describe } from "./errors.ts";
 import { entryText, projectEntry, snippet } from "./projection.ts";
 import { span, type WaitView } from "./limit-gate.ts";
+import { controlsFor } from "./surfaces/bindings.ts";
+import type { Surface } from "./surfaces/types.ts";
 import { DEFAULT_PREFS, type EmbedderMessage, type PushMessage, type PushPrefs } from "./push.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -28,11 +30,27 @@ const DISGUISING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 export class Alerts {
     readonly #app: PocketApp;
     readonly #doneTimers = new Map<ConversationId, NodeJS.Timeout>();
+    /** How many runs began in each conversation: a notice checks it is still for the run it was made for. */
+    readonly #runsStarted = new Map<ConversationId, number>();
     /** Approvals already announced, so each one is pushed once. */
     #approvalIds = new Set<string>();
+    /** Cards already announced, by conversation and id. */
+    readonly #surfaceIds = new Set<string>();
 
     constructor(app: PocketApp) {
         this.#app = app;
+    }
+
+    #wantsPush(userId: string, id: ConversationId, kind: keyof PushPrefs): boolean {
+        const app = this.#app;
+        const user = app.config.userById(userId);
+
+        return (
+            user !== undefined &&
+            app.canSee(user, id) &&
+            (app.pushStore?.prefs(userId) ?? DEFAULT_PREFS)[kind] &&
+            !app.watching(userId, id)
+        );
     }
 
     /**
@@ -50,13 +68,8 @@ export class Alerts {
     ): Promise<void> {
         const app = this.#app;
         const store = app.pushStore;
-        const user = app.config.userById(userId);
 
-        if (user === undefined || !app.canSee(user, id)) {
-            return;
-        }
-
-        if (!(store?.prefs(userId) ?? DEFAULT_PREFS)[kind] || app.watching(userId, id)) {
+        if (!this.#wantsPush(userId, id, kind)) {
             return;
         }
 
@@ -90,9 +103,14 @@ export class Alerts {
      * A run started or ended. "Pi finished" goes out once it has stayed finished for a moment. `failure`: the run failed
      * with this line (`app.ts` `failureText`), also when no answer of Pi's says so, as when its compaction failed.
      */
-    runChanged(id: ConversationId, busy: boolean, failure?: string): void {
+    runChanged(id: ConversationId, busy: boolean, failure?: string, aborted = false): void {
         clearTimeout(this.#doneTimers.get(id));
         this.#doneTimers.delete(id);
+
+        // A run that started is a new one: a "finished" notice still waiting on its outcome label is for the one before.
+        if (busy) {
+            this.#runsStarted.set(id, (this.#runsStarted.get(id) ?? 0) + 1);
+        }
 
         if (busy || this.#app.sessionMeta(id) === undefined || this.#quiet()) {
             return;
@@ -100,7 +118,7 @@ export class Alerts {
 
         const timer = setTimeout(() => {
             this.#doneTimers.delete(id);
-            void this.#pushDone(id, failure).catch((error: unknown) =>
+            void this.#pushDone(id, aborted, failure).catch((error: unknown) =>
                 this.#app.log(`push failed: ${describe(error)}`),
             );
         }, DONE_DELAY_MS);
@@ -109,8 +127,9 @@ export class Alerts {
         this.#doneTimers.set(id, timer);
     }
 
-    async #pushDone(id: ConversationId, failure?: string): Promise<void> {
+    async #pushDone(id: ConversationId, aborted: boolean, failure?: string): Promise<void> {
         const app = this.#app;
+        const run = this.#runsStarted.get(id) ?? 0;
 
         if (app.isBusy(id)) {
             return;
@@ -141,12 +160,50 @@ export class Alerts {
         const answer = last?.kind === "assistant" ? last : undefined;
         // PiP's answers open its panel, over whatever the app shows, rather than a session.
         const pip = app.sessionMeta(id)?.pip !== undefined;
+        const recipients: string[] = [];
+
+        for (const userId of await this.participants(id)) {
+            // Their PiP follows this run and tells them what came of it: one notification, not two.
+            if (!pip && (await app.pip.reportsOn(id, userId).catch(() => false))) {
+                continue;
+            }
+
+            recipients.push(userId);
+        }
+
+        const outcome =
+            !failed &&
+            !aborted &&
+            answer?.error === undefined &&
+            answer?.stopReason === "stop" &&
+            recipients.some(
+                (userId) =>
+                    this.#wantsPush(userId, id, "done") &&
+                    (app.hasEmbedders(userId) ||
+                        (app.pushStore?.subscriptions(userId).length ?? 0) > 0),
+            )
+                ? await app.classifyRunOutcome(
+                      id,
+                      answer.id,
+                      answer.blocks
+                          .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                          .join("\n"),
+                  )
+                : undefined;
+
+        // The classifier took time: a run that began meanwhile (and maybe ended) is not the one this notice is for.
+        if (app.isBusy(id) || (this.#runsStarted.get(id) ?? 0) !== run) {
+            return;
+        }
+
         const message: PushMessage = {
             title: pip
-                ? title
+                ? outcome === undefined
+                    ? title
+                    : `${outcome} · ${title}`
                 : failed
                   ? `Pi stopped with an error · ${title}`
-                  : `Pi finished · ${title}`,
+                  : `${outcome ?? "Pi finished"} · ${title}`,
             body: snippet(
                 failure ??
                     (failed
@@ -158,12 +215,7 @@ export class Alerts {
             tag: `done-${String(id)}`,
         };
 
-        for (const userId of await this.participants(id)) {
-            // Their PiP follows this run and tells them what came of it: one notification, not two.
-            if (!pip && (await app.pip.reportsOn(id, userId).catch(() => false))) {
-                continue;
-            }
-
+        for (const userId of recipients) {
             // A failure waits for a person: it goes out at once, also to a phone that saves its battery.
             void this.push(userId, id, "done", message, failed ? "high" : "normal");
         }
@@ -299,6 +351,68 @@ export class Alerts {
                         text: call,
                         may,
                     });
+                }
+            })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
+        }
+    }
+
+    /**
+     * A card Pi shows and waits for (`surfaces/`): it goes to the people in the session who can act on at least one
+     * control (a viewer only when the card says `anyone`). Its title is all the notification says, never its values. Each
+     * card is announced once; one older than two minutes was shown before this server started, or long ago.
+     */
+    announceSurfaces(id: ConversationId, items: Record<string, Surface> | undefined): void {
+        const app = this.#app;
+
+        if (this.#quiet()) {
+            return;
+        }
+
+        for (const surface of Object.values(items ?? {})) {
+            const mark = `${String(id)}/${surface.id}`;
+
+            if (
+                surface.status !== "open" ||
+                surface.wait === undefined ||
+                this.#surfaceIds.has(mark) ||
+                Date.now() - surface.createdAt > 120_000
+            ) {
+                continue;
+            }
+
+            this.#surfaceIds.add(mark);
+
+            // A card older than two minutes is never announced, so the oldest marks can go.
+            if (this.#surfaceIds.size > 1000) {
+                this.#surfaceIds.delete(this.#surfaceIds.values().next().value!);
+            }
+
+            void (async () => {
+                const root = app.rootOf(id);
+                const title = await app.conversationTitle(root);
+
+                for (const userId of await this.participants(root)) {
+                    const user = app.config.userById(userId);
+
+                    if (
+                        user === undefined ||
+                        !Object.values(controlsFor(surface, user)).includes(true)
+                    ) {
+                        continue;
+                    }
+
+                    void this.push(
+                        userId,
+                        id,
+                        "approval",
+                        {
+                            title: `Pi needs you · ${title}`,
+                            body: snippet(surface.title, 120),
+                            url: `/s/${String(id)}`,
+                            tag: `surface-${String(id)}-${surface.id}`,
+                        },
+                        "high",
+                    );
                 }
             })().catch((error: unknown) => app.log(`push failed: ${describe(error)}`));
         }

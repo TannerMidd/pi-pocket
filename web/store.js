@@ -1,7 +1,8 @@
 // App state, the server connection, and API calls. Components read `store.state` and re-render on `store.subscribe`.
 import { onRoute, popRoute, pushRoute, routeState, routeUnder } from "./back.js";
 import { hostCan, onPageVisibility, pageVisible } from "./host.js";
-import { sessionForest, unfolded } from "./session-tree.js";
+import { familyIndex, recentRows } from "./session-tree.js";
+import { familyPath, newFamilyVisit, restoreFamilyOpener, routeFamily } from "./family-route.js";
 import { liveMessage } from "./live.js";
 import { fitClock, moment } from "./clock.js";
 import { fingerprint } from "./text-hash.js";
@@ -93,6 +94,8 @@ const emptyView = () => ({
     approvals: [],
     artifacts: [],
     artifactsEnded: {},
+    /** Pocket Surfaces by id (`surfaces.js`): the server sends a surface again only when its revision is new. */
+    surfaces: {},
     subagents: [],
     authors: {},
     linkedPeers: {},
@@ -263,9 +266,6 @@ addEventListener("pocket:signedOut", () => {
     }
 });
 
-/** Where this browser keeps the sessions whose linked sessions are folded away (`toggleFoldedLinked`). */
-const FOLDED_LINKED_KEY = "pocket.foldedLinked";
-
 export const store = {
     state: {
         me: undefined, // undefined: unknown, null: signed out
@@ -287,8 +287,8 @@ export const store = {
         conversationId: routeConversation(),
         /** The route this one was opened over, as a board is (`navigate`'s `over`): `{ id }`, null for home; else null. */
         over: routeOver(),
-        /** Sessions whose linked sessions are folded away in the list: this browser's choice (`toggleFoldedLinked`). */
-        foldedLinked: readFoldedLinked(),
+        family: routeFamily(),
+        fromIndex: routeState("fromIndex") === true,
         view: emptyView(),
         /** How far this browser has read each session's chat, by id: what `pocket.chatRead.<id>` keeps. */
         chatReads: firstReads,
@@ -370,6 +370,8 @@ export const store = {
         peopleAsk: { tab: null, highlight: null, n: 0 },
         /** This person's PiP, as the server last told (`{ id, busy, endedAt }`); null when they have none yet. */
         pip: null,
+        /** Each provider's usage left, from its last response: `{ at, providers }`, for the owner only (`usage.js`). */
+        usage: null,
         /** The PiP panel shows; kept per tab, like the browser's, so the reload after a live edit keeps it. */
         pipOpen: sessionStorage.getItem("pocket.pip") === "1",
         /** PiP's conversation, while the panel shows. */
@@ -497,125 +499,37 @@ export function sessionUnread(session, state = store.state) {
     return session.chatAt !== undefined && session.chatBy !== state.me?.id && session.chatAt > read;
 }
 
-/**
- * Sessions in "workspace" order, as Alt+1…9 and the rail number them: pinned ones first (in the order they were
- * pinned), then the rest, newest first, each followed by the linked sessions under it, as the list shows them
- * (`session-tree.js`). Archived sessions are left out.
- */
+/** Number the recent sidebar's shortcuts, pins and ordinary roots. The launcher also searches quiet children. */
 export function workspaceOrder(state = store.state) {
-    const { sessions, pinned: pins, foldedLinked } = state;
+    const { sessions, pinned } = state;
     const open = openId(state);
 
-    // The list, the rail, the home screen, and peek tiles all ask as they draw: the order is made once for each list.
-    if (
-        ordered.sessions === sessions &&
-        ordered.pinned === pins &&
-        ordered.folded === foldedLinked &&
-        ordered.open === open
-    ) {
-        return ordered.order;
+    if (ordered.sessions !== sessions || ordered.pinned !== pinned || ordered.open !== open) {
+        const { shortcuts, roots } = recentRows(
+            sessions.filter((s) => !s.archived),
+            familyIndex(sessions),
+            pinned,
+            open,
+        );
+        const byId = new Map(roots.map((s) => [s.id, s]));
+        const pins = new Set(pinned);
+
+        ordered = {
+            sessions,
+            pinned,
+            open,
+            order: Object.freeze([
+                ...shortcuts,
+                ...pinned.map((id) => byId.get(id)).filter(Boolean),
+                ...roots.filter((s) => !pins.has(s.id)),
+            ]),
+        };
     }
 
-    // Linked sessions folded away are out of the order too: the numbers and Alt+arrows follow what shows.
-    const order = orderOf(state, foldsNow(state));
-
-    ordered = { sessions, pinned: pins, folded: foldedLinked, open, order };
-
-    return order;
+    return ordered.order;
 }
 
-/**
- * Every session that is not archived, in workspace order, folded ones too: for finding a session (the launcher), where a
- * fold must not hide one that waits.
- */
-export function sessionOrder(state = store.state) {
-    const { sessions, pinned: pins } = state;
-
-    if (orderedAll.sessions !== sessions || orderedAll.pinned !== pins) {
-        orderedAll = { sessions, pinned: pins, order: orderOf(state, new Set()) };
-    }
-
-    return orderedAll.order;
-}
-
-/** Sessions in workspace order, with the linked sessions under `folds` left out. */
-function orderOf(state, folds) {
-    const { sessions, pinned: pins } = state;
-    const active = sessions.filter((session) => !session.archived);
-    const { roots, rows } = sessionForest(active, { pinned: pins });
-    const family = (root) => unfolded(rows.get(root.id), folds).map((row) => row.session);
-    const byId = new Map(roots.map((root) => [root.id, root]));
-    const pinned = pins.map((id) => byId.get(id)).filter(Boolean);
-    const first = new Set(pinned);
-
-    // Shared by every caller until the next list: frozen, so none changes it for the others.
-    return Object.freeze([
-        ...pinned.flatMap(family),
-        ...roots.filter((root) => !first.has(root)).flatMap(family),
-    ]);
-}
-
-/** The last workspace order, and the lists it was made from. */
-let ordered = { sessions: null, pinned: null, folded: null, open: null, order: [] };
-/** The last order of every session, folded ones too. */
-let orderedAll = { sessions: null, pinned: null, order: [] };
-
-function readFoldedLinked() {
-    try {
-        const kept = JSON.parse(localStorage.getItem(FOLDED_LINKED_KEY) ?? "[]");
-
-        return Array.isArray(kept) ? kept.filter((id) => Number.isSafeInteger(id)) : [];
-    } catch {
-        return [];
-    }
-}
-
-/**
- * The folds that apply now: a session whose linked sessions are folded, but not one above the open session, which
- * always shows.
- */
-export function foldsNow(state = store.state) {
-    const folds = new Set(state.foldedLinked);
-    const byId = new Map(state.sessions.map((session) => [session.id, session]));
-    const seen = new Set();
-
-    for (
-        let at = byId.get(openId(state))?.linkedFrom?.id;
-        at !== undefined && !seen.has(at);
-        at = byId.get(at)?.linkedFrom?.id
-    ) {
-        seen.add(at);
-        folds.delete(at);
-    }
-
-    return folds;
-}
-
-/** Fold a session's linked sessions away in the list, or show them again; kept for this browser, its other tabs too. */
-export function toggleFoldedLinked(id) {
-    const known = new Set(store.state.sessions.map((session) => session.id));
-    // Sessions that are gone are let go of as the choice is saved.
-    const next = store.state.foldedLinked.filter((each) => each !== id && known.has(each));
-
-    if (!store.state.foldedLinked.includes(id)) {
-        next.push(id);
-    }
-
-    try {
-        localStorage.setItem(FOLDED_LINKED_KEY, JSON.stringify(next));
-    } catch {
-        // Storage refused: the fold holds until the page reloads.
-    }
-
-    store.set({ foldedLinked: next });
-}
-
-// Another tab of this browser folded or unfolded: this one follows.
-addEventListener("storage", (event) => {
-    if (event.key === FOLDED_LINKED_KEY) {
-        store.set({ foldedLinked: readFoldedLinked() });
-    }
-});
+let ordered = {};
 
 /** Server features the web app may use. `collab` 2 adds roles, take turns, reactions, pins, notes, mentions, push. */
 export const collab = () => (store.state.server?.collab ?? 0) >= 2;
@@ -889,7 +803,14 @@ function reloadAccount(to) {
     notesDrafts.clear();
     waitingInserts = [];
     source?.close();
-    store.set({ me: null, composerInsert: null, auth: null, pip: null, pipOpen: false });
+    store.set({
+        me: null,
+        composerInsert: null,
+        auth: null,
+        pip: null,
+        usage: null,
+        pipOpen: false,
+    });
 
     if (to === undefined) {
         location.reload();
@@ -979,11 +900,21 @@ export function signOut() {
         try {
             await disk.clear().catch(() => {});
             await api("logout", {});
+            personStorage.clear();
+
+            // Already visible notifications are local; the server has revoked future deliveries.
+            try {
+                const worker = await navigator.serviceWorker?.getRegistration();
+
+                for (const notice of (await worker?.getNotifications()) ?? []) {
+                    notice.close();
+                }
+            } catch {
+                // Local notification settings must not prevent sign-out.
+            }
         } finally {
             signingOut = false;
         }
-
-        personStorage.clear();
 
         try {
             localStorage.setItem(PERSON_KEY, "");
@@ -1720,6 +1651,7 @@ function mergeView(current, data) {
         inbox: data.inbox ?? base.inbox,
         artifacts: data.artifacts ?? base.artifacts,
         artifactsEnded: data.artifactsEnded ?? base.artifactsEnded,
+        surfaces: mergeSurfaces(base.surfaces, data),
         subagents: data.subagents ?? base.subagents,
         authors: data.authors ?? base.authors,
         linkedPeers: data.linkedPeers ?? base.linkedPeers,
@@ -1740,6 +1672,26 @@ function mergeView(current, data) {
         // What the folder has checked out: `{ branch }` or `{ detached }`, and null outside a repository.
         branch: data.branch === undefined ? base.branch : data.branch,
     };
+}
+
+/**
+ * The surfaces after a view: a full one (`base` is empty then) holds them all; an update brings the ones whose revision
+ * is new (`surfaces`) and names the ones that left (`surfacesGone`). The same map when nothing changed.
+ */
+function mergeSurfaces(had, data) {
+    const gone = data.surfacesGone ?? [];
+
+    if (data.surfaces === undefined && gone.length === 0) {
+        return had;
+    }
+
+    const next = { ...had, ...data.surfaces };
+
+    for (const id of gone) {
+        delete next[id];
+    }
+
+    return next;
 }
 
 let reconnecting = false;
@@ -1962,6 +1914,8 @@ const handlers = {
     pip: (pip) => setChanged({ ...pipLayout(pip), pip: kept(store.state.pip, pip) }),
     // PiP's conversation, while this tab's PiP panel is open.
     pipview: applyPipView,
+    // The owner's usage left of each provider, as its last response said (the server sends it to nobody else).
+    usage: (usage) => store.set({ usage }),
     chat: applyChat,
     presence: (data) =>
         data.conversationId === store.state.conversationId && store.set({ presence: data.people }),
@@ -2649,23 +2603,43 @@ export function closeSignIn(flowId) {
  */
 export function navigate(
     conversationId,
-    { replace = false, sheet = null, over = null, back = false } = {},
+    { replace = false, sheet = null, over = null, back = false, family = null } = {},
 ) {
-    const path = conversationId === null ? "/" : `/s/${conversationId}`;
+    const path = family
+        ? familyPath(family.scope)
+        : conversationId === null
+          ? "/"
+          : "/s/" + conversationId;
+    const fromIndex = !!store.state.family && conversationId !== null;
 
     // A new route says what it is over; the same route keeps what its entry already says.
-    const route = location.pathname !== path || store.state.conversationId !== conversationId;
+    const route =
+        location.pathname !== path ||
+        store.state.conversationId !== conversationId ||
+        store.state.family?.scope !== family?.scope ||
+        (!!family && store.state.family?.key !== family.key);
 
     if (route && back) {
         popRoute(path);
     } else if (route) {
-        pushRoute(path, { replace, state: over === null ? {} : { over } });
+        pushRoute(path, {
+            replace,
+            state: {
+                ...(over === null ? {} : { over }),
+                ...(family ? { familyKey: family.key } : {}),
+                ...(fromIndex ? { fromIndex: true } : {}),
+            },
+        });
     }
 
     // The subagents board and extensions' pages show in the conversation's place: going to one, even the one under it,
     // closes them.
     if (store.state.board || store.state.page) {
         store.set({ board: false, boardAgents: null, page: null });
+    }
+
+    if (route || family) {
+        store.set({ family, fromIndex, drawer: false });
     }
 
     // Its row tapped again counts too.
@@ -2698,6 +2672,40 @@ export function navigate(
         ...sheetChange(sheet, state),
     }));
     showKept(conversationId);
+}
+
+export function openFamily(scope, query = "", origin = document.activeElement, filter = "all") {
+    scope = String(scope);
+
+    const open = store.state.family?.scope === scope ? store.state.family : null;
+
+    // The index is open: a plain tap on its own link keeps the search it has.
+    if (
+        open &&
+        ((query === "" && filter === "all") || (query === open.query && filter === open.filter))
+    ) {
+        store.set({ board: false, page: null, drawer: false, sheet: null });
+
+        return;
+    }
+
+    const family = newFamilyVisit(scope, query, origin);
+
+    family.filter = filter;
+
+    // A new search takes the open index's place, still over the route it was opened over, so back leaves it once.
+    if (open) {
+        Object.assign(family, {
+            origin: open.origin,
+            opener: open.opener,
+            sideQuery: open.sideQuery,
+            sideTab: open.sideTab,
+            drawer: open.drawer,
+            sideScroll: open.sideScroll,
+        });
+    }
+
+    navigate(null, { family, replace: !!open });
 }
 
 /**
@@ -2744,6 +2752,24 @@ function showKept(id) {
 // Back or forward to another route. Back that only closes a layer (a sheet, a panel) is back.js's.
 onRoute(() => {
     const id = routeConversation();
+    const previous = store.state.family;
+    const scope = /^\/s\/index\/([^/]+)$/.exec(location.pathname)?.[1];
+    const family = scope && previous?.scope === scope ? previous : routeFamily();
+    const returning = previous && previous !== family && previous.origin === location.pathname;
+
+    if (family !== previous || store.state.fromIndex !== (routeState("fromIndex") === true)) {
+        store.set({
+            family,
+            fromIndex: routeState("fromIndex") === true,
+            board: false,
+            page: null,
+        });
+    }
+
+    if (returning) {
+        restoreFamilyOpener(previous);
+    }
+
     // The entry says what its route is over: in the same change as the route, so the open mark never jumps between.
     const over = store.state.over?.id === routeOver()?.id ? {} : { over: routeOver() };
 
@@ -2768,6 +2794,10 @@ onRoute(() => {
             drawer: false,
         });
         showKept(id);
+    }
+
+    if (returning && previous.drawer) {
+        store.set({ drawer: true, drawerReturn: previous });
     }
 });
 
@@ -2928,7 +2958,35 @@ export const actions = {
     setAccess: (userId, patch) => api(`users/${encodeURIComponent(userId)}`, patch),
     withdraw: (submissionId) => api(`c/${current()}/withdraw`, { submissionId }),
     /** Move one's own queued message to "steer" or "followUp", or send it now with "interrupt". */
-    move: (submissionId, mode) => api(`c/${current()}/move`, { submissionId, mode }),
+    move: async (submissionId, mode) => {
+        const id = current();
+        const before = store.state.view.inbox.find((item) => item.id === submissionId);
+        const result = await api(`c/${id}/move`, { submissionId, mode });
+
+        if (result?.ok !== true) {
+            throw new ApiError(undefined, "The server did not confirm the move. Check the queue.");
+        }
+
+        // A mode change is saved before the reply. Show it without waiting for the view, but do not replace a card
+        // the view has since updated or removed. An Interrupt is a task that has yet to send, not a mode change.
+        const { view } = store.state;
+
+        if (
+            mode !== "interrupt" &&
+            before !== undefined &&
+            before.mode !== mode &&
+            !changingAccount &&
+            current() === id &&
+            view.conversation?.id === id &&
+            view.inbox.includes(before)
+        ) {
+            const inbox = view.inbox.map((item) => (item === before ? { ...item, mode } : item));
+
+            store.set({ view: { ...view, inbox } });
+        }
+
+        return result;
+    },
     editQueued: (submissionId, id = current()) => api(`c/${id}/edit-queued`, { submissionId }),
     /** What a Stop held: send them all, or drop one or take it back into the box, by its key. */
     sendHeld: () => api(`c/${current()}/held`, { action: "send" }),
@@ -2983,7 +3041,11 @@ export const actions = {
     unwatchPr: () => api(`c/${current()}/watch`, { stop: true }),
     /** Allow or deny a call; an ask (`host.ask`) is allowed with what was typed in its fields. */
     approve: (id, allow, values) =>
-        api(`approvals/${encodeURIComponent(id)}`, { allow, ...(values ? { values } : {}) }),
+        api(`approvals/${encodeURIComponent(id)}`, {
+            source: "app",
+            allow,
+            ...(values ? { values } : {}),
+        }),
     /** `worktree`: the session works in a git worktree of its own, made from the folder. */
     createSession: (cwd, { worktree = false } = {}) =>
         api("sessions", { cwd, ...(worktree ? { worktree } : {}) }),
@@ -3231,6 +3293,17 @@ PEOPLE_DOCK.addEventListener("change", () => {
 
 export function openSheet(sheet) {
     store.set((state) => ({ ...sheetChange(sheet, state), drawer: false }));
+}
+
+/** A rail or top-bar trigger starts a new navigation trail. Tapping the open destination closes it. */
+export function toggleNavigation(sheet) {
+    const current = store.state.sheet;
+
+    if (current?.type === sheet.type && current.section === sheet.section) {
+        closeSheet();
+    } else {
+        openSheet({ ...sheet, navigationRoot: true });
+    }
 }
 
 /**

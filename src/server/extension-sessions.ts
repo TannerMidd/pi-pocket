@@ -68,8 +68,9 @@ export class ExtensionSessions implements SessionsApi {
         const previous = await recorded();
         const meta = app.sessionMeta(source);
         // A repeat acts for the person the first call acted for: the message is theirs, and goes once.
-        const requester = previous?.by ?? app.attribution.requesterOf(source);
-        const user = requester === undefined ? undefined : app.config.userById(requester);
+        const requester =
+            previous === undefined ? app.attribution.requesterOf(source) : previous.by;
+        const user = app.steeringUser(source, requester);
 
         if (meta === undefined || meta.pip !== undefined || user === undefined) {
             throw new HttpError(403, "A session starts only where Pi works for someone.");
@@ -96,17 +97,28 @@ export class ExtensionSessions implements SessionsApi {
                     const winner = await recorded();
 
                     // The message is the winner's: a call that wrote meanwhile does not send it again.
-                    sender =
-                        (winner?.by === undefined ? undefined : app.config.userById(winner.by)) ??
-                        user;
+                    const person = app.steeringUser(source, winner?.by);
+
+                    if (person === undefined) {
+                        throw new HttpError(
+                            403,
+                            "The original requester can no longer steer here.",
+                        );
+                    }
+
+                    sender = person;
 
                     return (winner?.conversationId as ConversationId | undefined) ?? error.session;
                 },
             );
         }
 
+        if (!app.steeringUser(source, sender.id) || !app.steeringUser(session, sender.id)) {
+            throw new HttpError(403, "The original requester can no longer steer these sessions.");
+        }
+
         if (request.message !== undefined) {
-            await this.#message(session, sender, request.message, token);
+            await this.#message(source, session, sender, request.message, token);
         }
 
         return { session };
@@ -217,11 +229,23 @@ export class ExtensionSessions implements SessionsApi {
             throw new AlreadyStarted(receipt.conversationId as unknown as ConversationId);
         }
 
+        const current = this.#app.steeringUser(source, user.id);
+
+        if (current === undefined || current.sessions !== undefined) {
+            throw new HttpError(403, "This person can no longer start sessions.");
+        }
+
         Object.assign(receipt, { conversationId: Number(made), by: user.id });
     }
 
     /** Send the first message as the person wrote it, once: a submission already stored for this key is the first. */
-    async #message(id: ConversationId, user: User, message: string, token: string): Promise<void> {
+    async #message(
+        source: ConversationId,
+        id: ConversationId,
+        user: User,
+        message: string,
+        token: string,
+    ): Promise<void> {
         const app = this.#app;
         const requestId = ownRequest(user.id, clientKey(token));
         // Looked up before `Commands.submit`: its checks (a spend limit reached since) would refuse a repeat.
@@ -233,6 +257,21 @@ export class ExtensionSessions implements SessionsApi {
             return;
         }
 
-        await app.commands.submit(id, user, { text: message, requestId: token });
+        await app.commands.submit(
+            id,
+            user,
+            { text: message, requestId: token },
+            undefined,
+            undefined,
+            () => {
+                if (app.steeringUser(source, user.id) === undefined) {
+                    throw new HttpError(
+                        403,
+                        "The original requester can no longer steer the source session.",
+                    );
+                }
+            },
+            (tx) => app.requireDriver(id, user, tx),
+        );
     }
 }

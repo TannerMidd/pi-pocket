@@ -19,6 +19,7 @@ export default function createGuard(host: PocketHost) {
         hooks: [
             hook(ToolTask, {
                 beforeTool: async (call, api, context) => {
+                    const requester = host.requesterOf?.(api.conversationId);
                     const agent = await api.snapshot(AgentDoc, api.conversationId, context);
                     const cwd = agent?.cwd ?? process.cwd();
                     const judged = await host.guard.judge(
@@ -48,16 +49,35 @@ export default function createGuard(host: PocketHost) {
                     }
 
                     let answer = await api.memo<ApprovalAnswer>("pocket.approval", context);
+                    const previous = await api.memo<number>("pocket.approval.created-at", context);
+                    const saved = await api.memo<string>("pocket.approval.requester", context);
+                    const by =
+                        saved ??
+                        (answer === undefined && previous === undefined && requester !== undefined
+                            ? await api.memo("pocket.approval.requester", requester, context)
+                            : undefined);
+                    const refused = {
+                        block: "This approval needs its original requester to be able to steer here.",
+                    };
+
+                    if (!host.canSteer?.(api.conversationId, by)) {
+                        return refused;
+                    }
 
                     if (answer === undefined) {
                         // Keep the original time when the pending hook runs again after a restart.
                         const createdAt =
-                            (await api.memo<number>("pocket.approval.created-at", context)) ??
+                            previous ??
                             (await api.memo<number>(
                                 "pocket.approval.created-at",
                                 Date.now(),
                                 context,
                             ));
+
+                        if (host.requesterOf(api.conversationId) !== by) {
+                            return refused;
+                        }
+
                         const asked = await host.approvals.request(
                             {
                                 // The call, not just its task: a codemode script makes several calls in one task, maybe at once.
@@ -75,6 +95,10 @@ export default function createGuard(host: PocketHost) {
                         );
 
                         answer = await api.memo<ApprovalAnswer>("pocket.approval", asked, context);
+                    }
+
+                    if (!host.canSteer?.(api.conversationId, by)) {
+                        return refused;
                     }
 
                     return answer.allow

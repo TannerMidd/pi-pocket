@@ -248,6 +248,29 @@ async function focus(on: boolean, target = page) {
     }
 }
 
+/**
+ * The frame the canvas shows, chosen as a person does. The default follows the room the panel has, which the window and
+ * the sidebar set, so a test that checks a frame's numbers asks for that frame.
+ */
+async function useSize(name: string, target = page) {
+    const button = `[...document.querySelectorAll(".dsn-seg button")].find((each) => !each.closest(".dsy-check-options") && each.getAttribute("aria-label").startsWith(${JSON.stringify(name)}))`;
+    const there = await evaluate<boolean>(
+        target,
+        `
+        const size = ${button};
+        size?.click();
+        return JSON.stringify(Boolean(size));
+    `,
+    );
+
+    assert.ok(there, `a ${name} size to choose`);
+    await waitFor(
+        `the ${name} canvas`,
+        `return JSON.stringify(${button}?.getAttribute("aria-pressed") === "true")`,
+        target,
+    );
+}
+
 const section = async (name: string, target = page) => {
     await pressed(".dsy-tabs [role=tab]", name, target);
     await waitFor(
@@ -1685,6 +1708,9 @@ test(
             "the page",
             `return JSON.stringify(Boolean(document.querySelector('.dsy-preview-head button[aria-label="Check this design"]')))`,
         );
+        // The check follows the canvas, and the canvas follows the room by default: ask for the desktop frame, so the
+        // page is checked at a size this test knows.
+        await useSize("Desktop");
         await pressed('.dsy-preview-head button[aria-label="Check this design"]');
         await waitFor(
             "the dock",
@@ -1992,6 +2018,8 @@ test(
             "the page",
             `return JSON.stringify(Boolean(document.querySelector('.dsy-preview-head button[aria-label="Check this design"]')))`,
         );
+        // (the canvas follows the room by default: this test asks for the desktop frame, so the check's size is known)
+        await useSize("Desktop");
         await pressed('.dsy-preview-head button[aria-label="Check this design"]');
         await waitFor(
             "the dock",
@@ -2446,35 +2474,70 @@ test("every section can be reached at the width of a panel beside the chat", rea
 });
 
 test("focus mode hides the conversation and gives the panel the whole width", real, async () => {
+    // The canvas follows the room by default, and a size chosen in an earlier test is kept in this browser: the test
+    // starts on a page that has none, with a design open for the system to show.
+    await inPage(`localStorage.removeItem("x.design.prefs"); return "null";`);
+    await go(session);
+    await openSystem();
+    await pressed(".dsn-picker");
+    await pressed(".dsn-list-item", "Ferry booking");
     await openSystem();
     await focus(false);
-    // (the conversation comes back with a short animation, when an earlier test left the focus on)
-    await waitFor(
-        "the conversation",
-        `return JSON.stringify(document.querySelector(".layout > .pane").getBoundingClientRect().width > 400)`,
-    );
 
-    const widths = async () =>
-        inPage<{ panel: number; chat: number }>(`
-            const chat = document.querySelector(".layout > .pane");
+    /** The room beside the sidebar, the panel, and the conversation, in whole pixels. */
+    const widths = () =>
+        inPage<{ room: number; panel: number; chat: number }>(`
+            const box = (selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().width ?? 0);
+            const layout = document.querySelector(".layout");
+            const style = getComputedStyle(layout);
             return JSON.stringify({
-                panel: document.querySelector(".ext-panel").getBoundingClientRect().width,
-                chat: chat ? chat.getBoundingClientRect().width : 0,
+                room: Math.round(layout.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - box(".layout > .sidebar")),
+                panel: box(".ext-panel"),
+                chat: box(".layout > .pane"),
             });
         `);
-    const before = await widths();
 
-    assert.ok(before.chat > 400 && before.panel < 800, JSON.stringify(before));
+    /** The widths once they hold still: the panel and the conversation move with a short animation. */
+    const settled = async () => {
+        let last = await widths();
+        let still = 0;
+
+        await until(
+            async () => {
+                const now = await widths();
+
+                still = now.panel === last.panel && now.chat === last.chat ? still + 1 : 0;
+                last = now;
+
+                return still >= 5;
+            },
+            "the widths to hold still",
+            SLOW,
+        );
+
+        return last;
+    };
+
+    const before = await settled();
+
+    // Beside the conversation the panel takes a part of the room, and the conversation keeps a part of its own.
+    assert.ok(
+        before.chat > 0 && before.panel < before.room && before.chat >= before.room / 4,
+        JSON.stringify(before),
+    );
     await pressed('.dsy-bars button[aria-label="Hide the conversation"]');
     await waitFor(
         "focus",
         `return JSON.stringify(document.documentElement.hasAttribute("data-dsn-focus"))`,
     );
 
-    // (the panel grows with a short animation)
-    await waitFor(
-        "the width",
-        `const chat = document.querySelector(".layout > .pane"); return JSON.stringify(document.querySelector(".ext-panel").getBoundingClientRect().width > 1000 && (chat ? chat.getBoundingClientRect().width : 0) === 0)`,
+    // (the panel grows with a short animation, and has all of the room the conversation had)
+    const whole = await settled();
+
+    assert.equal(whole.chat, 0, "the conversation is gone");
+    assert.ok(
+        whole.panel >= before.panel + before.chat - 2 && whole.panel <= whole.room,
+        `the panel has the room: ${JSON.stringify({ before, whole })}`,
     );
     await waitFor(
         "the room",
@@ -2494,12 +2557,16 @@ test("focus mode hides the conversation and gives the panel the whole width", re
         "back",
         `return JSON.stringify(!document.documentElement.hasAttribute("data-dsn-focus"))`,
     );
-    // (the conversation comes back with a short animation)
-    await waitFor(
-        "the conversation",
-        `return JSON.stringify(document.querySelector(".layout > .pane").getBoundingClientRect().width > 400)`,
+
+    // (the conversation comes back with a short animation, and takes its room again)
+    const back = await settled();
+
+    assert.ok(
+        back.chat > 0 &&
+            Math.abs(back.chat - before.chat) <= 2 &&
+            Math.abs(back.panel - before.panel) <= 2,
+        `as they were: ${JSON.stringify({ before, back })}`,
     );
-    assert.ok((await widths()).panel < 800);
 
     await pressed(".dsn-picker");
     await pressed(".dsn-list-item", "Ferry booking");

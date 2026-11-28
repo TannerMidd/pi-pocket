@@ -14,7 +14,14 @@
  * fails when this file and Pi Pocket's code do not agree.
  */
 import type { Context } from "@earendil-works/chord/context";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type {
+    Api,
+    ClassifierAnswer,
+    ClassifierQuestion,
+    ImageContent,
+    Model,
+    ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import type { ProviderConfig, Skill } from "@earendil-works/pi-coding-agent";
 import type {
     ConversationId,
@@ -120,6 +127,59 @@ export interface WorkspaceProvider {
     env(cwd: string): ExecutionEnv;
     /** @experimental @since 0.28.0 */
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+    /**
+     * Marks workspaces of this scheme as untrusted sandboxes enforced by core: blocks host tools and host browser,
+     * skips host `commandEnv` injection, restricts memory writes to session scope, and forbids moving across the
+     * isolation boundary.
+     * @experimental @since 0.31.0
+     */
+    readonly isolated?: boolean;
+    /**
+     * Called when no active session remains on `cwd` (after archive or removal) so the provider can stop or clean up
+     * resources for that workspace.
+     * @experimental @since 0.31.0
+     */
+    disposeWorkspace?(cwd: string): Promise<void> | void;
+    /**
+     * Returns a human-readable reason when `cwd` can no longer accept work (for example, after a sandbox is deleted),
+     * or `undefined` while the workspace is available.
+     * @experimental @since 0.31.0
+     */
+    unavailable?(cwd: string): string | undefined;
+}
+
+/**
+ * What one `host.classify` call takes: what the model judges, and what it answers.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface ClassifyRequest {
+    /**
+     * The classifier model, `provider/modelId`; the id may hold more slashes. A chat model is refused. Left out, or
+     * empty, the call uses the classifier model the owner chose in Providers, and throws when there is none.
+     * @since 0.31.0
+     * @experimental
+     */
+    model?: string;
+    /**
+     * What the model judges.
+     * @since 0.31.0
+     * @experimental
+     */
+    state: Record<string, unknown>;
+    /**
+     * Images judged together with `state`. Only classifier models whose input accepts images answer them.
+     * @since 0.31.0
+     * @experimental
+     */
+    images?: ImageContent[];
+    /**
+     * What it answers, by question id, with the shapes of pi-ai's `ClassifierQuestion`: a choice, a score, or
+     * yes/no. At least one.
+     * @since 0.31.0
+     * @experimental
+     */
+    questions: Record<string, ClassifierQuestion>;
 }
 
 /**
@@ -185,6 +245,24 @@ export interface Host {
      * @since 0.13.1
      */
     modelProblem(ref: ModelRef, fresh?: boolean): Promise<string | undefined>;
+    /**
+     * The classifier model the owner chose in Providers, as `provider/modelId`, or undefined when none is chosen. Pi
+     * Pocket names no classifier on its own.
+     * @since 0.31.0
+     * @experimental
+     */
+    classifierModel(): string | undefined;
+    /**
+     * One classifier-model call: typed `questions` about `state`, answered by the classifier that `request.model` names
+     * (TypeSafe's Jev, Cloudflare's Clef, OpenAI's GPT-6 Luna), or by the owner's chosen classifier when it names
+     * none. It runs through Pi's model runtime with the owner's stored provider sign-ins and keys, exactly as a
+     * session's own model calls do. It throws when no classifier is named or chosen, when the model is not a
+     * classifier here, when its provider has no stored sign-in or key, or when the call fails. It never wakes a
+     * session.
+     * @since 0.31.0
+     * @experimental
+     */
+    classify(request: ClassifyRequest): Promise<Record<string, ClassifierAnswer>>;
     /**
      * Registers a model provider with Pi's model runtime, as a Pi extension does. `config` is Pi's own provider
      * configuration, including the models it starts with and how it refreshes them. The last registration of a name
@@ -1300,6 +1378,18 @@ export interface WebRequest {
      */
     createSession(request: { cwd: string; title?: string }): Promise<{ id: number }>;
     /**
+     * Archives or unarchives a session from an owner-only route.
+     * @since 0.31.0
+     * @experimental
+     */
+    archiveSession?(id: number, archived?: boolean): Promise<void>;
+    /**
+     * Returns the owner's default working directory and favorite project folders.
+     * @since 0.31.0
+     * @experimental
+     */
+    folders?(): Promise<{ defaultCwd: string; favorites: string[] }>;
+    /**
      * The request's method.
      * @since 0.14.0
      */
@@ -1747,6 +1837,14 @@ export interface Web {
      * @experimental
      */
     presentEntry(spec: PresentEntry): void;
+    /**
+     * Adds a component to surfaces (Pi's cards, the `ui` tool), while the module is on. `type` is
+     * `x.<module>.<Name>`. The server checks a card's use of it against `props` and `bind`; its browser half is
+     * `pocket.surfaceComponent`.
+     * @since 0.31.0
+     * @experimental
+     */
+    surfaceComponent(spec: SurfaceComponentSpec): void;
     /**
      * Sends an event to the browser module: to everyone it loads for, or to the person `to`. It never throws.
      * @since 0.14.0
@@ -2423,7 +2521,8 @@ export type SessionActionSpec = (
      */
     access?: "steer" | "view";
     /**
-     * The name of one of the app's icons. An action with an icon is also a button on rows, where a mouse hovers.
+     * The name of one of the app's icons. Rows draw no buttons on hover (since 0.31.0): the action shows by its label
+     * in the row's menu, its long-press sheet, and the selection bar.
      * @since 0.20.0
      * @experimental
      */
@@ -2718,6 +2817,54 @@ export interface CallSummary {
      * @since 0.14.0
      */
     by?: string;
+}
+
+/**
+ * What `pocket.surfaceComponent` registers: how this browser draws a component the module added with
+ * `web.surfaceComponent` on the server. The renderer is the owner's installed code, never the card's.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceRenderSpec {
+    /** The type the server registered, `x.<module>.<Name>`. */
+    type: string;
+    /** What the app renders for each component of that type. */
+    render: ComponentType<SurfaceRenderProps>;
+}
+
+/**
+ * The props of a surface component's renderer. It reads props and data, may bind one value, and makes no new kinds of
+ * action: `act` presses one of the card's own buttons.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceRenderProps {
+    /** The component's props as the card gave them, with expressions worked out. */
+    props: Record<string, unknown>;
+    /** The data at the component's `bind` path; undefined without one. */
+    value: unknown;
+    /** Sets the bound value for everyone. The server checks it against the schema `bind` gave. */
+    set(next: unknown): void;
+    /** Presses a Button of the card by its id: only the card's own actions. */
+    act(button: string): void;
+    /** True when the card ended or this person may not use the component. */
+    disabled: boolean;
+}
+
+/**
+ * What `web.surfaceComponent` registers on the server.
+ * @since 0.31.0
+ * @experimental
+ */
+export interface SurfaceComponentSpec {
+    /** `x.<module>.<Name>`: the module's name, then letters and digits. */
+    type: string;
+    /** A pi-schema for the component's props (every key but `type`, `bind`, and `who`). */
+    props: object;
+    /** A pi-schema for the one value it binds (`bind: "/path"`). Without it the component binds nothing. */
+    bind?: object;
+    /** Its plain text for the transcript, an export, a chat, and browsers without its module. Up to 500 characters. */
+    text(props: Record<string, unknown>, data: Record<string, unknown>): string;
 }
 
 /**
@@ -3192,6 +3339,13 @@ export interface Pocket {
      * @experimental
      */
     fence(spec: FenceSpec): Added<FenceSpec>;
+    /**
+     * Draws a component of surfaces (Pi's cards) that the module registered with `web.surfaceComponent`.
+     * Without this module in a browser, the card shows the component's text.
+     * @since 0.31.0
+     * @experimental
+     */
+    surfaceComponent(spec: SurfaceRenderSpec): Added<SurfaceRenderSpec>;
     /**
      * Sets the inline and display math renderer.
      * @since 0.28.0

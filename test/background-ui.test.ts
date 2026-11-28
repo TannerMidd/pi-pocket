@@ -8,6 +8,7 @@ import {
     openApp,
     owner,
     root,
+    say,
     scriptedModel,
     until,
 } from "./helpers.ts";
@@ -92,6 +93,78 @@ after(async () => {
     cleanUp();
 });
 
+test(
+    "the lead sees a worker's quiet replacement and earlier timeout without seeing its output",
+    real,
+    async () => {
+        const lead = await newSession(app);
+
+        await say(app, lead, "Start a worker");
+        await app.linkedSessions.reports(lead, { take: false }, "no-reports");
+        const { session: worker } = await app.linkedSessions.start(
+            lead,
+            { message: "Check the sample" },
+            "sample-worker",
+        );
+
+        await until(() => !app.isBusy(worker), "the worker's turn to end");
+        const options = { notify: false, requestedBy: owner(app).id };
+        const a = await app.background.start(worker, {
+            ...options,
+            command: "echo sample-worker-output; sleep 60",
+            quietMinutes: 0.01,
+        });
+
+        try {
+            await until(
+                async () =>
+                    (await app.background.jobs(worker)).recentAdverse[0]?.outcome === "timeout",
+                "first attempt to time out",
+            );
+            const b = await app.background.start(worker, {
+                ...options,
+                command: "sleep 61",
+                quietMinutes: 0,
+                jobId: a.jobId!,
+                expectedAttempt: a.id,
+            });
+
+            await page.setViewport(VIEWPORTS.mobile);
+            await page.navigate(`${base}/s/${lead}`);
+            await see(
+                `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
+                "lead session",
+            );
+            await inPage(
+                `(await import("/store.js")).openSheet({ type: "background" }); return "null"`,
+            );
+            await see(
+                `return JSON.stringify(document.querySelector(".job-status") !== null)`,
+                "job status",
+            );
+            await inPage(`document.querySelector(".job-status").open = true; return "null"`);
+            await see(
+                `return JSON.stringify(document.querySelector(".job-status")?.textContent.includes(${JSON.stringify(b.id)}))`,
+                "replacement attempt",
+            );
+            const text = await inPage<string>(
+                `return JSON.stringify(document.querySelector(".job-status").innerText)`,
+            );
+
+            assert.ok(text.includes(a.id));
+            assert.match(text, /Timed out/);
+            assert.match(text, /Attempt 2/);
+            assert.doesNotMatch(text, /sample-worker-output|sleep 61/);
+        } finally {
+            for (const item of await app.background.list(worker)) {
+                if (item.status === "running") {
+                    await app.background.stop(worker, item.id);
+                }
+            }
+        }
+    },
+);
+
 test("a background task's end shows as a card with its last lines", real, async () => {
     const id = await newSession(app);
 
@@ -110,20 +183,28 @@ test("a background task's end shows as a card with its last lines", real, async 
 
     // The watch tells Pi within a few seconds of the command ending.
     await see(
-        `return JSON.stringify(document.querySelector(".background-report") !== null)`,
+        `return JSON.stringify(document.querySelector(".acard[data-kind=background]") !== null)`,
         "the background card",
         20_000,
     );
 
     const head = await inPage<string>(
-        `return JSON.stringify(document.querySelector(".background-report .report-head")?.textContent.replace(/\\s+/g, " ").trim())`,
+        `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-head")?.textContent.replace(/\\s+/g, " ").trim())`,
     );
 
-    assert.match(head, /^[0-9a-f]{6} exited with code 0 · \d+s$/);
+    assert.match(head, /^Task ended· Background task· .+Task \w+$/);
+
+    // How it ended and how long it took are the footer's.
+    assert.match(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-facts").textContent)`,
+        ),
+        /^Exit code 0Took \d+s/,
+    );
 
     const card = () =>
         inPage<string>(
-            `return JSON.stringify(document.querySelector(".background-report")?.textContent.replace(/\\s+/g, " ").trim())`,
+            `return JSON.stringify(document.querySelector(".acard[data-kind=background]")?.textContent.replace(/\\s+/g, " ").trim())`,
         );
 
     // Its command, and the last lines of its output as printed: the rest (and Pi's words about the tool) stay folded.
@@ -133,18 +214,18 @@ test("a background task's end shows as a card with its last lines", real, async 
     assert.doesNotMatch(await card(), /Read the rest with the background tool/);
     assert.equal(
         await inPage(
-            `return JSON.stringify(document.querySelector(".background-output pre")?.textContent.split("\\n").length)`,
+            `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-code")?.textContent.split("\\n").length)`,
         ),
         8,
     );
 
-    const link = ".background-report .background-output .link";
+    const link = ".acard[data-kind=background] .acard-more";
 
     assert.equal(
         await inPage(
             `return JSON.stringify(document.querySelector("${link}")?.textContent.trim())`,
         ),
-        "Show all 201 lines",
+        "Show all · 201 lines",
     );
 
     // Show all opens the whole output.
@@ -171,20 +252,22 @@ test("output whose own line says it is the end is not taken for a cut one", real
         requestId: `quiet-${id}`,
     });
     await see(
-        `return JSON.stringify(document.querySelector(".background-output pre") !== null)`,
+        `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-code") !== null)`,
         "the background card",
         20_000,
     );
     assert.equal(
         await inPage(
-            `return JSON.stringify(document.querySelector(".background-output pre").textContent)`,
+            `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-code").textContent)`,
         ),
         "one\nThe end of its output",
     );
-    // All of it reached Pi: no "The end of its output:" label above it.
-    assert.equal(
-        await inPage(`return JSON.stringify(document.querySelector(".background-output .muted"))`),
-        null,
+    // All of it reached Pi: the footer does not say it is only the end.
+    assert.doesNotMatch(
+        await inPage<string>(
+            `return JSON.stringify(document.querySelector(".acard[data-kind=background] .acard-foot").textContent)`,
+        ),
+        /Only the end of its output/,
     );
 });
 
@@ -197,24 +280,36 @@ test("tasks that ended together show a card each, in one group", real, async () 
         `return JSON.stringify(document.querySelector(".composer textarea") !== null)`,
         "the session",
     );
-    const first = await app.background.start(id, { command: "echo one; exit 1" });
-    const second = await app.background.start(id, { command: "echo two; exit 2" });
+    const first = await app.background.start(id, {
+        requestedBy: owner(app).id,
+        command: "echo one; exit 1",
+    });
+    const second = await app.background.start(id, {
+        requestedBy: owner(app).id,
+        command: "echo two; exit 2",
+    });
 
     // Both ended, so Pi got one message about the two: a card each, in one group.
     await see(
-        `return JSON.stringify(document.querySelectorAll(".report-group .background-report").length === 2)`,
+        `return JSON.stringify(document.querySelectorAll(".acard-group .acard[data-kind=background]").length === 2)`,
         "a card each",
         20_000,
     );
 
     const heads = await inPage<string[]>(
-        `return JSON.stringify([...document.querySelectorAll(".report-group .background-report .report-head")].map((head) => head.textContent.replace(/\\s+/g, " ").trim()))`,
+        `return JSON.stringify([...document.querySelectorAll(".acard-group .acard[data-kind=background] .acard-head")].map((head) => head.textContent.replace(/\\s+/g, " ").trim()))`,
     );
     const both = heads.join("\n");
 
     // Each card says which task it is, how it ended, and how long it took.
-    assert.match(both, new RegExp(`${first.id} exited with code 1 · \\d+s`));
-    assert.match(both, new RegExp(`${second.id} exited with code 2 · \\d+s`));
+    assert.match(both, new RegExp(`Task ended· Background task· .+Task ${first.id}`));
+    assert.match(both, new RegExp(`Task ended· Background task· .+Task ${second.id}`));
+    const facts = await inPage<string[]>(
+        `return JSON.stringify([...document.querySelectorAll(".acard-group .acard[data-kind=background] .acard-facts")].map((each) => each.textContent))`,
+    );
+
+    assert.match(facts.join("\n"), /^Exit code 1Took \d+s/m);
+    assert.match(facts.join("\n"), /^Exit code 2Took \d+s/m);
 });
 
 test(

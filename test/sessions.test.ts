@@ -21,6 +21,7 @@ import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { ConversationId, EntryRecord } from "@earendil-works/pi-durable";
 import { SessionsDoc } from "../src/server/docs.ts";
+import { issueUpload } from "../src/server/upload-references.ts";
 
 /** What each model request saw: the model, the system prompt's sections, and the newest message. */
 const requests: { model: string; sections: Record<string, string>; text: string }[] = [];
@@ -188,7 +189,9 @@ test("a message sent again reaches its fork even when the server stops before se
             : new Proxy(await conversation.call(app, cid), {
                   get: (found, key) => {
                       if (key === "submit") {
-                          return () => new Promise(() => {});
+                          return () => {
+                              throw new Error("fixture: request stopped before submission");
+                          };
                       }
 
                       const value: unknown = Reflect.get(found, key, found);
@@ -199,10 +202,13 @@ test("a message sent again reaches its fork even when the server stops before se
     let fork: ConversationId | undefined;
 
     try {
-        void app.commands.resend(id, owner(app), {
-            entryId: Number(message!.id),
-            text: "hello again",
-        });
+        await assert.rejects(
+            app.commands.resend(id, owner(app), {
+                entryId: Number(message!.id),
+                text: "hello again",
+            }),
+            /fixture: request stopped before submission/,
+        );
         await until(async () => {
             const items = (await app.harness.snapshot(SessionsDoc, context))?.items ?? {};
 
@@ -231,12 +237,12 @@ test("a message sent again reaches its fork even when the server stops before se
 test("an edited message keeps the files attached to the original", async () => {
     const id = await newSession(app);
     const path = join(app.workspace.uploadDirectory(id), "notes.txt");
+    const file = { path, name: "notes.txt", mime: "text/plain", size: 10 };
 
     writeFileSync(path, "some notes");
-    await say(app, id, "read my notes", [
-        { path, name: "notes.txt", mime: "text/plain", size: 10 },
-    ]);
-    const [message] = await ofKind(id, "pi.user");
+    await issueUpload(app, id, file);
+    await say(app, id, "read my notes", [file]);
+    const [message] = await ofKind(id, "pocket.upload-input");
     const { id: fork } = await app.commands.resend(id, owner(app), {
         entryId: Number(message!.id),
         text: "summarize my notes",
@@ -246,7 +252,7 @@ test("an edited message keeps the files attached to the original", async () => {
         async () => (await ofKind(fork, "pi.assistant")).length === 1,
         "the edit to be answered",
     );
-    const [edited] = await ofKind(fork, "pi.user");
+    const [edited] = await ofKind(fork, "pocket.upload-input");
     const text = JSON.stringify(edited!.model);
 
     assert.match(text, /summarize my notes/);

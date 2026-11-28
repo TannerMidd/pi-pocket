@@ -1,23 +1,26 @@
 /** `/api/c/:id`: one conversation's routes, for people the API has checked may see it. */
-import { randomUUID } from "node:crypto";
-import { createWriteStream, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
-import { basename, extname, join, resolve, sep } from "node:path";
+import { basename, extname } from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { readState, writeState } from "../artifact-state.ts";
 import { deleteArtifact } from "../artifacts.ts";
 import { outcome } from "../background.ts";
+import { readJobSupervision } from "../job-supervision.ts";
 import { openNoFollow } from "../no-follow.ts";
 import type { Attachment, SubmitRequest } from "../commands.ts";
 import { HttpError } from "../errors.ts";
 import type { CommandRequest } from "../extension-commands.ts";
+import { createUpload } from "../upload-references.ts";
 import { prepareModelImage } from "../model-images.ts";
 import { reveal } from "../reveal.ts";
+import { actOnSurface } from "../surfaces/act.ts";
 import { serveImage, TYPES } from "./assets.ts";
 import { type ApiRequest, json, readJson, send } from "./io.ts";
 
-const MAX_UPLOAD = 50 * 1024 * 1024;
+import { MAX_UPLOAD, withUploadBytes } from "../upload-content.ts";
 
 const ENTRY_IMAGE_TYPES = new Set([
     "image/png",
@@ -45,7 +48,8 @@ export function uploadMime(name: string, header: string | undefined): string {
         .split(";")[0]!
         .trim();
     const mime =
-        declared === "" || declared === "application/octet-stream"
+        !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i.test(declared) ||
+        declared === "application/octet-stream"
             ? TYPES[extname(name).toLowerCase()]
             : declared;
 
@@ -72,15 +76,7 @@ export async function conversationRoutes(
             throw new HttpError(400, "attachments must be a list");
         }
 
-        const attachments = (body.attachments ?? []).filter((file): file is Attachment => {
-            // Only files this server stored for this conversation.
-            return (
-                typeof file?.path === "string" &&
-                resolve(file.path).startsWith(app.workspace.uploadDirectory(id) + sep)
-            );
-        });
-
-        return json(response, 200, await app.commands.submit(id, user, { ...body, attachments }));
+        return json(response, 200, await app.commands.submit(id, user, body));
     }
 
     if (third === "extension-commands" && fourth === undefined && method === "POST") {
@@ -178,6 +174,13 @@ export async function conversationRoutes(
         const body = await readJson<{ at?: unknown }>(request);
 
         return json(response, 200, await app.commands.dismissSubagent(id, user, body.at));
+    }
+
+    // A finished subagent hidden from its parent's bar, or shown again: `at` says what the person saw it do last.
+    if (third === "hidden" && method === "POST") {
+        const body = await readJson<{ hidden?: unknown; at?: unknown }>(request);
+
+        return json(response, 200, await app.commands.hideSubagent(id, user, body.hidden, body.at));
     }
 
     if (third === "withdraw" && method === "POST") {
@@ -500,6 +503,23 @@ export async function conversationRoutes(
         app.requireSteer(user);
 
         const file = app.workspace.readableFile(user, id, requested);
+        const name = basename(typeof file === "string" ? file : file.path);
+        const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+        const headers = (size: number) => ({
+            "content-type": "application/octet-stream",
+            "content-length": size,
+            "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+        });
+
+        if (typeof file !== "string") {
+            return withUploadBytes(file, async (bytes) => {
+                response.writeHead(200, headers(bytes.length));
+                await pipeline(Readable.from([bytes]), response);
+            });
+        }
+
         let handle: FileHandle;
 
         try {
@@ -515,17 +535,7 @@ export async function conversationRoutes(
                 throw new HttpError(404, "File not found");
             }
 
-            // An ASCII fallback, then the whole name (RFC 6266): no quote or line break gets into the header.
-            const name = basename(file);
-            const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
-
-            response.writeHead(200, {
-                "content-type": "application/octet-stream",
-                "content-length": stats.size,
-                "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
-                "cache-control": "private, no-store",
-                "x-content-type-options": "nosniff",
-            });
+            response.writeHead(200, headers(stats.size));
 
             await pipeline(handle.createReadStream({ autoClose: false }), response);
         } finally {
@@ -583,6 +593,21 @@ export async function conversationRoutes(
                 await writeState(app, id, user, fourth, await readJson(request)),
             );
         }
+    }
+
+    // A person's action on a surface Pi showed (`surfaces/act.ts`): core, so that session-invited guests can act too.
+    if (
+        third === "surfaces" &&
+        fourth !== undefined &&
+        parts[4] === "act" &&
+        parts.length === 5 &&
+        method === "POST"
+    ) {
+        return json(
+            response,
+            200,
+            await actOnSurface(app, id, user, fourth, await readJson(request)),
+        );
     }
 
     // Deleting an artifact with all its versions (`artifacts.ts`): anyone who sees the session and steers.
@@ -713,6 +738,14 @@ export async function conversationRoutes(
                 endedAt: item.endedAt ?? null,
             })),
         });
+    }
+
+    if (third === "background" && fourth === "jobs" && parts.length === 4 && method === "GET") {
+        return json(
+            response,
+            200,
+            await readJobSupervision(app, id, user, url.searchParams.get("after") ?? undefined),
+        );
     }
 
     // What a background task printed, from a byte on: `from` is where the last look ended, and `to` where this one did.
@@ -855,47 +888,50 @@ export async function conversationRoutes(
         // A remote session's machine cannot read a file stored on this one.
         app.workspace.requireLocal(id);
         const name = safeName(url.searchParams.get("name") ?? "upload");
-        const directory = app.workspace.uploadDirectory(id);
         // Unique, and never written over: pasted images all arrive as image.png, often at once.
-        const file = join(
-            directory,
-            `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}-${name}`,
+        const upload = await createUpload(
+            app,
+            id,
+            `${Date.now().toString(36)}-${randomUUID()}-${name}`,
         );
+        const received = createHash("sha256");
         let size = 0;
-
-        request.on("data", (chunk: Buffer) => {
-            size += chunk.length;
-
-            if (size > MAX_UPLOAD) {
-                request.destroy(new HttpError(413, "Files can be up to 50 MB"));
-            }
-        });
+        let attachment: Attachment;
+        let sha256: string;
 
         try {
-            await pipeline(request, createWriteStream(file, { mode: 0o600, flags: "wx" }));
-        } catch (error) {
-            // A cut-off or oversized upload leaves nothing behind (and a name already taken was never this upload's).
-            // Cut off is the client's doing, not a server error.
-            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-                rmSync(file, { force: true });
+            for await (const chunk of request) {
+                size += chunk.length;
+
+                if (size > MAX_UPLOAD) {
+                    throw new HttpError(413, "Files can be up to 50 MB");
+                }
+
+                received.update(chunk);
+                await upload.handle.writeFile(chunk);
             }
 
+            sha256 = received.digest("hex");
+            attachment = await upload.accept(
+                user.id,
+                { name, mime: uploadMime(name, request.headers["content-type"]), size },
+                sha256,
+            );
+        } catch (error) {
             if (error instanceof HttpError || request.complete) {
                 throw error;
             }
 
             throw new HttpError(400, "The upload stopped before it finished");
+        } finally {
+            await upload.close();
         }
 
-        const attachment: Attachment = {
-            path: file,
-            name,
-            mime: uploadMime(name, request.headers["content-type"]),
-            size,
-        };
-
-        // Made ready for the model while the person still writes: their message then goes at once.
-        prepareModelImage(file, attachment.mime, size);
+        prepareModelImage({
+            path: attachment.path,
+            mime: attachment.mime,
+            content: { size, sha256 },
+        });
 
         return json(response, 200, attachment);
     }

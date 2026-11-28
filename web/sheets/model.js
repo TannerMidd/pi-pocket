@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { actions, api, attempt, closeSheet, openSheet, store } from "../store.js";
 import { useDragToClose } from "../gestures.js";
 import { favoriteModels } from "../model-favorites.js";
+import { openUsage, serverNow, sessionUsage, UsageMeter } from "./usage.js";
+import { summary, USAGE_ICONS, usedShare } from "../usage.js";
 import {
     anchorStyle,
     BOTTOM_SHEETS,
@@ -56,6 +58,52 @@ const matches = (model, query) => {
         .split(/\s+/)
         .every((word) => haystack.includes(word));
 };
+
+/** What the usage row says of the session's provider: its tightest window, or why it has none. */
+function usageWords(view, now) {
+    const words = summary(view, now);
+
+    if (words !== null) {
+        return words.text;
+    }
+
+    return view.state === "no-data"
+        ? "no usage yet"
+        : view.state === "not-reported"
+          ? "does not report usage"
+          : view.state === "ok"
+            ? "limits open"
+            : "reset, waiting for new numbers";
+}
+
+/** One row over the models: the session's provider and how much of its limits is left, opening every provider's. */
+function UsageRow() {
+    const now = serverNow();
+    const view = sessionUsage(now);
+
+    if (view === null) {
+        return null;
+    }
+
+    const { state, window } = view;
+    const numbers = (state === "ok" || state === "low") && window?.left !== undefined;
+
+    return html`<button
+        class="model-usage"
+        data-part="model-usage"
+        data-state=${state}
+        onClick=${() => openUsage("model")}
+    >
+        <span class="model-usage-name">${view.provider.name}</span>
+        <span class="model-usage-what">
+            ${state === "limited" && html`<${Icon} name="clock" size=${12} />`}
+            ${state === "low" && html`<${Icon} path=${USAGE_ICONS.warn} size=${12} />`}
+            ${numbers && html`<${UsageMeter} state=${state} used=${usedShare(window)} />`}
+            <span>${usageWords(view, now)}</span>
+        </span>
+        <span class="model-usage-all">All providers <${Icon} name="chevron" size=${12} /></span>
+    </button>`;
+}
 
 /**
  * The model picker: a menu that opens up from the message box's model chip, with the current model first and checked,
@@ -304,6 +352,7 @@ export function ModelPicker() {
                     <${Icon} name="key" size=${13} /> Providers
                 </button>
             </header>
+            ${pipId === undefined && !forDefault && html`<${UsageRow} />`}
             ${
                 searchable &&
                 html`<label class="search pop-menu-search">

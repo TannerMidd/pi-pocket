@@ -45,7 +45,8 @@ Background tasks (Pi's `background` tool) work on Windows since 0.30.0, with Git
 
 - A stop ends the processes by force at once, with no polite stop first.
 - A task's job does not let its processes leave it (Git Bash leaves a job that allows it), so a program in a task that asks to start a process outside its job gets "access denied". A process started outside the task (through a service or the Task Scheduler) is not followed, and a task does not say what it left running.
-- The task's first process holds a handle to its job, so a restarted server finds the job again while that process runs. Once it ended, a restarted server knows the processes found before the restart, and what they start directly; a process started through Git Bash (which starts a program as a new process) is then not followed.
+- Before a new command starts, the helper holds handles to its waiting shell and launcher. The shell answers on a private pipe, and Node checks its original launcher handle. Only then can the helper assign those same handles to the job and register a completion record. If the server stops, the helper can keep the job open and record when Windows reports zero active processes. A restarted watch can use that record even after the job name disappears.
+- If the helper cannot check a job, the watch waits and checks again. An exit code is not proof that all children exited. If the helper and job disappear without a completion record, Pi Pocket cannot safely resume that attempt. Older attempts without proof of full job coverage have the same limit.
 - A PowerShell in Constrained Language mode (a locked-down machine) cannot load the helper: then background tasks do not start, and say why.
 
 ## Machines that block links
@@ -55,6 +56,8 @@ Some enterprise policies refuse links and junctions. Drop-in extensions work the
 ## Updates
 
 Menu → **Update Pi Pocket** updates the package in `app\`, as for any global npm install, and restarts; it needs npm's registry. The Node.js in `node\` stays the one that Setup installed. A newer installer brings a newer Node.js and its own package; run it over the old install. It stops a running Pi Pocket first (it asks), and it keeps a newer package that the app already updated to.
+
+The updater closes its file watchers before it moves the running package. Windows can refuse the move if a process still holds files in that folder. If an older install reports `EPERM` when renaming `pi-pocket` to `previous`, it has not switched to the new version. Finish active work, choose **Quit Pi Pocket** from the tray, then run the newer official Setup for the same Windows account. Do not uninstall Pi Pocket or delete the data folder.
 
 The desktop app checks the package before it starts it: when `app\` holds an older `pi-pocket` than the app itself (an install that did not finish), it says so in a message and starts nothing. Run the same Setup again to put its package back.
 

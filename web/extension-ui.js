@@ -20,6 +20,7 @@ import { describersChanged, setCallDescriber } from "./calls.js";
 import { jumpToEntry } from "./chat.js";
 import { modulePresentationMode, setPresentationMode } from "./entry-presentation.js";
 import { markdownChanged, setFences, setMath } from "./markdown-ext.js";
+import { setSurfaceComponents, surfaceComponentsChanged } from "./surface-registry.js";
 import { leaveSafeMode, onSafeModeEnd, safeMode } from "./safe-mode.js";
 import {
     api,
@@ -78,8 +79,11 @@ const KINDS = [
     "composerKey",
     "fence",
     "mathInline",
+    "surfaceComponent",
 ];
 const MARKDOWN_KINDS = new Set(["fence", "mathInline"]);
+/** A surface component's type: `x.<module>.<Name>`. */
+const SURFACE_TYPE = /^x\.[a-z0-9-]{1,40}\.[A-Za-z][A-Za-z0-9]{0,39}$/;
 const FENCE_LANG = /^[\w+#.-]{1,24}$/;
 /** What a rail button, menu row, launcher action, or status item can open: one of the module's own. */
 const OPENS = ["page", "sheet", "panel"];
@@ -126,6 +130,23 @@ function markdownSpecOf(kind, matches = () => true) {
 
     return undefined;
 }
+
+setSurfaceComponents((type) => {
+    for (const module of order) {
+        const record = modules.get(module);
+
+        // A type is its own module's: another module's registration of it is never drawn.
+        if (
+            liveRecord(record) &&
+            type.startsWith(`x.${module}.`) &&
+            record.adds.surfaceComponent.has(type)
+        ) {
+            return record.adds.surfaceComponent.get(type);
+        }
+    }
+
+    return undefined;
+});
 
 setFences((lang) => {
     const spec = markdownSpecOf("fence", (each) =>
@@ -425,6 +446,8 @@ function sync(list, known = true) {
 
     if (orderChanged) {
         markdownChanged();
+        chipsRev++;
+        wordsRev++;
     }
 
     const wanted = new Map(safeMode() ? [] : list.map((each) => [each.module, each]));
@@ -598,6 +621,9 @@ function unload(record) {
 /** Take away what a browser module added, and run its cleanups, last first. */
 function teardown(record) {
     const hadMarkdown = record.adds.fence.size > 0 || record.adds.mathInline.size > 0;
+    const hadSurfaces = record.adds.surfaceComponent.size > 0;
+    const hadChips = record.adds.sessionChips.size > 0;
+    const hadWords = record.adds.sessionSearch.size > 0;
 
     for (const kind of KINDS) {
         record.adds[kind].clear();
@@ -605,6 +631,18 @@ function teardown(record) {
 
     if (hadMarkdown) {
         markdownChanged();
+    }
+
+    if (hadSurfaces) {
+        surfaceComponentsChanged();
+    }
+
+    if (hadChips) {
+        chipsRev++;
+    }
+
+    if (hadWords) {
+        wordsRev++;
     }
 
     record.arrangements.clear();
@@ -642,20 +680,20 @@ onExtensionEvent(({ module, event, data }) => {
 // ─── pocket: the app's API for a browser module ──────────────────────────────
 
 /** A copy of what a module gives to add, once it holds: read once, so what is checked is what is kept. */
-function specOf(kind, spec) {
+function specOf(kind, spec, module) {
     if (typeof spec !== "object" || spec === null) {
         throw new Error(`pocket.${kind}: give it an object`);
     }
 
     const copy = { ...spec };
 
-    check(kind, copy);
+    check(kind, copy, module);
 
     return copy;
 }
 
 /** What each kind needs besides its `id`, and the one thing it does when used, if it is used. */
-function check(kind, spec) {
+function check(kind, spec, module) {
     const name = `pocket.${kind}`;
 
     if (!isId(spec.id)) {
@@ -675,6 +713,22 @@ function check(kind, spec) {
 
         if (typeof spec.component !== "function") {
             throw new Error(`${name} ${spec.id}: give it a component to show`);
+        }
+
+        return;
+    }
+
+    if (kind === "surfaceComponent") {
+        if (typeof spec.type !== "string" || !SURFACE_TYPE.test(spec.type)) {
+            throw new Error(`${name}: type is x.<module>.<Name>, as the server registered it`);
+        }
+
+        if (!spec.type.startsWith(`x.${module}.`)) {
+            throw new Error(`${name}: type is x.${module}.<Name>: this module's name, then a name`);
+        }
+
+        if (typeof spec.render !== "function") {
+            throw new Error(`${name} ${spec.id}: give it a render function`);
         }
 
         return;
@@ -851,18 +905,15 @@ function check(kind, spec) {
     }
 }
 
-/** Two specs that would show the same: the same fields, each the very same value. */
+/** Two specs that would show the same: the same fields, each the very same value (missing and undefined match). */
 function sameSpec(a, b) {
     if (a === undefined || b === undefined) {
         return false;
     }
 
-    const keys = Object.keys(a);
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
 
-    return (
-        keys.length === Object.keys(b).length &&
-        keys.every((key) => Object.hasOwn(b, key) && Object.is(a[key], b[key]))
-    );
+    return [...keys].every((key) => Object.is(a[key], b[key]));
 }
 
 /**
@@ -904,7 +955,7 @@ function pocketFor(record) {
     const add = (kind, spec) => {
         tick(record);
 
-        let current = specOf(kind, spec);
+        let current = specOf(kind, spec, record.module);
         // A panel's top bar button has the panel's id: a top bar button of the same id would be a second item of it.
         const sharing = { panel: "topbar", topbar: "panel" }[kind];
 
@@ -927,6 +978,18 @@ function pocketFor(record) {
 
                 if (MARKDOWN_KINDS.has(kind)) {
                     markdownChanged();
+                }
+
+                if (kind === "surfaceComponent") {
+                    surfaceComponentsChanged();
+                }
+
+                if (kind === "sessionChips") {
+                    chipsRev++;
+                }
+
+                if (kind === "sessionSearch") {
+                    wordsRev++;
                 }
 
                 redraw();
@@ -952,12 +1015,24 @@ function pocketFor(record) {
                     return;
                 }
 
-                check(kind, next);
+                check(kind, next, record.module);
                 current = next;
                 record.adds[kind].set(current.id, current);
 
                 if (MARKDOWN_KINDS.has(kind)) {
                     markdownChanged();
+                }
+
+                if (kind === "surfaceComponent") {
+                    surfaceComponentsChanged();
+                }
+
+                if (kind === "sessionChips") {
+                    chipsRev++;
+                }
+
+                if (kind === "sessionSearch") {
+                    wordsRev++;
                 }
 
                 redraw();
@@ -970,6 +1045,18 @@ function pocketFor(record) {
 
                     if (MARKDOWN_KINDS.has(kind)) {
                         markdownChanged();
+                    }
+
+                    if (kind === "surfaceComponent") {
+                        surfaceComponentsChanged();
+                    }
+
+                    if (kind === "sessionChips") {
+                        chipsRev++;
+                    }
+
+                    if (kind === "sessionSearch") {
+                        wordsRev++;
                     }
 
                     redraw();
@@ -1260,6 +1347,9 @@ function pocketFor(record) {
         composerKey: (spec) => add("composerKey", spec),
         fence: (spec) => add("fence", spec),
         mathInline: (spec) => add("mathInline", spec),
+        /** How this browser draws a surface component the module registered on the server (`web.surfaceComponent`). */
+        surfaceComponent: (spec) =>
+            add("surfaceComponent", { ...(spec ?? {}), id: String(spec?.type ?? "") }),
         /** Put text into the message box, after what is there, for the person to send: never sent by itself. */
         insertText(text, options) {
             tick(record);
@@ -1726,9 +1816,11 @@ export function closeExtPanel() {
     store.set({ extPanel: null });
 }
 
+const canShowPanel = (state) => state.conversationId !== null && !state.missing;
+
 /** The extension panel shows now: one asked for, in a conversation that is there. `App` draws it by this. */
 export function extPanelShown(state = store.state) {
-    return state.extPanel !== null && state.conversationId !== null && !state.missing;
+    return state.extPanel !== null && canShowPanel(state);
 }
 
 /** The `close` a panel's component gets: it closes that panel of that version while it shows, and no other panel. */
@@ -1911,37 +2003,46 @@ export function browserModuleState(module) {
 // ─── Where they show ─────────────────────────────────────────────────────────
 
 /**
- * The rail's buttons that extensions added, after the app's own tools. They take the room they need: a rail with more
- * buttons than room scrolls as a whole, and fades the edge where more is (`useScrollMore`).
+ * Rail buttons appear in Tools. A panel target names its place so Tools can show the button there only once.
  */
-export function ExtensionRailButtons() {
-    const buttons = added("rail");
+export function extensionRailItems() {
+    const available = added("rail").filter(
+        ({ spec }) => spec.panel === undefined || canShowPanel(store.state),
+    );
 
-    if (buttons.length === 0) {
-        return null;
-    }
+    return available.map(({ record, spec }) => {
+        const open = opened(record, spec);
+        const toggles = spec.page !== undefined || spec.panel !== undefined;
+        const badge = badgeFor(spec);
 
-    return html`<div class="rail-exts">
-        ${buttons.map(({ record, spec }) => {
-            const open = opened(record, spec);
-            const toggles = spec.page !== undefined || spec.panel !== undefined;
-            const badge = badgeFor(spec);
-
-            return html`<button
+        return {
+            panelPlace: spec.panel === undefined ? null : itemId(record, { id: spec.panel }),
+            node: html`<button
                 key=${`${record.module}:${spec.id}`}
-                class=${`rail-button rail-ext ${open ? "open" : ""}`}
+                class=${`list-item menu-row tool-row rail-button rail-ext ${open ? "open" : ""}`}
                 data-part="rail-button"
                 data-state=${railState(open)}
                 title=${spec.title}
                 aria-label=${badge === "" ? spec.title : `${spec.title}, ${badge}`}
                 aria-pressed=${toggles ? open : undefined}
-                onClick=${() => (open ? closeOf(spec) : activate(record, spec))}
+                onClick=${() => {
+                    if (spec.sheet === undefined) {
+                        closeSheet();
+                    }
+
+                    if (open) {
+                        closeOf(spec);
+                    } else {
+                        activate(record, spec);
+                    }
+                }}
             >
                 <${Icon} path=${pathOf(spec)} size=${18} />
+                <span class="tool-label">${spec.title}</span>
                 ${badge !== "" && html`<span class="rail-count">${badge}</span>`}
-            </button>`;
-        })}
-    </div>`;
+            </button>`,
+        };
+    });
 }
 
 /** Close what a button opened: its page or its panel. */
@@ -2045,12 +2146,13 @@ function cutText(text, max) {
         : characters.join("");
 }
 
-/** Chips stay valid until the server replaces the session or an extension changes what it adds, as words do. */
+/** Chips stay valid until the server replaces the session or a module changes its `sessionChips`. */
 const cachedChips = new WeakMap();
+let chipsRev = 0;
 
 /** The chips that extensions put on a session's row: `{ key, label, title, run }`, `run` only for one that does something. */
 export function sessionChips(session) {
-    const revision = store.state.extensionsRev;
+    const revision = chipsRev;
     const cached = cachedChips.get(session);
 
     if (cached?.revision === revision) {
@@ -2083,12 +2185,13 @@ export function sessionChips(session) {
     return chips;
 }
 
-/** Words stay valid until the server replaces the session or an extension changes what it adds. */
+/** Words stay valid until the server replaces the session or a module changes its `sessionSearch`. */
 const cachedWords = new WeakMap();
+let wordsRev = 0;
 
 /** The words that extensions give a session for the session list's search and the launcher's, lowercased. */
 export function sessionWords(session) {
-    const revision = store.state.extensionsRev;
+    const revision = wordsRev;
     const cached = cachedWords.get(session);
 
     if (cached?.revision === revision) {
@@ -2122,7 +2225,7 @@ export function sessionActions() {
             label: cutText(spec.label, ACTION_TEXT),
             title: spec.label,
             module: record.title,
-            // One with an icon is also a button on rows, where a mouse hovers (`sessions.js`).
+            // Kept for extensions that read it; rows draw no hover buttons since 0.31.0 (`sessions.js`).
             iconPath: spec.icon !== undefined || spec.iconPath !== undefined ? pathOf(spec) : null,
             run: (ids) => {
                 const sessions = Object.freeze([...ids]);
@@ -2348,7 +2451,8 @@ function placeItems() {
     }));
 }
 
-/** The buttons that extensions added to the message box's row, after the app's own on its left. */
+/** The buttons that extensions added to the message box's row, after the app's own on its left. In a box up to 480px wide
+they fold into its ⋯ button (`fold`, `more`: `composer-more.js`). */
 function composerItems() {
     return added("composerButton").map(({ record, spec }) => ({
         id: itemId(record, spec),
@@ -2356,6 +2460,15 @@ function composerItems() {
         module: record.title,
         before: spec.before,
         after: spec.after,
+        // In a box up to 480px wide, in the row's ⋯ menu (`composer-more.js`).
+        fold: 1,
+        more: () => ({
+            name: spec.title,
+            iconPath: pathOf(spec),
+            on: opened(record, spec),
+            badge: badgeFor(spec),
+            run: () => (opened(record, spec) ? closeOf(spec) : activate(record, spec)),
+        }),
         render: () => {
             const on = opened(record, spec);
             const badge = badgeFor(spec);

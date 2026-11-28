@@ -1,6 +1,8 @@
 /** Files for the relay: what Pi sends is read from its session's folder only, and what it fetches is kept there. */
-import { realpath } from "node:fs/promises";
-import { basename, extname, relative, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { renameSync } from "node:fs";
+import { open, realpath, unlink } from "node:fs/promises";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { openNoFollow } from "../../no-follow.ts";
 import { workspaceScheme } from "../../paths.ts";
 import { isEnvFile } from "../../secrets.ts";
@@ -56,6 +58,33 @@ export async function folderOf(cwd: string | undefined): Promise<string> {
     }
 
     return realpath(cwd);
+}
+
+/** Stage bytes privately. A route change cannot interleave between the last check and publication. */
+export async function publishFetchedFile(
+    path: string,
+    data: Uint8Array,
+    checkCurrent: () => void,
+): Promise<void> {
+    checkCurrent();
+    const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
+    const handle = await open(temporary, "wx", 0o600);
+
+    try {
+        try {
+            checkCurrent();
+            await handle.writeFile(data);
+        } finally {
+            await handle.close();
+        }
+
+        checkCurrent();
+        renameSync(temporary, path);
+    } catch (error) {
+        await unlink(temporary).catch(() => {});
+
+        throw error;
+    }
 }
 
 /** Pi's paths, read with every check: in the session's folder (links too), not hidden, not the server's data. */

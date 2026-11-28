@@ -282,7 +282,7 @@ export class RepoWatches {
             throw new HttpError(403, "Viewers cannot set up watches.");
         }
 
-        if (app.sessionMeta(request.target) === undefined || !app.canSee(person, request.target)) {
+        if (app.steeringUser(request.target, person.id) === undefined) {
             throw new HttpError(404, "Watches message sessions this person can reach, or PiP.");
         }
 
@@ -328,6 +328,10 @@ export class RepoWatches {
         const now = app.now();
 
         const watch = await app.harness.commit(async (tx) => {
+            if (app.steeringUser(request.target, person.id) === undefined) {
+                throw new HttpError(403, "A watch needs someone who can steer here.");
+            }
+
             const doc = await tx.doc(RepoWatchesDoc);
             const same =
                 request.key === undefined
@@ -658,6 +662,10 @@ export class RepoWatches {
             return runtime.commit(() => finished, context);
         }
 
+        if (app.steeringUser(watch.target as unknown as ConversationId, watch.by) === undefined) {
+            return this.#failed(id, runtime, "its person can no longer steer here", context);
+        }
+
         // Triggers are off: the watch waits, and asks GitHub nothing.
         if (!this.running) {
             return this.#again(id, runtime, this.timing.poll, context);
@@ -722,9 +730,9 @@ export class RepoWatches {
         }
 
         const target = watch.target as unknown as ConversationId;
-        const person = app.config.userById(watch.by);
+        const person = app.steeringUser(target, watch.by);
 
-        if (person === undefined || person.role === "viewer" || !app.canSee(person, target)) {
+        if (person === undefined) {
             return this.#failed(
                 id,
                 runtime,

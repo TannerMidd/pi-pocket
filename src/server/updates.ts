@@ -110,6 +110,12 @@ export interface UpdatesOptions {
      * running server does not load the new version's files; false starts again after an update that failed.
      */
     quiesce?: (paused: boolean) => void;
+    /** Release file watchers before an npm swap; resume them only after a safe rollback. */
+    closeOwnWatchers?: (closed: boolean) => void;
+    /** Tests say how this copy was installed, rather than asking npm (`npmInstallKind`). */
+    installKind?: (appRoot: string) => Promise<InstallKind>;
+    /** Tests stage the new package themselves (an offline tarball), rather than npm's registry. */
+    stage?: (appRoot: string, version: string) => Promise<void>;
     /** How many sessions Pi works in now. */
     busy: () => number;
     log: (line: string) => void;
@@ -533,7 +539,9 @@ export class Updates {
     #knownKind: InstallKind = "unknown";
 
     async #installKind(local: Local): Promise<InstallKind> {
-        this.#knownKind = local.git ? "git" : await (this.#npmKind ??= npmInstallKind(this.#root));
+        this.#knownKind = local.git
+            ? "git"
+            : await (this.#npmKind ??= (this.#options.installKind ?? npmInstallKind)(this.#root));
 
         return this.#knownKind;
     }
@@ -1354,12 +1362,17 @@ export class Updates {
         // Someone started to work while npm staged the package: nothing failed, so no outcome is noted (as for git),
         // and an install by itself tries this release again once the sessions are quiet.
         let declined = false;
+        // Whether this server's own watchers inside the live package were closed for the swap. Only then are they
+        // made again below: a stop before the swap left them as they were, and one after a failed restore must stay
+        // closed, with the restart the error asks for making new ones.
+        let watchClosed = false;
 
         writePending(this.#root, pending);
 
         try {
             this.#setStep("Installing packages");
-            await stageNpmUpdate(this.#root, latest.version);
+            await (this.#options.stage?.(this.#root, latest.version) ??
+                stageNpmUpdate(this.#root, latest.version));
             const reason = stillWanted();
 
             if (reason !== undefined) {
@@ -1370,10 +1383,12 @@ export class Updates {
 
             this.#setStep(`Switching to ${latest.tag}`);
             this.#options.quiesce?.(true);
+            this.#options.closeOwnWatchers?.(true);
+            watchClosed = true;
             swapInPackage(this.#root);
         } catch (error) {
             // No new server ran yet, so even a warning release can safely restore the package here.
-            // If restoration fails, keep the pending state and stopped watchers for launcher recovery.
+            // If restoration fails, keep the pending state and closed watchers for launcher recovery.
             try {
                 if (!restorePackage(this.#root)) {
                     throw new Error("The previous npm package is missing.");
@@ -1392,6 +1407,10 @@ export class Updates {
                 }
 
                 this.#options.quiesce?.(false);
+
+                if (watchClosed) {
+                    this.#options.closeOwnWatchers?.(false);
+                }
             } catch (restoreError) {
                 throw new HttpError(
                     500,

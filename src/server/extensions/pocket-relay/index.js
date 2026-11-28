@@ -826,7 +826,7 @@ export default function setup(pocket) {
                     onInput=${(event) => set("owners", event.currentTarget.value)}
                 ></textarea>
                 <div class="muted small">
-                    The IDs of your own accounts on this service. Pi reads them as trusted.
+                    Only authenticated account IDs match. HTTP and RSS have none.
                 </div>
             </div>
             ${

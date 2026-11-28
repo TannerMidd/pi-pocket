@@ -1,18 +1,23 @@
 /**
  * The files in a session's folder, for `@` mentions in the message box. In a git repository the list is git's: the
  * tracked files and the untracked ones it does not ignore. Elsewhere it is a walk of the folder that skips hidden and
- * dependency folders. A list is kept for a few seconds and shared by every tab, carries a version so a browser that
- * has the newest one hears only that, and is compressed once, however many browsers fetch it. Browsers match the list
+ * dependency folders. Only unrestricted tabs share a cached list. Each list carries a version so a browser that
+ * has the newest one hears only that, and is compressed on demand. Browsers match the list
  * themselves as people type: typing never waits on the network.
  */
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { open, opendir, stat } from "node:fs/promises";
+import { lstat, open, opendir, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { gzip as gzipCallback } from "node:zlib";
 import { git } from "./git.ts";
+import { type ReadableFile, withUploadBytes } from "./upload-content.ts";
 
 const gzip = promisify(gzipCallback);
+const exec = promisify(execFile);
 
 /** The most files a list holds. Past it, the files nearest the folder's top are kept. */
 export const MAX_FILES = 100_000;
@@ -22,6 +27,8 @@ export const MAX_FILES = 100_000;
  */
 const WALK_FILES = 50_000;
 const WALK_MS = 3_000;
+/** A separate work budget for restricted reads, including denied and absent candidates. */
+const SCAN_ENTRIES = 2 * MAX_FILES;
 /** A list is fresh for ten times what it took to make, within these bounds: a slow walk is not repeated every keystroke. */
 const FRESH_MIN_MS = 2_000;
 const FRESH_MAX_MS = 60_000;
@@ -38,6 +45,15 @@ const SKIP = new Set([
     "dist-newstyle",
 ]);
 
+export type FileFilter = {
+    /** The canonical workspace encloses no protected roots. Git can discover names, but each still needs `allow`. */
+    ordinaryTree?: boolean;
+    /** Whether a file can be listed. Both callbacks take absolute paths. */
+    allow: (path: string) => boolean | Promise<boolean>;
+    /** Empty to prune, known basenames to probe without enumerating, or undefined to enumerate. */
+    children: (dir: string) => readonly string[] | undefined;
+};
+
 export type FileList = {
     /** Paths relative to the folder, with `/` between parts. */
     files: string[];
@@ -53,19 +69,17 @@ export type FileListing = FileList & { json: string; gzipped(): Promise<Buffer> 
 type Entry = { at: number; freshFor: number; listing: Promise<FileListing> };
 
 /** The files git lists in `cwd`, or undefined when it is not in a repository (or git is not installed, or failed). */
-async function gitFiles(cwd: string): Promise<string[] | undefined> {
+async function gitFiles(cwd: string, timeoutMs = 10_000): Promise<string | undefined> {
     try {
         // Past this much, a walk (which stops at its own limits) does instead.
         const out = await git(
             cwd,
             ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-            { timeoutMs: 10_000, maxBuffer: 32 * 1024 * 1024 },
+            { timeoutMs, maxBuffer: 32 * 1024 * 1024 },
         );
-        // A conflicted file is listed once per stage.
-        const files = [...new Set(out.split("\0"))].filter((path) => path !== "");
 
         // A folder git ignores entirely, inside a repository, is still worth a walk.
-        return files.length === 0 ? undefined : files;
+        return out === "" ? undefined : out;
     } catch {
         return undefined;
     }
@@ -82,16 +96,23 @@ async function readSome(
     path: string,
     limit: number,
     deadline = Number.POSITIVE_INFINITY,
+    allow?: FileFilter["allow"],
 ): Promise<{ entries: Dirent[]; more: boolean }> {
     const entries: Dirent[] = [];
     const dir = await opendir(path, { bufferSize: 256 });
+    let scanned = 0;
 
     // Leaving the loop early closes the folder.
     for await (const entry of dir) {
-        if (
-            entries.length >= limit ||
-            ((entries.length & 1023) === 1023 && Date.now() > deadline)
-        ) {
+        if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
+            return { entries, more: true };
+        }
+
+        if (allow !== undefined && !(await allow(join(path, entry.name)))) {
+            continue;
+        }
+
+        if (entries.length >= limit) {
             return { entries, more: true };
         }
 
@@ -185,13 +206,272 @@ function nearest(files: string[], max: number): { files: string[]; truncated: bo
     return { files: kept, truncated: true };
 }
 
-/** The files in `cwd`, as `FileList` says. */
-export async function listFiles(cwd: string, max = MAX_FILES): Promise<FileList> {
-    const listed = await gitFiles(cwd);
+type WalkEntry = { name: string; dir: boolean };
+
+/** A partial directory is never opened. Even a missing candidate consumes one unit of scan work. */
+async function* candidates(
+    dir: string,
+    known: readonly string[] | undefined,
+): AsyncGenerator<WalkEntry | undefined> {
+    if (known === undefined) {
+        const folder = await opendir(dir, { bufferSize: 256 });
+
+        for await (const entry of folder) {
+            yield { name: entry.name, dir: entry.isDirectory() };
+        }
+    } else {
+        const seen = new Set<string>();
+
+        for (const name of known) {
+            if (
+                !name ||
+                basename(name) !== name ||
+                name === "." ||
+                name === ".." ||
+                seen.has(name)
+            ) {
+                yield undefined;
+                continue;
+            }
+
+            seen.add(name);
+            const info = await lstat(join(dir, name)).catch(() => undefined);
+
+            yield info && { name, dir: info.isDirectory() };
+        }
+    }
+}
+
+/** Check only these candidates, without asking git to discover any files. NULs preserve every filename. */
+async function ignoredFiles(dir: string, names: string[], deadline: number): Promise<Set<string>> {
+    const command = exec(
+        "git",
+        ["--no-literal-pathspecs", "-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
+        {
+            cwd: dir,
+            timeout: Math.max(1, deadline - Date.now()),
+            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+        },
+    );
+
+    // Git may exit before consuming stdin; the command promise reports its error.
+    command.child.stdin!.on("error", () => {});
+    command.child.stdin!.end(names.map((name) => `./${name}\0`).join(""));
+
+    try {
+        const { stdout } = await command;
+
+        return new Set(stdout.split("\0").map((path) => path.slice(2)));
+    } catch (error) {
+        if ((error as { code?: number }).code === 1) {
+            return new Set();
+        }
+
+        throw error;
+    }
+}
+
+/** A bounded breadth-first walk. A denied name spends scan work, never a result slot. */
+async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
+    const files: string[] = [];
+    const deadline = Date.now() + WALK_MS;
+    const root = resolve(cwd);
+
+    if (filter.children(root)?.length === 0) {
+        return { files, truncated: false };
+    }
+
+    const repository =
+        (
+            await git(root, ["rev-parse", "--is-inside-work-tree"], { timeoutMs: WALK_MS }).catch(
+                () => "",
+            )
+        ).trim() === "true";
+    const visibleLimit = repository ? max : Math.min(max, WALK_FILES);
+    const queue = [""];
+    let scanned = 0;
+
+    for (let i = 0; i < queue.length; i++) {
+        if (Date.now() > deadline) {
+            return { files, truncated: true };
+        }
+
+        const prefix = queue[i]!;
+        const dir = join(root, prefix);
+        const known = filter.children(dir);
+
+        if (known?.length === 0) {
+            continue;
+        }
+
+        // Git does not recurse into another worktree (including a checked-out submodule).
+        if (
+            repository &&
+            prefix !== "" &&
+            known === undefined &&
+            (await lstat(join(dir, ".git")).catch(() => undefined))
+        ) {
+            continue;
+        }
+
+        const fileStart = files.length;
+        const folderStart = queue.length;
+        const batch: WalkEntry[] = [];
+
+        const flush = async (): Promise<boolean> => {
+            const ignored =
+                repository && batch.length !== 0
+                    ? await ignoredFiles(
+                          dir,
+                          batch.map((entry) => entry.name),
+                          deadline,
+                      )
+                    : undefined;
+
+            for (const entry of batch) {
+                if (ignored?.has(entry.name)) {
+                    continue;
+                }
+
+                const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+
+                if (entry.dir) {
+                    queue.push(path);
+                } else if (files.length < visibleLimit) {
+                    files.push(path);
+                } else {
+                    return false;
+                }
+            }
+
+            batch.length = 0;
+
+            return true;
+        };
+
+        try {
+            for await (const entry of candidates(dir, known)) {
+                if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
+                    await flush();
+
+                    return { files, truncated: true };
+                }
+
+                if (!entry || (repository && entry.name === ".git")) {
+                    continue;
+                }
+
+                if (entry.dir) {
+                    if (!repository && (entry.name.startsWith(".") || SKIP.has(entry.name))) {
+                        continue;
+                    }
+
+                    if (filter.children(join(dir, entry.name))?.length === 0) {
+                        continue;
+                    }
+                } else if (!(await filter.allow(join(dir, entry.name)))) {
+                    continue;
+                }
+
+                batch.push(entry);
+
+                if (batch.length === 512 && !(await flush())) {
+                    return { files, truncated: true };
+                }
+            }
+
+            if (!(await flush())) {
+                return { files, truncated: true };
+            }
+        } catch (error) {
+            if (Date.now() >= deadline || (error as { killed?: boolean }).killed === true) {
+                return { files, truncated: true };
+            }
+
+            if (
+                ["ENOENT", "ENOTDIR", "EACCES", "EPERM"].includes(
+                    (error as NodeJS.ErrnoException).code ?? "",
+                )
+            ) {
+                continue;
+            }
+
+            throw error;
+        } finally {
+            sortFrom(files, fileStart);
+            sortFrom(queue, folderStart);
+        }
+    }
+
+    return { files, truncated: false };
+}
+
+/** Preserve native Git order (including tracked after untracked) until the result limit requires `nearest`. */
+async function fromGit(output: string, root: string, max: number, filter?: FileFilter) {
+    const files = new Set<string>();
+    const deadline = Date.now() + WALK_MS;
+    let scanned = 0;
+    let start = 0;
+
+    while (start < output.length) {
+        if (filter !== undefined) {
+            if (++scanned > SCAN_ENTRIES || Date.now() > deadline) {
+                return { files: nearest([...files], max).files, truncated: true };
+            }
+
+            // The filesystem boundary check is synchronous. Give other requests a turn between batches.
+            if (scanned % 256 === 0) {
+                await setImmediate();
+            }
+        }
+
+        const end = output.indexOf("\0", start);
+
+        if (end === -1) {
+            break;
+        }
+
+        const path = output.slice(start, end);
+
+        if (!filter || (await filter.allow(join(root, path)))) {
+            // A conflicted file is listed once per stage.
+            files.add(path);
+        }
+
+        start = end + 1;
+    }
+
+    return nearest([...files], max);
+}
+
+/** Keep the unrestricted walk's order: siblings sorted by name, directories visited breadth first. */
+function sortFrom(paths: string[], start: number): void {
+    if (paths.length > start + 1) {
+        const sorted = paths.slice(start).sort();
+
+        for (const path of sorted) {
+            paths[start++] = path;
+        }
+    }
+}
+
+/** The files in `cwd`, filtered before computing the version of a restricted listing. */
+export async function listFiles(
+    cwd: string,
+    max = MAX_FILES,
+    filter?: FileFilter,
+): Promise<FileList> {
+    const root = resolve(cwd);
+    const ordinary =
+        filter === undefined || (filter.ordinaryTree && filter.children(root) === undefined);
+    const listed = ordinary ? await gitFiles(root, filter && WALK_MS) : undefined;
     const { files, truncated } =
-        listed === undefined
-            ? await walkFiles(cwd, Math.min(max, WALK_FILES), WALK_MS)
-            : nearest(listed, max);
+        listed !== undefined
+            ? await fromGit(listed, root, max, filter)
+            : filter !== undefined
+              ? await filteredFiles(root, ordinary ? Math.min(max, WALK_FILES) : max, filter)
+              : await walkFiles(root, Math.min(max, WALK_FILES), WALK_MS);
+
     const version = createHash("sha1")
         .update(files.join("\0"))
         .update(truncated ? "+" : "")
@@ -210,8 +490,12 @@ export class FileLists {
         this.#now = now;
     }
 
-    /** The list for `cwd`: a fresh one kept here, the one being made, or a new one. */
-    get(cwd: string): Promise<FileListing> {
+    /** Only unrestricted callers share an in-flight or cached list. */
+    get(cwd: string, filter?: FileFilter): Promise<FileListing> {
+        if (filter !== undefined) {
+            return this.#make(cwd, filter);
+        }
+
         const kept = this.#lists.get(cwd);
         const now = this.#now();
 
@@ -251,8 +535,8 @@ export class FileLists {
         return entry.listing;
     }
 
-    async #make(cwd: string): Promise<FileListing> {
-        const list = await listFiles(cwd);
+    async #make(cwd: string, filter?: FileFilter): Promise<FileListing> {
+        const list = await listFiles(cwd, MAX_FILES, filter);
         const json = JSON.stringify(list);
         let compressed: Promise<Buffer> | undefined;
 
@@ -271,12 +555,35 @@ export type FileView =
     | { kind: "image" | "binary" | "other"; size: number }
     | { kind: "folder"; entries: { name: string; dir: boolean }[]; truncated: boolean };
 
+function viewBytes(file: string, buffer: Buffer, size = buffer.length): FileView {
+    if (IMAGE_EXTENSIONS.test(file)) {
+        return { kind: "image", size };
+    }
+
+    const bytes = buffer.subarray(0, VIEW_BYTES);
+
+    if (bytes.subarray(0, 8000).includes(0)) {
+        return { kind: "binary", size };
+    }
+
+    return { kind: "text", size, text: bytes.toString("utf8"), truncated: size > bytes.length };
+}
+
 /** What the viewer shows of `file`. Throws when it is not there. */
-export async function viewFile(file: string): Promise<FileView> {
+export async function viewFile(file: ReadableFile, allow?: FileFilter["allow"]): Promise<FileView> {
+    if (typeof file !== "string") {
+        return withUploadBytes(file, async (bytes) => viewBytes(file.path, bytes));
+    }
+
     const info = await stat(file);
 
     if (info.isDirectory()) {
-        const { entries, more } = await readSome(file, VIEW_ENTRIES);
+        const { entries, more } = await readSome(
+            resolve(file),
+            VIEW_ENTRIES,
+            allow && Date.now() + WALK_MS,
+            allow,
+        );
         const listed = entries
             .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
             .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
@@ -298,19 +605,8 @@ export async function viewFile(file: string): Promise<FileView> {
     try {
         const buffer = Buffer.alloc(Math.min(info.size, VIEW_BYTES));
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        const bytes = buffer.subarray(0, bytesRead);
 
-        // Text files have no NUL bytes; nearly every other kind does, early on.
-        if (bytes.subarray(0, 8000).includes(0)) {
-            return { kind: "binary", size: info.size };
-        }
-
-        return {
-            kind: "text",
-            size: info.size,
-            text: bytes.toString("utf8"),
-            truncated: info.size > bytesRead,
-        };
+        return viewBytes(file, buffer.subarray(0, bytesRead), info.size);
     } finally {
         await handle.close();
     }

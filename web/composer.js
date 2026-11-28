@@ -48,10 +48,14 @@ import {
 } from "./store.js";
 import { useDock } from "./dock.js";
 import { fromServer } from "./seen.js";
+import { ComposerRow } from "./composer-more.js";
 import { defineItem, slotItems } from "./slots.js";
 import { SubagentsBar } from "./subagents.js";
 import { TrustBar } from "./trust.js";
+import { closeSheet } from "./store.js";
+import { openUsage, serverNow, sessionUsage, UsageMeter } from "./sheets/usage.js";
 import { prefs } from "./theme.js";
+import { hoursMinutes, percent, summary, usedShare, USAGE_ICONS } from "./usage.js";
 import { fingerprint } from "./text-hash.js";
 import { says } from "./turns.js";
 import { MicButton, useDictation } from "./voice.js";
@@ -69,6 +73,7 @@ import {
     modelLabel,
     shortModelName,
     Spinner,
+    useMinute,
     useSecond,
 } from "./ui.js";
 
@@ -853,6 +858,7 @@ function WatchBar() {
 
 export function Composer() {
     const { view, conversationId } = store.state;
+    const personId = store.state.me?.id ?? null;
     const historyScope = { person: store.state.me?.id, conversation: conversationId };
     const [text, setText] = useState(() => drafts.get(conversationId));
     const [files, setFiles] = useState(() => loadAttached(conversationId));
@@ -985,9 +991,39 @@ export function Composer() {
     // The request id kept for the box's words: a change ends the wait of what was taken back.
     const request = keptRequest(conversationId)?.requestId;
 
+    // What the person typed or attached in this box, as the last render has it: not the textarea, which an update made in
+    // an effect does not change until the next render.
+    const sinceDrawn = useRef({ text, files });
+    // The box was drawn before the person was known (the device's copy of the session shows first on a reload), so it
+    // read nothing from the person's storage, which is theirs only once /api/me says who they are.
+    const drawnUnknown = useRef(personId === null);
+
+    sinceDrawn.current = { text, files };
+
     // The queued messages of this conversation taken back (`keepBack`) go before the box's words,
-    // once no send is on its way.
+    // once no send is on its way. When the person becomes known, what the device keeps for the box (draft, files, pasted
+    // text, quotes) is read first, in this one pass, unless something was typed or attached meanwhile, and the taken-back
+    // messages go on top of it.
     useEffect(() => {
+        const late = personId !== null && drawnUnknown.current;
+        const fresh =
+            late && sinceDrawn.current.text === "" && sinceDrawn.current.files.length === 0;
+
+        if (personId !== null) {
+            drawnUnknown.current = false;
+        }
+
+        let words = sinceDrawn.current.text;
+        let chips = [];
+
+        if (fresh) {
+            words = drafts.get(conversationId);
+            chips = loadAttached(conversationId);
+            setPastes(loadPastes(conversationId));
+            keepPieces(loadPieces(conversationId), conversationId, words);
+            setStrips(loadStrips(conversationId));
+        }
+
         // Read now, not at the render: a send can begin between the two.
         const all = onTheWay.has(conversationId) ? [] : keptBack(conversationId);
         const now = keptRequest(conversationId)?.requestId;
@@ -995,6 +1031,12 @@ export function Composer() {
         const list = all.filter(ready);
 
         if (list.length === 0) {
+            if (fresh) {
+                setText(words);
+                setCaret(words.length);
+                setFiles(chips);
+            }
+
             return;
         }
 
@@ -1004,8 +1046,7 @@ export function Composer() {
             backKey(conversationId),
             waiting.length === 0 ? null : JSON.stringify(waiting),
         );
-        let words = drafts.get(conversationId);
-        let chips = [];
+        words = fresh ? words : drafts.get(conversationId);
 
         for (const back of list) {
             words = words.trim() === "" ? back.text : `${back.text}\n${words}`;
@@ -1021,7 +1062,7 @@ export function Composer() {
             box.current?.focus();
             box.current?.setSelectionRange(at, at);
         });
-    }, [conversationId, sending, takenBack, request]);
+    }, [conversationId, sending, takenBack, request, personId]);
     useEffect(() => {
         const draft = drafts.get(conversationId);
 
@@ -1972,14 +2013,48 @@ export function Composer() {
               : ` · ${users.find((user) => user.id === item.by)?.name ?? "someone"}`;
 
     useDock(dock);
-    // View only now, or someone else took the wheel: the box goes, and dictation with it.
-    const writes = !collab() || (canSteer() && !(view.turns?.on && view.turns.driver !== me?.id));
+    const unavailable = view.workspaceUnavailable ?? null;
+    // View only now, unavailable workspace, or someone else took the wheel: the box goes, and dictation with it.
+    const writes =
+        unavailable === null &&
+        (!collab() || (canSteer() && !(view.turns?.on && view.turns.driver !== me?.id)));
 
     useEffect(() => {
         if (!writes) {
             dictation.stop(true);
         }
     }, [writes]);
+
+    if (unavailable !== null) {
+        const archived =
+            store.state.sessions.find((session) => session.id === conversationId)?.archived ===
+            true;
+
+        return html`<footer class="composer-wrap" data-part="composer">
+            <div class="dock" data-part="dock" ref=${dock}>
+                <${TypingLine} where="pi" />
+                <${SubagentsBar} />
+            </div>
+            <${ParentSessionButton} />
+            <div class="view-only workspace-unavailable" data-part="workspace-unavailable">
+                <span><strong>Read-only.</strong> ${unavailable}</span>
+                ${
+                    !archived &&
+                    canSteer() &&
+                    html`<button
+                        class="button small"
+                        onClick=${() =>
+                            attempt(() =>
+                                actions.updateSession(conversationId, { archived: true }),
+                            )}
+                    >
+                        Archive session
+                    </button>`
+                }
+            </div>
+            <${StatusLine} />
+        </footer>`;
+    }
 
     if (collab() && !canSteer()) {
         return html`<footer class="composer-wrap" data-part="composer">
@@ -2429,8 +2504,10 @@ export function Composer() {
                         onPaste=${onPaste}
                         enterkeyhint=${coarse ? "enter" : "send"}
                     ></textarea>
-                    <div class="composer-row" data-part="composer-tools">
-                        ${slotItems("composer", { picker, agent, level, view }).map(({ node }) => node)}
+                    <${ComposerRow}
+                        context=${{ picker, agent, level, view }}
+                        fits=${`${busy}|${sendMode}|${shortModel(agent)}|${level}|${agent?.available}`}
+                    >
                         <input
                             ref=${picker}
                             type="file"
@@ -2507,7 +2584,7 @@ export function Composer() {
                             }
                         </button>
                         ${busy && html`<${StopButton} />`}
-                    </div>
+                    <//>
                 </div>`
         }
         <${StatusLine} />
@@ -2528,6 +2605,13 @@ defineItem("composer", {
     id: "core:attach",
     label: "Attach files",
     order: 200,
+    // Where the model's name would be cut short, in a box up to 480px wide, it folds into ⋯ (`composer-more.js`).
+    fold: 2,
+    more: ({ picker }) => ({
+        name: "Attach files",
+        icon: "clip",
+        run: () => picker.current?.click(),
+    }),
     render: ({ picker }) =>
         html`<button
             class="icon-button attach-button"
@@ -2561,9 +2645,18 @@ defineItem("composer", {
     id: "core:plan",
     label: "Plan",
     order: 400,
+    // In a box up to 480px wide, in the row's ⋯ menu (`composer-more.js`).
+    fold: 1,
+    more: ({ view }) =>
+        planShown(view) && {
+            name: "Plan",
+            icon: "plan",
+            toggle: true,
+            on: view.plan?.on === true,
+            run: () => attempt(() => actions.setPlan(!view.plan?.on)),
+        },
     render: ({ view }) =>
-        planAvailable() &&
-        view.conversation?.kind !== "subagent" &&
+        planShown(view) &&
         html`<button
             class=${`plan-chip ${view.plan?.on ? "on" : ""}`}
             data-part="composer-button plan-chip"
@@ -2575,6 +2668,9 @@ defineItem("composer", {
             Plan
         </button>`,
 });
+
+/** Whether Plan shows in a session's message box: not in a subagent's. */
+const planShown = (view) => planAvailable() && view.conversation?.kind !== "subagent";
 
 /** The browser sizes the message box to its text itself (`field-sizing` in style.css): nothing to measure. */
 const SIZES_ITSELF = globalThis.CSS?.supports?.("field-sizing", "content") ?? false;
@@ -2632,10 +2728,14 @@ function PlacesButton() {
 
 /**
  * The status line's shorter forms, in the order a narrow line takes them until it fits on one row: shorter words and
- * gaps, no "1 here" while you are alone, extensions' items' short forms, the guard's and the context's labels, then the
- * cache, then the wait for the first token.
+ * gaps, no "1 here" while you are alone, extensions' items' short forms, the guard's and the context's labels, the
+ * usage's window ("7d"), then the cache, the usage's "used" and word, the wait for the first token, and last the
+ * usage's meter ("41%" alone).
  */
-const SHORTER = ["words", "here", "ext", "guard", "context", "cache", "wait"];
+const SHORTER = [
+    ...["words", "here", "ext", "guard", "context", "window", "cache"],
+    ...["used", "wait", "bare"],
+];
 /** What each status line was last fitted for: its text. Its width is the observer's to watch. */
 const fitted = new WeakMap();
 
@@ -2877,6 +2977,117 @@ defineItem("status", {
     detail: () =>
         cacheRate() !== undefined &&
         `${Math.round(cacheRate() * 100)}% of the input came from the cache`,
+});
+
+/** Whether the session's provider should show in the status line: live numbers/hold, or an on-demand subscription check. */
+function canShowUsage(view, now) {
+    if (view === null) {
+        return false;
+    }
+
+    if (summary(view, now) !== null) {
+        return true;
+    }
+
+    return (
+        view.provider.refreshable === true && (view.state === "no-data" || view.state === "reset")
+    );
+}
+
+/**
+ * How much of the open session's provider's limits is left, from its last response or an on-demand subscription check
+ * (the owner's, `usage.js`): the tightest window ("7d 41% used"), then "41% used", then "41%". Low and limited keep a
+ * mark and a word. Refreshable subscriptions with no numbers yet still show a compact button that fetches on click.
+ */
+function UsageItem() {
+    useMinute();
+
+    const now = serverNow();
+    const view = sessionUsage(now);
+
+    if (!canShowUsage(view, now)) {
+        return null;
+    }
+
+    const words = summary(view, now);
+    const open = store.state.sheet?.type === "usage";
+
+    if (!words) {
+        const label = view.state === "reset" ? "Reset" : "Usage";
+        const aria =
+            view.state === "reset"
+                ? `${view.provider.name} usage: window reset. Click to check latest usage.`
+                : `${view.provider.name} usage: click to check latest usage.`;
+
+        return html`<button
+            class="usage-now usage-idle"
+            data-part="status-usage"
+            data-state=${view.state}
+            aria-haspopup="dialog"
+            aria-expanded=${open}
+            aria-label=${aria}
+            title=${aria}
+            onClick=${() => (open ? closeSheet() : openUsage("item"))}
+        >
+            <${Icon} path=${USAGE_ICONS.gauge} size=${12} class="gauge" />
+            <span class="val">${label}</span>
+        </button>`;
+    }
+
+    const { window, state, until } = view;
+    const limited = state === "limited";
+    const countText = limited && until !== undefined ? hoursMinutes(until - now) : "";
+
+    return html`<button
+        class=${`usage-now ${limited && countText === "" ? "no-count" : ""}`}
+        data-part="status-usage"
+        data-state=${state}
+        aria-haspopup="dialog"
+        aria-expanded=${open}
+        aria-label=${words.aria}
+        title=${words.aria}
+        onClick=${() => (open ? closeSheet() : openUsage("item"))}
+    >
+        ${limited && html`<${Icon} name="clock" size=${12} />`}
+        ${state === "low" && html`<${Icon} path=${USAGE_ICONS.warn} size=${12} />`}
+        ${state === "ok" && html`<${Icon} path=${USAGE_ICONS.gauge} size=${12} class="gauge" />`}
+        ${
+            limited
+                ? html`<span class="word">Limited</span>`
+                : state === "low" && html`<span class="word">Low</span>`
+        }
+        ${!limited && window.tag !== "" && html`<span class="tag">${window.tag}</span>`}
+        ${!limited && html`<${UsageMeter} state=${state} used=${usedShare(window)} />`}
+        <span class="val">
+            <span class="num">${limited ? countText : percent(window)}</span>
+            ${limited ? "" : html`<span class="used"> used</span>`}
+        </span>
+    </button>`;
+}
+
+defineItem("status", {
+    id: "core:usage",
+    label: "Provider usage",
+    note: "For the owner. The model sheet still shows it when hidden",
+    order: 450,
+    render: () => {
+        const now = serverNow();
+        const view = sessionUsage(now);
+
+        return canShowUsage(view, now) ? html`<${UsageItem} />` : null;
+    },
+    detail: () => {
+        const now = serverNow();
+        const view = sessionUsage(now);
+
+        if (!canShowUsage(view, now)) {
+            return null;
+        }
+
+        return (
+            summary(view, now)?.aria ?? `${view.provider.name} usage: click to check latest usage.`
+        );
+    },
 });
 
 /**

@@ -78,8 +78,22 @@ export default function createAsk(host: PocketHost) {
                 multiple: each.multiSelect === true,
             }));
             let reply = await api.memo<Reply>("pocket.ask", context);
+            const original = await api.memo<string>("pocket.ask.requester", context);
+            const by =
+                original ??
+                (reply === undefined ? host.requesterOf(api.conversationId) : undefined);
+
+            if (by === undefined || !host.canSteer?.(api.conversationId, by)) {
+                throw new Error("This question has no requester who can still steer here.");
+            }
 
             if (reply === undefined) {
+                await api.memo("pocket.ask.requester", by, context);
+
+                if (host.requesterOf(api.conversationId) !== by) {
+                    throw new Error("This question no longer has its original requester.");
+                }
+
                 const fields: AskField[] = questions.map((each, at) => ({
                     name: `q${at + 1}`,
                     label: each.question,

@@ -12,7 +12,7 @@ const context = BACKGROUND_CONTEXT;
 const DEFAULT_INSTRUCTIONS =
     "Something happened that you were set up to hear about. Say in a line what it is, and whether anything needs doing.";
 
-const MAX_PAYLOAD = 8000;
+export const MAX_PAYLOAD = 8000;
 const MAX_INSTRUCTIONS = 4000;
 const TAG = /^[a-z][a-z0-9-]{0,39}$/;
 const MAX_ATTRIBUTES = 8;
@@ -158,19 +158,19 @@ export class Inbox {
         this.#app = app;
     }
 
-    async deliver(target: ConversationId, delivery: InboxDelivery): Promise<{ sent: boolean }> {
+    async deliver(
+        target: ConversationId,
+        delivery: InboxDelivery,
+        checkCurrent?: () => void,
+    ): Promise<{ sent: boolean }> {
+        checkCurrent?.();
         check(delivery);
 
         const app = this.#app;
-        const person = app.config.userById(delivery.by);
+        const person = app.steeringUser(target, delivery.by);
         const meta = app.sessionMeta(target);
 
-        if (
-            person === undefined ||
-            person.role === "viewer" ||
-            meta === undefined ||
-            !app.canSee(person, target)
-        ) {
+        if (person === undefined || meta === undefined) {
             throw new HttpError(410, "This session is gone, or its person cannot reach it.");
         }
 
@@ -185,6 +185,8 @@ export class Inbox {
                 (tx) => tx.submissionByRequest(target, requestFor(person.id, key)),
                 context,
             )) !== undefined;
+
+        checkCurrent?.();
 
         if (sent) {
             return { sent: false };
@@ -212,6 +214,8 @@ export class Inbox {
                 person,
                 { text: inboxText(delivery), requestId: key },
                 viaLabel(delivery.via),
+                undefined,
+                checkCurrent,
             );
         } catch (error) {
             // A message that did not go gives its place in the hour back.

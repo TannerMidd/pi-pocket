@@ -43,6 +43,8 @@ export interface User {
     role: Role;
     /** sha256 of the user's login token; the token itself is only kept for the owner. */
     tokenHash: string;
+    /** Changes when sign-out cannot persist revocation in the push store. */
+    pushGeneration?: string;
     createdAt: number;
     lastSeen?: number;
     /** Conversation ids of the only sessions this person may open; absent means every session. */
@@ -105,7 +107,7 @@ interface PocketConfig {
     themeDefault?: ThemeDefault;
     /** Extension modules (file names in `src/server/extensions/`) the owner turned off. */
     disabledExtensions?: string[];
-    /** Extension modules the owner turned on. Matters for modules that are off by default, like Lancet Guard. */
+    /** Extension modules enabled at profile creation or by the owner; overrides the loader's legacy defaults. */
     enabledExtensions?: string[];
     /** "others": a guest cannot allow a risky call that their own message led to. Absent: anyone who can steer may. */
     approvals?: ApprovalRule;
@@ -116,6 +118,11 @@ interface PocketConfig {
      * Absent or empty: none, and subagents always run on their session's model.
      */
     subagentModels?: string[];
+    /**
+     * The classifier model (`provider/modelId`) modules use when their own setting is empty, as the owner chose it in
+     * Providers. Absent: none chosen, and the classifier features do nothing.
+     */
+    classifierModel?: string;
     /** The most hours a run waits for a model's limit to clear (`limit-gate.ts`); 0: it does not wait. Absent: 6. */
     limitWaitHours?: number;
     /**
@@ -166,6 +173,13 @@ export class ConfigStore {
             this.#config = {
                 version: 1,
                 ownerToken,
+                // Seed new profiles only. Missing flags in an existing profile must keep their old meaning.
+                enabledExtensions: [
+                    "agent-teams.ts",
+                    "pocket-relay.ts",
+                    "relay-triage.ts",
+                    "run-outcomes.ts",
+                ],
                 users: [
                     {
                         id: randomUUID(),
@@ -292,6 +306,24 @@ export class ConfigStore {
         this.save();
     }
 
+    /** The owner's shared classifier model (`provider/modelId`); undefined: none chosen. */
+    get classifierModel(): string | undefined {
+        const model = this.#config.classifierModel;
+
+        // Read from a file people may have edited: only a provider/modelId string counts.
+        return typeof model === "string" && model.indexOf("/") > 0 ? model.trim() : undefined;
+    }
+
+    set classifierModel(model: string | undefined) {
+        if (model === undefined) {
+            delete this.#config.classifierModel;
+        } else {
+            this.#config.classifierModel = model;
+        }
+
+        this.save();
+    }
+
     /** How many hours a run waits for a limit to clear, at most; 0: not at all. */
     get limitWaitHours(): number {
         const hours = this.#config.limitWaitHours;
@@ -381,6 +413,32 @@ export class ConfigStore {
 
     userById(id: string): User | undefined {
         return this.#config.users.find((user) => user.id === id);
+    }
+
+    pushCredential(id: string): string | undefined {
+        const user = this.userById(id);
+
+        return user?.tokenHash
+            ? hashToken(`push:${user.tokenHash}:${user.pushGeneration ?? ""}`)
+            : undefined;
+    }
+
+    revokeUserPush(id: string): void {
+        const user = this.userById(id);
+
+        if (user !== undefined) {
+            const previous = user.pushGeneration;
+
+            user.pushGeneration = randomUUID();
+
+            try {
+                this.save();
+            } catch (error) {
+                user.pushGeneration = previous;
+
+                throw error;
+            }
+        }
     }
 
     addUser(name: string, role: Role, sessions?: string[]): { user: User; token: string } {

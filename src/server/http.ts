@@ -50,7 +50,7 @@ function pageFacts(
 
 export function createHandler(options: HttpOptions) {
     const { app } = options;
-    const auth = new Auth(app.config);
+    const auth = new Auth(app.config, app.pushStore);
     const api = createApi(options, auth);
 
     return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

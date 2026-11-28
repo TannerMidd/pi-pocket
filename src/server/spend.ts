@@ -21,10 +21,13 @@ const COUNT_AFTER_MS = 250;
 
 export const dollars = (amount: number) => `$${amount.toFixed(2)}`;
 
+type SessionSpend = { id: number; title: string; spent: number };
+
 export type SpendSummary = {
     /** Everything Pi spent on this server; only the owner sees it. */
     total?: number;
-    sessions: { id: number; title: string; spent: number; budget?: number }[];
+    sessions: (SessionSpend & { budget?: number })[];
+    teams: { lead: number; spent: number; members: SessionSpend[] }[];
     /** Everyone for the owner; others see themselves. */
     people: { id: string; name: string; spent: number; budget?: number }[];
 };
@@ -464,16 +467,49 @@ export class Spend {
             byRoot.set(root, (byRoot.get(root) ?? 0) + cost);
         }
 
-        const sessions = app.sessions(user).map((session) => {
-            const id = session.id as unknown as ConversationId;
-            const budget = app.sessionMeta(id)?.budget;
+        const visible = app.sessions(user);
+        const individual = new Map(
+            visible.map(({ id, title }) => [
+                id,
+                {
+                    id,
+                    title: title ?? "New session",
+                    spent: byRoot.get(id as unknown as ConversationId) ?? 0,
+                },
+            ]),
+        );
+        const groups = new Map<number, SpendSummary["teams"][number]>();
 
-            return {
-                id: session.id,
-                title: session.title ?? "New session",
-                spent: budget === undefined ? (byRoot.get(id) ?? 0) : this.budgetSpent(id),
-                ...(budget === undefined ? {} : { budget }),
+        // Agent Teams has one lead and direct linked sessions. Use the visible links, not the budget rollup.
+        for (const { id, linkedFrom } of visible) {
+            const lead = linkedFrom && individual.get(linkedFrom.id);
+
+            if (!lead || lead.id === id) {
+                continue;
+            }
+
+            const member = individual.get(id)!;
+            const group = groups.get(lead.id) ?? {
+                lead: lead.id,
+                spent: lead.spent,
+                members: [lead],
             };
+
+            group.members.push(member);
+            group.spent += member.spent;
+            groups.set(lead.id, group);
+        }
+
+        const sessions = visible.map(({ id, budget }) => {
+            const own = individual.get(id)!;
+            const spent =
+                budget === undefined
+                    ? own.spent
+                    : user.sessions !== undefined
+                      ? (groups.get(id)?.spent ?? own.spent)
+                      : this.budgetSpent(id as unknown as ConversationId);
+
+            return { ...own, spent, ...(budget === undefined ? {} : { budget }) };
         });
         // PiP is out of the session list, not out of the spending: its person sees what it cost.
         const pip = app.pip.idOf(user.id);
@@ -503,6 +539,7 @@ export class Spend {
         return {
             ...(owner ? { total } : {}),
             sessions: sessions.sort((a, b) => b.spent - a.spent),
+            teams: [...groups.values()].sort((a, b) => b.spent - a.spent),
             people: people.sort((a, b) => b.spent - a.spent),
         };
     }

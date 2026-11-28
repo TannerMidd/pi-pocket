@@ -5,8 +5,8 @@
  * command checks who may do it, and changes others should know about become activity lines in the session's chat.
  */
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { basename, extname, join, sep } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { basename, extname, join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { copyJson, type JsonValue } from "@earendil-works/chord/json";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -47,6 +47,7 @@ import {
     HeldDoc,
     type HeldMessage,
     InterruptsDoc,
+    IssuedUploadsDoc,
     NotesDoc,
     PinsDoc,
     PlanDoc,
@@ -58,6 +59,7 @@ import {
 } from "./docs.ts";
 import {
     ATTACHMENTS_HEADING,
+    UPLOAD_INPUT,
     CONTEXT_BLOCK,
     FILE_BLOCK,
     FROM_PREFIX,
@@ -65,9 +67,23 @@ import {
     splitAttachments,
 } from "./entry-format.ts";
 import { describe, HttpError, optionalFlag, optionalText } from "./errors.ts";
+import {
+    type Attachment,
+    checkedUploads,
+    uploadData,
+    uploadInput,
+    uploadRefs,
+} from "./upload-references.ts";
 import { attribute } from "./fence.ts";
 import { homePath } from "./paths.ts";
-import { forModel, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
+import { forModel, issuedModelImage, MAX_INLINE_IMAGE, modelImage } from "./model-images.ts";
+import {
+    type ReadableFile,
+    sameContent,
+    uploadContent,
+    type UploadContent,
+    withUploadBytes,
+} from "./upload-content.ts";
 import { mentionedPaths, viewFile } from "./files.ts";
 import { isThinkingLevel, THINKING_LEVELS } from "./models.ts";
 import { writePiSession } from "./pi-sessions.ts";
@@ -80,14 +96,16 @@ import {
 } from "./project-model.ts";
 import { expandPromptTemplate, expandSkillCommand, unwrapSkill } from "./prompts.ts";
 import { clientKey, ownRequest, requestFor, requestPerson } from "./requests.ts";
+import { newestOf } from "./room.ts";
 import {
+    canRequeue,
+    type CanSteer,
     type Interrupt,
     interruptTask,
     type Requeue,
     type Resend,
-    resendContent,
-    resendRequest,
-    ResendTask,
+    resendDraft,
+    resendTask,
     userContent,
 } from "./resend.ts";
 import { whyUnanswered } from "./subagent-runs.ts";
@@ -104,30 +122,91 @@ import {
 
 const context = BACKGROUND_CONTEXT;
 
-export type Attachment = { path: string; name: string; mime: string; size: number };
+export type { Attachment } from "./upload-references.ts";
 
-// A name can hold " (", so the path is the part that ends with "-name".
-function attachedFile(line: string, uploads: string): Attachment[] {
-    const tail = /, ([^,]+), (\d+) bytes\)(?: \[Image: .*)?$/.exec(line);
+function attachmentLine(file: Attachment): string {
+    return `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`;
+}
 
-    if (!line.startsWith("- ") || tail === null) {
-        return [];
+/** Do not withdraw what the composer cannot represent, including images with no uploaded original. */
+async function editableInput(
+    app: PocketApp,
+    id: ConversationId,
+    content: UserInput,
+    entry: unknown,
+) {
+    const { text: body, images } = userContent({ content });
+    const written = body.replace(FROM_PREFIX, "");
+    const data = uploadData(entry);
+    const refs = uploadRefs(entry);
+    const unsafe = () =>
+        new HttpError(
+            409,
+            "The attachment list cannot be verified. This message has not changed. Attach the files again in a new message.",
+        );
+
+    if (
+        Array.isArray(content) &&
+        content.some((part, index) => index > 0 && part.type === "text")
+    ) {
+        // An inline file or quoted session context has no attachment the composer can restore.
+        throw unsafe();
     }
 
-    const head = line.slice(2, tail.index);
+    if (data === undefined && images.length === 0 && splitAttachments(written)[1] === undefined) {
+        return { text: written, attachments: [] };
+    }
 
-    for (let at = head.indexOf(" ("); at !== -1; at = head.indexOf(" (", at + 1)) {
-        const path = head.slice(0, at);
-        const name = head.slice(at + 2);
+    if (!Array.isArray(data?.uploads) || refs.length === 0 || refs.length !== data.uploads.length) {
+        throw unsafe();
+    }
 
-        if (path.startsWith(uploads + sep) && path.endsWith(`-${name}`)) {
-            const mime = tail[1] === "unknown type" ? "" : tail[1]!;
+    const at = written.lastIndexOf(ATTACHMENTS_HEADING);
 
-            return [{ path, name, mime, size: Number(tail[2]) }];
+    if (at < 0) {
+        throw unsafe();
+    }
+
+    const lines = written.slice(at + ATTACHMENTS_HEADING.length).split("\n");
+    const attachments = await checkedUploads(app, id, { refs }).catch(() => {
+        throw unsafe();
+    });
+
+    if (
+        lines.length !== attachments.length ||
+        !attachments.every((file, index) => {
+            const line = attachmentLine(file);
+
+            return lines[index] === line || lines[index]!.startsWith(line + " [Image: ");
+        })
+    ) {
+        throw unsafe();
+    }
+
+    if (images.length !== 0) {
+        const originals = attachments.filter((file) => forModel(file.mime, file.size));
+        const model = (await app.agentState(id))?.model;
+
+        if (
+            images.length !== originals.length ||
+            model === undefined ||
+            !app.models.getModel(model.provider, model.modelId)?.input.includes("image")
+        ) {
+            throw unsafe();
+        }
+
+        for (const [index, file] of originals.entries()) {
+            const { image } = await modelImage(file.path, file.mime).catch(() => {
+                throw unsafe();
+            });
+
+            if (image.mimeType !== images[index]!.mimeType || image.data !== images[index]!.data) {
+                throw unsafe();
+            }
         }
     }
 
-    return [];
+    return { text: written.slice(0, at), attachments };
 }
 
 export interface SubmitRequest {
@@ -189,6 +268,8 @@ export const dealtWith = (name: string): string => {
 
 /** What dismissing a subagent's failure came to: `newer` when it failed again since the failure seen. */
 type Dismissal = { dismissed: boolean; newer?: true };
+/** What hiding a subagent from its parent's bar came to: `newer` when it did something since what was seen. */
+type Hiding = { hidden: boolean; newer?: true; failure?: number };
 /** The extension that makes plan mode block changes; without it, plan mode would do nothing. */
 const PLAN_EXTENSION = "pocket-plan";
 /** What Pi is told when someone approves its plan. */
@@ -350,20 +431,27 @@ export class Commands {
     /** An Interrupt (`submit`, `moveQueued`): it stops the run it was made for, by that run's id. */
     readonly interruptTask: Task<Interrupt, { phase: "send" }, null, object>;
 
+    readonly resendTask: ReturnType<typeof resendTask>;
+    readonly #canSteer: CanSteer;
+
     constructor(app: PocketApp) {
         this.#app = app;
-        this.interruptTask = interruptTask(async (run, context) => {
+        this.#canSteer = (id, by) => app.steeringUser(id, by) !== undefined;
+        this.resendTask = resendTask(this.#canSteer, (id, resend) =>
+            this.#resendGrants(id, resend),
+        );
+        this.interruptTask = interruptTask(async (run, context, allowed) => {
             const harness = this.#app.harness;
             const task = run as unknown as TaskId;
             const record = await harness.getTask(task, context);
 
-            if (record === undefined || record.state.status === "terminal") {
+            if (record === undefined || record.state.status === "terminal" || !allowed()) {
                 return;
             }
 
             await harness.abortTask(task, context);
             await harness.waitForTask(task, context);
-        });
+        }, this.#canSteer);
         this.followTask = defineTask<Followed, { phase: "wait" }, null>({
             name: "pocket.follow-failure",
             version: 1,
@@ -547,6 +635,21 @@ export class Commands {
         return { id: conversation.id };
     }
 
+    #checkWorktree(worktree: Worktree): void {
+        const app = this.#app;
+        const name = basename(worktree.path);
+        const root = app.managedStorage.root("worktrees");
+
+        if (
+            worktree.path !== join(app.dataDir, "worktrees", name) &&
+            worktree.path !== join(root, name)
+        ) {
+            throw new HttpError(409, "That worktree is outside the managed folder.");
+        }
+
+        app.managedStorage.folder("worktrees", name);
+    }
+
     /**
      * Run `create` with the folder a new session works in: `cwd` itself, or, when `isolated`, the matching folder in a
      * new git worktree made from it, named after `label`. A worktree whose session `create` did not make is discarded.
@@ -561,13 +664,21 @@ export class Commands {
             return create({ cwd, skipped: [] });
         }
 
-        const made = await createWorktree(cwd, join(this.#app.dataDir, "worktrees"), label);
+        const storage = this.#app.managedStorage;
+        const made = await createWorktree(cwd, join(this.#app.dataDir, "worktrees"), label, {
+            root: () => storage.root("worktrees"),
+            created: (worktree) => storage.recordWorktree(basename(worktree.path)),
+            check: (worktree) => this.#checkWorktree(worktree),
+        });
 
         try {
             return await create(made);
         } catch (error) {
-            await discardWorktree(made.worktree).catch((cleanup: unknown) =>
-                this.#app.log(`worktree ${made.worktree.path} left behind: ${describe(cleanup)}`),
+            await discardWorktree(made.worktree, () => this.#checkWorktree(made.worktree)).catch(
+                (cleanup: unknown) =>
+                    this.#app.log(
+                        `worktree ${made.worktree.path} left behind: ${describe(cleanup)}`,
+                    ),
             );
 
             throw error;
@@ -619,7 +730,7 @@ export class Commands {
             .filter((each) => inside(app.cwdOf(each)))
             .map((each) => ({ id: each, cwd: back(app.cwdOf(each)) }));
 
-        await removeWorktree(worktree, force === true);
+        await removeWorktree(worktree, force === true, () => this.#checkWorktree(worktree));
 
         // The session and its subagents go back to the folders the worktree came from.
         for (const move of moves) {
@@ -802,16 +913,29 @@ export class Commands {
             beforeSubmit(): Promise<{ user: User; context: Context }>;
             afterSubmit(): void;
         },
+        checkCurrent?: () => void,
+        checkPolicy?: (tx: Tx) => Promise<void>,
     ): Promise<{ submissionId: SubmissionId; requestId: string }> {
         const app = this.#app;
 
         app.requireSee(user, id);
+        app.requireSteer(user);
+        user = this.#requireRequester(id, user.id);
         await app.requireDriver(id, user);
 
         // PiP turned off takes nothing, from its person either: it would run without its rules, and be compacted without
         // its own summary (`pip-compact.ts`). What else goes to it (reports, schedules, watches) waits meanwhile.
         if (app.pip.ownerOf(id) !== undefined && !app.pip.available(user)) {
             throw new HttpError(409, "PiP is turned off in Extensions.");
+        }
+
+        const workspaceUnavailable =
+            typeof app.workspaceUnavailable === "function" && typeof app.cwdOf === "function"
+                ? app.workspaceUnavailable(app.cwdOf(id))
+                : undefined;
+
+        if (workspaceUnavailable !== undefined) {
+            throw new HttpError(409, workspaceUnavailable);
         }
 
         const conversation = await app.conversation(id);
@@ -824,7 +948,10 @@ export class Commands {
               : typed;
         // A value an extension hides (`host.hide`), pasted into the message, is never stored nor sent to the model.
         const text = app.hidden.replace(expanded, id);
-        const attachments = request.attachments ?? [];
+        const attachments = await checkedUploads(app, id, {
+            attachments: request.attachments ?? [],
+        });
+        const refs = attachments.map((file) => `${id}/${basename(file.path)}`);
 
         if (text === "" && attachments.length === 0) {
             throw new HttpError(400, "Nothing to send");
@@ -847,9 +974,7 @@ export class Commands {
         const images = model.input.includes("image")
             ? attachments.filter((file) => forModel(file.mime, file.size))
             : [];
-        const made = await Promise.allSettled(
-            images.map((file) => modelImage(file.path, file.mime)),
-        );
+        const made = await Promise.allSettled(images.map(issuedModelImage));
         // What differs between a file and the image the model gets goes on the file's line.
         const notes = new Map<Attachment, string>();
 
@@ -861,7 +986,7 @@ export class Commands {
 
         const lines = attachments.map((file) => {
             const note = notes.get(file);
-            const line = `- ${file.path} (${file.name}, ${file.mime || "unknown type"}, ${file.size} bytes)`;
+            const line = attachmentLine(file);
 
             return note === undefined ? line : `${line} ${note}`;
         });
@@ -906,6 +1031,11 @@ export class Commands {
         // A failed subagent's failure as the person writes to it: what their message comes to settles it.
         const failure = await this.#failureOf(id);
 
+        // A retry of a request finds its first submission: it is no new message, and no event goes out for it again.
+        const known =
+            app.pip.ownerOf(id) === undefined &&
+            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
+                undefined;
         let submitContext = context;
 
         // Human extension starts acquire a short policy lease after preparation. Its context checks policy again
@@ -915,27 +1045,32 @@ export class Commands {
 
             user = accepted.user;
             submitContext = accepted.context;
-            submitContext.abortSignal?.throwIfAborted();
         }
 
-        // A retry of a request finds its first submission: it is no new message, and no event goes out for it again.
-        const known =
-            app.pip.ownerOf(id) === undefined &&
-            (await app.harness.commit((tx) => tx.submissionByRequest(id, requestId), context)) !==
-                undefined;
         // Only a person's own message interrupts, never one sent for them (`via`). The same durable handoff as a
         // queued message's Interrupt keeps everything waiting, before it stops the run. Admission releases its lease
         // once that handoff is stored, not while the task stops the run and puts the messages back.
         const draft = {
             type: "input" as const,
             content,
+            ...uploadInput(refs),
             whenBusy: request.mode === "steer" ? ("steer" as const) : ("followUp" as const),
             requestId,
         };
         const admitted = await (
             request.mode === "interrupt" && via === undefined
-                ? this.#interrupt(id, { content, requestId }, submitContext)
-                : this.#submitInput(conversation, draft, user, via, text, known, submitContext)
+                ? this.#interrupt(id, draft, submitContext)
+                : this.#submitInput(
+                      conversation,
+                      draft,
+                      user,
+                      via,
+                      text,
+                      known,
+                      submitContext,
+                      checkCurrent,
+                      checkPolicy,
+                  )
         ).finally(() => admission?.afterSubmit());
         let submissionId: SubmissionId;
 
@@ -996,8 +1131,18 @@ export class Commands {
         text: string,
         known: boolean,
         submitContext: Context,
+        checkCurrent?: () => void,
+        checkPolicy?: (tx: Tx) => Promise<void>,
     ): Promise<{ submissionId: SubmissionId }> {
         const app = this.#app;
+
+        const check = () => {
+            checkCurrent?.();
+            submitContext.abortSignal?.throwIfAborted();
+            app.spend.check(this.#requireRequester(conversation.id, user.id), conversation.id);
+        };
+
+        check();
         const noted =
             !known && app.pip.ownerOf(conversation.id) === undefined
                 ? await app.turnNotes.submit(
@@ -1005,6 +1150,8 @@ export class Commands {
                       draft,
                       { by: user.id, ...(via === undefined ? {} : { via }), text, at: app.now() },
                       submitContext,
+                      check,
+                      checkPolicy,
                   )
                 : undefined;
 
@@ -1012,7 +1159,18 @@ export class Commands {
             return { submissionId: noted };
         }
 
-        return { submissionId: (await conversation.submit(draft, submitContext)).id };
+        const submissionId = await app.harness.commit(async (tx) => {
+            await checkPolicy?.(tx);
+            check();
+
+            const id = await conversation.submit(tx, draft);
+
+            check();
+
+            return id;
+        }, submitContext);
+
+        return { submissionId };
     }
 
     /** Submissions `message.sent` went out for lately: a retry that raced its first try finds its id here. */
@@ -1107,6 +1265,75 @@ export class Commands {
         }
 
         return this.#dismissFailure(id, user, at);
+    }
+
+    /**
+     * A person hid a finished subagent (`id`, its conversation) from its parent's subagents bar, for everyone, or showed
+     * it again (`hidden` false: they opened it). `at` is the newest thing they saw it do (its `askedAt` or `answeredAt`):
+     * it stays hidden until it does something newer, and one that did already is not hidden, which `newer` says. Hiding
+     * a failure deals with it too. Not hidden while it works. The board and Pi see it as before.
+     */
+    async hideSubagent(
+        id: ConversationId,
+        user: User,
+        hidden: unknown,
+        at: unknown,
+    ): Promise<Hiding> {
+        const app = this.#app;
+
+        app.requireSee(user, id);
+        app.requireSteer(user);
+
+        if (typeof hidden !== "boolean") {
+            throw new HttpError(400, "hidden must be true or false");
+        }
+
+        if (hidden && (typeof at !== "number" || !Number.isFinite(at))) {
+            throw new HttpError(400, "at must be the time of the newest thing seen");
+        }
+
+        const parent = app.parentOf(id);
+
+        if (parent === undefined) {
+            throw new HttpError(404, "Not a subagent");
+        }
+
+        if (hidden && app.isBusy(id)) {
+            return { hidden: false };
+        }
+
+        const answer = await app.harness.commit(async (tx): Promise<Hiding> => {
+            const agents = (await tx.doc(SubagentsDoc, parent)).agents;
+            const record = Object.values(agents).find((each) => each.conversationId === id);
+
+            if (record === undefined) {
+                return { hidden: false };
+            }
+
+            if (!hidden) {
+                delete record.hiddenAt;
+
+                return { hidden: false };
+            }
+
+            if (newestOf(record) !== at) {
+                return { hidden: false, newer: true };
+            }
+
+            record.hiddenAt = at;
+
+            return {
+                hidden: true,
+                ...(record.failed === true ? { failure: record.answeredAt ?? 0 } : {}),
+            };
+        }, context);
+
+        // A failure hidden needs nobody either; a stop has no failure to deal with, and `#dismissFailure` knows it.
+        if (answer.failure !== undefined) {
+            await this.#dismissFailure(id, user, answer.failure);
+        }
+
+        return { hidden: answer.hidden, ...(answer.newer ? { newer: true } : {}) };
     }
 
     /**
@@ -1218,13 +1445,13 @@ export class Commands {
         let total = 0;
 
         for (const mention of mentionedPaths(text).slice(0, MAX_MENTIONED)) {
-            let file: string | undefined;
+            let file: ReadableFile | undefined;
 
             for (const candidate of mention.candidates) {
                 try {
                     const resolved = app.workspace.readableFile(user, id, candidate);
 
-                    if (statSync(resolved).isFile()) {
+                    if (typeof resolved !== "string" || statSync(resolved).isFile()) {
                         file = resolved;
                         break;
                     }
@@ -1238,11 +1465,21 @@ export class Commands {
             }
 
             try {
-                const mime = IMAGE_MIME[extname(file).toLowerCase()];
+                const path = typeof file === "string" ? file : file.path;
+                const mime = IMAGE_MIME[extname(path).toLowerCase()];
 
                 if (mime !== undefined) {
-                    if (images && statSync(file).size <= MAX_INLINE_IMAGE) {
-                        parts.push((await modelImage(file, mime)).image);
+                    if (
+                        images &&
+                        (typeof file === "string" ? statSync(file).size : file.content.size) <=
+                            MAX_INLINE_IMAGE
+                    ) {
+                        parts.push(
+                            (typeof file === "string"
+                                ? await modelImage(file, mime)
+                                : await withUploadBytes(file, (bytes) => modelImage(bytes, mime))
+                            ).image,
+                        );
                     }
 
                     continue;
@@ -1265,7 +1502,7 @@ export class Commands {
 
                 parts.push({
                     type: "text",
-                    text: `${FILE_BLOCK}${file}">\n${content}${cut}\n</file>`,
+                    text: `${FILE_BLOCK}${path}">\n${content}${cut}\n</file>`,
                 });
             } catch (error) {
                 app.notice("warning", `Could not send ${mention.written}: ${describe(error)}`, id);
@@ -1424,18 +1661,99 @@ export class Commands {
 
     /** A subagent a person stops: its report to its parent says a person did, not that it failed. */
     async #stoppedByPerson(id: ConversationId): Promise<void> {
+        if (this.#app.parentOf(id) !== undefined && this.#app.isBusy(id)) {
+            await this.#app.harness.commit((tx) => this.#markStopped(tx, id), context);
+        }
+    }
+
+    async #markStopped(tx: Tx, id: ConversationId): Promise<void> {
         const parent = this.#app.parentOf(id);
 
-        if (parent === undefined || !this.#app.isBusy(id)) {
-            return;
-        }
-
-        await this.#app.harness.commit(async (tx) => {
+        if (parent !== undefined) {
             const agents = (await tx.doc(SubagentsDoc, parent)).agents;
             const name = Object.keys(agents).find((each) => agents[each]!.conversationId === id);
 
             if (name !== undefined) {
                 agents[name]!.stoppedBy = "person";
+            }
+        }
+    }
+
+    #requireRequester(id: ConversationId, person: string | undefined): User {
+        const user = this.#app.steeringUser(id, person);
+
+        if (user === undefined) {
+            throw new HttpError(403, "This person can no longer steer this session.");
+        }
+
+        return user;
+    }
+
+    /** Drop revoked people's queued and held inputs before recovery resumes or revoked runs stop. */
+    async pruneQueued(ids: Iterable<ConversationId>, personId?: string): Promise<void> {
+        if (personId !== undefined) {
+            // Join the mutation line synchronously, before a later boundary can select the queued inputs.
+            await Promise.all(
+                Array.from(ids, (id) =>
+                    this.#canSteer(id, personId)
+                        ? undefined
+                        : this.#pruneQueue(id, personId, true, true),
+                ),
+            );
+
+            return;
+        }
+
+        // Startup runs with the harness paused. Do not create inbox or held documents for empty sessions.
+        for (const id of ids) {
+            const inbox = (await this.#app.harness.snapshot(InboxDoc, id, context))?.items.length;
+            const held = (await this.#app.harness.snapshot(HeldDoc, id, context))?.items.length;
+
+            if (inbox || held) {
+                await this.#pruneQueue(id, undefined, Boolean(inbox), Boolean(held));
+            }
+        }
+    }
+
+    async #pruneQueue(
+        id: ConversationId,
+        personId: string | undefined,
+        hasInbox: boolean,
+        hasHeld: boolean,
+    ): Promise<void> {
+        const drop = (requestId: string | undefined) =>
+            personId === undefined
+                ? !canRequeue(id, requestId, this.#canSteer)
+                : requestPerson(requestId)?.userId === personId;
+
+        await this.#app.harness.commit(async (tx) => {
+            if (hasHeld) {
+                const held = await tx.doc(HeldDoc, id);
+
+                for (let at = held.items.length - 1; at >= 0; at--) {
+                    if (drop(held.items[at]!.requestId)) {
+                        held.items.splice(at, 1);
+                    }
+                }
+            }
+
+            if (hasInbox) {
+                const inbox = await tx.doc(InboxDoc, id);
+                const removed = new Set<SubmissionId>();
+
+                for (const item of inbox.items) {
+                    if (item.mode !== "write" && drop((await tx.submission(item.id))?.requestId)) {
+                        removed.add(item.id);
+                    }
+                }
+
+                if (removed.size > 0) {
+                    inbox.items = inbox.items.filter((item) => !removed.has(item.id));
+
+                    for (const item of removed) {
+                        tx.settleSubmission(item, { status: "unanswered", reason: "aborted" });
+                    }
+                }
             }
         }, context);
     }
@@ -1446,92 +1764,67 @@ export class Commands {
      */
     async #hold(id: ConversationId): Promise<number> {
         const app = this.#app;
-        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
-        const requests = new Map<number, string | undefined>();
 
-        for (let attempt = 0; ; attempt++) {
-            const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+        return app.harness.commit(async (tx) => {
+            const items = (await tx.doc(InboxDoc, id)).items;
+            // Every table read comes before the commit's first table write.
+            const subagents = await tx.doc(SubagentsDoc, id);
+            const batch =
+                subagents.sending === undefined
+                    ? undefined
+                    : await tx.submissionByRequest(id, subagents.sending.request);
+            const now = app.now();
+            const taken = new Set<SubmissionId>();
+            const adding: HeldMessage[] = [];
 
-            for (const item of queued) {
-                if (item.mode !== "write" && !requests.has(Number(item.id))) {
-                    const record = await (
-                        await app.harness.submission(item.id, context)
-                    )?.status(context);
+            for (const item of items) {
+                if (item.mode === "write" || item.id === batch?.id) {
+                    continue;
+                }
 
-                    requests.set(Number(item.id), record?.requestId);
+                const first = (await tx.submission(item.id))?.requestId;
+                const person = requestPerson(first);
+
+                taken.add(item.id);
+
+                if (first === undefined || !canRequeue(id, first, this.#canSteer)) {
+                    continue;
+                }
+
+                adding.push({
+                    key: String(item.id),
+                    content: copyJson(item.content) as JsonValue,
+                    mode: item.mode,
+                    // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
+                    requestId: `${first.replace(/(~\d+)+$/, "")}~${String(item.id)}`,
+                    ...(item.entry === undefined
+                        ? {}
+                        : { entry: copyJson(item.entry) as JsonValue }),
+                    ...(person?.wrote === true ? { by: person.userId } : {}),
+                    heldAt: now,
+                });
+            }
+
+            if (taken.size === 0) {
+                return 0;
+            }
+
+            for (let at = items.length - 1; at >= 0; at--) {
+                if (taken.has(items[at]!.id)) {
+                    items.splice(at, 1);
                 }
             }
 
-            const held = await app.harness.commit(async (tx) => {
-                const items = (await tx.doc(InboxDoc, id)).items;
-                // Every table read comes before the commit's first table write.
-                const subagents = await tx.doc(SubagentsDoc, id);
-                const batch =
-                    subagents.sending === undefined
-                        ? undefined
-                        : await tx.submissionByRequest(id, subagents.sending.request);
-                const now = app.now();
-                const taken = new Set<SubmissionId>();
-                const adding: HeldMessage[] = [];
-
-                for (const item of items) {
-                    if (item.mode === "write" || item.id === batch?.id) {
-                        continue;
-                    }
-
-                    if (!requests.has(Number(item.id))) {
-                        // Queued since the requests were read. Stop must not fail: after a few tries, it goes.
-                        if (attempt < 3) {
-                            return "again";
-                        }
-
-                        continue;
-                    }
-
-                    const first = requests.get(Number(item.id));
-                    const person = requestPerson(first);
-
-                    taken.add(item.id);
-                    adding.push({
-                        key: String(item.id),
-                        content: copyJson(item.content) as JsonValue,
-                        mode: item.mode,
-                        // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
-                        requestId:
-                            first === undefined
-                                ? `held-${String(item.id)}`
-                                : `${first.replace(/(~\d+)+$/, "")}~${String(item.id)}`,
-                        ...(item.entry === undefined
-                            ? {}
-                            : { entry: copyJson(item.entry) as JsonValue }),
-                        ...(person?.wrote === true ? { by: person.userId } : {}),
-                        heldAt: now,
-                    });
-                }
-
-                if (taken.size === 0) {
-                    return 0;
-                }
-
-                for (let at = items.length - 1; at >= 0; at--) {
-                    if (taken.has(items[at]!.id)) {
-                        items.splice(at, 1);
-                    }
-                }
-
-                for (const item of taken) {
-                    tx.settleSubmission(item, { status: "unanswered", reason: "aborted" });
-                }
-
+            if (adding.length > 0) {
                 (await tx.doc(HeldDoc, id)).items.push(...adding);
-
-                return taken.size;
-            }, context);
-
-            if (held !== "again") {
-                return held;
             }
-        }
+
+            for (const item of taken) {
+                tx.settleSubmission(item, { status: "unanswered", reason: "aborted" });
+            }
+
+            return adding.length;
+        }, context);
     }
 
     /**
@@ -1565,18 +1858,24 @@ export class Commands {
                     return false;
                 }
 
-                await conversation.submit(tx, {
-                    type: "input",
-                    content: item.content as unknown as UserInput,
-                    whenBusy: item.mode,
-                    requestId: item.requestId,
-                    ...(item.entry === undefined
-                        ? {}
-                        : { entry: item.entry as unknown as InputEntry }),
-                });
+                app.spend.check(this.#requireRequester(id, user.id), id);
+                const allowed = canRequeue(id, item.requestId, this.#canSteer);
+
+                if (allowed) {
+                    await conversation.submit(tx, {
+                        type: "input",
+                        content: item.content as unknown as UserInput,
+                        whenBusy: item.mode,
+                        requestId: item.requestId,
+                        ...(item.entry === undefined
+                            ? {}
+                            : { entry: item.entry as unknown as InputEntry }),
+                    });
+                }
+
                 doc.items = doc.items.filter((each) => each.key !== key);
 
-                return true;
+                return allowed;
             }, context);
 
             sent += went ? 1 : 0;
@@ -1630,19 +1929,11 @@ export class Commands {
             throw new HttpError(403, "Only its sender can edit a held message.");
         }
 
-        await this.#unhold(id, key);
-        const [written, files] = splitAttachments(
-            userContent({ content: item.content as unknown as UserInput }).text.replace(
-                FROM_PREFIX,
-                "",
-            ),
-        );
-        const uploads = app.workspace.uploadDirectory(id);
+        const draft = await editableInput(app, id, item.content as UserInput, item.entry);
 
-        return {
-            text: written,
-            attachments: (files ?? "").split("\n").flatMap((line) => attachedFile(line, uploads)),
-        };
+        await this.#unhold(id, key);
+
+        return draft;
     }
 
     async #heldItem(id: ConversationId, key: string): Promise<HeldMessage> {
@@ -1747,29 +2038,23 @@ export class Commands {
         const item = (await app.harness.snapshot(InboxDoc, id, context))?.items.find(
             (entry) => Number(entry.id) === submissionId,
         );
-        const result =
-            item === undefined || item.mode === "write"
-                ? "not_found"
-                : await app.harness.abortSubmission(
-                      submissionId as unknown as SubmissionId,
-                      context,
-                      id,
-                  );
 
-        if (item === undefined || item.mode === "write" || result !== "aborted") {
+        if (item === undefined || item.mode === "write") {
             throw new HttpError(409, "That message has already gone to Pi.");
         }
 
-        // A `/skill:` or prompt template message comes back as it was sent: expanded.
-        const [written, files] = splitAttachments(
-            userContent({ content: item.content }).text.replace(FROM_PREFIX, ""),
+        const draft = await editableInput(app, id, item.content, item.entry);
+        const result = await app.harness.abortSubmission(
+            submissionId as unknown as SubmissionId,
+            context,
+            id,
         );
-        const uploads = app.workspace.uploadDirectory(id);
 
-        return {
-            text: written,
-            attachments: (files ?? "").split("\n").flatMap((line) => attachedFile(line, uploads)),
-        };
+        if (result !== "aborted") {
+            throw new HttpError(409, "That message has already gone to Pi.");
+        }
+
+        return draft;
     }
 
     /**
@@ -1820,6 +2105,7 @@ export class Commands {
                     return false;
                 }
 
+                this.#requireRequester(id, user.id);
                 item.mode = mode;
 
                 return true;
@@ -1842,154 +2128,140 @@ export class Commands {
     /** Store an Interrupt and every waiting input together, before stopping only the run seen in this commit. */
     async #interrupt(
         id: ConversationId,
-        input: { requestId: string } & ({ content: UserInput } | { submissionId: number }),
+        input: { requestId: string } & (
+            { content: UserInput; entry?: InputEntry } | { submissionId: number }
+        ),
         admissionContext: Context = context,
     ): Promise<{ submissionId: SubmissionId } | { task: TaskId; started: boolean }> {
         const app = this.#app;
         const conversation = await app.conversation(id);
-        // Request ids of the queued messages, from Pi Durable's records: a commit cannot read a submission by its id.
-        const requests = new Map<number, string | undefined>();
 
-        await this.#stoppedByPerson(id);
+        const check = () => {
+            admissionContext.abortSignal?.throwIfAborted();
+            app.spend.check(this.#requireRequester(id, requestPerson(input.requestId)?.userId), id);
+        };
 
-        for (let attempt = 0; ; attempt++) {
-            const queued = (await app.harness.snapshot(InboxDoc, id, context))?.items ?? [];
+        return app.harness.commit(async (tx) => {
+            const known = await tx.submissionByRequest(id, input.requestId);
+            const interrupts = await tx.doc(InterruptsDoc, id);
+            const pending = interrupts.pending[input.requestId];
 
-            for (const item of queued) {
-                if (item.mode !== "write" && !requests.has(Number(item.id))) {
-                    const record = await (
-                        await app.harness.submission(item.id, context)
-                    )?.status(context);
-
-                    requests.set(Number(item.id), record?.requestId);
-                }
+            // The task is the receipt until the actual submission exists. Two concurrent POSTs, and a retry after
+            // a restart between stop and send, find that same handoff rather than stopping a newer run.
+            if (known !== undefined) {
+                return { submissionId: known.id };
             }
 
-            const admitted = await app.harness.commit(async (tx) => {
-                const known = await tx.submissionByRequest(id, input.requestId);
-                const interrupts = await tx.doc(InterruptsDoc, id);
-                const pending = interrupts.pending[input.requestId];
+            if (pending !== undefined) {
+                return { task: pending as unknown as TaskId, started: false };
+            }
 
-                // The task is the receipt until the actual submission exists. Two concurrent POSTs, and a retry after
-                // a restart between stop and send, find that same handoff rather than stopping a newer run.
-                if (known !== undefined) {
-                    return { submissionId: known.id };
-                }
+            const items = (await tx.doc(InboxDoc, id)).items;
+            const item =
+                "submissionId" in input
+                    ? items.find((entry) => Number(entry.id) === input.submissionId)
+                    : undefined;
 
-                if (pending !== undefined) {
-                    return { task: pending as unknown as TaskId, started: false };
-                }
+            if (item?.mode === "write" || ("submissionId" in input && item === undefined)) {
+                throw new HttpError(409, "That message has already gone to Pi.");
+            }
 
-                const items = (await tx.doc(InboxDoc, id)).items;
-                const item =
-                    "submissionId" in input
-                        ? items.find((entry) => Number(entry.id) === input.submissionId)
-                        : undefined;
+            // Every table read comes before the commit's first table write.
+            const subagents = await tx.doc(SubagentsDoc, id);
+            const batch =
+                subagents.sending === undefined
+                    ? undefined
+                    : await tx.submissionByRequest(id, subagents.sending.request);
+            const live = await tx.doc(LiveDoc, id);
 
-                if (item?.mode === "write" || ("submissionId" in input && item === undefined)) {
-                    throw new HttpError(409, "That message has already gone to Pi.");
-                }
+            if (live.run === undefined && "content" in input) {
+                check();
 
-                // Every table read comes before the commit's first table write.
-                const subagents = await tx.doc(SubagentsDoc, id);
-                const batch =
-                    subagents.sending === undefined
-                        ? undefined
-                        : await tx.submissionByRequest(id, subagents.sending.request);
-                const live = await tx.doc(LiveDoc, id);
-
-                if (live.run === undefined && "content" in input) {
-                    return {
-                        submissionId: await conversation.submit(tx, {
-                            type: "input",
-                            content: input.content,
-                            requestId: input.requestId,
-                        }),
-                    };
-                }
-
-                const others: Requeue[] = [];
-                const stay = new Set<SubmissionId>();
-
-                for (const other of items) {
-                    // Writes stay in the queue by themselves; the reports go back to their courier when withdrawn.
-                    if (other.id === item?.id || other.mode === "write" || other.id === batch?.id) {
-                        continue;
-                    }
-
-                    if (!requests.has(Number(other.id))) {
-                        // Queued since the requests were read.
-                        if (attempt >= 3) {
-                            throw new HttpError(409, "The queue is changing; try again.");
-                        }
-
-                        return "again";
-                    }
-
-                    const first = requests.get(Number(other.id));
-
-                    stay.add(other.id);
-                    others.push({
-                        content: copyJson(other.content) as UserInput,
-                        mode: other.mode,
-                        // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
-                        requestId:
-                            first === undefined
-                                ? `interrupt-${input.requestId}-${others.length}`
-                                : `${first.replace(/(~\d+)+$/, "")}~${other.id}`,
-                        ...(other.entry === undefined
-                            ? {}
-                            : { entry: copyJson(other.entry) as InputEntry }),
-                    });
-                }
-
-                const content =
-                    "content" in input ? input.content : (copyJson(item!.content) as UserInput);
-                const run = live.run === undefined ? undefined : Number(live.run.taskId);
-
-                // Taken out of the queue here, so the stop's withdrawal cannot reach them: the task puts them back.
-                for (let at = items.length - 1; at >= 0; at--) {
-                    const queued = items[at]!.id;
-
-                    if (queued === item?.id || stay.has(queued)) {
-                        items.splice(at, 1);
-                    }
-                }
-
-                if (item !== undefined) {
-                    tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
-                }
-
-                for (const taken of stay) {
-                    tx.settleSubmission(taken, {
-                        status: "unanswered",
-                        reason: "aborted",
-                    });
-                }
-
-                const task = await tx.createTask(
-                    this.interruptTask,
-                    {
-                        content,
+                return {
+                    submissionId: await conversation.submit(tx, {
+                        type: "input",
+                        content: input.content,
+                        ...(input.entry === undefined ? {} : { entry: input.entry }),
                         requestId: input.requestId,
-                        ...(item?.entry === undefined
-                            ? {}
-                            : { entry: copyJson(item.entry) as InputEntry }),
-                        ...(run === undefined ? {} : { run }),
-                        others,
-                    },
-                    { ownership: { kind: "conversation" }, background: true, conversationId: id },
-                );
-
-                interrupts.pending[input.requestId] = Number(task);
-
-                return { task, started: true };
-            }, admissionContext);
-
-            if (admitted !== "again") {
-                return admitted;
+                    }),
+                };
             }
-        }
+
+            const others: Requeue[] = [];
+            const stay = new Set<SubmissionId>();
+
+            for (const other of items) {
+                // Writes stay in the queue by themselves; the reports go back to their courier when withdrawn.
+                if (other.id === item?.id || other.mode === "write" || other.id === batch?.id) {
+                    continue;
+                }
+
+                const first = (await tx.submission(other.id))?.requestId;
+
+                stay.add(other.id);
+
+                if (first === undefined || !canRequeue(id, first, this.#canSteer)) {
+                    continue;
+                }
+
+                others.push({
+                    content: copyJson(other.content) as UserInput,
+                    mode: other.mode,
+                    // The person is in the request id: the new one keeps it, for who wrote it and whose work it is.
+                    requestId: `${first.replace(/(~\d+)+$/, "")}~${other.id}`,
+                    ...(other.entry === undefined
+                        ? {}
+                        : { entry: copyJson(other.entry) as InputEntry }),
+                });
+            }
+
+            const content =
+                "content" in input ? input.content : (copyJson(item!.content) as UserInput);
+            const entry = "content" in input ? input.entry : item?.entry;
+            const run = live.run === undefined ? undefined : Number(live.run.taskId);
+
+            // Taken out of the queue here, so the stop's withdrawal cannot reach them: the task puts them back.
+            for (let at = items.length - 1; at >= 0; at--) {
+                const queued = items[at]!.id;
+
+                if (queued === item?.id || stay.has(queued)) {
+                    items.splice(at, 1);
+                }
+            }
+
+            if (run !== undefined) {
+                await this.#markStopped(tx, id);
+            }
+
+            check();
+
+            if (item !== undefined) {
+                tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+            }
+
+            for (const taken of stay) {
+                tx.settleSubmission(taken, {
+                    status: "unanswered",
+                    reason: "aborted",
+                });
+            }
+
+            const task = await tx.createTask(
+                this.interruptTask,
+                {
+                    content,
+                    requestId: input.requestId,
+                    ...(entry === undefined ? {} : { entry: copyJson(entry) as InputEntry }),
+                    ...(run === undefined ? {} : { run }),
+                    others,
+                },
+                { ownership: { kind: "conversation" }, background: true, conversationId: id },
+            );
+
+            interrupts.pending[input.requestId] = Number(task);
+
+            return { task, started: true };
+        }, admissionContext);
     }
 
     async configure(
@@ -2065,7 +2337,35 @@ export class Commands {
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
+        const currentCwd = current?.cwd ?? app.cwdOf(id);
+
+        if (
+            request.cwd !== undefined &&
+            request.cwd !== currentCwd &&
+            (app.isIsolatedWorkspace(currentCwd) ||
+                app.isIsolatedWorkspace(request.cwd) ||
+                app.isIsolatedConversation(id))
+        ) {
+            throw new HttpError(
+                400,
+                "Isolated sandbox sessions cannot be moved to another folder or workspace.",
+            );
+        }
+
         const cwd = request.cwd === undefined ? undefined : await app.resolveCwd(request.cwd);
+
+        if (
+            cwd !== undefined &&
+            cwd !== currentCwd &&
+            (app.isIsolatedWorkspace(currentCwd) ||
+                app.isIsolatedWorkspace(cwd) ||
+                app.isIsolatedConversation(id))
+        ) {
+            throw new HttpError(
+                400,
+                "Isolated sandbox sessions cannot be moved to another folder or workspace.",
+            );
+        }
 
         const change = {
             ...(request.model === undefined
@@ -2681,7 +2981,7 @@ export class Commands {
 
         const entry = await app.transcripts.visibleEntry(id, entryId);
 
-        if (entry?.kind !== "pi.user") {
+        if (entry?.kind !== "pi.user" && entry?.kind !== UPLOAD_INPUT) {
             throw new HttpError(404, "No such message to Pi");
         }
 
@@ -2727,8 +3027,21 @@ export class Commands {
             (await app.harness.snapshot(AuthorsDoc, id, context))?.entries[String(entryId)] ??
             user.id;
         const images = model.input.includes("image") ? original.images : [];
+        const allows = await this.#approvedUploads(id);
+        const contentByRef: Record<string, UploadContent> = {};
+
+        for (const ref of new Set(uploadRefs(entry))) {
+            const content = await allows(ref);
+
+            if (content) {
+                contentByRef[ref] = content;
+            }
+        }
+
+        const refs = Object.keys(contentByRef);
         const resend: Resend = {
             text,
+            ...(refs.length === 0 ? {} : { uploads: refs, uploadsApproved: true, contentByRef }),
             by: user.id,
             ...(images.length === 0 ? {} : { images: { entry: entryId as unknown as EntryId } }),
         };
@@ -2753,16 +3066,18 @@ export class Commands {
             worktree: request.worktree === true,
             resend,
         });
-        const submission = await (
-            await app.conversation(forked)
-        ).submit(
-            {
-                type: "input",
-                content: resendContent(text, images),
-                requestId: resendRequest(resend),
-            },
-            context,
-        );
+        const conversation = await app.conversation(forked);
+        const grants = await this.#resendGrants(forked, resend);
+        const submissionId = await app.harness.commit(async (tx) => {
+            const fork = (await tx.doc(SessionsDoc)).items[String(forked)];
+
+            this.#requireRequester(forked, user.id);
+            const placed = await conversation.submit(tx, resendDraft(resend, images, grants, fork));
+
+            this.#requireRequester(forked, user.id);
+
+            return placed;
+        }, context);
         const whose =
             author === user.id
                 ? "a message"
@@ -2775,6 +3090,8 @@ export class Commands {
                   : `sent ${whose} again`;
 
         await app.collab.activity(forked, user, line, false);
+        const submission = (await app.harness.submission(submissionId, context))!;
+
         this.#reportUnanswered(forked, submission.wait(context));
 
         return { id: forked };
@@ -2850,9 +3167,107 @@ export class Commands {
         const sourceTitle = meta.title ?? "New session";
         const title = `${sourceTitle} · ${branch.label}`.slice(0, MAX_TITLE);
 
-        return this.#inPlace(source?.cwd ?? meta.cwd, branch.worktree, title, (place) =>
+        const sourceCwd = source?.cwd ?? meta.cwd;
+
+        if (branch.worktree && app.workspaceScheme(sourceCwd) !== undefined) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
+
+        return this.#inPlace(sourceCwd, branch.worktree, title, (place) =>
             this.#fork(id, user, { ...branch, title, sourceTitle, place }),
         );
+    }
+
+    async #approvedUploads(id: ConversationId) {
+        const app = this.#app;
+        const allows = app.workspace.uploadGrant(id);
+        const own = String(id) + "/";
+        const issued = (await app.harness.snapshot(IssuedUploadsDoc, id, context))?.files ?? {};
+
+        return (ref: string) =>
+            allows(
+                ref,
+                ref.startsWith(own) && Object.hasOwn(issued, ref.slice(own.length))
+                    ? issued[ref.slice(own.length)]
+                    : undefined,
+            );
+    }
+
+    async #resendGrants(id: ConversationId, resend: Resend): Promise<Set<string>> {
+        const refs = new Set<string>();
+
+        if (
+            resend.uploadsApproved === true &&
+            resend.contentByRef &&
+            Array.isArray(resend.uploads)
+        ) {
+            const allows = this.#app.workspace.uploadGrant(id);
+
+            for (const ref of new Set(resend.uploads)) {
+                if (
+                    typeof ref === "string" &&
+                    sameContent(await allows(ref), uploadContent(resend.contentByRef[ref]))
+                ) {
+                    refs.add(ref);
+                }
+            }
+        }
+
+        return refs;
+    }
+
+    /** Only placed inputs in the durable branch through `at` can pass their uploads on. */
+    async #forkUploads(
+        id: ConversationId,
+        at: number | undefined,
+        resend?: Resend,
+    ): Promise<Record<string, UploadContent>> {
+        const app = this.#app;
+        const inherited = app.sessionMeta(id)?.inheritedUploads;
+        const refs = new Set<string>();
+
+        if (
+            at !== undefined &&
+            (inherited?.length || existsSync(join(app.dataDir, "uploads", String(id))))
+        ) {
+            const source = await app.conversation(id);
+            let cursor: Cursor | undefined;
+
+            do {
+                const page = await source.entries(
+                    { maxEntryId: at as unknown as EntryId },
+                    32,
+                    cursor,
+                    context,
+                );
+
+                for (const entry of page.items) {
+                    for (const ref of uploadRefs(entry)) {
+                        refs.add(ref);
+                    }
+                }
+
+                cursor = page.next;
+            } while (cursor !== undefined);
+        }
+
+        const content: Record<string, UploadContent> = {};
+
+        if (refs.size === 0 && !resend?.uploads?.length) {
+            return content;
+        }
+
+        const allowed = await this.#approvedUploads(id);
+
+        for (const ref of new Set([...refs, ...(resend?.uploads ?? [])])) {
+            const verified = await allowed(ref);
+
+            if (verified && (refs.has(ref) || sameContent(verified, resend?.contentByRef?.[ref]))) {
+                content[ref] = verified;
+            }
+        }
+
+        return content;
     }
 
     /**
@@ -2874,6 +3289,7 @@ export class Commands {
         const app = this.#app;
         const source = await app.agentState(id);
         const { at, title, place } = fork;
+        const inheritedUploadContent = await this.#forkUploads(id, at, fork.resend);
         const agent: AgentChange = {
             ...fork.agent,
             ...(place.worktree === undefined ? {} : { cwd: place.cwd }),
@@ -2891,6 +3307,7 @@ export class Commands {
                 throw new HttpError(409, "That session was removed.");
             }
 
+            this.#requireForkable(id, this.#requireRequester(id, user.id));
             const sessions = await tx.doc(SessionsDoc);
 
             sessions.items[String(forked)] = {
@@ -2900,12 +3317,14 @@ export class Commands {
                 updatedAt: now,
                 createdBy: user.id,
                 forkedFrom: { id: Number(id), ...(at === undefined ? {} : { entryId: at }) },
+                inheritedUploads: Object.keys(inheritedUploadContent),
+                inheritedUploadContent,
                 ...(place.worktree === undefined ? {} : { worktree: place.worktree }),
             };
             await app.memory.forked(tx, id, forked, title);
 
             if (fork.resend !== undefined) {
-                await tx.createTask(ResendTask, fork.resend, {
+                await tx.createTask(this.resendTask, fork.resend, {
                     ownership: { kind: "conversation" },
                     background: true,
                     conversationId: forked,

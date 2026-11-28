@@ -1,0 +1,615 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { join } from "node:path";
+import { after, before, test } from "node:test";
+import { createProvider, type ClassifierAnswer } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { defang } from "../src/server/fence.ts";
+import { createHandler } from "../src/server/http.ts";
+import type { Client } from "../src/server/room.ts";
+import {
+    type App,
+    cleanUp,
+    fakeTab,
+    lastText,
+    loadTools,
+    newSession,
+    openApp,
+    owner,
+    root,
+    say,
+    scriptedModel,
+    until,
+} from "./helpers.ts";
+
+const model = "faux-jev/jev-test";
+const seen: Record<string, unknown>[] = [];
+let verdict: ClassifierAnswer = choice("needs_input", 1);
+
+function choice(value: string, confidence: number): ClassifierAnswer {
+    return { type: "choice", choice: value, confidence, probabilities: { [value]: confidence } };
+}
+
+let fail = false;
+/** While set, the classifier waits for it: a notification then waits on its outcome label. */
+let hold: Promise<void> | undefined;
+let app: App;
+
+before(async () => {
+    app = await openApp(scriptedModel());
+    app.models.registerNativeProvider(
+        createProvider({
+            id: "faux-jev",
+            auth: { apiKey: { name: "Faux Jev", resolve: async () => ({ auth: {} }) } },
+            models: [
+                {
+                    type: "classifier",
+                    id: "jev-test",
+                    name: "Faux Jev",
+                    api: "typesafe-system-one",
+                    provider: "faux-jev",
+                    baseUrl: "https://faux.example/v1",
+                    input: ["text"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    contextWindow: 64_000,
+                },
+            ],
+            classifiers: {
+                "typesafe-system-one": {
+                    async classify(_model, input) {
+                        seen.push(input.state as Record<string, unknown>);
+                        await hold;
+
+                        return {
+                            api: "typesafe-system-one",
+                            provider: "faux-jev",
+                            model: "jev-test",
+                            answers: { outcome: verdict },
+                            stopReason: fail ? "error" : "stop",
+                            timestamp: Date.now(),
+                        };
+                    },
+                },
+            },
+        }),
+    );
+});
+
+after(async () => {
+    await app?.close();
+    cleanUp();
+});
+
+test("opt-in labels done notifications, keeps the existing body and urgency, and falls back after failure", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
+    const sent = () =>
+        tab.events.filter((event) => event.event === "embedder-notify").map((event) => event.data);
+
+    await app.attach(client);
+
+    try {
+        await say(app, id, "first answer");
+        await until(() => sent().length === 1, "plain completion notification");
+        assert.match(String(sent()[0]?.title), /^Pi finished · /);
+        assert.equal(seen.length, 0);
+
+        await app.setExtensionEnabled(owner(app), "run-outcomes.ts", true);
+        await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: model });
+        await say(app, id, "second answer");
+        await until(() => sent().length === 2, "classified completion notification");
+        assert.match(String(sent()[1]?.title), /^Needs input · /);
+        assert.equal(sent()[1]?.body, "echo: second answer");
+        assert.equal(sent()[1]?.urgency, "normal");
+        assert.deepEqual(seen, [{ answer: "echo: second answer" }]);
+
+        fail = true;
+        await say(app, id, "third answer");
+        await until(() => sent().length === 3, "completion notification after classifier failure");
+        assert.match(String(sent()[2]?.title), /^Pi finished · /);
+        assert.deepEqual(seen.at(-1), { answer: "echo: third answer" });
+    } finally {
+        fail = false;
+        app.detach(client);
+    }
+});
+
+test("a PiP follow report includes the label outside the original answer's fence", async () => {
+    const id = await newSession(app);
+    const pip = await app.pip.ensure(owner(app));
+
+    await app.pip.read(pip, Number(id));
+    const { requestId } = await app.pip.send(
+        pip,
+        Number(id),
+        "Can you choose a target?",
+        false,
+        "send-outcome",
+    );
+
+    await app.pip.follow(pip, Number(id), requestId, "follow-outcome");
+    await until(
+        async () =>
+            (await app.transcripts.allEntries(pip, true)).some(
+                (entry) =>
+                    entry.kind === "user" &&
+                    entry.text.includes("</session-output>\nReported outcome: Needs input."),
+            ),
+        "labeled PiP report",
+    );
+    assert.match(String(seen.at(-1)?.answer), /Can you choose a target\?/);
+});
+
+test("a shared answer gets one verdict, hidden values are redacted, and uncertain labels are ignored", async () => {
+    const id = await newSession(app);
+    const before = seen.length;
+    const unhide = app.hidden.add({
+        value: "secret-ticket-123",
+        label: "ticket",
+        conversationId: Number(id),
+    });
+    const text = "This task is blocked by secret-ticket-123";
+
+    verdict = choice("blocked", 0.8);
+
+    try {
+        assert.deepEqual(
+            await Promise.all([
+                app.classifyRunOutcome(id, 1, text),
+                app.classifyRunOutcome(id, 1, text),
+            ]),
+            ["Blocked", "Blocked"],
+        );
+        assert.equal(seen.length, before + 1);
+        assert.ok(!String(seen.at(-1)?.answer).includes("secret-ticket-123"));
+
+        verdict = choice("completed", 0.5);
+        assert.equal(await app.classifyRunOutcome(id, 2, "Done"), undefined);
+        verdict = choice("verdict-with-private-text-456", 1);
+        assert.equal(await app.classifyRunOutcome(id, 3, "Done"), undefined);
+    } finally {
+        unhide();
+    }
+});
+
+test("the owner sees only sanitized verdicts and counts in Classifier Hub, not guests or viewers", async () => {
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const read = (token: string) =>
+        fetch(`http://127.0.0.1:${port}/api/x/classifier-hub/activity`, {
+            headers: { "X-Pocket": "1", authorization: `Bearer ${token}` },
+        });
+
+    try {
+        const response = await read(app.config.ownerToken);
+
+        assert.equal(response.status, 200);
+        const activity = await response.text();
+
+        assert.match(activity, /"verdicts":\["needs_input"\]/);
+        assert.match(activity, /"source":"run-outcomes","answered":\d+,"failed":1,"timedOut":0/);
+        assert.doesNotMatch(
+            activity,
+            /Can you choose|second answer|secret-ticket-123|verdict-with-private-text-456/,
+        );
+
+        for (const role of ["guest", "viewer"] as const) {
+            const added = app.config.addUser(role, role);
+
+            assert.equal((await read(added.token)).status, 404);
+            assert.ok(
+                !app.webs.clients(added.user).some((client) => client.module === "classifier-hub"),
+            );
+        }
+    } finally {
+        server.closeAllConnections();
+        server.close();
+    }
+});
+
+test("with no classifier chosen the notification keeps its plain title; the shared choice labels it", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
+    const sent = () =>
+        tab.events
+            .filter((event) => event.event === "embedder-notify")
+            .map((event) => event.data as { url?: string; title?: string; body?: string })
+            .filter((data) => data.url === `/s/${String(id)}`);
+
+    await app.attach(client);
+    await app.setExtensionEnabled(owner(app), "run-outcomes.ts", true);
+    await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: "" });
+    verdict = choice("needs_input", 1);
+
+    try {
+        const before = seen.length;
+
+        await say(app, id, "no classifier answer");
+        await until(() => sent().length === 1, "plain notification");
+        assert.match(String(sent()[0]?.title), /^Pi finished · /);
+        assert.ok(
+            !seen.slice(before).some((state) => String(state.answer).includes("no classifier")),
+            "nothing of this session was sent to any classifier",
+        );
+
+        await app.setClassifierModel(owner(app), model);
+        await say(app, id, "shared classifier answer");
+        await until(() => sent().length === 2, "labelled notification");
+        assert.match(String(sent()[1]?.title), /^Needs input · /);
+        assert.ok(
+            seen.slice(before).some((state) => String(state.answer).includes("shared classifier")),
+        );
+
+        // The shared choice must be a signed-in classifier, and null clears it.
+        await assert.rejects(
+            app.setClassifierModel(owner(app), "faux-jev/nope"),
+            /classifier model/,
+        );
+        await app.setClassifierModel(owner(app), null);
+        assert.equal(app.config.classifierModel, undefined);
+    } finally {
+        await app.setClassifierModel(owner(app), null);
+        await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: model });
+        app.detach(client);
+    }
+});
+
+test("a long answer goes as its head and its tail, so a closing question is read", async () => {
+    const id = await newSession(app);
+    const long = `${"A".repeat(6_000)} Which target do you want?`;
+
+    verdict = choice("needs_input", 1);
+    await app.classifyRunOutcome(id, 77, long);
+
+    const sentAnswer = String(seen.at(-1)?.answer);
+
+    assert.ok(sentAnswer.startsWith("AAAA"), "the start is kept");
+    assert.ok(sentAnswer.endsWith("Which target do you want?"), "the end is kept");
+    assert.ok(sentAnswer.length < 4_200, "and the rest is left out");
+});
+
+test("a notification that waited on its label is dropped when a new run began meanwhile", async () => {
+    const id = await newSession(app);
+    const tab = fakeTab(undefined, owner(app));
+    const client: Client = { ...tab.client, embedder: "embedder-notify" };
+    const sent = () =>
+        tab.events
+            .filter((event) => event.event === "embedder-notify")
+            .map((event) => event.data as { url?: string; body?: string })
+            .filter((data) => data.url === `/s/${String(id)}`);
+
+    let release = () => {};
+
+    await app.setExtensionEnabled(owner(app), "run-outcomes.ts", true);
+    await app.setExtensionSettings(owner(app), "run-outcomes", { classifyModel: model });
+    await app.attach(client);
+    hold = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    try {
+        const before = seen.length;
+
+        await say(app, id, "first run");
+        await until(() => seen.length > before, "the first notification waits on its label", 8_000);
+        // A new run begins and ends while the label is awaited.
+        await say(app, id, "second run");
+        await until(() => sent().length >= 1, "a notification", 10_000);
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+
+        assert.equal(sent().length, 1, "one notification: the first run's is stale and dropped");
+        assert.match(String(sent()[0]?.body), /second run/);
+    } finally {
+        release();
+        hold = undefined;
+        app.detach(client);
+    }
+});
+
+test("provider list counts classifier models, owner picks shared model, and Classifier Hub reports it", async () => {
+    const row = app.providers.list(true).find((provider) => provider.id === "faux-jev");
+
+    assert.equal(row?.classifiers, 1);
+    assert.equal(row?.models, 0, "chat models are counted on their own");
+    await until(() => app.models.hasConfiguredAuth("faux-jev"), "the provider's key is known");
+    assert.ok(app.classifierModels(owner(app)).some((each) => each.spec === model));
+    await assert.rejects(app.setClassifierModel(owner(app), "faux-jev/nope"), /classifier model/);
+    await assert.rejects(app.setClassifierModel(owner(app), 7), /classifier model/);
+
+    const guest = app.config.addUser("classifier-guest", "guest").user;
+
+    await assert.rejects(app.setClassifierModel(guest, null), /Only the owner/);
+    assert.throws(() => app.classifierModels(guest), /Only the owner/);
+
+    await app.setExtensionEnabled(owner(app), "classifier-hub.ts", true);
+    const server = createServer(
+        createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
+    );
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const read = async () =>
+        (
+            await fetch(`http://127.0.0.1:${port}/api/x/classifier-hub/activity`, {
+                headers: { "X-Pocket": "1", authorization: `Bearer ${app.config.ownerToken}` },
+            })
+        ).json() as Promise<{ classifierModel: string | null }>;
+
+    try {
+        await app.setClassifierModel(owner(app), null);
+        assert.equal((await read()).classifierModel, null);
+        await app.setClassifierModel(owner(app), model);
+        assert.equal(app.config.classifierModel, model);
+        assert.equal((await read()).classifierModel, model);
+    } finally {
+        await app.setClassifierModel(owner(app), null);
+        server.closeAllConnections();
+        server.close();
+    }
+});
+
+const parentCases = [
+    ["linked", "enabled"],
+    ["linked", "disabled"],
+    ["linked", "unavailable"],
+    ["linked", "failure"],
+    ["linked", "timeout"],
+    ["linked", "empty"],
+    ["linked", "model-error"],
+    ["linked", "low-confidence"],
+    ["linked", "subscribed"],
+    ["linked", "stopped"],
+    ["subagent", "enabled"],
+    ["subagent", "disabled"],
+    ["subagent", "stopped"],
+    ["subagent", "watched"],
+] as const;
+
+for (const [path, mode] of parentCases) {
+    test(`${path} parent report: ${mode}, original answer and one delivery`, async () => {
+        const answer =
+            "Choose the required branch: release or main?\nOriginal answer stays intact.";
+        const outcomeLabel =
+            "Reported outcome (Run outcomes classifier; not proof of success): Needs input.";
+        const parentModel = "parent-jev/classifier";
+        const local = await openApp(
+            scriptedModel((request) => {
+                const { text } = lastText(request as never);
+
+                if (text.includes("SPAWN_WORKER") && !text.includes("[subagent")) {
+                    return fauxAssistantMessage(
+                        [
+                            fauxToolCall("subagent", {
+                                action: "spawn",
+                                name: "worker",
+                                message: "CHILD_TASK",
+                            }),
+                        ],
+                        { stopReason: "toolUse" },
+                    );
+                }
+
+                if (text.includes("CHILD_TASK") && mode === "model-error") {
+                    return fauxAssistantMessage([], {
+                        stopReason: "error",
+                        errorMessage: "Bad request",
+                    });
+                }
+
+                return fauxAssistantMessage([
+                    fauxText(
+                        text.includes("CHILD_TASK")
+                            ? mode === "empty"
+                                ? ""
+                                : mode === "stopped"
+                                  ? "word ".repeat(80_000)
+                                  : answer
+                            : "Parent ready.",
+                    ),
+                ]);
+            }),
+            join(root, `${path}-${mode}`),
+        );
+        const answersSeen: string[] = [];
+
+        let release = () => {};
+
+        const held = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+
+        local.models.registerNativeProvider(
+            createProvider({
+                id: "parent-jev",
+                auth: { apiKey: { name: "Scripted", resolve: async () => ({ auth: {} }) } },
+                models: [
+                    {
+                        type: "classifier",
+                        id: "classifier",
+                        name: "Scripted",
+                        api: "typesafe-system-one",
+                        provider: "parent-jev",
+                        baseUrl: "https://faux.example",
+                        input: ["text"],
+                        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                        contextWindow: 64000,
+                    },
+                ],
+                classifiers: {
+                    "typesafe-system-one": {
+                        async classify(_model, input) {
+                            answersSeen.push(String((input.state as { answer: string }).answer));
+
+                            if (mode === "timeout") {
+                                await held;
+                            }
+
+                            if (mode === "failure") {
+                                throw new Error("scripted classifier failure");
+                            }
+
+                            return {
+                                api: "typesafe-system-one",
+                                provider: "parent-jev",
+                                model: "classifier",
+                                answers: {
+                                    outcome: {
+                                        type: "choice",
+                                        choice: "needs_input",
+                                        confidence: mode === "low-confidence" ? 0.5 : 1,
+                                        probabilities: { needs_input: 1 },
+                                    },
+                                },
+                                stopReason: "stop",
+                                timestamp: Date.now(),
+                            };
+                        },
+                    },
+                },
+            }),
+        );
+
+        const tab = fakeTab(undefined, owner(local));
+        const client = { ...tab.client, embedder: "embedder-notify" as const };
+
+        try {
+            if (mode === "subscribed") {
+                await local.attach(client);
+            }
+
+            if (mode !== "disabled") {
+                await local.setExtensionEnabled(owner(local), "run-outcomes.ts", true);
+
+                if (mode !== "unavailable") {
+                    await local.setExtensionSettings(owner(local), "run-outcomes", {
+                        classifyModel: parentModel,
+                    });
+                }
+            }
+
+            const parent = await newSession(local);
+
+            await say(local, parent, "Ready");
+            let child;
+
+            if (path === "linked") {
+                child = (
+                    await local.linkedSessions.start(parent, { message: "CHILD_TASK" }, "worker")
+                ).session;
+            } else {
+                await loadTools(local, parent, "subagent");
+                await say(local, parent, "SPAWN_WORKER");
+                await until(
+                    () => local.subagents().some((agent) => agent.name === "worker"),
+                    "child created",
+                );
+                child = local.subagents().find((agent) => agent.name === "worker")!.conversationId;
+            }
+
+            if (mode === "stopped") {
+                await until(() => local.isBusy(child), "child running");
+                await local.commands.abort(child, owner(local));
+            }
+
+            if (mode === "watched") {
+                client.conversationId = child;
+                await local.attach(client);
+            }
+
+            const reports = async () =>
+                (await local.transcripts.allEntries(parent, true)).filter(
+                    (entry) =>
+                        entry.kind === "user" &&
+                        (path === "linked"
+                            ? /Linked session \S+ (finished its run|failed|was stopped)/.test(
+                                  entry.text,
+                              )
+                            : /\[subagent worker (answered, no reply needed|failed:|stopped:)/.test(
+                                  entry.text,
+                              )),
+                );
+
+            await until(async () => (await reports()).length === 1, "parent report", 15000);
+            await until(() => !local.isBusy(parent), "parent finished");
+            const report = (await reports())[0]!;
+
+            assert.equal(report.kind, "user");
+            const text = report.text;
+
+            if (mode === "model-error" || mode === "empty" || mode === "stopped") {
+                assert.doesNotMatch(text, /Reported outcome/);
+                assert.equal(
+                    answersSeen.length,
+                    0,
+                    "no classifier call for failure or empty answer",
+                );
+                assert.equal((await reports()).length, 1);
+
+                return;
+            }
+
+            assert.ok(
+                text.includes(path === "linked" ? defang(answer) : answer),
+                "full original answer",
+            );
+
+            if (mode === "enabled" || mode === "subscribed" || mode === "watched") {
+                assert.ok(
+                    text.endsWith(outcomeLabel),
+                    "attributed classifier verdict reaches the parent",
+                );
+                const childAnswer = (await local.transcripts.allEntries(child, true)).findLast(
+                    (entry) => entry.kind === "assistant",
+                );
+
+                assert.ok(childAnswer);
+                assert.equal(
+                    await local.classifyRunOutcome(child, childAnswer.id, answer),
+                    "Needs input",
+                );
+
+                if (mode === "subscribed" && path === "linked") {
+                    await until(
+                        () =>
+                            tab.events.some(
+                                (event) =>
+                                    event.event === "embedder-notify" &&
+                                    (event.data as { url?: string; title?: string }).url ===
+                                        `/s/${String(child)}` &&
+                                    (event.data as { title: string }).title.startsWith(
+                                        "Needs input",
+                                    ),
+                            ),
+                        "child completion notification",
+                    );
+                }
+
+                assert.equal(
+                    answersSeen.filter((each) => each === answer).length,
+                    1,
+                    "same child answer shares its verdict across surfaces",
+                );
+            } else {
+                assert.ok(!text.includes("Reported outcome"));
+                assert.ok(
+                    text.endsWith(
+                        path === "linked" ? `${defang(answer)}\n</linked-session-message>` : answer,
+                    ),
+                    "fallback preserves exact report suffix",
+                );
+            }
+
+            assert.equal((await reports()).length, 1);
+        } finally {
+            release();
+            local.detach(client);
+            await local.close();
+        }
+    });
+}

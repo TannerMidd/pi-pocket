@@ -6,6 +6,8 @@
 #   that signed in with a one-time link, one instance only, and Quit that stops it all. An older package makes the app
 #   show its error and start nothing, and Setup puts its own package back; a newer one stays. It uninstalls while the
 #   app runs, which must stop it and keep the data folder.
+# - update: starts the installed desktop app and stages a synthetic npm release from a loopback HTTPS registry.
+#   The new server must report success and read the same saved session and setting.
 # - checks: the type check and the part of the test suite that is known to pass on Windows, with the background task
 #   and quiet-limit tests.
 name: Windows
@@ -383,6 +385,137 @@ jobs:
                   Get-Content (Join-Path $env:RUNNER_TEMP "pi-pocket.out.log"), (Join-Path $env:RUNNER_TEMP "pi-pocket.err.log") -ErrorAction SilentlyContinue
                   Get-Content (Join-Path $env:APP "launcher.log") -ErrorAction SilentlyContinue
 
+    update:
+        name: Installed update (the desktop app updates itself)
+        runs-on: windows-latest
+        timeout-minutes: 45
+        defaults:
+            run:
+                shell: pwsh
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 26
+
+            - name: Build and install this checkout
+              run: |
+                  $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+                  $setup = Join-Path $env:RUNNER_TEMP setup
+                  ./packaging/windows/build.ps1 -Version $version -OutDir $setup
+                  $run = Start-Process "$setup\Pi-Pocket-Setup-$version.exe" '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+                  if ($run.ExitCode -ne 0) { throw "Setup exited with $($run.ExitCode)" }
+                  "VERSION=$version" >> $env:GITHUB_ENV
+                  "APP=$env:LOCALAPPDATA\Pi Pocket" >> $env:GITHUB_ENV
+                  "FIXTURE=$env:RUNNER_TEMP\update-registry" >> $env:GITHUB_ENV
+
+            - name: Pack the installed dependency tree as a newer version
+              run: |
+                  $env:OPENSSL = @(
+                      (Get-Command openssl.exe -ErrorAction SilentlyContinue).Source
+                      "$env:ProgramFiles\Git\usr\bin\openssl.exe"
+                      "$env:ProgramFiles\Git\mingw64\bin\openssl.exe"
+                  ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+                  if (!$env:OPENSSL) { throw 'OpenSSL was not found' }
+                  & "$env:APP\node\node.exe" packaging/windows/update-fixture.mjs prepare $env:FIXTURE "$env:APP\app\node_modules\pi-pocket"
+
+            - name: Serve that version on loopback with a private test CA
+              run: |
+                  $hostsFile = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
+                  Add-Content $hostsFile ([Environment]::NewLine + "127.0.0.1 registry.npmjs.org" + [Environment]::NewLine + "::1 registry.npmjs.org")
+                  ipconfig /flushdns | Out-Null
+                  if ($LASTEXITCODE -ne 0) { throw "DNS flush failed" }
+                  $serve = Start-Process node -ArgumentList ('"{0}\packaging\windows\update-fixture.mjs" serve "{1}"' -f $PWD,$env:FIXTURE) -PassThru
+                  $ready = Join-Path $env:FIXTURE ready
+                  for ($i = 0; $i -lt 30 -and !(Test-Path $ready); $i++) {
+                      if ($serve.HasExited) { throw "Fixture exited with $($serve.ExitCode)" }
+                      Start-Sleep -Seconds 1
+                  }
+                  "SYNTHETIC=$(Get-Content -Raw $ready)" >> $env:GITHUB_ENV
+                  "NODE_EXTRA_CA_CERTS=$env:FIXTURE\ca.pem" >> $env:GITHUB_ENV
+
+            - name: Update through the running desktop app
+              id: desktop
+              run: |
+                  $data = Join-Path $env:USERPROFILE .pi-pocket
+                  $base = 'http://127.0.0.1:8787'
+                  $desktop = Start-Process "$env:APP\Pi Pocket.exe" -PassThru
+                  # The ready file precedes the asynchronous launch of the Edge app window.
+                  $edge = $null
+                  for ($i = 0; $i -lt 180 -and !$edge; $i++) {
+                      if ($desktop.HasExited) { throw 'Desktop exited before readiness' }
+                      Start-Sleep -Seconds 1
+                      $edge = Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" | Where-Object {
+                          $_.CommandLine -like '*--app=*' -and $_.CommandLine -like '*Pi Pocket\Edge profile*'
+                      } | Select-Object -First 1
+                  }
+                  $running = Get-Content -Raw "$data\launcher-running.json" | ConvertFrom-Json
+                  if (!$edge -or !$running.desktop -or $running.url -ne $base) { throw 'Desktop is not ready' }
+                  try { $token = (Get-Content -Raw "$data\config.json" | ConvertFrom-Json).ownerToken } catch { throw 'Unreadable owner config' }
+                  $headers = @{ Authorization = "Bearer $token"; 'X-Pocket' = '1' }
+                  function Api($path, $body, $timeout = 30) {
+                      $options = @{ Uri = "$base/api/$path"; Headers = $headers; TimeoutSec = $timeout; SkipHttpErrorCheck = $true }
+                      if ($null -ne $body) {
+                          $options += @{ Method = 'Post'; ContentType = 'application/json'; Body = ($body | ConvertTo-Json -Compress) }
+                      }
+                      try { $reply = Invoke-WebRequest @options } catch {
+                          if ($path -eq 'x/updates/status') { return $null } # Connection refused during restart.
+                          throw "$path connection failed"
+                      }
+                      if ($path -eq 'x/updates/status' -and $reply.StatusCode -eq 503) { return $null } # Server starting.
+                      if ($reply.StatusCode -ne 200) {
+                          # Never emit API error text, launcher logs, command lines or a sign-in URL.
+                          $reason = [regex]::Match($reply.Content, '\b(EPERM|EBUSY|EACCES|ENOENT)\b').Value
+                          $swap = $reply.Content -match 'rename' -and $reply.Content -match 'previous'
+                          throw "$path HTTP $([int]$reply.StatusCode); code=$reason; renameToPrevious=$swap"
+                      }
+                      try { return ($reply.Content | ConvertFrom-Json) } catch { throw "$path sent invalid JSON" }
+                  }
+                  function ServerPid {
+                      (Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 -LocalPort 8787).OwningProcess
+                  }
+
+                  $before = ServerPid
+                  $title = 'Installed update persistence check'
+                  $session = Api sessions @{ title = $title }
+                  $null = Api settings @{ limitWaitHours = 12 }
+                  $checked = Api x/updates/check @{} 120
+                  if ($checked.version -ne $env:VERSION -or $checked.installKind -ne 'npm-global' -or
+                      !$checked.available -or $checked.latest.version -ne $env:SYNTHETIC -or $checked.blockers.Count) {
+                      throw 'Update check did not offer the fixture release for this install'
+                  }
+                  Write-Host 'Checked the fixture version. Applying through the production updater.'
+                  $applied = Api x/updates/apply @{ confirmWarning = $true } 1500
+                  if (!$applied.restarting -or $applied.version -ne $env:SYNTHETIC) { throw 'Apply did not request restart' }
+
+                  $deadline = (Get-Date).AddMinutes(3)
+                  do {
+                      Start-Sleep -Seconds 1
+                      $status = Api x/updates/status $null 5
+                      if ($status.version -eq $env:SYNTHETIC -and $status.last.ok) { break }
+                  } while ((Get-Date) -lt $deadline)
+                  if ($status.version -ne $env:SYNTHETIC -or !$status.last.ok -or
+                      $status.last.fromVersion -ne $env:VERSION -or $status.last.toVersion -ne $env:SYNTHETIC) {
+                      throw 'No completed update on the new server'
+                  }
+                  if ($desktop.HasExited -or (ServerPid) -eq $before) { throw 'Expected the same desktop and a new server PID' }
+                  if ((Get-Content -Raw "$env:FIXTURE\tarball-served") -ne $env:SYNTHETIC) { throw 'No fixture tarball transfer' }
+                  $saved = Api sessions | Where-Object { $_.id -eq $session.id -and $_.title -eq $title }
+                  if (!$saved -or (Api me).server.limitWaitHours -ne 12) { throw 'Session or setting did not survive' }
+                  Write-Host 'New server verified the update outcome, saved session, and setting.'
+
+            - name: Report only native module basenames on failure
+              if: failure() && steps.desktop.outcome == 'failure'
+              run: |
+                  Write-Host "tarballServed=$(Test-Path (Join-Path $env:FIXTURE 'tarball-served'))"
+                  Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq "$env:APP\node\node.exe" } | ForEach-Object {
+                      $names = $_.Modules.ModuleName | Where-Object { $_ -match '^[a-zA-Z0-9_.-]+\.node$' } | Sort-Object -Unique
+                      Write-Host "pid=$($_.Id) nativeModules=$($names -join ',')"
+                  }
+
     checks:
         name: Type check and tests
         runs-on: windows-latest
@@ -410,6 +543,7 @@ jobs:
                   test/launcher-access.test.ts
                   test/launcher-coverage.test.ts
                   test/launcher-desktop.test.ts
+                  test/launcher-stop-watchdog.test.ts
                   test/lock.test.ts
                   test/npm-install.test.ts
                   test/npm-package.test.ts

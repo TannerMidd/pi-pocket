@@ -197,6 +197,25 @@ test("helpers past the soft limit cost the parent one message, with what each wa
     }
 });
 
+test("a message to a subagent while the watch sleeps between looks starts no second watch", async () => {
+    settings(30, 0);
+    const id = await session();
+    const watch = async () => (await app.harness.snapshot(SubagentsDoc, id, context))!.stallWatch;
+
+    await say(id, "spawn once-a");
+    await until(async () => (await call(id, "once-a")) !== undefined, "a stuck call");
+
+    const first = await watch();
+
+    assert.ok(first !== undefined, "a watch");
+    // The watch sleeps nearly all the time, 100 ms between its looks.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await say(id, "nudge once-a");
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(await watch(), first, "the sleeping watch is the one that goes on");
+    await stop(id, "once-a");
+});
+
 test("the hard limit stops the stuck call, 2 times until it answers, then leaves it to a person", async () => {
     settings(30, 60);
     alerts.length = 0;

@@ -35,7 +35,7 @@ import { ChooseModelError, describe, HttpError } from "./errors.ts";
 import { defang, INVISIBLE_CLASS } from "./fence.ts";
 import { isThinkingLevel, levelFor, resolveModel, THINKING_LEVELS } from "./models.ts";
 import { requestFor } from "./requests.ts";
-import { callTimeoutMs, progressOf, waitingOn } from "./stall-facts.ts";
+import { callTimeoutMs, progressOf, recentWork, waitingOn } from "./stall-facts.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -117,7 +117,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const app = this.#app;
         const meta = app.sessionMeta(source);
         const requester = by ?? app.attribution.requesterOf(source);
-        const user = requester === undefined ? undefined : app.config.userById(requester);
+        const user = app.steeringUser(source, requester);
 
         if (meta === undefined || meta.pip !== undefined || user === undefined) {
             throw new HttpError(403, "Linked sessions need a session where Pi works for someone.");
@@ -126,6 +126,14 @@ export class LinkedSessions implements LinkedSessionsApi {
         app.requireSee(user, source);
 
         return user;
+    }
+
+    #caller(source: ConversationId, previous?: { by?: string }): User {
+        if (previous !== undefined && previous.by === undefined) {
+            throw new HttpError(403, "This saved linked-session request has no requester.");
+        }
+
+        return this.#person(source, previous?.by);
     }
 
     async #maySend(source: ConversationId, user: User, actor?: RequestActor): Promise<void> {
@@ -137,13 +145,22 @@ export class LinkedSessions implements LinkedSessionsApi {
             return;
         }
 
-        await app.requireDriver(source, user);
+        await this.#requireAgentTurn(source, user);
+        app.spend.check(user, source);
+    }
 
-        if ((await app.harness.snapshot(PlanDoc, source, context))?.on) {
+    async #requireAgentTurn(source: ConversationId, user: User, tx?: Tx): Promise<void> {
+        const app = this.#app;
+
+        await app.requireDriver(source, user, tx);
+        const plan =
+            tx === undefined
+                ? await app.harness.snapshot(PlanDoc, source, context)
+                : await tx.doc(PlanDoc, source);
+
+        if (plan?.on) {
             throw new HttpError(409, "This session is in plan mode.");
         }
-
-        app.spend.check(user, source);
     }
 
     /** Re-read policy on the mutation line, and re-resolve the person after every wait. */
@@ -441,7 +458,10 @@ export class LinkedSessions implements LinkedSessionsApi {
         failure: string | undefined,
     ): Promise<void> {
         const app = this.#app;
-        const { last, answer } = await app.harness.commit(async (tx) => {
+        const user = this.#person(id);
+
+        app.requireSee(user, lead);
+        const { last, answer, answerId } = await app.harness.commit(async (tx) => {
             const latest = await tx.latestEntryId(id);
 
             if (outcome !== "done" || latest === undefined) {
@@ -455,6 +475,7 @@ export class LinkedSessions implements LinkedSessionsApi {
 
             return {
                 last: latest,
+                answerId: found?.id,
                 answer: found?.model?.[0] as AssistantMessage | undefined,
             };
         }, context);
@@ -477,7 +498,15 @@ export class LinkedSessions implements LinkedSessionsApi {
                 : outcome === "failed"
                   ? (failure ?? "its run failed")
                   : "its run was stopped";
-        const user = this.#person(id);
+
+        if (!app.steeringUser(id, user.id) || !app.steeringUser(lead, user.id)) {
+            return;
+        }
+
+        const label =
+            outcome === "done" && answer?.stopReason === "stop" && answerId !== undefined
+                ? await app.classifyRunOutcome(id, answerId, text)
+                : undefined;
 
         await this.#deliver(
             id,
@@ -490,6 +519,7 @@ export class LinkedSessions implements LinkedSessionsApi {
             undefined,
             undefined,
             outcome,
+            label,
         );
     }
 
@@ -577,7 +607,9 @@ export class LinkedSessions implements LinkedSessionsApi {
             }
 
             const on = waitingOn(live);
-            const { at, timeoutMs } = await app.harness.commit(async (tx) => {
+            // A value the owner hid never goes to a classifier either.
+            const hide = (text: string) => app.hidden.replace(text, id);
+            const { at, timeoutMs, recent } = await app.harness.commit(async (tx) => {
                 const page = await tx.scanEntries({ conversationId: id, order: "descending" }, 20);
                 const messages = page.items.flatMap((entry) => entry.model ?? []);
                 const times = messages
@@ -588,12 +620,14 @@ export class LinkedSessions implements LinkedSessionsApi {
                     at: times.length === 0 ? undefined : Math.max(...times),
                     timeoutMs:
                         on.callId === undefined ? undefined : callTimeoutMs(messages, on.callId),
+                    recent: recentWork(messages, live, hide),
                 };
             }, context);
 
             found.push({
                 address: addresses.get(each.id)!,
                 progress: progressOf(live),
+                recent,
                 ...(at === undefined ? {} : { at }),
                 waiting: on.what,
                 ...(on.callId === undefined ? {} : { callId: on.callId }),
@@ -613,7 +647,14 @@ export class LinkedSessions implements LinkedSessionsApi {
             (await this.#app.harness.snapshot(LinkedSessionPeersDoc, source, context))?.peers ?? {};
         const target = Object.hasOwn(peers, request.to) ? peers[request.to] : undefined;
 
-        if (target === undefined || !this.#leads(source, target as unknown as ConversationId)) {
+        const by = this.#app.attribution.requesterOf(source);
+
+        if (
+            target === undefined ||
+            !this.#leads(source, target as unknown as ConversationId) ||
+            !this.#app.steeringUser(source, by) ||
+            !this.#app.steeringUser(target as unknown as ConversationId, by)
+        ) {
             return false;
         }
 
@@ -734,7 +775,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const previous = (
             await app.harness.snapshot(LinkedSessionCallsDoc, source, actor?.context ?? context)
         )?.items[token];
-        const user = actor?.current() ?? this.#person(source, previous?.by);
+        const user = actor?.current() ?? this.#caller(source, previous);
 
         if (actor !== undefined && previous !== undefined && previous.by !== user.id) {
             throw new HttpError(409, "This start key belongs to another person.");
@@ -787,10 +828,12 @@ export class LinkedSessions implements LinkedSessionsApi {
         agent: AgentState,
         cwd?: string,
     ): Promise<string> {
+        const inherited = agent.cwd ?? this.#app.cwdOf(source);
+        const sourceIsolated =
+            this.#app.isIsolatedWorkspace(inherited) || this.#app.isIsolatedConversation(source);
+
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
-            const inherited = agent.cwd ?? this.#app.cwdOf(source);
-
             this.#app.requireWorkspaceOwner(user, inherited);
 
             return inherited;
@@ -801,8 +844,16 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         this.#app.requireWorkspaceOwner(user, cwd);
+        const resolved = await this.#app.resolveCwd(cwd);
 
-        return await this.#app.resolveCwd(cwd);
+        if (sourceIsolated && resolved !== inherited) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot start linked sessions in another folder.",
+            );
+        }
+
+        return resolved;
     }
 
     /** Refuse a model the owner does not allow: with a list, the asker's fix is to choose from it. */
@@ -1020,7 +1071,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1032,6 +1083,14 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const id = target as unknown as ConversationId;
+
+        if (app.isIsolatedConversation(source) && !app.isIsolatedConversation(id)) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot message non-isolated sessions.",
+            );
+        }
+
         const listed = app.config.subagentModels;
         const runs = (await app.agentState(id))?.model;
 
@@ -1113,7 +1172,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1312,7 +1371,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         const token = callKey(source, key);
         const previous = (await app.harness.snapshot(LinkedSessionCallsDoc, source, context))
             ?.items[token];
-        const user = this.#person(source, previous?.by);
+        const user = this.#caller(source, previous);
 
         app.requireSteer(user);
 
@@ -1385,14 +1444,13 @@ export class LinkedSessions implements LinkedSessionsApi {
         actor?: RequestActor,
         approved?: StartSettings,
         ended?: "done" | "failed" | "aborted",
+        outcomeLabel?: string,
     ): Promise<void> {
         const app = this.#app;
 
         user = actor?.current() ?? user;
 
-        if (actor !== undefined) {
-            app.requireSee(user, target);
-        }
+        app.requireSee(user, target);
 
         const requestId = requestFor(user.id, token);
         const existing = await app.harness.commit(
@@ -1426,7 +1484,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         // One from anyone else (a linked session asking its lead or a sibling) gets an answer only when the target sends
         // one, so it is asked to.
         const answers = this.#leads(source, target)
-            ? `Send to that address only when the sender needs an answer mid-work; your final answer reaches it by itself when your run ends, so do not send it again, and do not send thanks or acknowledgements.`
+            ? `Send one short update to that address when a blocker, handoff, or changed expectation affects the lead's next decision. Answer a question that needs a reply mid-work, but do not send routine progress: your final answer reaches it by itself when your run ends; do not send it again or acknowledge this message.`
             : `Your final answer does not reach that session by itself: when the message asks for an answer or a result, send it to that address, once, when you have it. Do not send thanks or acknowledgements.`;
         const preface =
             ended === undefined
@@ -1436,7 +1494,7 @@ export class LinkedSessions implements LinkedSessionsApi {
                   : ended === "failed"
                     ? `Linked session ${replyTo} failed: its run gave up, and the message it was working on was not answered. Below is why. Do not start it again on another model: tell the person, or send it the work again once the cause is fixed.`
                     : `Linked session ${replyTo} was stopped before it answered. Send it the work again if it is still needed.`;
-        const text = `${preface}\n<linked-session-message>\n${defang(message)}\n</linked-session-message>`;
+        const text = `${preface}\n<linked-session-message>\n${defang(message)}\n</linked-session-message>${outcomeLabel === undefined ? "" : `\nReported outcome (Run outcomes classifier; not proof of success): ${outcomeLabel}.`}`;
 
         let closeAdmission = () => {};
 
@@ -1447,7 +1505,16 @@ export class LinkedSessions implements LinkedSessionsApi {
                 { text, requestId: token, mode: steer ? "steer" : "followUp" },
                 `linked session ${replyTo}`,
                 actor === undefined
-                    ? undefined
+                    ? {
+                          beforeSubmit: async () => {
+                              const current = this.#person(source, user.id);
+
+                              app.requireSee(current, target);
+
+                              return { user: current, context };
+                          },
+                          afterSubmit: () => {},
+                      }
                     : {
                           beforeSubmit: () =>
                               app.harness.commit(async (tx) => {
@@ -1465,6 +1532,17 @@ export class LinkedSessions implements LinkedSessionsApi {
                               }, actor.context),
                           afterSubmit: () => closeAdmission(),
                       },
+                () => {
+                    const current = this.#person(source, actor?.current().id ?? user.id);
+
+                    app.spend.check(current, source);
+                },
+                actor === undefined
+                    ? async (tx) => {
+                          await this.#requireAgentTurn(source, user, tx);
+                          await app.requireDriver(target, user, tx);
+                      }
+                    : undefined,
             );
         } finally {
             closeAdmission();
