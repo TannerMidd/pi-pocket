@@ -1,0 +1,74 @@
+# pi-pocket, layered on top of the compose file next to this one.
+#
+# Docker Compose loads docker-compose.override.yml automatically whenever it loads
+# docker-compose.yml, so nothing has to name either file:
+#
+#   ./pocket.sh                 # exports what this file needs from the host, then up -d --build
+#   docker compose up -d --build    # the same, minus the environment injection
+#
+# Only what the stock service does not already do is here: mirrored paths, the
+# identity to write them as, and the credentials a shell carries but a compose file
+# must not hold. Everything else — port, access mode, Chromium flags, security_opt,
+# healthcheck — keeps the upstream definition.
+#
+# Volumes merge by target in Compose, so the mounts below are added to the stock ones
+# rather than replacing them. Paths mirror the host: /home/you/Repos on the host is
+# /home/you/Repos in the container, which is why they are written out in full instead
+# of being funnelled through a container-only folder — an absolute path in a session
+# means the same file on either side.
+
+services:
+  pi-pocket:
+    # uid of the invoking user, so files written in the mounts belong to them rather
+    # than to root. pocket.sh exports both from `id`; the fallbacks match the image's
+    # `node` user. HOME stays unset, so the image uses its own /home/node as it is.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # The stock image's stages are in this file; docker/tools.dockerfile starts FROM
+    # that `app` stage and adds python3, uv, Hugo, obsidian-export, kubectl and
+    # Obsidian. Compose builds the image a service names before it creates the
+    # container, so `up -d --build` makes pi-pocket:local in the same build and the
+    # tools are layered on it, not built again.
+    #
+    # Compose merges this build mapping into the stock one key by key, so `dockerfile`
+    # and `target` are named here, together with the image they belong to.
+    build:
+      context: .
+      dockerfile: docker/tools.dockerfile
+      target: development
+    image: pi-pocket:tools
+    # Mirrored: repos, dotfiles and notes at their host paths. SecondBrain read-only,
+    # as everywhere else in this setup.
+    working_dir: /home/node/Sync/LLMWiki
+    # No PATH here: the image sets it and the shell it starts reads that value. A
+    # PATH in this file would replace the image's, not add to it.
+    environment:
+      GIT_USER_NAME: ${GIT_USER_NAME}
+      GIT_USER_EMAIL: ${GIT_USER_EMAIL}
+      # gh-based extensions (repo watches, PiP) read this.
+      GH_TOKEN: ${LUKAS_AI_GH_TOKEN}
+      # pi-ai falls back to this env var when no credential is stored, so models work
+      # without the interactive sign-in in the Providers sheet. Bare key: it comes from
+      # the shell, and pocket.sh sources ~/.bash_secrets when the shell is missing it.
+      LITELLM_API_KEY:
+#      OPENROUTER_API_KEY:
+      GITLAB_TOKEN: ${LUKAS_AI_GITLAB_TOKEN}
+
+      # uv
+      UV_COMPILE_BYTECODE: "1"
+      UV_LINK_MODE: copy
+      UV_TOOL_BIN_DIR: /opt/uv-bin
+      UV_PYTHON_DOWNLOADS: "0"
+      UV_PROJECT_ENVIRONMENT: ".venv-docker"
+
+    volumes:
+      - ${HOME}/Repos:/home/node/Repos:rw
+      - ${HOME}/dotfiles:/home/node/dotfiles:rw
+      - ${HOME}/Sync/SecondBrain:/home/node/Sync/SecondBrain:r
+      - ${HOME}/Sync/LLMWiki:/home/node/Sync/LLMWiki:rw
+      - ${HOME}/.kube/config:/home/node/.kube/config:ro
+    # Deliberately no /var/run/docker.sock, unlike a setup where an agent drives
+    # Docker: nothing in pi-pocket needs it, and a session that can steer Pi would
+    # then steer the host's Docker daemon. Add it knowing that is what it means.
+    ports:
+      - "${PI_POCKET_BIND:-0.0.0.0}:${PI_POCKET_PORT:-8787}:${PI_POCKET_PORT:-8787}"
+      - 8788:8788
