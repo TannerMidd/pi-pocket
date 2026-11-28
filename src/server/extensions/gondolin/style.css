@@ -68,6 +68,18 @@
     border-color: transparent;
 }
 
+.gondolin-btn-danger {
+    background: var(--err, #dc2626);
+    color: #fff;
+    border-color: transparent;
+}
+
+.gondolin-confirm-note {
+    align-self: center;
+    font-size: 0.85rem;
+    color: var(--err, #dc2626);
+}
+
 .gondolin-actions {
     display: flex;
     gap: 0.4rem;

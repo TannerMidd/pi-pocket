@@ -375,6 +375,7 @@ export default function setup(pocket) {
         const [networkMode, setNetworkMode] = useState("allowlist");
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState("");
+        const [confirming, setConfirming] = useState(null);
 
         if (reviewId !== null) {
             return html`<${DiffReview} sandboxId=${reviewId} onBack=${() => setReviewId(null)} />`;
@@ -421,6 +422,7 @@ export default function setup(pocket) {
 
         async function action(id, path, method = "POST") {
             setError("");
+            setConfirming(null);
 
             try {
                 await pocket.api(
@@ -564,37 +566,88 @@ export default function setup(pocket) {
                                                   </div>
                                               </div>
                                               <div class="gondolin-actions">
-                                                  <button
-                                                      type="button"
-                                                      class="gondolin-btn"
-                                                      onClick=${() => setReviewId(sb.id)}
-                                                  >
-                                                      Diff
-                                                  </button>
                                                   ${
-                                                      sb.state !== "stopped" &&
-                                                      html`<button
-                                                          type="button"
-                                                          class="gondolin-btn"
-                                                          onClick=${() => action(sb.id, "/stop")}
-                                                      >
-                                                          Stop
-                                                      </button>`
+                                                      confirming?.id === sb.id
+                                                          ? html`<span
+                                                                    class="gondolin-confirm-note"
+                                                                >
+                                                                    ${
+                                                                        confirming.kind === "reset"
+                                                                            ? "Erase /workspace and re-seed?"
+                                                                            : "Permanently delete sandbox?"
+                                                                    }
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    class="gondolin-btn gondolin-btn-danger"
+                                                                    onClick=${() =>
+                                                                        confirming.kind === "reset"
+                                                                            ? action(
+                                                                                  sb.id,
+                                                                                  "/reset",
+                                                                              )
+                                                                            : action(
+                                                                                  sb.id,
+                                                                                  "",
+                                                                                  "DELETE",
+                                                                              )}
+                                                                >
+                                                                    ${
+                                                                        confirming.kind === "reset"
+                                                                            ? "Confirm reset"
+                                                                            : "Confirm delete"
+                                                                    }
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="gondolin-btn"
+                                                                    onClick=${() =>
+                                                                        setConfirming(null)}
+                                                                >
+                                                                    Cancel
+                                                                </button>`
+                                                          : html`<button
+                                                                    type="button"
+                                                                    class="gondolin-btn"
+                                                                    onClick=${() =>
+                                                                        setReviewId(sb.id)}
+                                                                >
+                                                                    Diff
+                                                                </button>
+                                                                ${
+                                                                    sb.state !== "stopped" &&
+                                                                    html`<button
+                                                                        type="button"
+                                                                        class="gondolin-btn"
+                                                                        onClick=${() =>
+                                                                            action(sb.id, "/stop")}
+                                                                    >
+                                                                        Stop
+                                                                    </button>`
+                                                                }
+                                                                <button
+                                                                    type="button"
+                                                                    class="gondolin-btn"
+                                                                    onClick=${() =>
+                                                                        setConfirming({
+                                                                            id: sb.id,
+                                                                            kind: "reset",
+                                                                        })}
+                                                                >
+                                                                    Reset
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="gondolin-btn"
+                                                                    onClick=${() =>
+                                                                        setConfirming({
+                                                                            id: sb.id,
+                                                                            kind: "delete",
+                                                                        })}
+                                                                >
+                                                                    Delete
+                                                                </button>`
                                                   }
-                                                  <button
-                                                      type="button"
-                                                      class="gondolin-btn"
-                                                      onClick=${() => action(sb.id, "/reset")}
-                                                  >
-                                                      Reset
-                                                  </button>
-                                                  <button
-                                                      type="button"
-                                                      class="gondolin-btn"
-                                                      onClick=${() => action(sb.id, "", "DELETE")}
-                                                  >
-                                                      Delete
-                                                  </button>
                                               </div>
                                           </div>
                                       </li>`,
