@@ -927,6 +927,28 @@ export default function createGondolin(
                 });
             }
 
+            const targetCwd = sandboxUri(record.id);
+            let sessionSaved = false;
+            const stopWatching =
+                existing === undefined && typeof host.on === "function"
+                    ? host.on("session.created", (event) => {
+                          if (event.cwd === targetCwd) {
+                              sessionSaved = true;
+                          }
+                      })
+                    : undefined;
+            let beforeAddresses: Set<string> | undefined;
+
+            if (existing === undefined && typeof host.linkedSessions.list === "function") {
+                try {
+                    const current = await host.linkedSessions.list(api.conversationId);
+
+                    beforeAddresses = new Set(current.map((item) => item.address));
+                } catch {
+                    beforeAddresses = undefined;
+                }
+            }
+
             try {
                 const started = await host.linkedSessions.start(
                     api.conversationId,
@@ -936,7 +958,7 @@ export default function createGondolin(
                         message: args.message!,
                         model: args.model,
                         thinking: args.thinking,
-                        cwd: sandboxUri(record.id),
+                        cwd: targetCwd,
                     },
                     key,
                 );
@@ -951,10 +973,31 @@ export default function createGondolin(
                 );
             } catch (error) {
                 if (existing === undefined) {
-                    await manager.remove(record.id).catch(() => undefined);
+                    let hasSavedChild = sessionSaved;
+
+                    if (!hasSavedChild && typeof host.linkedSessions.list === "function") {
+                        hasSavedChild = await host.linkedSessions
+                            .list(api.conversationId)
+                            .then((items) =>
+                                items.some(
+                                    (item) =>
+                                        item.cwd === targetCwd ||
+                                        (item.cwd === undefined &&
+                                            (beforeAddresses === undefined ||
+                                                !beforeAddresses.has(item.address))),
+                                ),
+                            )
+                            .catch(() => true);
+                    }
+
+                    if (!hasSavedChild) {
+                        await manager.remove(record.id).catch(() => undefined);
+                    }
                 }
 
                 throw error;
+            } finally {
+                stopWatching?.();
             }
         },
     });

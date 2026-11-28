@@ -1412,6 +1412,8 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
     let settingNetworkMode: "off" | "allowlist" | "open" = "allowlist";
     let requesterRole: "owner" | "guest" | "viewer" | undefined = "owner";
     let startError: Error | undefined;
+    let saveChildBeforeThrow = false;
+    const savedLinked: { address: string; cwd?: string }[] = [];
     const startedCalls: {
         source: unknown;
         request: { title?: string; message: string; cwd?: string };
@@ -1429,16 +1431,28 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
             requesterOf: () => "user-1",
             roleOf: () => requesterRole,
             linkedSessions: {
+                list: async () => [...savedLinked],
                 start: async (
                     source: unknown,
                     request: { title?: string; message: string; cwd?: string },
                     key: string,
                 ) => {
+                    if (saveChildBeforeThrow) {
+                        savedLinked.push({
+                            address: `s-saved-${savedLinked.length + 1}`,
+                            cwd: request.cwd,
+                        });
+                    }
+
                     if (startError !== undefined) {
                         throw startError;
                     }
 
                     startedCalls.push({ source, request, key });
+                    savedLinked.push({
+                        address: `s${startedCalls.length}`,
+                        cwd: request.cwd,
+                    });
 
                     return { session: 500 as never, address: "s1", answers: true };
                 },
@@ -1512,7 +1526,7 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
             /looser than the owner's configured default/,
         );
 
-        // 4. Failed linkedSessions.start cleans up newly created sandbox (no orphan).
+        // 4. Failed linkedSessions.start before child creation cleans up newly created sandbox (no orphan).
         startError = new Error("model not allowed");
         await assert.rejects(
             sandboxTool.execute(
@@ -1531,6 +1545,39 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
 
         assert.match(listAfterFail.output[0]!.text, /No Gondolin sandboxes/);
 
+        // 4b. If linkedSessions.start saves a child session and THEN fails delivery (e.g. plan mode),
+        // the sandbox MUST be preserved so the child is never stranded and retrying reuses it.
+        saveChildBeforeThrow = true;
+        startError = new Error("session entered plan mode");
+        await assert.rejects(
+            sandboxTool.execute(
+                { action: "start", message: "saved then blocked", source: "empty" },
+                makeApi(repo, "call-partial"),
+                BACKGROUND_CONTEXT,
+            ),
+            /plan mode/,
+        );
+        saveChildBeforeThrow = false;
+        startError = undefined;
+
+        const listAfterPartial = await sandboxTool.execute(
+            { action: "list" },
+            makeApi(repo),
+            BACKGROUND_CONTEXT,
+        );
+        const partialId = listAfterPartial.output[0]!.text.match(/sb-[a-f0-9]+/)?.[0];
+
+        assert.ok(partialId !== undefined, "sandbox with a saved child session must be kept");
+
+        // Retrying the same callId reuses that exact sandbox instead of creating a duplicate.
+        const retriedPartial = await sandboxTool.execute(
+            { action: "start", message: "saved then blocked", source: "empty" },
+            makeApi(repo, "call-partial"),
+            BACKGROUND_CONTEXT,
+        );
+
+        assert.match(retriedPartial.output[0]!.text, new RegExp(partialId));
+
         // 5. Start from current project succeeds, and replaying same callId is idempotent!
         const started = await sandboxTool.execute(
             {
@@ -1546,9 +1593,9 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
         assert.match(started.output[0]!.text, /Started sandbox (sb-[a-f0-9]+)/);
         const sbId = started.output[0]!.text.match(/sb-[a-f0-9]+/)![0]!;
 
-        assert.equal(startedCalls.length, 1);
-        assert.equal(startedCalls[0]!.request.cwd, sandboxUri(sbId));
-        assert.equal(startedCalls[0]!.key, "task-1:call-ok");
+        assert.equal(startedCalls.length, 2);
+        assert.equal(startedCalls[1]!.request.cwd, sandboxUri(sbId));
+        assert.equal(startedCalls[1]!.key, "task-1:call-ok");
 
         // Replay with identical taskId:callId reuses the exact same sandbox (no duplicate!).
         const replayed = await sandboxTool.execute(
@@ -1570,7 +1617,7 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
             BACKGROUND_CONTEXT,
         );
 
-        assert.equal(listed.output[0]!.text.split("\n").length, 1);
+        assert.equal(listed.output[0]!.text.split("\n").length, 2);
         assert.match(listed.output[0]!.text, new RegExp(`${sbId}.*net: off`));
 
         // 6. Diff inspects edits made inside the sandbox, and stop snapshots & stops the VM.
@@ -1598,7 +1645,7 @@ test("sandbox tool lets owner host sessions start/list/diff/stop sandboxes with 
         assert.match(stopRes.output[0]!.text, /stopped sandbox/);
 
         // 7. Sandbox cap (10) prevents runaway agent spawning.
-        for (let i = 2; i <= 10; i++) {
+        for (let i = 3; i <= 10; i++) {
             await sandboxTool.execute(
                 { action: "start", source: "empty", message: `worker ${i}` },
                 makeApi(repo, `call-cap-${i}`),
