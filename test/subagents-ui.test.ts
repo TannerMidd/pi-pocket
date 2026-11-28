@@ -212,7 +212,11 @@ test(
             `return JSON.stringify(document.querySelectorAll(".agent-row").length === 2)`,
             "a row each",
         );
-        // Only the finished one has ×; the working one has Stop.
+        // Only the finished one has × once its report reaches Pi; the working one has Stop.
+        await see(
+            `return JSON.stringify(document.querySelectorAll(".agent-hide").length > 0)`,
+            "Hide once reported",
+        );
         assert.equal(
             await inPage<string[]>(
                 `return JSON.stringify([...document.querySelectorAll(".agent-hide")].map((button) => button.getAttribute("aria-label")))`,
