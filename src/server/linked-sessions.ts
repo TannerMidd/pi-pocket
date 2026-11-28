@@ -1484,7 +1484,7 @@ export class LinkedSessions implements LinkedSessionsApi {
         // One from anyone else (a linked session asking its lead or a sibling) gets an answer only when the target sends
         // one, so it is asked to.
         const answers = this.#leads(source, target)
-            ? `Send to that address only when the sender needs an answer mid-work; your final answer reaches it by itself when your run ends, so do not send it again, and do not send thanks or acknowledgements.`
+            ? `Send one short update to that address when a blocker, handoff, or changed expectation affects the lead's next decision. Answer a question that needs a reply mid-work, but do not send routine progress: your final answer reaches it by itself when your run ends; do not send it again or acknowledge this message.`
             : `Your final answer does not reach that session by itself: when the message asks for an answer or a result, send it to that address, once, when you have it. Do not send thanks or acknowledgements.`;
         const preface =
             ended === undefined
