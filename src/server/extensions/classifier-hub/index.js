@@ -1,5 +1,5 @@
-// The Jev Hub, for the owner: a menu row and a launcher action that open a sheet with counts of every
-// Jev call since the hub started, and the recent provider verdicts. It keeps nothing: the server sends
+// The Classifier Hub, for the owner: a menu row and a launcher action that open a sheet with counts of every
+// classifier call since the hub started, and the recent provider verdicts. It keeps nothing: the server sends
 // only numbers and verdict words. It uses only `pocket`.
 export const pocketApi = 1;
 
@@ -61,17 +61,17 @@ const took = (ms) => (ms >= 10_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 100
 export default function setup(pocket) {
     const { html, useEffect, useState } = pocket;
 
-    pocket.menu({ id: "jev-hub", label: "Jev Hub", sheet: "jev-hub" });
+    pocket.menu({ id: "classifier-hub", label: "Classifier Hub", sheet: "classifier-hub" });
     pocket.launcher({
-        id: "jev-hub",
-        label: "Jev Hub",
+        id: "classifier-hub",
+        label: "Classifier Hub",
         detail: "Classifier activity and verdicts",
         iconPath: ICON,
-        keywords: ["jev", "hub", "verdicts", "counts"],
-        sheet: "jev-hub",
+        keywords: ["classifier", "decision", "hub", "verdicts", "counts", "activity"],
+        sheet: "classifier-hub",
     });
 
-    function JevHub() {
+    function ClassifierHub() {
         const [activity, setActivity] = useState(null);
         const [error, setError] = useState(null);
         const [working, setWorking] = useState(false);
@@ -83,7 +83,7 @@ export default function setup(pocket) {
             try {
                 setActivity(await pocket.api("activity"));
             } catch (failed) {
-                setError(failed.message ?? "Could not read the Jev Hub.");
+                setError(failed.message ?? "Could not read Classifier Hub.");
             } finally {
                 setWorking(false);
             }
@@ -94,21 +94,22 @@ export default function setup(pocket) {
             void read();
         }, []);
 
-        const head = (text) => html`<div class="jev-label">${text}</div>`;
+        const head = (text) => html`<div class="classifier-hub-label">${text}</div>`;
 
-        const chip = (tone, text) => html`<span class=${`jev-chip ${tone}`}>${text}</span>`;
+        const chip = (tone, text) =>
+            html`<span class=${`classifier-hub-chip ${tone}`}>${text}</span>`;
 
         const counts = (total) =>
-            html`<div class="jev-counts">
-                <span class="jev-count ok">${total.answered} answered</span>
-                <span class="jev-count err">${total.failed} failed</span>
-                <span class="jev-count warn">${total.timedOut} timed out</span>
+            html`<div class="classifier-hub-counts">
+                <span class="classifier-hub-count ok">${total.answered} answered</span>
+                <span class="classifier-hub-count err">${total.failed} failed</span>
+                <span class="classifier-hub-count warn">${total.timedOut} timed out</span>
             </div>`;
 
         if (error !== null) {
-            return html`<div class="jev-sheet">
+            return html`<div class="classifier-hub-sheet">
                 <div class="error-box">${error}</div>
-                <div class="jev-buttons">
+                <div class="classifier-hub-buttons">
                     <button class="button" disabled=${working} onClick=${read}>
                         ${working ? "Reading…" : "Try again"}
                     </button>
@@ -117,7 +118,7 @@ export default function setup(pocket) {
         }
 
         if (activity === null) {
-            return html`<${pocket.Loader} label="Reading the Jev Hub" />`;
+            return html`<${pocket.Loader} label="Reading Classifier Hub" />`;
         }
 
         const totals = activity.totals ?? [];
@@ -126,8 +127,8 @@ export default function setup(pocket) {
             (total) => total.answered + total.failed + total.timedOut === 0,
         );
 
-        return html`<div class="jev-sheet">
-            <div class="jev-card jev-head">
+        return html`<div class="classifier-hub-sheet">
+            <div class="classifier-hub-card classifier-hub-head">
                 <div>
                     ${head("Classifier calls since the hub started")}
                     <div class="muted small mono">${when(activity.startedAt)}</div>
@@ -138,8 +139,8 @@ export default function setup(pocket) {
             </div>
             ${
                 activity.classifierModel === null &&
-                html`<div class="jev-card jev-empty" role="status">
-                    <div class="jev-source">No classifier model is chosen</div>
+                html`<div class="classifier-hub-card classifier-hub-empty" role="status">
+                    <div class="classifier-hub-source">No classifier model is chosen</div>
                     <div class="muted small">
                         Pick one in Menu → Providers. Until then the classifier features do nothing,
                         except a module with a Classify model of its own.
@@ -148,17 +149,17 @@ export default function setup(pocket) {
             }
             ${
                 nothing
-                    ? html`<div class="jev-card jev-empty">
-                          <div class="jev-source">No classifier calls yet</div>
+                    ? html`<div class="classifier-hub-card classifier-hub-empty">
+                          <div class="classifier-hub-source">No classifier calls yet</div>
                           <div class="muted small">
                               Enable an integration such as Run outcomes in Menu → Extensions.
                           </div>
                       </div>`
-                    : html`<div class="jev-totals">
+                    : html`<div class="classifier-hub-totals">
                           ${totals.map(
                               (total) =>
-                                  html`<div key=${total.source} class="jev-card">
-                                      <div class="jev-source">
+                                  html`<div key=${total.source} class="classifier-hub-card">
+                                      <div class="classifier-hub-source">
                                           ${SOURCES[total.source] ?? total.source}
                                       </div>
                                       ${counts(total)}
@@ -169,18 +170,18 @@ export default function setup(pocket) {
             ${head("Recent provider verdicts")}
             ${
                 recent.length === 0
-                    ? html`<div class="jev-card jev-empty">
+                    ? html`<div class="classifier-hub-card classifier-hub-empty">
                           <div class="muted">No recent calls to show.</div>
                       </div>`
-                    : html`<ul class="jev-recent">
+                    : html`<ul class="classifier-hub-recent">
                           ${recent.map(
                               (entry, index) =>
-                                  html`<li key=${index} class="jev-card">
-                                      <div class="jev-entry-head">
-                                          <div class="jev-entry-source">
+                                  html`<li key=${index} class="classifier-hub-card">
+                                      <div class="classifier-hub-entry-head">
+                                          <div class="classifier-hub-entry-source">
                                               ${SOURCES[entry.source] ?? entry.source}
                                           </div>
-                                          <div class="jev-entry-meta">
+                                          <div class="classifier-hub-entry-meta">
                                               ${chip(
                                                   STATUSES[entry.status]?.tone ?? "",
                                                   STATUSES[entry.status]?.label ?? entry.status,
@@ -193,10 +194,13 @@ export default function setup(pocket) {
                                       </div>
                                       ${
                                           entry.verdicts?.length > 0 &&
-                                          html`<ul class="jev-verdicts">
+                                          html`<ul class="classifier-hub-verdicts">
                                               ${entry.verdicts.map(
                                                   (verdict, at) =>
-                                                      html`<li key=${at} class="mono jev-verdict">
+                                                      html`<li
+                                                          key=${at}
+                                                          class="mono classifier-hub-verdict"
+                                                      >
                                                           ${VERDICTS[verdict] ?? verdict}
                                                       </li>`,
                                               )}
@@ -214,6 +218,11 @@ export default function setup(pocket) {
         </div>`;
     }
 
-    pocket.sheet({ id: "jev-hub", title: "Jev Hub", component: JevHub, wide: true });
+    pocket.sheet({
+        id: "classifier-hub",
+        title: "Classifier Hub",
+        component: ClassifierHub,
+        wide: true,
+    });
     pocket.style("style.css");
 }

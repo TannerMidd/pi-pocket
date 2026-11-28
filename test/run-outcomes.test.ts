@@ -173,7 +173,7 @@ test("a shared answer gets one verdict, hidden values are redacted, and uncertai
     }
 });
 
-test("the owner sees only sanitized verdicts and counts in Jev Hub, not guests or viewers", async () => {
+test("the owner sees only sanitized verdicts and counts in Classifier Hub, not guests or viewers", async () => {
     const server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -181,7 +181,7 @@ test("the owner sees only sanitized verdicts and counts in Jev Hub, not guests o
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as { port: number }).port;
     const read = (token: string) =>
-        fetch(`http://127.0.0.1:${port}/api/x/jev-hub/activity`, {
+        fetch(`http://127.0.0.1:${port}/api/x/classifier-hub/activity`, {
             headers: { "X-Pocket": "1", authorization: `Bearer ${token}` },
         });
 
@@ -202,7 +202,9 @@ test("the owner sees only sanitized verdicts and counts in Jev Hub, not guests o
             const added = app.config.addUser(role, role);
 
             assert.equal((await read(added.token)).status, 404);
-            assert.ok(!app.webs.clients(added.user).some((client) => client.module === "jev-hub"));
+            assert.ok(
+                !app.webs.clients(added.user).some((client) => client.module === "classifier-hub"),
+            );
         }
     } finally {
         server.closeAllConnections();
@@ -310,7 +312,7 @@ test("a notification that waited on its label is dropped when a new run began me
     }
 });
 
-test("provider list counts classifier models, owner picks shared model, and Jev Hub reports it", async () => {
+test("provider list counts classifier models, owner picks shared model, and Classifier Hub reports it", async () => {
     const row = app.providers.list(true).find((provider) => provider.id === "faux-jev");
 
     assert.equal(row?.classifiers, 1);
@@ -325,7 +327,7 @@ test("provider list counts classifier models, owner picks shared model, and Jev 
     await assert.rejects(app.setClassifierModel(guest, null), /Only the owner/);
     assert.throws(() => app.classifierModels(guest), /Only the owner/);
 
-    await app.setExtensionEnabled(owner(app), "jev-hub.ts", true);
+    await app.setExtensionEnabled(owner(app), "classifier-hub.ts", true);
     const server = createServer(
         createHandler({ app, listen: { host: "127.0.0.1", port: 0 }, restart: () => {} }),
     );
@@ -334,7 +336,7 @@ test("provider list counts classifier models, owner picks shared model, and Jev 
     const port = (server.address() as { port: number }).port;
     const read = async () =>
         (
-            await fetch(`http://127.0.0.1:${port}/api/x/jev-hub/activity`, {
+            await fetch(`http://127.0.0.1:${port}/api/x/classifier-hub/activity`, {
                 headers: { "X-Pocket": "1", authorization: `Bearer ${app.config.ownerToken}` },
             })
         ).json() as Promise<{ classifierModel: string | null }>;

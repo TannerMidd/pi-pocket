@@ -1,8 +1,8 @@
-/** Jev Hub shows the owner recent classifier verdicts, counts, and deadlines without keeping inputs. */
+/** Classifier Hub shows the owner recent classifier verdicts, counts, and deadlines without keeping inputs. */
 import { trackClassifier } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
 
-export default function createJevHub(host: PocketHost, web?: ExtensionWeb): void {
+export default function createClassifierHub(host: PocketHost, web?: ExtensionWeb): void {
     if (web === undefined || typeof host.classify !== "function") {
         return;
     }
@@ -22,5 +22,5 @@ export default function createJevHub(host: PocketHost, web?: ExtensionWeb): void
         }),
         { access: "owner" },
     );
-    web.client("jev-hub", { access: "owner" });
+    web.client("classifier-hub", { access: "owner" });
 }

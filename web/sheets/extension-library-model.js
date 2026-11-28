@@ -34,7 +34,7 @@ const GROUPS = {
         codemode: ["terminal", "Combine tool calls in JavaScript."],
         "tool-search": ["search", "Find tools when a task needs them."],
         prompt: ["chat", "Provide Pi’s system instructions."],
-        "jev-hub": ["pulse", "Inspect recent classifier activity."],
+        "classifier-hub": ["pulse", "Inspect recent classifier activity."],
         gallery: ["grid", "Find extensions and themes."],
         updates: ["download", "Check for new versions of Pi Pocket."],
         "anthropic-subscription": ["key", "Use Claude subscription billing."],

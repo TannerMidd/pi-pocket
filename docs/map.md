@@ -247,7 +247,7 @@ Each default-exports `(host: PocketHost, web: ExtensionWeb) => Extension | Exten
 
 `ConfigStore` seeds only new profiles with enabled flags for Agent Teams, Relay, Relay triage, and Run outcomes. The loader retains legacy defaults for absent flags in existing profiles.
 
-`run-outcomes.ts` supplies a label only with a selected classifier for `alerts.ts`, PiP follow reports (`pip.ts`), linked-session parent reports (`linked-sessions.ts`), and subagent parent reports (`extensions/subagents.ts`). Subagent reporters use the internal optional `host.classifyRunOutcome` facade to share core redaction and answer identity. `classifier-activity.ts` records outcomes of built-in classifier calls at their deadlines. `jev-hub.ts` starts that collector and exposes the owner-only `GET /api/x/jev-hub/activity` route and the sheet in `jev-hub/`.
+`run-outcomes.ts` supplies a label only with a selected classifier for `alerts.ts`, PiP follow reports (`pip.ts`), linked-session parent reports (`linked-sessions.ts`), and subagent parent reports (`extensions/subagents.ts`). Subagent reporters use the internal optional `host.classifyRunOutcome` facade to share core redaction and answer identity. `classifier-activity.ts` records outcomes of built-in classifier calls at their deadlines. `classifier-hub.ts` starts that collector and exposes the owner-only `GET /api/x/classifier-hub/activity` route and the sheet in `classifier-hub/`.
 
 ## Web: `web/` (Preact and htm, no build)
 

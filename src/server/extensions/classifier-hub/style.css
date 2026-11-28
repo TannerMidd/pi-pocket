@@ -1,15 +1,15 @@
-.jev-sheet {
+.classifier-hub-sheet {
     display: flex;
     flex-direction: column;
     gap: 12px;
     min-width: 0;
 }
 
-.jev-sheet p {
+.classifier-hub-sheet p {
     margin: 0;
 }
 
-.jev-label {
+.classifier-hub-label {
     color: var(--muted);
     font-size: 12px;
     font-weight: 600;
@@ -17,7 +17,7 @@
     text-transform: uppercase;
 }
 
-.jev-card {
+.classifier-hub-card {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -28,55 +28,55 @@
     background: var(--card);
 }
 
-.jev-head {
+.classifier-hub-head {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
 }
 
-.jev-head .jev-label {
+.classifier-hub-head .classifier-hub-label {
     color: var(--text);
 }
 
-.jev-empty {
+.classifier-hub-empty {
     align-items: flex-start;
 }
 
-.jev-totals {
+.classifier-hub-totals {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 8px;
 }
 
-.jev-source {
+.classifier-hub-source {
     font-weight: 600;
 }
 
-.jev-counts {
+.classifier-hub-counts {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 12px;
 }
 
-.jev-count {
+.classifier-hub-count {
     font-size: 12px;
     font-weight: 600;
 }
 
-.jev-count.ok {
+.classifier-hub-count.ok {
     color: var(--ok);
 }
 
-.jev-count.err {
+.classifier-hub-count.err {
     color: var(--err);
 }
 
-.jev-count.warn {
+.classifier-hub-count.warn {
     color: var(--warn);
 }
 
-.jev-recent {
+.classifier-hub-recent {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -85,7 +85,7 @@
     list-style: none;
 }
 
-.jev-entry-head {
+.classifier-hub-entry-head {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -94,20 +94,20 @@
     min-width: 0;
 }
 
-.jev-entry-source {
+.classifier-hub-entry-source {
     font-weight: 600;
     min-width: 0;
     overflow-wrap: anywhere;
 }
 
-.jev-entry-meta {
+.classifier-hub-entry-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 8px;
 }
 
-.jev-chip {
+.classifier-hub-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -120,7 +120,7 @@
     font-weight: 600;
 }
 
-.jev-chip::before {
+.classifier-hub-chip::before {
     content: "";
     width: 7px;
     height: 7px;
@@ -128,25 +128,25 @@
     background: currentColor;
 }
 
-.jev-chip.ok {
+.classifier-hub-chip.ok {
     border-color: var(--ok);
     background: var(--ok-soft);
     color: var(--ok);
 }
 
-.jev-chip.warn {
+.classifier-hub-chip.warn {
     border-color: var(--warn-line);
     background: var(--warn-soft);
     color: var(--warn);
 }
 
-.jev-chip.err {
+.classifier-hub-chip.err {
     border-color: var(--err-line);
     background: var(--err-soft);
     color: var(--err);
 }
 
-.jev-verdicts {
+.classifier-hub-verdicts {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -155,7 +155,7 @@
     list-style: none;
 }
 
-.jev-verdict {
+.classifier-hub-verdict {
     padding: 4px 10px;
     border-left: 2px solid var(--hair-2);
     color: var(--muted);
@@ -163,19 +163,19 @@
     overflow-wrap: anywhere;
 }
 
-.jev-buttons {
+.classifier-hub-buttons {
     display: flex;
     justify-content: flex-end;
 }
 
-.jev-buttons .button,
-.jev-head .button {
+.classifier-hub-buttons .button,
+.classifier-hub-head .button {
     min-height: 40px;
 }
 
 @media (pointer: coarse) {
-    .jev-buttons .button,
-    .jev-head .button {
+    .classifier-hub-buttons .button,
+    .classifier-hub-head .button {
         min-height: 44px;
     }
 }
