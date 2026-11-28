@@ -10,7 +10,16 @@ import {
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { LimitGate, noWait } from "../src/server/limit-gate.ts";
 import { responseFacts } from "../src/server/limits.ts";
-import { parseUsage, UsageStore, windowName } from "../src/server/usage.ts";
+import {
+    canRefreshUsage,
+    extractJwtAccountId,
+    parseAnthropicUsage,
+    parseCodexUsage,
+    parseUsage,
+    UsageRefresher,
+    UsageStore,
+    windowName,
+} from "../src/server/usage.ts";
 import {
     type App,
     cleanUp,
@@ -783,4 +792,180 @@ test("web/usage.js: tightest window, provider states, sorting, holds, and open w
     const tiny = { ...win("tokens", 0, "low", 6 * MIN, "tok"), tiny: true };
 
     assert.equal(summary(view(prov("A", [tiny])), NOW)?.text, "tok >99% used");
+});
+
+test("on-demand subscription parsers read Anthropic and Codex usage JSON bodies", () => {
+    const resetFive = new Date(AT + 2 * 3_600_000).toISOString();
+    const resetSeven = new Date(AT + 5 * 86_400_000).toISOString();
+    const anthropic = parseAnthropicUsage({
+        five_hour: { utilization: 37.0, resets_at: resetFive },
+        seven_day: { utilization: 92.4, resets_at: resetSeven },
+        seven_day_sonnet: { utilization: 100, resets_at: resetSeven },
+        seven_day_opus: null,
+    });
+
+    assert.equal(anthropic.length, 3);
+    assert.deepEqual(
+        anthropic.map((each) => [each.id, each.left, each.state]),
+        [
+            ["5h", 63, "ok"],
+            ["7d", 8, "low"],
+            ["7d_sonnet", 0, "limited"],
+        ],
+    );
+    assert.equal(anthropic[0]?.resetAt, AT + 2 * 3_600_000);
+    assert.deepEqual(parseAnthropicUsage(null), []);
+
+    const codex = parseCodexUsage(
+        {
+            rate_limit: {
+                allowed: true,
+                limit_reached: false,
+                primary_window: {
+                    used_percent: 25,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 7200,
+                    reset_at: Math.floor((AT + 7_200_000) / 1000),
+                },
+                secondary_window: {
+                    used_percent: 48,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 345_600,
+                },
+            },
+        },
+        AT,
+    );
+
+    assert.deepEqual(
+        codex.map((each) => [each.id, each.label, each.left, each.state]),
+        [
+            ["5h", "5-hour window", 75, "ok"],
+            ["7d", "Weekly window", 52, "ok"],
+        ],
+    );
+    assert.equal(codex[0]?.resetAt, AT + 7_200_000);
+    assert.equal(codex[1]?.resetAt, AT + 345_600_000);
+
+    const payload = Buffer.from(
+        JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" } }),
+    ).toString("base64url");
+
+    assert.equal(extractJwtAccountId(`hdr.${payload}.sig`), "acct_123");
+    assert.equal(extractJwtAccountId("not-a-jwt"), undefined);
+    assert.equal(canRefreshUsage("anthropic", "subscription"), true);
+    assert.equal(canRefreshUsage("anthropic", "key"), false);
+    assert.equal(canRefreshUsage("openai-codex", "subscription"), true);
+    assert.equal(canRefreshUsage("faux", "subscription"), false);
+});
+
+test("UsageRefresher fetches on demand, deduplicates concurrent calls, enforces cooldown, and honors 429", async () => {
+    let now = AT;
+    let changed = 0;
+    const store = new UsageStore({ now: () => now, changed: () => changed++ });
+    const seen: { url: string; auth: string | null; beta: string | null; acct: string | null }[] =
+        [];
+    let release!: () => void;
+    let firstGate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let mode: "ok" | "429" | "huge" = "ok";
+
+    const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+
+        seen.push({
+            url: String(input),
+            auth: headers.get("authorization"),
+            beta: headers.get("anthropic-beta"),
+            acct: headers.get("chatgpt-account-id"),
+        });
+
+        await firstGate;
+
+        if (mode === "429") {
+            return new Response("slow down", {
+                status: 429,
+                headers: { "retry-after": "180" },
+            });
+        }
+
+        if (mode === "huge") {
+            return new Response("x".repeat(70 * 1024), { status: 200 });
+        }
+
+        if (String(input).includes("anthropic")) {
+            return Response.json({
+                five_hour: { utilization: 40, resets_at: new Date(now + 3_600_000).toISOString() },
+            });
+        }
+
+        return Response.json({
+            rate_limit: {
+                primary_window: { used_percent: 20, limit_window_seconds: 18_000 },
+            },
+        });
+    }) as typeof fetch;
+
+    const jwtPayload = Buffer.from(
+        JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_xyz" } }),
+    ).toString("base64url");
+    const refresher = new UsageRefresher({
+        store,
+        getToken: async (id) => (id === "anthropic" ? "ant-tok" : `h.${jwtPayload}.s`),
+        fetch: fakeFetch,
+        now: () => now,
+        cooldownMs: 60_000,
+    });
+
+    // Two concurrent calls share one upstream fetch (single-flight).
+    const first = refresher.refresh(["anthropic", "openai-codex"]);
+    const second = refresher.refresh(["anthropic"]);
+
+    release();
+    firstGate = Promise.resolve();
+
+    const [a, b] = await Promise.all([first, second]);
+
+    assert.equal(seen.length, 2);
+    assert.deepEqual(a.refreshed.sort(), ["anthropic", "openai-codex"]);
+    assert.deepEqual(b.refreshed, ["anthropic"]);
+    assert.equal(seen.find((each) => each.url.includes("anthropic"))?.beta, "oauth-2025-04-20");
+    assert.equal(seen.find((each) => each.url.includes("wham/usage"))?.acct, "acct_xyz");
+    assert.equal(
+        store.view({ id: "anthropic", name: "Anthropic", kind: "subscription" }).windows[0]?.left,
+        60,
+    );
+    assert.ok(changed >= 2);
+
+    // Within cooldown: zero upstream calls.
+    now += 10_000;
+    const cooled = await refresher.refresh(["anthropic"]);
+
+    assert.equal(seen.length, 2);
+    assert.deepEqual(cooled.refreshed, []);
+    assert.equal(cooled.cooldownMs, 50_000);
+
+    // After cooldown, an HTTP 429 honors Retry-After (180s).
+    now += 60_000;
+    mode = "429";
+    const limited = await refresher.refresh(["anthropic"]);
+
+    assert.deepEqual(limited.failed, ["anthropic"]);
+    assert.equal(seen.length, 3);
+    now += 100_000;
+
+    const stillWaiting = await refresher.refresh(["anthropic"]);
+
+    assert.equal(seen.length, 3);
+    assert.equal(stillWaiting.cooldownMs, 80_000);
+
+    // forget() clears cooldown; oversized response body is rejected safely.
+    refresher.forget("anthropic");
+    mode = "huge";
+
+    const huge = await refresher.refresh(["anthropic"]);
+
+    assert.deepEqual(huge.failed, ["anthropic"]);
+    assert.equal(seen.length, 4);
 });

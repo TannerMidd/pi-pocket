@@ -142,7 +142,14 @@ import { loadPromptTemplates, type PromptTemplate, type SkillCommand } from "./p
 import { BASE_THEME, DEFAULT_COLORS, Themes } from "./themes.ts";
 import { THEME_ID } from "./themes/format.ts";
 import { LimitGate, type LimitTuning } from "./limit-gate.ts";
-import { UsageStore, type UsageProvider, type UsageSnapshot } from "./usage.ts";
+import {
+    canRefreshUsage,
+    UsageRefresher,
+    UsageStore,
+    type UsageProvider,
+    type UsageRefreshResult,
+    type UsageSnapshot,
+} from "./usage.ts";
 import { CacheKeeper } from "./cache-keeper.ts";
 import { measureModelStreams } from "./timing.ts";
 import { Providers } from "./providers.ts";
@@ -392,6 +399,8 @@ export interface OpenOptions {
     configureModels?: (models: ModelRuntime) => void;
     /** Tests shorten the limit gate's waits (`limit-gate.ts`). */
     limits?: Partial<LimitTuning>;
+    /** Tests inject a fetch for on-demand subscription usage refreshes (`usage.ts`). */
+    usageFetch?: typeof fetch;
     /** The clock durable work runs by, such as scheduled messages. Tests move it ahead. */
     now?: () => number;
     /** The browser to run for the Browser panel and tool; null for none. Undefined finds one on this machine. */
@@ -450,6 +459,8 @@ export class PocketApp {
     readonly limits: LimitGate;
     /** What each provider's last response said about its limits (`usage.ts`); only the owner sees it. */
     readonly usage: UsageStore;
+    /** On-demand subscription usage refresher with per-provider cooldowns (`usage.ts`). */
+    readonly usageRefresher: UsageRefresher;
     /** Keeps the prompt cache warm while a run waits on a tool call (`cache-keeper.ts`). */
     readonly cacheKeeper: CacheKeeper;
     readonly schedules = new Schedules(this);
@@ -629,6 +640,19 @@ export class PocketApp {
             },
         });
         this.usage = new UsageStore({ changed: () => this.#usageChanged() });
+        this.usageRefresher = new UsageRefresher({
+            store: this.usage,
+            getToken: async (providerId, signal) => {
+                if (!this.models.isUsingOAuth(providerId)) {
+                    return undefined;
+                }
+
+                const resolved = await this.models.getAuth(providerId, { signal });
+
+                return resolved?.auth.apiKey;
+            },
+            ...(options.usageFetch === undefined ? {} : { fetch: options.usageFetch }),
+        });
         this.limits = new LimitGate({
             seen: (provider, facts) => this.usage.record(provider, facts),
             hours: () => this.config.limitWaitHours,
@@ -2484,28 +2508,34 @@ export class PocketApp {
      */
     usageSnapshot(): UsageSnapshot {
         const now = Date.now();
-        const known = new Map<string, { id: string; name: string; kind: UsageProvider["kind"] }>();
+        const known = new Map<
+            string,
+            { id: string; name: string; kind: UsageProvider["kind"]; refreshable?: true }
+        >();
         const kindOf = (id: string): UsageProvider["kind"] =>
             this.models.isUsingOAuth(id) ? "subscription" : "key";
 
+        const entryOf = (id: string, name: string) => {
+            const kind = kindOf(id);
+
+            return {
+                id,
+                name,
+                kind,
+                ...(canRefreshUsage(id, kind) ? { refreshable: true as const } : {}),
+            };
+        };
+
         for (const provider of this.providers.list(true)) {
             if (provider.configured) {
-                known.set(provider.id, {
-                    id: provider.id,
-                    name: provider.name,
-                    kind: kindOf(provider.id),
-                });
+                known.set(provider.id, entryOf(provider.id, provider.name));
             }
         }
 
         // A provider that answered but is not listed as signed in (a key in the environment) still has numbers.
         for (const id of this.usage.seen()) {
             if (!known.has(id)) {
-                known.set(id, {
-                    id,
-                    name: this.models.getProvider(id)?.name ?? id,
-                    kind: kindOf(id),
-                });
+                known.set(id, entryOf(id, this.models.getProvider(id)?.name ?? id));
             }
         }
 
@@ -2550,6 +2580,18 @@ export class PocketApp {
     /** The owner's usage, or undefined for anyone else: those who may open Providers may see it. */
     usageFor(user: User): UsageSnapshot | undefined {
         return user.role === "owner" ? this.usageSnapshot() : undefined;
+    }
+
+    /** Fetch fresh usage on demand for configured subscription providers (or one named provider), subject to cooldown. */
+    async refreshUsage(providerId?: string, signal?: AbortSignal): Promise<UsageRefreshResult> {
+        const refreshable = this.usageSnapshot()
+            .providers.filter((provider) => provider.refreshable === true)
+            .map((provider) => provider.id);
+        const targets =
+            providerId === undefined ? refreshable : refreshable.filter((id) => id === providerId);
+        const outcome = await this.usageRefresher.refresh(targets, signal);
+
+        return { ...this.usageSnapshot(), ...outcome };
     }
 
     /** Something about usage changed: the owner's tabs get it, at most once each 1.5 seconds. */

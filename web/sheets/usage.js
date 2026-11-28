@@ -1,8 +1,8 @@
-// Usage: how much of each provider's limits remains, from its last response (the owner's `usage` events). Sends
-// nothing. A popover above the status line on wide screens, a bottom sheet on phones. The status line's item
-// (`core:usage`, composer.js) and the model sheet's row open it.
+// Usage: how much of each provider's limits remains, from its last response (the owner's `usage` events) or checked on
+// demand for subscription providers when opened. A popover above the status line on wide screens, a bottom sheet on
+// phones. The status line's item (`core:usage`, composer.js) and the model sheet's row open it.
 import { useEffect, useRef, useState } from "preact/hooks";
-import { closeSheet, openSheet, serverClockOffset, store } from "../store.js";
+import { api, closeSheet, openSheet, serverClockOffset, store } from "../store.js";
 import { useDragToClose } from "../gestures.js";
 import { BOTTOM_SHEETS, formatWhen, html, Icon, scrimPress, useMinute } from "../ui.js";
 import {
@@ -97,23 +97,32 @@ function WindowRow({ window, now }) {
 }
 
 /** What a provider with no windows says. */
-function Silent({ status }) {
-    return status === "no-data"
-        ? html`<p class="usage-note">
-              <${Icon} path=${USAGE_ICONS.dash} size=${12} />
-              <span>No usage yet. It updates after the next request.</span>
-          </p>`
-        : html`<p class="usage-note">
-              <${Icon} path=${USAGE_ICONS.slash} size=${12} />
-              <span>
-                  This provider does not report usage.
-                  <small>Its responses carry no limits, so there is nothing to read.</small>
-              </span>
-          </p>`;
+function Silent({ status, refreshable = false, refreshing = false }) {
+    if (status === "no-data") {
+        const text =
+            refreshable && refreshing
+                ? "Checking latest usage…"
+                : refreshable
+                  ? "No usage yet. Refresh or send a message to check."
+                  : "No usage yet. It updates after the next request.";
+
+        return html`<p class="usage-note">
+            <${Icon} path=${USAGE_ICONS.dash} size=${12} />
+            <span>${text}</span>
+        </p>`;
+    }
+
+    return html`<p class="usage-note">
+        <${Icon} path=${USAGE_ICONS.slash} size=${12} />
+        <span>
+            This provider does not report usage.
+            <small>Its responses carry no limits, so there is nothing to read.</small>
+        </span>
+    </p>`;
 }
 
 /** A provider's windows in full, with the limit gate's hold when there is one, and the models it holds alone. */
-function Windows({ view, now }) {
+function Windows({ view, now, refreshing = false }) {
     const { provider } = view;
     const held =
         provider.held !== undefined && provider.held.until > now ? provider.held : undefined;
@@ -123,7 +132,11 @@ function Windows({ view, now }) {
             ? provider.windows.map(
                   (window) => html`<${WindowRow} key=${window.id} window=${window} now=${now} />`,
               )
-            : html`<${Silent} status=${provider.status} />`
+            : html`<${Silent}
+                  status=${provider.status}
+                  refreshable=${provider.refreshable === true}
+                  refreshing=${refreshing}
+              />`
     }${
         held &&
         html`<p class="usage-note usage-held">
@@ -141,7 +154,7 @@ function Windows({ view, now }) {
 }
 
 /** The open session's provider, in full. */
-function Current({ view, now }) {
+function Current({ view, now, refreshing = false }) {
     const { provider } = view;
 
     return html`<section class="usage-current" data-state=${view.state} aria-label=${provider.name}>
@@ -153,7 +166,7 @@ function Current({ view, now }) {
                 html`<span class="usage-asof">as of ${agoWords(now - provider.asOf)}</span>`
             }
         </div>
-        <${Windows} view=${view} now=${now} />
+        <${Windows} view=${view} now=${now} refreshing=${refreshing} />
     </section>`;
 }
 
@@ -268,6 +281,58 @@ function Panel({ onClose }) {
     const [expanded, setExpanded] = useState(null);
     const [grouped, setGrouped] = useState(false);
     const [filter, setFilter] = useState("");
+    const [refreshing, setRefreshing] = useState(false);
+    const [refreshNote, setRefreshNote] = useState("");
+    const alive = useRef(true);
+    const canRefresh = (usage?.providers ?? []).some((provider) => provider.refreshable === true);
+
+    const doRefresh = async (explicit) => {
+        if (!canRefresh) {
+            return;
+        }
+
+        setRefreshing(true);
+        setRefreshNote("");
+
+        try {
+            const result = await api("usage/refresh", {});
+
+            if (!alive.current) {
+                return;
+            }
+
+            if (Array.isArray(result?.providers)) {
+                store.set({ usage: { at: result.at, providers: result.providers } });
+            }
+
+            if (explicit && result.refreshed.length === 0 && result.cooldownMs > 0) {
+                setRefreshNote(`Checked recently · try again in ${inWords(result.cooldownMs)}`);
+            } else if (result.failed.length > 0 && result.refreshed.length === 0) {
+                setRefreshNote("Couldn’t check right now · showing last known usage");
+            }
+        } catch {
+            if (alive.current) {
+                setRefreshNote("Couldn’t check right now · showing last known usage");
+            }
+        } finally {
+            if (alive.current) {
+                setRefreshing(false);
+            }
+        }
+    };
+
+    useEffect(() => {
+        alive.current = true;
+
+        if (canRefresh) {
+            void doRefresh(false);
+        }
+
+        return () => {
+            alive.current = false;
+        };
+    }, []);
+
     const views = (usage?.providers ?? []).map((provider) =>
         providerView(provider, now, provider.id === id ? modelId : undefined),
     );
@@ -286,22 +351,43 @@ function Panel({ onClose }) {
         .sort((a, b) => a.provider.name.localeCompare(b.provider.name));
     const groupOpen = query !== "" ? none.length > 0 : grouped;
     const toggle = (providerId) => setExpanded((open) => (open === providerId ? null : providerId));
+    const subtitle = refreshing
+        ? "Checking latest usage…"
+        : refreshNote !== ""
+          ? refreshNote
+          : canRefresh
+            ? "From each provider’s last response, or checked on demand."
+            : "From each provider’s last response. Sends nothing.";
 
     return html`<header class="usage-head">
             <div class="grip" aria-hidden="true"></div>
             <div class="usage-head-text">
                 <h2 id="usage-title">Usage</h2>
-                <p>From each provider’s last response. Sends nothing.</p>
+                <p>${subtitle}</p>
             </div>
-            <button class="icon-button" onClick=${onClose} aria-label="Close usage">
-                <${Icon} name="close" size=${18} />
-            </button>
+            <div class="usage-head-actions">
+                ${
+                    canRefresh &&
+                    html`<button
+                        class=${`icon-button usage-refresh ${refreshing ? "spinning" : ""}`}
+                        disabled=${refreshing}
+                        onClick=${() => void doRefresh(true)}
+                        aria-label="Refresh usage"
+                        title="Refresh usage"
+                    >
+                        <${Icon} path=${USAGE_ICONS.refresh} size=${16} />
+                    </button>`
+                }
+                <button class="icon-button" onClick=${onClose} aria-label="Close usage">
+                    <${Icon} name="close" size=${18} />
+                </button>
+            </div>
         </header>
         <div class="usage-list" data-scroll>
             ${
                 current &&
                 html`<p class="usage-group">In this session</p>
-                    <${Current} view=${current} now=${now} />`
+                    <${Current} view=${current} now=${now} refreshing=${refreshing} />`
             }
             ${
                 others.length > 0 &&

@@ -232,6 +232,7 @@ export class Providers {
         this.#app.limits.reset(providerId);
         // And so were the numbers of its last response.
         this.#app.usage.forget(providerId);
+        this.#app.usageRefresher.forget(providerId);
     }
 
     /** A mark came or went: tabs get the models marked again, and sessions' views their model's state. */

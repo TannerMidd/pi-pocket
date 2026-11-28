@@ -534,6 +534,18 @@ export function createApi(options: HttpOptions, auth: Auth) {
             return json(response, 200, app.usageSnapshot());
         }
 
+        if (first === "usage" && second === "refresh" && method === "POST") {
+            requireOwner(user);
+
+            const body = await readJson<{ provider?: unknown }>(request);
+            const provider =
+                typeof body.provider === "string" && body.provider.trim() !== ""
+                    ? body.provider.trim()
+                    : undefined;
+
+            return json(response, 200, await app.refreshUsage(provider));
+        }
+
         if (first === "spend" && method === "GET") {
             return json(response, 200, app.spend.summary(user));
         }

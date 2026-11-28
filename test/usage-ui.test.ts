@@ -26,6 +26,7 @@ let browsers: Browsers;
 let page: BrowserPage;
 let base = "";
 let sessionId = "";
+let mockUsageFetch: typeof fetch | undefined;
 const shots = process.env.USAGE_SHOTS;
 
 const secs = (ms: number) => String(Math.round((Date.now() + ms) / 1000));
@@ -128,6 +129,7 @@ before(async () => {
             models.registerNativeProvider(faux.provider);
             models.registerNativeProvider({ ...idle.provider, name: "Idle" } as never);
         },
+        usageFetch: (input, init) => (mockUsageFetch ?? globalThis.fetch)(input, init),
         home,
     });
     server = createServer(
@@ -698,5 +700,83 @@ test(
             "the item of a provider with no numbers",
         );
         assert.match((await itemText()) ?? "", /^Limited 1:1\d$/);
+    },
+);
+
+test(
+    "a refreshable subscription shows in the status line before any model call and fetches on click with cooldown",
+    real,
+    async (t) => {
+        await page.setViewport(DESKTOP);
+
+        const me = app.config.users.find((user) => user.role === "owner")!;
+        const sub = fauxProvider({ provider: "anthropic", models: [{ id: "claude-test" }] });
+
+        app.models.registerNativeProvider({ ...sub.provider, name: "Anthropic" } as never);
+        t.mock.method(
+            app.models,
+            "isUsingOAuth",
+            (providerId: string) => providerId === "anthropic",
+        );
+        t.mock.method(app.models, "getAuth", async (providerId: string) =>
+            providerId === "anthropic" ? { auth: { apiKey: "oauth-test-token" } } : undefined,
+        );
+
+        let fetchCalls = 0;
+
+        mockUsageFetch = (async () => {
+            fetchCalls++;
+
+            return Response.json({
+                five_hour: {
+                    utilization: 37,
+                    resets_at: new Date(Date.now() + 2 * HOUR).toISOString(),
+                },
+                seven_day: {
+                    utilization: 26,
+                    resets_at: new Date(Date.now() + 4 * 24 * HOUR).toISOString(),
+                },
+            });
+        }) as typeof fetch;
+
+        try {
+            const { id } = await app.commands.createSession(me, { cwd: work });
+
+            await app.commands.configure(id, me, {
+                model: { provider: "anthropic", modelId: "claude-test" },
+                thinkingLevel: "off",
+            });
+            await open(String(id));
+
+            // Shows in the status line right away without any model call.
+            await wait(
+                `return document.querySelector(".usage-now.usage-idle") !== null`,
+                "the idle subscription usage button",
+            );
+            assert.equal(await itemText(), "Usage");
+            assert.equal(fetchCalls, 0, "does not fetch before the user clicks");
+
+            // Clicking opens the popover and fetches live usage on demand.
+            await page.click({ selector: ".usage-now" });
+            await wait(
+                `return document.querySelector(".usage-current")?.innerText.includes("37% used")`,
+                "live usage populated on click",
+            );
+            assert.equal(fetchCalls, 1, "one upstream fetch on first click");
+            assert.match((await itemText()) ?? "", /37% used/);
+
+            // Clicking refresh again right away hits the server cooldown without spamming upstream.
+            await settle();
+            await page.click({ selector: ".usage-refresh" });
+            await wait(
+                `return document.querySelector(".usage-head p")?.innerText.includes("Checked recently")`,
+                "cooldown note in the popover header",
+            );
+            assert.equal(fetchCalls, 1, "cooldown prevents extra upstream fetch");
+        } finally {
+            mockUsageFetch = undefined;
+            app.usage.forget("anthropic");
+            app.usageRefresher.forget("anthropic");
+        }
     },
 );

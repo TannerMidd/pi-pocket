@@ -1,14 +1,45 @@
 /**
- * Provider usage: how much of each provider's limits is left, as its last response said. A response's limit headers
- * (`limits.ts` keeps only those) are read into windows (a 5-hour window, requests per minute), and the newest of each
- * provider is kept in memory, with the time of the response. Nothing is stored, nothing is sent to a provider, and
- * no key, token, or body is read: only numbers, times, and the names of the windows.
+ * Provider usage: how much of each provider's limits is left, as its last response said, or as fetched on demand for
+ * subscription providers when the owner opens the Usage panel. Response limit headers (`limits.ts` keeps only those)
+ * are read into windows (a 5-hour window, requests per minute), and the newest of each provider is kept in memory,
+ * with the time of the response. On-demand refreshes query read-only subscription usage endpoints with a per-provider
+ * cooldown and single-flight deduplication so repeated clicks never spam upstream.
  *
  * Only the owner sees it (`PocketApp.usageFor`): the same people who may open the Providers sheet.
  */
+import { responseFacts } from "./limits.ts";
 
 /** A window is low under this many percent left. */
 export const LOW_AT = 15;
+
+/** Minimum interval between on-demand live usage fetches per provider. */
+export const USAGE_REFRESH_COOLDOWN_MS = 60_000;
+
+/** Upper bound for an upstream Retry-After cooldown on an on-demand usage check. */
+const USAGE_REFRESH_MAX_RETRY_MS = 10 * 60_000;
+
+/** Timeout for an upstream on-demand usage check. */
+const USAGE_REFRESH_TIMEOUT_MS = 10_000;
+
+/** Maximum bytes read from an upstream usage JSON body. */
+const MAX_USAGE_BODY_BYTES = 64 * 1024;
+
+/** Subscription providers with read-only usage endpoints that can be checked on demand. */
+const REFRESHABLE_SUBSCRIPTIONS = new Set(["anthropic", "openai-codex", "openai"]);
+
+/** Anthropic OAuth usage endpoint and client headers matching pi-ai's OAuth transport. */
+const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+const ANTHROPIC_USER_AGENT = "claude-cli/2.1.322";
+
+/** ChatGPT/Codex OAuth usage endpoint and JWT claim path matching pi-ai's Codex transport. */
+const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_JWT_CLAIM = "https://api.openai.com/auth";
+
+/** Whether a provider's subscription usage can be fetched on demand without making a model call. */
+export function canRefreshUsage(providerId: string, kind: UsageProvider["kind"]): boolean {
+    return kind === "subscription" && REFRESHABLE_SUBSCRIPTIONS.has(providerId);
+}
 
 export type WindowState = "ok" | "low" | "limited";
 
@@ -392,6 +423,8 @@ export type UsageProvider = {
     /** When the response that the windows come from came. */
     asOf?: number;
     windows: UsageWindow[];
+    /** True when the owner can check live subscription usage on demand without a model call. */
+    refreshable?: true;
     /** The limit gate holds the whole account's requests: when it tries next, and why in fixed words. */
     held?: UsageHold;
     /** The limit gate holds single models only (another model of the provider may still answer). */
@@ -402,11 +435,395 @@ export type UsageHold = { until: number; reason: string };
 
 export type UsageSnapshot = { at: number; providers: UsageProvider[] };
 
+export type UsageRefreshResult = UsageSnapshot & {
+    refreshed: string[];
+    cooldownMs: number;
+    failed: string[];
+};
+
 export type UsageDeps = {
     now?: () => number;
     /** Something changed: tell the owner's tabs (throttled by the caller). */
     changed: () => void;
 };
+
+/** Parse Anthropic's `GET /api/oauth/usage` JSON body into usage windows (`utilization` is 0–100%). */
+export function parseAnthropicUsage(body: unknown): UsageWindow[] {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return [];
+    }
+
+    const record = body as Record<string, unknown>;
+    const specs = [
+        { key: "five_hour", id: "5h", tag: "5h", label: "5-hour window" },
+        { key: "seven_day", id: "7d", tag: "7d", label: "Weekly window" },
+        { key: "seven_day_sonnet", id: "7d_sonnet", tag: "7d", label: "Weekly window (Sonnet)" },
+        { key: "seven_day_opus", id: "7d_opus", tag: "7d", label: "Weekly window (Opus)" },
+    ] as const;
+    const windows: UsageWindow[] = [];
+
+    for (const spec of specs) {
+        const entry = record[spec.key];
+
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+            continue;
+        }
+
+        const rawUtil = (entry as Record<string, unknown>).utilization;
+
+        if (typeof rawUtil !== "number" || !Number.isFinite(rawUtil) || rawUtil < 0) {
+            continue;
+        }
+
+        const resetsAt = (entry as Record<string, unknown>).resets_at;
+        const resetAt = typeof resetsAt === "string" ? timeOf(resetsAt) : undefined;
+        const raw = 100 - Math.min(100, rawUtil);
+
+        windows.push({
+            id: spec.id,
+            tag: spec.tag,
+            label: spec.label,
+            ...measure(raw, rawUtil >= 100),
+            ...(resetAt === undefined ? {} : { resetAt }),
+        });
+    }
+
+    return windows;
+}
+
+/** Parse ChatGPT/Codex's `GET /backend-api/wham/usage` JSON body into usage windows. */
+export function parseCodexUsage(body: unknown, at: number): UsageWindow[] {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        return [];
+    }
+
+    const rateLimit = (body as Record<string, unknown>).rate_limit;
+
+    if (typeof rateLimit !== "object" || rateLimit === null || Array.isArray(rateLimit)) {
+        return [];
+    }
+
+    const limitObj = rateLimit as Record<string, unknown>;
+    const rawWindows: {
+        which: "primary" | "secondary";
+        used: number;
+        minutes?: number;
+        resetAt?: number;
+    }[] = [];
+
+    for (const which of ["primary", "secondary"] as const) {
+        const entry = limitObj[`${which}_window`];
+
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+            continue;
+        }
+
+        const obj = entry as Record<string, unknown>;
+        const used = obj.used_percent;
+
+        if (typeof used !== "number" || !Number.isFinite(used) || used < 0) {
+            continue;
+        }
+
+        const windowSec = obj.limit_window_seconds;
+        const minutes =
+            typeof windowSec === "number" && Number.isFinite(windowSec) && windowSec > 0
+                ? Math.round(windowSec / 60)
+                : undefined;
+        const resetSec = obj.reset_at;
+        const afterSec = obj.reset_after_seconds;
+        const resetAt =
+            typeof resetSec === "number" && Number.isFinite(resetSec) && resetSec > 0
+                ? timeOf(String(resetSec))
+                : typeof afterSec === "number" && Number.isFinite(afterSec) && afterSec > 0
+                  ? at + Math.round(afterSec * 1000)
+                  : undefined;
+
+        rawWindows.push({ which, used, minutes, resetAt });
+    }
+
+    const anyExhausted = rawWindows.some((each) => each.used >= 100);
+    const overallLimited = limitObj.limit_reached === true || limitObj.allowed === false;
+
+    return rawWindows.map((each, index) => {
+        const name =
+            each.minutes === undefined
+                ? {
+                      tag: each.which === "primary" ? "5h" : "7d",
+                      label: each.which === "primary" ? "Primary window" : "Secondary window",
+                  }
+                : windowName(each.minutes);
+        const exhausted = each.used >= 100 || (!anyExhausted && overallLimited && index === 0);
+
+        return {
+            id: each.minutes === undefined ? each.which : name.tag,
+            tag: name.tag,
+            label: name.label,
+            ...measure(100 - Math.min(100, each.used), exhausted),
+            ...(each.resetAt === undefined ? {} : { resetAt: each.resetAt }),
+        };
+    });
+}
+
+/** Extract `chatgpt_account_id` from an OpenAI OAuth JWT payload without logging or throwing. */
+export function extractJwtAccountId(token: string): string | undefined {
+    const parts = token.split(".");
+
+    if (parts.length !== 3) {
+        return undefined;
+    }
+
+    try {
+        const decoded = Buffer.from(parts[1]!, "base64url").toString("utf8");
+        const payload = JSON.parse(decoded) as Record<string, unknown>;
+        const claim = payload?.[CODEX_JWT_CLAIM];
+
+        if (typeof claim !== "object" || claim === null) {
+            return undefined;
+        }
+
+        const id = (claim as Record<string, unknown>).chatgpt_account_id;
+
+        return typeof id === "string" && id.trim() !== "" ? id : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Read at most `limit` UTF-8 bytes from a fetch response; undefined when oversized. */
+async function readBoundedText(response: Response, limit: number): Promise<string | undefined> {
+    const declared = numberOf(response.headers.get("content-length") ?? undefined);
+
+    if (declared !== undefined && declared > limit) {
+        await response.body?.cancel().catch(() => {});
+
+        return undefined;
+    }
+
+    if (response.body === null) {
+        const text = await response.text();
+
+        return Buffer.byteLength(text, "utf8") <= limit ? text : undefined;
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+                break;
+            }
+
+            total += value.byteLength;
+
+            if (total > limit) {
+                await reader.cancel().catch(() => {});
+
+                return undefined;
+            }
+
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return Buffer.concat(chunks).toString("utf8");
+}
+
+function retryAfterMs(headers: Headers, baseCooldownMs: number): number {
+    const millis = numberOf(headers.get("retry-after-ms") ?? undefined);
+    const seconds = numberOf(headers.get("retry-after") ?? undefined);
+    const ms = millis ?? (seconds === undefined ? undefined : seconds * 1000);
+
+    if (ms === undefined || ms <= baseCooldownMs) {
+        return baseCooldownMs;
+    }
+
+    return Math.min(USAGE_REFRESH_MAX_RETRY_MS, Math.round(ms));
+}
+
+export type UsageRefresherDeps = {
+    store: UsageStore;
+    getToken: (providerId: string, signal: AbortSignal) => Promise<string | undefined>;
+    fetch?: typeof fetch;
+    now?: () => number;
+    cooldownMs?: number;
+};
+
+type SingleRefreshOutcome =
+    { status: "refreshed" } | { status: "cooldown"; remainingMs: number } | { status: "failed" };
+
+/**
+ * Fetches live subscription usage on demand with per-provider cooldowns and single-flight deduplication so repeated
+ * clicks never spam upstream endpoints.
+ */
+export class UsageRefresher {
+    readonly #deps: UsageRefresherDeps;
+    readonly #fetch: typeof fetch;
+    readonly #now: () => number;
+    readonly #cooldownMs: number;
+    readonly #cooldownUntil = new Map<string, number>();
+    readonly #inFlight = new Map<string, Promise<SingleRefreshOutcome>>();
+
+    constructor(deps: UsageRefresherDeps) {
+        this.#deps = deps;
+        this.#fetch = deps.fetch ?? globalThis.fetch;
+        this.#now = deps.now ?? Date.now;
+        this.#cooldownMs = deps.cooldownMs ?? USAGE_REFRESH_COOLDOWN_MS;
+    }
+
+    /** Clear a provider's cooldown (e.g. after sign-in or sign-out). */
+    forget(providerId: string): void {
+        this.#cooldownUntil.delete(providerId);
+    }
+
+    /** Refresh one or more refreshable subscription providers, honoring cooldowns and deduplicating concurrent calls. */
+    async refresh(
+        providerIds: readonly string[],
+        signal?: AbortSignal,
+    ): Promise<{ refreshed: string[]; cooldownMs: number; failed: string[] }> {
+        const unique = [...new Set(providerIds)].filter((id) => REFRESHABLE_SUBSCRIPTIONS.has(id));
+        const refreshed: string[] = [];
+        const failed: string[] = [];
+        let cooldownMs = 0;
+
+        await Promise.all(
+            unique.map(async (providerId) => {
+                const outcome = await this.#refreshOne(providerId, signal);
+
+                if (outcome.status === "refreshed") {
+                    refreshed.push(providerId);
+                } else if (outcome.status === "cooldown") {
+                    cooldownMs = Math.max(cooldownMs, outcome.remainingMs);
+                } else {
+                    failed.push(providerId);
+                }
+            }),
+        );
+
+        return { refreshed, cooldownMs, failed };
+    }
+
+    #refreshOne(providerId: string, signal?: AbortSignal): Promise<SingleRefreshOutcome> {
+        const running = this.#inFlight.get(providerId);
+
+        if (running !== undefined) {
+            return running;
+        }
+
+        const now = this.#now();
+        const until = this.#cooldownUntil.get(providerId) ?? 0;
+
+        if (now < until) {
+            return Promise.resolve({ status: "cooldown", remainingMs: until - now });
+        }
+
+        const work = this.#fetchProvider(providerId, signal).finally(() => {
+            this.#inFlight.delete(providerId);
+        });
+
+        this.#inFlight.set(providerId, work);
+
+        return work;
+    }
+
+    async #fetchProvider(providerId: string, signal?: AbortSignal): Promise<SingleRefreshOutcome> {
+        const timeout = AbortSignal.timeout(USAGE_REFRESH_TIMEOUT_MS);
+        const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+        const startedAt = this.#now();
+
+        this.#cooldownUntil.set(providerId, startedAt + this.#cooldownMs);
+
+        try {
+            const token = await this.#deps.getToken(providerId, combined);
+
+            if (token === undefined || token.trim() === "") {
+                return { status: "failed" };
+            }
+
+            const isAnthropic = providerId === "anthropic";
+            const url = isAnthropic ? ANTHROPIC_USAGE_URL : CODEX_USAGE_URL;
+            const headers: Record<string, string> = isAnthropic
+                ? {
+                      Authorization: `Bearer ${token}`,
+                      "anthropic-beta": ANTHROPIC_OAUTH_BETA,
+                      Accept: "application/json",
+                      "User-Agent": ANTHROPIC_USER_AGENT,
+                      "x-app": "cli",
+                  }
+                : {
+                      Authorization: `Bearer ${token}`,
+                      Accept: "application/json",
+                      originator: "pi",
+                  };
+
+            if (!isAnthropic) {
+                const accountId = extractJwtAccountId(token);
+
+                if (accountId !== undefined) {
+                    headers["chatgpt-account-id"] = accountId;
+                }
+            }
+
+            const response = await this.#fetch(url, {
+                method: "GET",
+                headers,
+                redirect: "error",
+                signal: combined,
+            });
+            const at = this.#now();
+
+            if (response.status === 429) {
+                const waitMs = retryAfterMs(response.headers, this.#cooldownMs);
+
+                this.#cooldownUntil.set(providerId, at + waitMs);
+                await response.body?.cancel().catch(() => {});
+
+                return { status: "failed" };
+            }
+
+            if (!response.ok) {
+                await response.body?.cancel().catch(() => {});
+
+                return { status: "failed" };
+            }
+
+            const text = await readBoundedText(response, MAX_USAGE_BODY_BYTES);
+            let windows: UsageWindow[] = [];
+
+            if (text !== undefined) {
+                try {
+                    const parsed: unknown = JSON.parse(text);
+
+                    windows = isAnthropic
+                        ? parseAnthropicUsage(parsed)
+                        : parseCodexUsage(parsed, at);
+                } catch {
+                    windows = [];
+                }
+            }
+
+            if (windows.length === 0) {
+                windows = parseUsage(responseFacts(response.status, response.headers), at);
+            }
+
+            if (windows.length === 0) {
+                return { status: "failed" };
+            }
+
+            this.#deps.store.recordWindows(providerId, windows, at);
+
+            return { status: "refreshed" };
+        } catch {
+            return { status: "failed" };
+        }
+    }
+}
 
 /** What each provider's newest response said about its limits. In memory only: a restart starts empty. */
 export class UsageStore {
@@ -443,6 +860,16 @@ export class UsageStore {
         }
     }
 
+    /** Record windows obtained directly from an on-demand subscription usage check, always updating `asOf`. */
+    recordWindows(provider: string, windows: UsageWindow[], at: number = this.#now()): void {
+        if (windows.length === 0) {
+            return;
+        }
+
+        this.#entries.set(provider, { windows, at, silent: false });
+        this.#deps.changed();
+    }
+
     /** A sign-in or sign-out: the numbers were another account's. */
     forget(provider: string): void {
         if (this.#entries.delete(provider)) {
@@ -452,7 +879,12 @@ export class UsageStore {
 
     /** What is known of one provider now, `held` being what the limit gate says. */
     view(
-        provider: { id: string; name: string; kind: UsageProvider["kind"] },
+        provider: {
+            id: string;
+            name: string;
+            kind: UsageProvider["kind"];
+            refreshable?: true;
+        },
         held?: UsageProvider["held"],
         modelHolds: NonNullable<UsageProvider["modelHolds"]> = [],
     ): UsageProvider {

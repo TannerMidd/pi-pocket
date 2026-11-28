@@ -10,6 +10,7 @@ export const USAGE_ICONS = {
     gauge: "M4 16a8 8 0 1 1 16 0M12 16l4-5",
     dash: "M12 21a9 9 0 100-18 9 9 0 000 18z",
     slash: "M12 21a9 9 0 100-18 9 9 0 000 18zM6.5 17.5l11-11",
+    refresh: "M21 12a9 9 0 11-2.64-6.36M21 4v5h-5",
 };
 
 /** The state of a window now: `reset` once its time has passed. */

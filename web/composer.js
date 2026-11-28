@@ -2945,24 +2945,62 @@ defineItem("status", {
         `${Math.round(cacheRate() * 100)}% of the input came from the cache`,
 });
 
+/** Whether the session's provider should show in the status line: live numbers/hold, or an on-demand subscription check. */
+function canShowUsage(view, now) {
+    if (view === null) {
+        return false;
+    }
+
+    if (summary(view, now) !== null) {
+        return true;
+    }
+
+    return (
+        view.provider.refreshable === true && (view.state === "no-data" || view.state === "reset")
+    );
+}
+
 /**
- * How much of the open session's provider's limits is left, from its last response (the owner's, `usage.js`): the
- * tightest window ("7d 41% left"), then "41% left", then "41%". Low and limited keep a mark and a word. A tap opens
- * the list of every provider's (`sheets/usage.js`). Nothing when the provider has no numbers yet.
+ * How much of the open session's provider's limits is left, from its last response or an on-demand subscription check
+ * (the owner's, `usage.js`): the tightest window ("7d 41% used"), then "41% used", then "41%". Low and limited keep a
+ * mark and a word. Refreshable subscriptions with no numbers yet still show a compact button that fetches on click.
  */
 function UsageItem() {
     useMinute();
 
     const now = serverNow();
     const view = sessionUsage(now);
-    const words = view && summary(view, now);
 
-    if (!words) {
+    if (!canShowUsage(view, now)) {
         return null;
     }
 
-    const { window, state, until } = view;
+    const words = summary(view, now);
     const open = store.state.sheet?.type === "usage";
+
+    if (!words) {
+        const label = view.state === "reset" ? "Reset" : "Usage";
+        const aria =
+            view.state === "reset"
+                ? `${view.provider.name} usage: window reset. Click to check latest usage.`
+                : `${view.provider.name} usage: click to check latest usage.`;
+
+        return html`<button
+            class="usage-now usage-idle"
+            data-part="status-usage"
+            data-state=${view.state}
+            aria-haspopup="dialog"
+            aria-expanded=${open}
+            aria-label=${aria}
+            title=${aria}
+            onClick=${() => (open ? closeSheet() : openUsage("item"))}
+        >
+            <${Icon} path=${USAGE_ICONS.gauge} size=${12} class="gauge" />
+            <span class="val">${label}</span>
+        </button>`;
+    }
+
+    const { window, state, until } = view;
     const limited = state === "limited";
     const countText = limited && until !== undefined ? hoursMinutes(until - now) : "";
 
@@ -2999,16 +3037,22 @@ defineItem("status", {
     note: "For the owner. The model sheet still shows it when hidden",
     order: 450,
     render: () => {
-        const view = sessionUsage();
+        const now = serverNow();
+        const view = sessionUsage(now);
 
-        return view !== null && summary(view, serverNow()) !== null ? html`<${UsageItem} />` : null;
+        return canShowUsage(view, now) ? html`<${UsageItem} />` : null;
     },
     detail: () => {
-        const view = sessionUsage();
+        const now = serverNow();
+        const view = sessionUsage(now);
 
-        return view?.state === "limited" || view?.state === "low" || view?.state === "ok"
-            ? summary(view, serverNow())?.aria
-            : null;
+        if (!canShowUsage(view, now)) {
+            return null;
+        }
+
+        return (
+            summary(view, now)?.aria ?? `${view.provider.name} usage: click to check latest usage.`
+        );
     },
 });
 

@@ -5175,6 +5175,10 @@ pre.diff .del {
     display: none;
 }
 
+.usage-now.usage-idle .gauge {
+    display: block;
+}
+
 .status-line[data-short~="window"] .usage-now .tag,
 .status-line[data-short~="used"] .usage-now .used,
 .status-line[data-short~="used"] .usage-now:not(.no-count) .word {
@@ -5285,6 +5289,29 @@ pre.diff .del {
 .usage-head-text {
     flex: 1;
     min-width: 0;
+}
+
+.usage-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+}
+
+.usage-refresh.spinning svg {
+    animation: usage-spin 0.9s linear infinite;
+}
+
+@keyframes usage-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .usage-refresh.spinning svg {
+        animation: none;
+    }
 }
 
 .usage-head h2 {
