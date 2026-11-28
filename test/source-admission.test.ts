@@ -73,6 +73,8 @@ function delivery(kind: Delivery) {
         requireDriver: PocketApp.prototype.requireDriver,
         rootOf: (id: ConversationId) => id,
         parentOf: () => undefined,
+        isIsolatedWorkspace: () => false,
+        isIsolatedConversation: () => false,
         spend: { check: () => {} },
         pip: { ownerOf: () => undefined },
         config: { subagentModels: [], users: [user], userById: () => undefined },

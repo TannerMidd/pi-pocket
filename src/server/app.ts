@@ -57,6 +57,7 @@ import type { BrowserState } from "./browser/page.ts";
 import { Collab, REACTIONS } from "./collab.ts";
 import { Commands } from "./commands.ts";
 import { ExtensionSessions } from "./extension-sessions.ts";
+import { isolatedToolBlock } from "./isolated-workspace.ts";
 import { LinkedSessions } from "./linked-sessions.ts";
 import { removeAvatar, saveAvatar } from "./avatars.ts";
 import { APP_ROOT, ConfigStore, helloUser, modulesWith, type User } from "./config.ts";
@@ -978,9 +979,26 @@ export class PocketApp {
                     this.commands.followTask,
                     this.extensionCommands.task,
                 ],
-                // Values extensions hide (`host.hide`) leave every tool's result before it is stored.
+                // Core security hooks: isolate untrusted workspaces before tool execution, and hide secrets on results.
                 hooks: [
                     hook(ToolTask, {
+                        beforeTool: async (call, api, context) => {
+                            const agent = await api.snapshot(AgentDoc, api.conversationId, context);
+                            const cwd = agent?.cwd ?? this.cwdOf(api.conversationId);
+
+                            if (
+                                this.isIsolatedWorkspace(cwd) ||
+                                this.isIsolatedConversation(api.conversationId)
+                            ) {
+                                const block = isolatedToolBlock(call.name, call.arguments);
+
+                                if (block !== undefined) {
+                                    return { block };
+                                }
+                            }
+
+                            return undefined;
+                        },
                         afterTool: (_call, result, api) => {
                             // A secret that changed while the tool ran is hidden from its result too.
                             this.secrets.sync();
@@ -1039,12 +1057,14 @@ export class PocketApp {
             commandEnv: (provider) => this.commandEnvs.add(provider),
             annotateTurns: (name, annotate) => this.turnNotes.add(name, annotate),
             browser: (conversationId, options) =>
-                browserFor(
-                    this.browsers,
-                    () => this.browserOn(),
-                    Number(conversationId),
-                    options?.open === true,
-                ),
+                this.isIsolatedConversation(conversationId)
+                    ? Promise.resolve(undefined)
+                    : browserFor(
+                          this.browsers,
+                          () => this.browserOn(),
+                          Number(conversationId),
+                          options?.open === true,
+                      ),
             notice: (level, message, conversationId) => this.notice(level, message, conversationId),
             stopToolCall: (conversationId, callId) => this.stopToolCall(conversationId, callId),
             waitsForLimit: (conversationId) =>
@@ -1720,9 +1740,15 @@ export class PocketApp {
 
     /** What changed in the session list, as events for extensions (`host.on`). PiP's conversations send none. */
     #sessionEvents(before: Record<string, SessionMeta>, after: Record<string, SessionMeta>): void {
+        const deactivated = new Set<string>();
+
         for (const [key, meta] of Object.entries(before)) {
             if (after[key] === undefined && meta.pip === undefined) {
                 this.events.emit("session.removed", { conversationId: Number(key) });
+
+                if (meta.cwd !== undefined) {
+                    deactivated.add(meta.cwd);
+                }
             }
         }
 
@@ -1754,15 +1780,56 @@ export class PocketApp {
                     conversationId,
                     archived: meta.archived === true,
                 });
+
+                if (meta.archived === true && meta.cwd !== undefined) {
+                    deactivated.add(meta.cwd);
+                }
             }
         }
+
+        if (deactivated.size > 0) {
+            const activeCwds = new Set(
+                Object.values(after)
+                    .filter((meta) => meta.pip === undefined && meta.archived !== true)
+                    .map((meta) => meta.cwd),
+            );
+
+            for (const cwd of deactivated) {
+                if (!activeCwds.has(cwd)) {
+                    this.#disposeWorkspace(cwd);
+                }
+            }
+        }
+    }
+
+    #disposeWorkspace(cwd: string): void {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme === undefined) {
+            return;
+        }
+
+        const provider = this.#workspaceProviders.get(scheme)?.at(-1)?.provider;
+
+        if (provider?.disposeWorkspace === undefined) {
+            return;
+        }
+
+        void Promise.resolve()
+            .then(() => provider.disposeWorkspace!(cwd))
+            .catch((error: unknown) => {
+                this.#log(`Workspace dispose failed for ${cwd}: ${describe(error)}`);
+            });
     }
 
     registerWorkspaceProvider(scheme: string, provider: WorkspaceProvider): () => void {
         if (
             !/^[a-z][a-z0-9+.-]+$/i.test(scheme) ||
             typeof provider?.env !== "function" ||
-            typeof provider?.resolveCwd !== "function"
+            typeof provider?.resolveCwd !== "function" ||
+            (provider.isolated !== undefined && typeof provider.isolated !== "boolean") ||
+            (provider.disposeWorkspace !== undefined &&
+                typeof provider.disposeWorkspace !== "function")
         ) {
             throw new Error("Invalid workspace provider registration");
         }
@@ -1790,6 +1857,32 @@ export class PocketApp {
 
     workspaceScheme(cwd: string): string | undefined {
         return workspaceScheme(cwd);
+    }
+
+    /**
+     * Whether `cwd` belongs to an isolated sandbox workspace. Unregistered URI schemes fail closed as isolated so
+     * disabling or reloading a sandbox provider never exposes host tools.
+     */
+    isIsolatedWorkspace(cwd: string): boolean {
+        const scheme = this.workspaceScheme(cwd);
+
+        if (scheme === undefined) {
+            return false;
+        }
+
+        const provider = this.#workspaceProviders.get(scheme)?.at(-1)?.provider;
+
+        return provider === undefined || provider.isolated === true;
+    }
+
+    /** Whether a conversation (or its root session, for subagents) runs in an isolated sandbox workspace. */
+    isIsolatedConversation(id: ConversationId): boolean {
+        const root = this.rootOf(id);
+
+        return (
+            this.isIsolatedWorkspace(this.cwdOf(id)) ||
+            (root !== id && this.isIsolatedWorkspace(this.cwdOf(root)))
+        );
     }
 
     /** A workspace URI reaches a provider's machines and keys: they are the owner's. */
@@ -1847,7 +1940,13 @@ export class PocketApp {
         this.secrets.sync();
 
         return withQuietLimit(
-            wrapEnv(this.#env(cwd), Number(id), cwd, this.commandEnvs, this.hidden),
+            wrapEnv(
+                this.#env(cwd),
+                Number(id),
+                cwd,
+                this.isIsolatedWorkspace(cwd) ? undefined : this.commandEnvs,
+                this.hidden,
+            ),
             () => this.background.commandQuietMs,
         );
     }

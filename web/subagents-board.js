@@ -17,6 +17,7 @@ import {
     modelText,
     ordered,
     seeFailure,
+    showHidden,
     stateOf,
     unresolved,
 } from "./subagents.js";
@@ -244,11 +245,12 @@ function NeedsYou({ needs, titles, selected, onPick }) {
 const stop = (agent) => attempt(() => api(`c/${agent.conversationId}/abort`, {}));
 
 /**
- * Open a subagent's conversation, where an approval it waits for can be answered; a failure it shows is seen there.
- * Seen before the board closes, while its subagents are known.
+ * Open a subagent's conversation, where an approval it waits for can be answered; a failure it shows is seen there,
+ * and one hidden from its session's bar shows there again. Before the board closes, while its subagents are known.
  */
 function open(agent) {
     seeFailure(agent);
+    showHidden(agent);
     closeBoard();
     navigate(agent.conversationId);
 }

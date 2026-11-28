@@ -215,16 +215,23 @@ test("the rail opens the panel, with the newest design in a frame that fits", re
 
 test("device sizes change the frame, and fit scales it to the room", real, async () => {
     await choose("Coffee landing page");
+    await waitFor(
+        "a 1080p page before choosing any device",
+        `const frame = document.querySelector(".dsn-frame");
+        return JSON.stringify(frame?.clientWidth === 1920 && frame?.clientHeight === 1080);`,
+    );
 
     for (const [title, size] of [
         ["Phone, 390 × 844", "390×844"],
         ["Tablet, 820 × 1180", "820×1180"],
-        ["Desktop, 1280 × 800", "1280×800"],
+        ["Desktop, 1920 × 1080", "1920×1080"],
     ] as const) {
         await pressed(`.dsn-seg button[title="${title}"]`);
         await waitFor(
             size,
-            `return JSON.stringify(document.querySelector(".dsn-zoom-size")?.textContent === ${JSON.stringify(size)})`,
+            `const frame = document.querySelector(".dsn-frame");
+            return JSON.stringify(document.querySelector(".dsn-zoom-size")?.textContent === ${JSON.stringify(size)}
+                && frame && [frame.clientWidth, frame.clientHeight].join("×") === ${JSON.stringify(size)});`,
         );
     }
 

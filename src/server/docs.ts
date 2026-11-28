@@ -428,6 +428,11 @@ export type SubagentRecord = {
      * a later time, so it needs them again.
      */
     dealtAt?: number;
+    /**
+     * When a person hid it from its parent's subagents bar: the time of the newest thing it had done then (its `askedAt`
+     * or `answeredAt`). It shows again once it does something newer, or someone opens it.
+     */
+    hiddenAt?: number;
     /** The stall watch's marks for its current quiet spell (`extensions/subagents.ts`): since when, and what it did. */
     stall?: { since: number; told?: true; stopped?: true };
     /** How often the stall watch stopped its work since it last answered: 2 at most, then a person decides. */

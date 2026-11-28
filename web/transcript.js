@@ -76,7 +76,7 @@ import {
     splitAttachments,
     Thumb,
 } from "./ui.js";
-import { LessonCall, memoryAvailable } from "./sheets/memory.js";
+import { FoldedLessons, LessonCall, memoryAvailable } from "./sheets/memory.js";
 
 /** A message the app sent for a person, and what sent it: PiP, a PR watch, a webhook (`submit` in src/server/commands.ts). */
 const VIA = /^\[via ([^\]\n]{1,300})\] /;
@@ -1234,6 +1234,7 @@ function ToolStep({
     const lesson =
         call.name === "memory" &&
         typeof details?.lesson === "string" &&
+        lessonCardAt(details.lesson, call.id) &&
         memoryAvailable(conversationId)
             ? details.lesson
             : null;
@@ -1345,6 +1346,19 @@ function ToolStep({
         ${body}
     </div>`;
 }
+
+/**
+ * Which memory calls show a lesson's card. Pi can name one lesson in several calls (it saves it, then changes it), and
+ * each call shows the lesson as it is now: by default (`newestOnly` false) every one does, and any of them approves it.
+ * Set `newestOnly` to true to show it at the newest call that names it alone, folded or open.
+ */
+export const LESSON_CARDS = { newestOnly: false };
+/** Each lesson's newest call in the transcript shown, by the lesson's id: `Transcript` fills it from the results. */
+let newestLessonCall = new Map();
+
+/** Whether call `callId` shows the card of `lesson`. */
+const lessonCardAt = (lesson, callId) =>
+    !LESSON_CARDS.newestOnly || newestLessonCall.get(lesson) === callId;
 
 /** Groups opened or closed by hand, per conversation and group, for as long as the page is open. */
 const openedGroups = new Map();
@@ -1479,6 +1493,24 @@ function ActivityGroup({
             decisionOf(store.state.view.decisions, step.block, result)?.allow !== false
         );
     }).length;
+    // The lessons Pi saved, changed, or forgot in the steps it draws, by step: folded, those that still wait show on or
+    // under its line, as opened they show at their steps. `item.before`'s are in rows not shown, as opened.
+    const lessonAt =
+        open || lone || !memoryAvailable(conversationId)
+            ? []
+            : item.steps.flatMap((step, index) => {
+                  const lesson =
+                      step.block.type === "toolCall" && step.block.name === "memory"
+                          ? (results.get(step.block.id)?.details?.lesson ??
+                            slots.get(step.block.id)?.details?.lesson)
+                          : undefined;
+
+                  return typeof lesson === "string" && lessonCardAt(lesson, step.block.id)
+                      ? [{ lesson, index }]
+                      : [];
+              });
+    const lessons = lessonAt.map((each) => each.lesson);
+    const lessonBadge = prefs().foldedLessons === "badge";
     const first = all[0];
     let start = first.entry?.at === undefined ? undefined : fromServer(first.entry.at);
 
@@ -1548,14 +1580,34 @@ function ActivityGroup({
             onClick=${() => {
                 unrolled.current = open ? -Infinity : performance.now();
                 keep(openedGroups, id, !open);
+
+                // A lesson that waits shows at its step, also when that step is among the earlier ones not drawn.
+                if (lessonAt.some((each) => each.index < hidden)) {
+                    keep(wholeGroups, id, true);
+                }
+
                 redraw((n) => n + 1);
             }}
         >
             <${Icon} name="chevron" size=${14} class="chev" part="activity-chevron" />
             <span class="activity-summary">${summarize(all, thinking)}</span>
             ${failed > 0 && html`<span class="activity-failed">${failed} failed</span>`}
+            ${
+                lessons.length > 0 &&
+                lessonBadge &&
+                html`<${FoldedLessons}
+                    lessonIds=${lessons}
+                    conversationId=${conversationId}
+                    badge=${true}
+                />`
+            }
             <${GroupTime} id=${id} start=${start} end=${end} live=${live} />
         </button>
+        ${
+            lessons.length > 0 &&
+            !lessonBadge &&
+            html`<${FoldedLessons} lessonIds=${lessons} conversationId=${conversationId} />`
+        }
         ${
             open &&
             lone &&
@@ -2680,6 +2732,14 @@ function callDeps(block, results, slots, approvals) {
         deps.push(agentsKey(view));
     }
 
+    // With `LESSON_CARDS.newestOnly`, a later call that names the same lesson takes its card away.
+    if (block.name === "memory") {
+        deps.push(
+            LESSON_CARDS.newestOnly,
+            LESSON_CARDS.newestOnly && newestLessonCall.get(results.get(block.id)?.details?.lesson),
+        );
+    }
+
     // Whether the browser is there to watch (`browserAvailable`), and open already.
     if (block.name === "browser") {
         deps.push(store.state.browserOpen, store.state.server);
@@ -2831,6 +2891,8 @@ function Items({ items, results, slots, approvals, busy, past = false, conversat
             prefs().showThinking === true,
             // Keep activity folded: a group drawn before the switch moved opens or folds with it.
             prefs().foldActivity === true,
+            // Lessons in folded activity: cards under the line, or a badge on it.
+            prefs().foldedLessons === "badge",
         ];
 
         // The calls before the rows shown count in the group's line: their results, for its time.
@@ -3470,6 +3532,19 @@ export function Transcript() {
         () => new Map((view.live.tools ?? []).map((slot) => [slot.callId, slot])),
         [view.live.tools],
     );
+
+    // Each lesson's newest call, oldest results first: the steps read it as they draw (`lessonCardAt`).
+    newestLessonCall = useMemo(() => {
+        const map = new Map();
+
+        for (const [callId, entry] of results) {
+            if (entry.name === "memory" && typeof entry.details?.lesson === "string") {
+                map.set(entry.details.lesson, callId);
+            }
+        }
+
+        return map;
+    }, [results]);
     const [fetching, setFetching] = useState(false);
     // Rows of the catch-up about to be drawn: where the reader looks, before Preact changes the page (it does after this
     // function returns), to keep it there after.

@@ -1,0 +1,141 @@
+.gondolin-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    color: var(--text);
+}
+
+.gondolin-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+}
+
+.gondolin-row-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.gondolin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.gondolin-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+}
+
+.gondolin-form input[type="text"],
+.gondolin-form input[type="url"],
+.gondolin-form select {
+    min-height: 40px;
+    padding: 0.4rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid var(--line, rgba(128, 128, 128, 0.35));
+    background: var(--card, transparent);
+    color: var(--text, inherit);
+}
+
+.gondolin-check {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 0.5rem !important;
+    min-height: 40px;
+}
+
+.gondolin-btn {
+    min-height: 40px;
+    padding: 0.4rem 0.85rem;
+    border-radius: 8px;
+    border: 1px solid var(--line, rgba(128, 128, 128, 0.35));
+    background: var(--card, transparent);
+    color: var(--text, inherit);
+    cursor: pointer;
+}
+
+.gondolin-primary {
+    background: var(--accent, #2563eb);
+    color: #fff;
+    border-color: transparent;
+}
+
+.gondolin-btn-danger {
+    background: var(--err, #dc2626);
+    color: #fff;
+    border-color: transparent;
+}
+
+.gondolin-confirm-note {
+    align-self: center;
+    font-size: 0.85rem;
+    color: var(--err, #dc2626);
+}
+
+.gondolin-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.gondolin-checks,
+.gondolin-list,
+.gondolin-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.gondolin-checks .bad,
+.gondolin-error {
+    color: var(--err, #dc2626);
+}
+
+.gondolin-banner {
+    padding: 0.65rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.gondolin-warn {
+    background: color-mix(in srgb, var(--warn, #eab308) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn, #eab308) 45%, transparent);
+}
+
+.gondolin-danger {
+    background: color-mix(in srgb, var(--err, #dc2626) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--err, #dc2626) 45%, transparent);
+}
+
+.gondolin-ok {
+    background: color-mix(in srgb, var(--ok, #16a34a) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ok, #16a34a) 45%, transparent);
+}
+
+.gondolin-diff,
+.gondolin-log {
+    max-height: 320px;
+    overflow: auto;
+    padding: 0.6rem;
+    border-radius: 8px;
+    background: var(--bg, rgba(0, 0, 0, 0.18));
+    border: 1px solid var(--line, rgba(128, 128, 128, 0.2));
+    font-size: 0.8rem;
+    white-space: pre;
+}
+
+.gondolin-item {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2));
+}

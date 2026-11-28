@@ -11675,6 +11675,56 @@ textarea.notes {
 /* The words that wait keep a readable width: where Approve and Discard would squeeze them, they go below. */
 .lesson-call.waiting > .grow {
     flex: 1 1 16rem;
+    min-width: 0;
+}
+
+/* Under a folded group's line, a long lesson keeps to two lines: the group opened shows it whole at its step. */
+.lesson-call .lesson-text.clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
+
+/* A folded group's lessons that still wait: their cards under its line. */
+.activity-lessons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 calc(10px * var(--space-x)) calc(10px * var(--space-y));
+}
+
+.activity-lessons > .lesson-call {
+    margin-top: 0;
+}
+
+/* Or, with Appearance's Badge, how many wait, on its line. */
+.activity-lessons-badge {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 7px;
+    border: 1px solid var(--accent-line);
+    border-radius: var(--r-pill);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: 500 11px var(--sans);
+}
+
+.activity-lessons-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: activity-lessons-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes activity-lessons-pulse {
+    50% {
+        opacity: 0.35;
+    }
 }
 
 /* Memory: a lesson Pi keeps, who saved it and where, and what can be done with it. */
@@ -18513,7 +18563,8 @@ textarea.notes {
     font-size: 0.76rem;
 }
 
-.agent-stop {
+.agent-stop,
+.agent-hide {
     flex: none;
     margin-right: 0.2rem;
 }

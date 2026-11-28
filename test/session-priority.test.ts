@@ -152,3 +152,60 @@ test("failed subagents nobody dealt with are named, and leave when dealt with", 
     await until(() => row(id).failedAgents === undefined, "the failure dealt with");
     assert.equal(row(id).subagents?.dealt, 1);
 });
+
+test("a finished subagent hidden from its bar stays hidden until it does something new, or is shown again", async () => {
+    const id = await newSession(app);
+
+    await app.commands.submit(id, owner(app), { text: "start a helper", requestId: "hide-1" });
+    await until(() => (row(id).failedAgents?.length ?? 0) === 1, "the failed subagent", 20_000);
+    const record = async () =>
+        (await app.harness.snapshot(SubagentsDoc, id, context))!.agents.flaky!;
+    const child = await record();
+    const newest = Math.max(child.askedAt ?? 0, child.answeredAt ?? 0);
+    const flaky = () =>
+        app.subagents(owner(app)).find((each) => each.name === "flaky" && each.id === Number(id))!;
+
+    // What was seen is older than what it did: not hidden.
+    assert.deepEqual(
+        await app.commands.hideSubagent(child.conversationId, owner(app), true, newest - 1),
+        {
+            hidden: false,
+            newer: true,
+        },
+    );
+    assert.equal(flaky().hidden, undefined);
+
+    // Hidden: for everyone, its failure dealt with, on the board still.
+    assert.deepEqual(
+        await app.commands.hideSubagent(child.conversationId, owner(app), true, newest),
+        {
+            hidden: true,
+        },
+    );
+    await until(() => flaky().hidden === true && flaky().dealt === true, "hidden and dealt with");
+    assert.equal(row(id).failedAgents, undefined);
+
+    // Opened: it shows again.
+    await app.commands.hideSubagent(child.conversationId, owner(app), false, undefined);
+    await until(() => flaky().hidden === undefined, "shown again");
+
+    // Hidden again, then it does something newer: it shows by itself.
+    await app.commands.hideSubagent(child.conversationId, owner(app), true, newest);
+    await until(() => flaky().hidden === true, "hidden again");
+    await app.harness.commit(async (tx) => {
+        (await tx.doc(SubagentsDoc, id)).agents.flaky!.askedAt = newest + 1;
+    }, context);
+    await until(() => flaky().hidden === undefined, "back once it does something new");
+    assert.equal(
+        (await record()).hiddenAt,
+        newest,
+        "the mark stays; what it did since outdates it",
+    );
+
+    // Not a subagent, or no answer, is refused.
+    await assert.rejects(app.commands.hideSubagent(id, owner(app), true, newest), /Not a subagent/);
+    await assert.rejects(
+        app.commands.hideSubagent(child.conversationId, owner(app), "yes", newest),
+        /hidden must be/,
+    );
+});

@@ -248,7 +248,7 @@ function reporterFor(
                 const by = agent?.stoppedBy;
 
                 if (agent !== undefined) {
-                    agent.answeredAt = Date.now();
+                    agent.answeredAt = runtime.now();
                     agent.failed = true;
                     agent.error = why;
                 }
@@ -284,7 +284,7 @@ function reporterFor(
             }
 
             agent.reported.push(settled.answer);
-            agent.answeredAt = Date.now();
+            agent.answeredAt = runtime.now();
             agent.failed = false;
             delete agent.error;
             // It answered: the stall watch may stop its work again.
@@ -591,8 +591,13 @@ async function working(tx: Tx, task: number | undefined): Promise<boolean> {
 
     const status = (await tx.task(task as never))?.state.status;
 
-    // One completing has taken its last reports already.
-    return status === "pending" || status === "running" || status === "waiting";
+    // One completing has taken its last reports already. A sleeping one (the stall watch between its looks) is there.
+    return (
+        status === "pending" ||
+        status === "running" ||
+        status === "waiting" ||
+        status === "sleeping"
+    );
 }
 
 /** Wait until the submission `id` has left `conversationId`'s queue: placed, withdrawn, or aborted. */
@@ -1937,7 +1942,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
 
                 // For the subagents bar: what it works on now, and since when.
                 record.asked = message.trim().slice(0, 300);
-                record.askedAt = Date.now();
+                record.askedAt = api.now();
                 delete record.stoppedBy;
 
                 if (!watched) {

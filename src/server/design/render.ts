@@ -4,16 +4,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { VIEWPORT_SIZES } from "../../../web/viewport-sizes.js";
 import { Chromium, type Json } from "../browser/cdp.ts";
 import { findBrowser, profileFolder } from "../browser/discovery.ts";
 import type { PocketHost } from "../host.ts";
 import type { DesignBundle } from "./bundle.ts";
 
-export const VIEWPORTS = {
-    mobile: { width: 390, height: 844 },
-    tablet: { width: 820, height: 1180 },
-    desktop: { width: 1280, height: 800 },
-} as const;
+export const VIEWPORTS = VIEWPORT_SIZES;
 
 export type ViewportName = keyof typeof VIEWPORTS;
 export type TweakValues = Record<string, string | number | boolean>;

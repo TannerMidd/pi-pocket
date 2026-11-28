@@ -157,6 +157,11 @@ async function ready(): Promise<void> {
     await until(
         async () =>
             await inPage<boolean>(`
+            // A document still being read has no import map yet: an import now fails, and stays failed.
+            if (document.readyState === "loading") {
+                return JSON.stringify(false);
+            }
+
             const { store } = await import("/store.js");
 
             return JSON.stringify(store.state.me != null && store.state.sessionsLoaded && store.state.connection === "open");
@@ -243,6 +248,115 @@ test(
 
         await ready();
         assert.equal((await shown("kept across the reload")).boot, false);
+    },
+);
+
+test(
+    "a draft shows in the box after a reload whose /api/me comes after the device's rows",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(app, id, "rows beside a draft");
+        await openOn(id, "rows beside a draft");
+        await saved(id);
+        await page.evaluate(`
+            const box = document.querySelector('.composer textarea');
+
+            box.value = 'keep me';
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+            "null";
+        `);
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(Object.keys(localStorage).some((key) => key.endsWith('draft.${id}')))`,
+                ),
+            "the draft kept on the device",
+        );
+        const me = hold("/api/me");
+
+        try {
+            await page.reload();
+            await until(
+                async () => (await shown("rows beside a draft")).rows,
+                "cached rows",
+                15_000,
+            );
+        } finally {
+            me.release();
+        }
+
+        // Drawn before the person was known, the box read no draft; it reads it once /api/me says who they are.
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.composer textarea')?.value === 'keep me')`,
+                ),
+            "the draft in the box",
+        );
+        await leave();
+    },
+);
+
+test(
+    "a taken-back message with its files, and the draft and files already in the box, all come back after a late /api/me",
+    real,
+    async () => {
+        const id = await newSession(app);
+
+        await say(app, id, "rows beside taken-back words");
+        await openOn(id, "rows beside taken-back words");
+        await saved(id);
+        // What the device keeps for this person and session: a draft, a file in the box, and a message taken back with
+        // its own file (`keepBack`).
+        await page.evaluate(`
+            const { store } = await import("/store.js");
+            const prefix = "pocket.person." + encodeURIComponent(store.state.me.id) + ":";
+            const file = (name) => ({ name, size: 3, mime: "text/plain", path: "/tmp/" + name });
+
+            localStorage.setItem(prefix + "draft.${id}", "the draft");
+            localStorage.setItem(prefix + "attached.${id}", JSON.stringify([file("kept.txt")]));
+            localStorage.setItem(prefix + "takenBack.${id}", JSON.stringify([
+                { text: "taken back", attachments: [file("back.txt")], after: null },
+            ]));
+            "null";
+        `);
+        const me = hold("/api/me");
+
+        try {
+            await page.reload();
+            await until(
+                async () => (await shown("rows beside taken-back words")).rows,
+                "cached rows",
+                15_000,
+            );
+        } finally {
+            me.release();
+        }
+
+        await until(
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(document.querySelector('.composer textarea')?.value === 'taken back\\nthe draft')`,
+                ),
+            "the taken-back words before the draft",
+        );
+        await ready();
+        // The words and both files, and the record of the taken-back message is gone, as it was taken.
+        assert.deepEqual(
+            await inPage<string[]>(
+                `return JSON.stringify([...document.querySelectorAll('.composer .chip-name')].map((each) => each.textContent))`,
+            ),
+            ["back.txt", "kept.txt"],
+        );
+        assert.equal(
+            await inPage<boolean>(
+                `return JSON.stringify(Object.keys(localStorage).some((key) => key.endsWith("takenBack.${id}")))`,
+            ),
+            false,
+        );
+        await leave();
     },
 );
 
@@ -530,6 +644,7 @@ test(
                 async () => (await shown("the previous person's rows")).rows,
                 "the early view",
             );
+            await page.evaluate(`window.beforeTheChange = true`);
             meUser = { ...app.config.users[0]!, id: "another-person" };
             me.release();
             await until(
@@ -553,6 +668,19 @@ test(
             events.release();
             poll.release();
         }
+
+        // The held stream and poll now answer as the signed-in person, not the one this page took: the page reloads
+        // itself to start again. Wait for that, or it can come in the next test's own navigation and take its place.
+        await until(
+            // A read while the document is being replaced fails: that is the reload, not yet its end.
+            async () =>
+                await inPage<boolean>(
+                    `return JSON.stringify(window.beforeTheChange !== true)`,
+                ).catch(() => false),
+            "the page's reload for the change of person",
+            15_000,
+        );
+        await ready();
     },
 );
 

@@ -232,6 +232,8 @@ export const PARTS = [
     "activity",
     "activity-head",
     "activity-chevron",
+    "activity-lessons",
+    "activity-lessons-badge",
     "timeline",
     "timeline-earlier",
     "thinking",

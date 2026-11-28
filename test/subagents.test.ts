@@ -22,7 +22,7 @@ import { after, before, beforeEach, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { type ConversationId, InboxDoc } from "@earendil-works/pi-durable";
+import { type ConversationId, InboxDoc, LiveDoc } from "@earendil-works/pi-durable";
 import { dealtWith } from "../src/server/commands.ts";
 import { SubagentsDoc } from "../src/server/docs.ts";
 
@@ -32,12 +32,14 @@ let plan = { spawn: [] as string[], rounds: 0, sleep: 0.2 };
 let slow: Record<string, number> = {};
 /** Subagents whose model fails once their tool round comes back, so their run ends in error mid-flight. */
 let lateFail = new Set<string>();
+/** What the subagents' model waits for before it answers: a test holds them until the parent is where it wants it. */
+let subagentsWait: Promise<void> = Promise.resolve();
 let parentCalls = 0;
 let rounds = 0;
 
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]) => fauxToolCall(name, args);
 
-const route: FauxResponseStep = (request) => {
+const route: FauxResponseStep = async (request) => {
     const all = JSON.stringify((request as { messages: unknown[] }).messages);
     const { role, text: said } = lastText(request as never);
     // With more than one person on the server, a message starts with who sent it.
@@ -45,6 +47,8 @@ const route: FauxResponseStep = (request) => {
     const subagent = /You are the subagent \\"([^\\]+)\\"/.exec(all)?.[1];
 
     if (subagent !== undefined) {
+        await subagentsWait;
+
         if (lateFail.has(subagent) && role === "toolResult") {
             return fauxAssistantMessage([], { stopReason: "error", errorMessage: "Bad request" });
         }
@@ -472,7 +476,41 @@ test("past its spend limit, an idle parent starts no turn for a report: it waits
 });
 
 test("reports taken out of the queue by something other than a person go again, and reach Pi once", async () => {
-    const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 8 });
+    // Where the run ends, as Pi Durable ends it, its queue is withdrawn; but the run can take what waits in it first, as
+    // its call ends. Then nothing was taken out, and the reports reached Pi once, which is the end of this test too, but
+    // not what it is about: start again, at most 5 times.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        if (await withdrawnAndSent()) {
+            return;
+        }
+    }
+
+    assert.fail("the run took the reports before the Stop withdrew them, 5 times");
+});
+
+/** One try of the test above: whether the reports were taken out of the queue (else the run took them first). */
+async function withdrawnAndSent(): Promise<boolean> {
+    // The subagents answer only once the parent is in its call, which outlasts the test (the Stop below ends it): on a
+    // loaded machine they could else answer first, and the parent would take the reports at its next pause.
+    const release = Promise.withResolvers<void>();
+
+    subagentsWait = release.promise;
+
+    const id = await orchestrate({ spawn: ["again-a", "again-b"], rounds: 1, sleep: 600 });
+
+    try {
+        await until(
+            async () =>
+                (await app.harness.snapshot(LiveDoc, id, context))?.tools?.some(
+                    (tool) => tool.status === "running",
+                ) === true,
+            "the parent in its call",
+            15_000,
+        );
+    } finally {
+        release.resolve();
+        subagentsWait = Promise.resolve();
+    }
 
     await until(
         async () => (await queued(id)) === 1,
@@ -482,11 +520,30 @@ test("reports taken out of the queue by something other than a person go again, 
     // Not Stop: the run ends as Pi Durable ends it, which withdraws what waits. The courier sends them again; as
     // anything queued while a run ends, they go to Pi with the next message.
     await (await app.harness.conversation(id, context))!.abort(context);
+
+    let taken = false;
+
     await until(
-        async () => !app.isBusy(id) && (await queued(id)) === 1 && (await held(id)).waiting === 2,
+        async () => {
+            const got = await delivered(id);
+
+            taken = got["again-a"] === 1 && got["again-b"] === 1;
+
+            return (
+                taken ||
+                (!app.isBusy(id) && (await queued(id)) === 1 && (await held(id)).waiting === 2)
+            );
+        },
         "sent again, waiting",
         15_000,
     );
+
+    if (taken) {
+        assert.deepEqual(await delivered(id), { "again-a": 1, "again-b": 1 });
+
+        return false;
+    }
+
     await app.commands.submit(id, owner(app), { text: "and then?", requestId: `next-${id}` });
     await until(
         async () => {
@@ -498,7 +555,9 @@ test("reports taken out of the queue by something other than a person go again, 
         15_000,
     );
     assert.deepEqual(await delivered(id), { "again-a": 1, "again-b": 1 });
-});
+
+    return true;
+}
 
 test("a subagent's conversation shows what it cost itself, not its session's spend or limit", async () => {
     slow = { thrifty: 3 };

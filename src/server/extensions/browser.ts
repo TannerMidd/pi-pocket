@@ -16,7 +16,7 @@ import { bool, num, obj, opt, str } from "@earendil-works/pi-schema";
 import { AgentDoc, defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { BrowserPage, LogEntry, Target } from "../browser/page.ts";
 import { displayUrl, normalizeUrl, REMOTE_FILES } from "../browser/urls.ts";
-import { presetOf, viewportFrom } from "../browser/viewport.ts";
+import { presetOf, viewportFrom, VIEWPORTS, type ViewportPreset } from "../browser/viewport.ts";
 import { classifierFor, type ClassifyRequest } from "../classify.ts";
 import { classifyFor } from "../classifier-activity.ts";
 import type { ExtensionWeb, PocketHost } from "../host.ts";
@@ -91,9 +91,15 @@ const TRIAGE_QUESTIONS: ClassifyRequest["questions"] = {
     },
 };
 
+function presetHint(name: ViewportPreset): string {
+    const { width, height } = VIEWPORTS[name];
+
+    return `${name} (${width}×${height})`;
+}
+
 const GUIDE = `The browser tool is a real Chromium on this machine. The people in this conversation see its page live in the Browser panel and can use it too: show and test web work there (local dev servers, HTML files on this machine, any site).
 - Start a dev server in the background with bash first (\`nohup npm run dev > /tmp/dev.log 2>&1 &\`), then navigate to it.
-- snapshot gives refs like [e12] for click, type, select, and hover, valid until the next snapshot. screenshot shows the layout; viewport changes the size. After a change, check console for errors.`;
+- snapshot gives refs like [e12] for click, type, select, and hover, valid until the next snapshot. screenshot shows the layout; viewport changes the size, for example ${presetHint("desktop")}. After a change, check console for errors.`;
 
 function clip(text: string, max = MAX_TEXT): string {
     return text.length > max
@@ -220,8 +226,7 @@ export default function createBrowser(host: PocketHost, web?: ExtensionWeb) {
                 ),
                 viewport: opt(
                     str({
-                        description:
-                            "viewport: mobile (390×844), tablet (820×1180), desktop (1280×800), or WIDTHxHEIGHT.",
+                        description: `viewport: ${presetHint("mobile")}, ${presetHint("tablet")}, ${presetHint("desktop")}, or WIDTHxHEIGHT.`,
                     }),
                 ),
                 fullPage: opt(
