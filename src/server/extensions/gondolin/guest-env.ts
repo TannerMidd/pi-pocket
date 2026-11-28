@@ -30,9 +30,15 @@ import {
 } from "@earendil-works/pi-durable/env";
 import type { GuestError, GuestStat, GuestVm } from "./guest.ts";
 
+export interface GuestLease {
+    vm: GuestVm;
+    /** Aborted when the sandbox begins stopping (for interruptible commands). */
+    stopSignal: AbortSignal;
+    release(): void;
+}
+
 export interface GuestEnvHost {
-    ready(signal?: AbortSignal): Promise<GuestVm>;
-    busy(): () => void;
+    acquire(kind: "fs" | "exec", signal?: AbortSignal): Promise<GuestLease>;
     touch(): void;
 }
 
@@ -318,14 +324,17 @@ export class GuestEnv implements ExecutionEnv {
             return stopped;
         }
 
-        try {
-            const vm = await this.#host.ready(context.abortSignal);
+        let lease: GuestLease | undefined;
 
+        try {
+            lease = await this.#host.acquire("fs", context.abortSignal);
             this.#host.touch();
 
-            return ok(await run(vm, resolved, context.abortSignal));
+            return ok(await run(lease.vm, resolved, context.abortSignal));
         } catch (error) {
             return err(fileError(error, resolved));
+        } finally {
+            lease?.release();
         }
     }
 
@@ -395,7 +404,6 @@ export class GuestEnv implements ExecutionEnv {
         options: { noFollow?: boolean } | undefined,
         context: Context,
     ): Promise<Result<BinaryReader, FileError>> {
-        const resolved = this.#resolve(path);
         const opened = await this.#fs(path, context, async (vm, target, signal) => {
             const link = await vm.fs.stat(target, false, signal);
 
@@ -403,46 +411,30 @@ export class GuestEnv implements ExecutionEnv {
                 throw new FileError("invalid", "Symbolic link", target);
             }
 
-            return { vm, stat: await vm.fs.stat(target, true, signal) };
-        });
+            const stat = await vm.fs.stat(target, true, signal);
 
-        if (!opened.ok) {
-            return opened;
-        }
+            if (stat.kind === "directory") {
+                throw new FileError("is_directory", "Is a directory", target);
+            }
 
-        const { vm, stat } = opened.value;
+            const info = infoOf(target, stat);
 
-        if (stat.kind === "directory") {
-            return err(new FileError("is_directory", "Is a directory", resolved));
-        }
+            if (!info.ok) {
+                throw new FileError("invalid", "Not a regular file", target);
+            }
 
-        const info = infoOf(resolved, stat);
-
-        if (!info.ok) {
-            return err(new FileError("invalid", "Not a regular file", resolved));
-        }
-
-        if (stat.size > MAX_READER_BYTES) {
-            return err(
-                new FileError(
+            if (stat.size > MAX_READER_BYTES) {
+                throw new FileError(
                     "invalid",
                     `File exceeds ${MAX_READER_BYTES / 1024 / 1024} MiB sandbox read limit.`,
-                    resolved,
-                ),
-            );
-        }
+                    target,
+                );
+            }
 
-        try {
-            return ok(
-                new MemoryBinaryReader(
-                    resolved,
-                    info.value,
-                    await vm.fs.readFile(resolved, context.abortSignal),
-                ),
-            );
-        } catch (error) {
-            return err(fileError(error, resolved));
-        }
+            return new MemoryBinaryReader(target, info.value, await vm.fs.readFile(target, signal));
+        });
+
+        return opened;
     }
 
     writeFile(
@@ -660,13 +652,21 @@ export class GuestEnv implements ExecutionEnv {
         context: Context,
         cwd?: string,
     ): Promise<Result<{ exitCode: number; stdout: string; stderr: string }, ExecutionError>> {
+        const MAX_CAPTURE = 64 * 1024;
         let stdout = "";
         let stderr = "";
+        let total = 0;
         const result = await this.#run(
             argv,
             {
                 ...(cwd === undefined ? {} : { cwd }),
                 onOutput: (text, _context, info) => {
+                    total += Buffer.byteLength(text, "utf8");
+
+                    if (total > MAX_CAPTURE) {
+                        throw new Error("Sandbox helper command output exceeded limit.");
+                    }
+
                     if (info.stream === "stderr") {
                         stderr += text;
                     } else {
@@ -741,10 +741,10 @@ export class GuestEnv implements ExecutionEnv {
             return err(new ExecutionError("aborted", "aborted"));
         }
 
-        let vm: GuestVm;
+        let lease: GuestLease;
 
         try {
-            vm = await this.#host.ready(signal);
+            lease = await this.#host.acquire("exec", signal);
         } catch (error) {
             if (signal?.aborted) {
                 return err(new ExecutionError("aborted", "aborted"));
@@ -759,6 +759,7 @@ export class GuestEnv implements ExecutionEnv {
             );
         }
 
+        const { vm, stopSignal } = lease;
         const stop = new AbortController();
         const onAbort = () => stop.abort();
         let timedOut = false;
@@ -769,11 +770,16 @@ export class GuestEnv implements ExecutionEnv {
                       timedOut = true;
                       stop.abort();
                   }, timeout * 1000);
-        const done = this.#host.busy();
         const decoders = { stdout: new StreamDecoder(), stderr: new StreamDecoder() };
         let callbackError: Error | undefined;
 
         signal?.addEventListener("abort", onAbort, { once: true });
+
+        if (stopSignal.aborted) {
+            stop.abort();
+        } else {
+            stopSignal.addEventListener("abort", onAbort, { once: true });
+        }
 
         try {
             const env: Record<string, string> = {};
@@ -825,6 +831,10 @@ export class GuestEnv implements ExecutionEnv {
                 return err(new ExecutionError("aborted", "aborted"));
             }
 
+            if (stopSignal.aborted) {
+                return err(new ExecutionError("spawn_error", "The sandbox stopped."));
+            }
+
             if (timedOut) {
                 return err(new ExecutionError("timeout", `timeout:${timeout}`));
             }
@@ -860,7 +870,8 @@ export class GuestEnv implements ExecutionEnv {
             }
 
             signal?.removeEventListener("abort", onAbort);
-            done();
+            stopSignal.removeEventListener("abort", onAbort);
+            lease.release();
         }
     }
 }

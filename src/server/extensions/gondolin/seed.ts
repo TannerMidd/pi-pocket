@@ -125,6 +125,44 @@ function readConfinedHostFile(
     return undefined;
 }
 
+function canonicalPath(raw: string): string {
+    try {
+        return realpathSync(raw);
+    } catch {
+        return resolve(raw);
+    }
+}
+
+function sensitiveRoots(dataDir?: string): string[] {
+    const home = canonicalPath(homedir());
+    const roots = [
+        join(home, ".ssh"),
+        join(home, ".gnupg"),
+        join(home, ".pi"),
+        join(home, ".pi-pocket"),
+        join(home, ".aws"),
+        join(home, ".kube"),
+        join(home, ".docker"),
+    ];
+
+    if (process.env.PI_CODING_AGENT_DIR !== undefined && process.env.PI_CODING_AGENT_DIR !== "") {
+        roots.push(process.env.PI_CODING_AGENT_DIR);
+    }
+
+    if (dataDir !== undefined && dataDir !== "") {
+        roots.push(dataDir);
+    }
+
+    return [...new Set(roots.map(canonicalPath))];
+}
+
+function isUnderSensitiveRoot(hostPath: string, roots: readonly string[]): boolean {
+    const resolved = resolve(hostPath);
+    const canonical = canonicalPath(hostPath);
+
+    return roots.some((root) => within(resolved, root) || within(canonical, root));
+}
+
 /**
  * Checks that a host folder chosen for one-way seeding is a real directory and not a sensitive system/credential root.
  * Returns the canonical real path.
@@ -154,18 +192,9 @@ export function validateSeedSource(folder: string, dataDir: string): string {
         throw new Error(`Not a directory: ${trimmed}`);
     }
 
-    const home = realpathSync(homedir());
+    const home = canonicalPath(homedir());
     const forbiddenExact = new Set(["/", home]);
-    const forbiddenSubtrees = [
-        join(home, ".ssh"),
-        join(home, ".gnupg"),
-        join(home, ".pi"),
-        join(home, ".pi-pocket"),
-        join(home, ".aws"),
-        join(home, ".kube"),
-        join(home, ".docker"),
-        resolve(dataDir),
-    ];
+    const forbiddenSubtrees = sensitiveRoots(dataDir);
 
     if (forbiddenExact.has(real)) {
         throw new Error(
@@ -207,32 +236,69 @@ export function validateGitUrl(raw: string): string {
     return parsed.href;
 }
 
+const MAX_GUEST_CAPTURE_BYTES = 1 * 1024 * 1024;
+
 async function execInGuest(
     vm: GuestVm,
     argv: string[],
     cwd?: string,
     signal?: AbortSignal,
+    maxBytes = MAX_GUEST_CAPTURE_BYTES,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+
+    if (signal?.aborted) {
+        controller.abort();
+    } else {
+        signal?.addEventListener("abort", onAbort, { once: true });
+    }
+
     const proc = vm.exec(argv, {
         ...(cwd === undefined ? {} : { cwd }),
-        ...(signal === undefined ? {} : { signal }),
+        signal: controller.signal,
     });
-    let stdout = "";
-    let stderr = "";
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    let totalBytes = 0;
+    let exceeded = false;
     const pump = (async () => {
         for await (const chunk of proc.output()) {
-            const text = Buffer.from(chunk.data).toString("utf8");
+            totalBytes += chunk.data.byteLength;
+
+            if (totalBytes > maxBytes) {
+                exceeded = true;
+                controller.abort();
+                break;
+            }
 
             if (chunk.stream === "stderr") {
-                stderr += text;
+                errChunks.push(Buffer.from(chunk.data));
             } else {
-                stdout += text;
+                outChunks.push(Buffer.from(chunk.data));
             }
         }
     })();
-    const [res] = await Promise.all([proc.result, pump]);
 
-    return { exitCode: res.exitCode, stdout, stderr };
+    try {
+        const [res] = await Promise.allSettled([proc.result, pump]);
+
+        if (exceeded) {
+            throw new Error(`Sandbox seed command output exceeded ${maxBytes} bytes.`);
+        }
+
+        if (res.status === "rejected") {
+            throw res.reason;
+        }
+
+        return {
+            exitCode: res.value.exitCode,
+            stdout: Buffer.concat(outChunks).toString("utf8"),
+            stderr: Buffer.concat(errChunks).toString("utf8"),
+        };
+    } finally {
+        signal?.removeEventListener("abort", onAbort);
+    }
 }
 
 function cleanGitEnv(): NodeJS.ProcessEnv {
@@ -357,6 +423,8 @@ export async function seedWorkspace(
               kind: "repo";
               sourcePath: string;
               includeUncommitted?: boolean;
+              /** Canonical Pi Pocket data folder excluded even when it sits beneath `sourcePath`. */
+              dataDir?: string;
               limits?: { maxFiles?: number; maxFileBytes?: number; maxTotalBytes?: number };
           },
     signal?: AbortSignal,
@@ -396,6 +464,7 @@ export async function seedWorkspace(
 
     // Local repo or plain folder: build a filtered single-commit snapshot (no raw .git history or excluded secrets).
     const sourcePath = realpathSync(options.sourcePath);
+    const excludedHostRoots = sensitiveRoots(options.dataDir);
     const isGitRepo = await execFileAsync(
         "git",
         [...SEED_GIT_FLAGS, "rev-parse", "--verify", "HEAD"],
@@ -474,7 +543,11 @@ export async function seedWorkspace(
                     ? mode === "100644" || mode === "100755"
                     : meta[1] === "blob" && (mode === "100644" || mode === "100755");
 
-            if (!isBlob || isExcludedSeedPath(relPath)) {
+            if (
+                !isBlob ||
+                isExcludedSeedPath(relPath) ||
+                isUnderSensitiveRoot(join(sourcePath, relPath), excludedHostRoots)
+            ) {
                 continue;
             }
 
@@ -568,6 +641,11 @@ export async function seedWorkspace(
             }
 
             const hostPath = join(hostDir, entry);
+
+            if (isUnderSensitiveRoot(hostPath, excludedHostRoots)) {
+                continue;
+            }
+
             const stat = lstatSync(hostPath);
 
             // Never follow symlinks or open FIFOs/devices/sockets.

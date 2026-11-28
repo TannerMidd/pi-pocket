@@ -85,7 +85,64 @@ const RISK_PATTERNS: readonly { test: (path: string) => boolean; reason: string 
     },
 ];
 
-/** Normalizes a diff header path (`a/foo/bar` -> `foo/bar`), handling git's quoted C-style escapes. */
+/** Decodes a C-quoted Git diff path (`"..."`), supporting UTF-8 octal sequences while refusing control/invalid escapes. */
+function decodeGitQuotedPath(quoted: string): string {
+    const inner = quoted.slice(1, -1);
+    const bytes: number[] = [];
+
+    for (let i = 0; i < inner.length; i++) {
+        const ch = inner[i]!;
+
+        if (ch !== "\\") {
+            for (const byte of Buffer.from(ch, "utf8")) {
+                bytes.push(byte);
+            }
+
+            continue;
+        }
+
+        const next = inner[i + 1];
+
+        if (next === undefined) {
+            return "\0escaped";
+        }
+
+        if (next === '"' || next === "\\") {
+            bytes.push(next.charCodeAt(0));
+            i++;
+            continue;
+        }
+
+        if (/^[0-7]$/.test(next)) {
+            const oct = inner.slice(i + 1, i + 4);
+
+            if (!/^[0-7]{3}$/.test(oct)) {
+                return "\0escaped";
+            }
+
+            const byte = parseInt(oct, 8);
+
+            if (byte > 0xff || byte < 0x20 || byte === 0x7f) {
+                return "\0escaped";
+            }
+
+            bytes.push(byte);
+            i += 3;
+            continue;
+        }
+
+        // Refuse control escapes (\n, \r, \t, \a, \b, \f, \v) and non-Git escapes (\x, \u).
+        return "\0escaped";
+    }
+
+    try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes));
+    } catch {
+        return "\0invalid-utf8";
+    }
+}
+
+/** Normalizes a diff header path (`a/foo/bar` -> `foo/bar`), handling git's quoted UTF-8 escapes. */
 function unquoteDiffPath(raw: string): string | undefined {
     const trimmed = raw.trim();
 
@@ -93,24 +150,16 @@ function unquoteDiffPath(raw: string): string | undefined {
         return undefined;
     }
 
-    let value = trimmed;
-
-    if (value.startsWith('"') && value.endsWith('"')) {
-        // Refuse octal/hex/control escapes that could smuggle NUL or weird control chars; decode simple escapes.
-        value = value.slice(1, -1).replace(/\\(["\\])/g, "$1");
-
-        if (/\\[0-7]{1,3}|\\x|\\u|\\0/.test(value)) {
-            return "\0escaped";
-        }
-    }
+    const value =
+        trimmed.startsWith('"') && trimmed.endsWith('"') ? decodeGitQuotedPath(trimmed) : trimmed;
 
     return value.replace(/^[ab]\//, "");
 }
 
-/** Whether `path` attempts traversal, absolute escape, NUL/backslash smuggling, or `.git` metadata writes. */
+/** Whether `path` attempts traversal, absolute escape, control-char/backslash smuggling, or `.git` metadata writes. */
 function unsafePathReason(path: string): string | undefined {
-    if (path === "" || path.includes("\0")) {
-        return `Invalid or NUL-containing path "${path}".`;
+    if (path === "" || /[\x00-\x1f\x7f]/.test(path)) {
+        return `Invalid or control-character path "${path}".`;
     }
 
     if (path.startsWith("/") || path.includes("\\") || /^[a-zA-Z]:/.test(path)) {

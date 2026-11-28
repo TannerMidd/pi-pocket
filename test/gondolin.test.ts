@@ -1016,3 +1016,246 @@ test("gondolin browser module conforms to Pi Pocket extension UI contract", asyn
         fn();
     }
 });
+
+test("seedWorkspace excludes canonical dataDir even when nested beneath a seeded folder", async () => {
+    const project = mkdtempSync(join(tmpdir(), "gondolin-nested-data-"));
+    const nestedData = join(project, "pocket-data");
+
+    mkdirSync(nestedData, { recursive: true });
+    writeFileSync(join(project, "app.txt"), "hello\n");
+    writeFileSync(join(nestedData, "config.json"), JSON.stringify({ ownerToken: "secret-owner" }));
+
+    const vm = new FakeVm("nested-data");
+
+    try {
+        await seedWorkspace(vm, {
+            kind: "repo",
+            sourcePath: project,
+            dataDir: nestedData,
+        });
+
+        assert.equal(existsSync(join(vm.rootDir, "workspace", "app.txt")), true);
+        assert.equal(
+            existsSync(join(vm.rootDir, "workspace", "pocket-data", "config.json")),
+            false,
+            "nested Pi Pocket data folder must never be copied into the guest",
+        );
+    } finally {
+        await vm.close();
+        rmSync(project, { recursive: true, force: true });
+    }
+});
+
+test("diff caps guest output stream in host memory and aborts runaway guest commands", async () => {
+    const data = mkdtempSync(join(tmpdir(), "gondolin-cap-"));
+    let aborted = false;
+    let yieldedChunks = 0;
+
+    const streamingDriver: SandboxDriver = {
+        installed: () => true,
+        check: async () => ({ ok: true, lines: [], backend: "qemu", images: [] }),
+        setup: async () => {},
+        start: async (spec) => {
+            const vm = new FakeVm(spec.sandboxId);
+            const origExec = vm.exec.bind(vm);
+
+            vm.exec = (argv: string[], options?: GuestExecOptions): GuestProcess => {
+                const cmd = argv.join(" ");
+
+                if (cmd.includes("diff --no-ext-diff")) {
+                    const big = Buffer.alloc(1024 * 1024, 0x61); // 1 MiB chunk
+
+                    return {
+                        output: async function* () {
+                            for (let i = 0; i < 100; i++) {
+                                if (options?.signal?.aborted) {
+                                    aborted = true;
+
+                                    return;
+                                }
+
+                                yieldedChunks++;
+                                yield { stream: "stdout", data: big };
+                            }
+                        },
+                        result: new Promise<{ exitCode: number }>((resolve) => {
+                            options?.signal?.addEventListener(
+                                "abort",
+                                () => {
+                                    aborted = true;
+                                    resolve({ exitCode: 137 });
+                                },
+                                { once: true },
+                            );
+                        }),
+                        write: () => {},
+                        end: () => {},
+                    };
+                }
+
+                return origExec(argv, options);
+            };
+
+            return vm;
+        },
+    };
+
+    const manager = new SandboxManager({
+        dir: join(data, "gondolin"),
+        dataDir: data,
+        driver: streamingDriver,
+        settings: () => ({
+            backend: "auto",
+            image: "ubuntu-24.04",
+            networkMode: "off",
+            allowedHosts: [],
+            memoryMb: 1024,
+            cpus: 2,
+            diskMb: 2048,
+            idleMinutes: 30,
+        }),
+    });
+
+    try {
+        const rec = manager.create({ name: "huge-diff", source: { kind: "empty" } });
+
+        await assert.rejects(manager.diff(rec.id), /exceeded the 10 MiB limit/);
+        assert.equal(aborted, true, "runaway guest diff command must be aborted");
+        assert.ok(yieldedChunks <= 12, `expected early abort, got ${yieldedChunks} MiB chunks`);
+    } finally {
+        await manager.closeAll();
+        rmSync(data, { recursive: true, force: true });
+    }
+});
+
+test("stop blocks new work and waits for in-flight file writes before snapshotting", async () => {
+    const data = mkdtempSync(join(tmpdir(), "gondolin-stop-drain-"));
+    let releaseWrite: (() => void) | undefined;
+    let writeStarted: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => {
+        writeStarted = resolve;
+    });
+    let firstBoot = true;
+
+    const driver = new FakeDriver();
+    const origStart = driver.start.bind(driver);
+
+    driver.start = async (spec, signal, onRunner) => {
+        const vm = (await origStart(spec, signal, onRunner)) as FakeVm;
+
+        if (firstBoot) {
+            firstBoot = false;
+            const origWrite = vm.fs.writeFile.bind(vm.fs);
+
+            vm.fs.writeFile = async (path, bytes, s) => {
+                if (path === "/workspace/in-flight.txt") {
+                    writeStarted?.();
+                    await new Promise<void>((resolve) => {
+                        releaseWrite = resolve;
+                    });
+                }
+
+                return origWrite(path, bytes, s);
+            };
+        }
+
+        return vm;
+    };
+
+    const manager = new SandboxManager({
+        dir: join(data, "gondolin"),
+        dataDir: data,
+        driver,
+        settings: () => ({
+            backend: "auto",
+            image: "ubuntu-24.04",
+            networkMode: "off",
+            allowedHosts: [],
+            memoryMb: 1024,
+            cpus: 2,
+            diskMb: 2048,
+            idleMinutes: 30,
+        }),
+    });
+
+    try {
+        const rec = manager.create({ name: "drain-test", source: { kind: "empty" } });
+        const env = manager.env(sandboxUri(rec.id));
+
+        await manager.ensureRunning(rec.id);
+
+        const inFlight = env.writeFile("in-flight.txt", "must-persist", BACKGROUND_CONTEXT);
+
+        await writeGate;
+
+        const stopping = manager.stop(rec.id, { saveSnapshot: true });
+        // New work arriving while stop is draining must be rejected rather than racing the snapshot.
+        const rejected = await env.writeFile("late.txt", "blocked", BACKGROUND_CONTEXT);
+
+        assert.equal(rejected.ok, false);
+        assert.match(rejected.error.message, /stopping/i);
+
+        releaseWrite?.();
+        const wrote = await inFlight;
+
+        assert.equal(wrote.ok, true);
+        await stopping;
+
+        // Restart from snapshot and verify the in-flight write survived.
+        const readBack = await env.readTextFile("in-flight.txt", BACKGROUND_CONTEXT);
+
+        assert.equal(readBack.ok, true);
+        assert.equal(readBack.value, "must-persist");
+    } finally {
+        await manager.closeAll();
+        rmSync(data, { recursive: true, force: true });
+    }
+});
+
+test("inspectPatch decodes quoted UTF-8 non-ASCII filenames while refusing control escapes", () => {
+    // Git's C-quoted UTF-8 for `日本語.md`: \346\227\245\346\234\254\350\252\236.md
+    const quotedUtf8 = inspectPatch(
+        [
+            'diff --git "a/\\346\\227\\245\\346\\234\\254\\350\\252\\236.md" "b/\\346\\227\\245\\346\\234\\254\\350\\252\\236.md"',
+            "new file mode 100644",
+            "--- /dev/null",
+            '+++ "b/\\346\\227\\245\\346\\234\\254\\350\\252\\236.md"',
+            "@@ -0,0 +1 @@",
+            "+こんにちは",
+            "",
+        ].join("\n"),
+    );
+
+    assert.equal(quotedUtf8.ok, true, quotedUtf8.blocked.join("; "));
+    assert.equal(quotedUtf8.files[0]?.path, "日本語.md");
+
+    const unquotedUtf8 = inspectPatch(
+        [
+            "diff --git a/café/résumé.txt b/café/résumé.txt",
+            "new file mode 100644",
+            "--- /dev/null",
+            "+++ b/café/résumé.txt",
+            "@@ -0,0 +1 @@",
+            "+ok",
+            "",
+        ].join("\n"),
+    );
+
+    assert.equal(unquotedUtf8.ok, true, unquotedUtf8.blocked.join("; "));
+    assert.equal(unquotedUtf8.files[0]?.path, "café/résumé.txt");
+
+    // Control characters and invalid UTF-8 remain blocked.
+    const controlEscape = inspectPatch(
+        [
+            'diff --git "a/bad\\012name.txt" "b/bad\\012name.txt"',
+            "new file mode 100644",
+            "--- /dev/null",
+            '+++ "b/bad\\012name.txt"',
+            "@@ -0,0 +1 @@",
+            "+nope",
+            "",
+        ].join("\n"),
+    );
+
+    assert.equal(controlEscape.ok, false);
+});

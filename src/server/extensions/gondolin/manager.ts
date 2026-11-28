@@ -14,8 +14,8 @@ import {
     type SandboxDriver,
     parseAllowedHosts,
 } from "./guest.ts";
-import { GuestEnv } from "./guest-env.ts";
-import { inspectPatch, type PatchInspection } from "./patch.ts";
+import { GuestEnv, type GuestLease } from "./guest-env.ts";
+import { inspectPatch, MAX_PATCH_BYTES, type PatchInspection } from "./patch.ts";
 import { seedWorkspace, validateGitUrl, validateSeedSource } from "./seed.ts";
 
 export const SANDBOX_SCHEME = "gondolin";
@@ -65,6 +65,9 @@ interface RunningEntry {
     vm?: GuestVm;
     starting?: Promise<GuestVm>;
     busy: number;
+    stopping: boolean;
+    idleWaiters: Set<() => void>;
+    activeAborts: Set<AbortController>;
     shell: string;
     lastActiveAt: number;
     idleTimer?: NodeJS.Timeout;
@@ -73,6 +76,7 @@ interface RunningEntry {
 
 const SANDBOX_ID_PATTERN = /^[a-z0-9][a-z0-9-]{3,47}$/;
 const MAX_AGENTS_MD_BYTES = 32 * 1024;
+const DEFAULT_CAPTURE_MAX_BYTES = 1 * 1024 * 1024;
 
 export function sandboxUri(id: string): string {
     return `${SANDBOX_SCHEME}://${id}/workspace`;
@@ -115,27 +119,64 @@ async function execCapture(
     argv: string[],
     cwd?: string,
     signal?: AbortSignal,
+    maxBytes = DEFAULT_CAPTURE_MAX_BYTES,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+
+    if (signal?.aborted) {
+        controller.abort();
+    } else {
+        signal?.addEventListener("abort", onAbort, { once: true });
+    }
+
     const proc = vm.exec(argv, {
         ...(cwd === undefined ? {} : { cwd }),
-        ...(signal === undefined ? {} : { signal }),
+        signal: controller.signal,
     });
-    let stdout = "";
-    let stderr = "";
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    let totalBytes = 0;
+    let exceeded = false;
     const pump = (async () => {
         for await (const chunk of proc.output()) {
-            const text = Buffer.from(chunk.data).toString("utf8");
+            totalBytes += chunk.data.byteLength;
+
+            if (totalBytes > maxBytes) {
+                exceeded = true;
+                controller.abort();
+                break;
+            }
 
             if (chunk.stream === "stderr") {
-                stderr += text;
+                errChunks.push(Buffer.from(chunk.data));
             } else {
-                stdout += text;
+                outChunks.push(Buffer.from(chunk.data));
             }
         }
     })();
-    const [res] = await Promise.all([proc.result, pump]);
 
-    return { exitCode: res.exitCode, stdout, stderr };
+    try {
+        const [res] = await Promise.allSettled([proc.result, pump]);
+
+        if (exceeded) {
+            throw new Error(
+                `Sandbox command output exceeded the ${Math.max(1, Math.round(maxBytes / 1024 / 1024))} MiB limit.`,
+            );
+        }
+
+        if (res.status === "rejected") {
+            throw res.reason;
+        }
+
+        return {
+            exitCode: res.value.exitCode,
+            stdout: Buffer.concat(outChunks).toString("utf8"),
+            stderr: Buffer.concat(errChunks).toString("utf8"),
+        };
+    } finally {
+        signal?.removeEventListener("abort", onAbort);
+    }
 }
 
 export class SandboxManager {
@@ -354,8 +395,7 @@ export class SandboxManager {
                 `gondolin:${id}`,
                 "/workspace",
                 {
-                    ready: (signal) => this.ensureRunning(id, signal),
-                    busy: () => this.#markBusy(id),
+                    acquire: (kind, signal) => this.#acquire(id, kind, signal),
                     touch: () => this.#touch(id),
                 },
                 () => this.#running.get(id)?.shell ?? "/bin/sh",
@@ -370,33 +410,97 @@ export class SandboxManager {
         let entry = this.#running.get(id);
 
         if (entry === undefined) {
-            entry = { busy: 0, shell: "/bin/sh", lastActiveAt: Date.now() };
+            entry = {
+                busy: 0,
+                stopping: false,
+                idleWaiters: new Set(),
+                activeAborts: new Set(),
+                shell: "/bin/sh",
+                lastActiveAt: Date.now(),
+            };
             this.#running.set(id, entry);
         }
 
         return entry;
     }
 
-    #markBusy(id: string): () => void {
+    async #acquire(id: string, kind: "fs" | "exec", signal?: AbortSignal): Promise<GuestLease> {
+        const existing = this.#running.get(id);
+
+        if (existing?.stopping === true) {
+            throw new Error("Sandbox is stopping.");
+        }
+
+        const vm = await this.ensureRunning(id, signal);
         const entry = this.#entry(id);
+
+        if (this.#disposed || entry.stopping || entry.vm !== vm) {
+            throw new Error("Sandbox is stopping.");
+        }
 
         entry.busy++;
         entry.lastActiveAt = Date.now();
         clearTimeout(entry.idleTimer);
         entry.idleTimer = undefined;
 
+        const stopController = new AbortController();
+
+        if (kind === "exec") {
+            entry.activeAborts.add(stopController);
+        }
+
         let done = false;
 
-        return () => {
-            if (done) {
-                return;
-            }
+        return {
+            vm,
+            stopSignal: stopController.signal,
+            release: () => {
+                if (done) {
+                    return;
+                }
 
-            done = true;
-            entry.busy = Math.max(0, entry.busy - 1);
-            entry.lastActiveAt = Date.now();
-            this.#scheduleIdle(id, entry);
+                done = true;
+                entry.activeAborts.delete(stopController);
+                entry.busy = Math.max(0, entry.busy - 1);
+                entry.lastActiveAt = Date.now();
+
+                if (entry.busy === 0) {
+                    for (const wake of entry.idleWaiters) {
+                        wake();
+                    }
+
+                    entry.idleWaiters.clear();
+                }
+
+                this.#scheduleIdle(id, entry);
+            },
         };
+    }
+
+    async #waitForIdle(entry: RunningEntry, timeoutMs?: number): Promise<void> {
+        if (entry.busy === 0) {
+            return;
+        }
+
+        await new Promise<void>((resolve) => {
+            let timer: NodeJS.Timeout | undefined;
+
+            const wake = () => {
+                if (timer !== undefined) {
+                    clearTimeout(timer);
+                }
+
+                entry.idleWaiters.delete(wake);
+                resolve();
+            };
+
+            entry.idleWaiters.add(wake);
+
+            if (timeoutMs !== undefined) {
+                timer = setTimeout(wake, timeoutMs);
+                timer.unref();
+            }
+        });
     }
 
     #touch(id: string): void {
@@ -412,7 +516,7 @@ export class SandboxManager {
         clearTimeout(entry.idleTimer);
         entry.idleTimer = undefined;
 
-        if (entry.vm === undefined || entry.busy > 0 || this.#disposed) {
+        if (entry.vm === undefined || entry.busy > 0 || entry.stopping || this.#disposed) {
             return;
         }
 
@@ -501,7 +605,11 @@ export class SandboxManager {
                     if (existsSync(snap)) {
                         await this.#restoreWorkspaceSnapshot(vm, snap, signal);
                     } else {
-                        const seeded = await seedWorkspace(vm, record.source, signal);
+                        const seedOptions =
+                            record.source.kind === "repo"
+                                ? { ...record.source, dataDir: this.#dataDir }
+                                : record.source;
+                        const seeded = await seedWorkspace(vm, seedOptions, signal);
 
                         record.seeded = true;
 
@@ -631,6 +739,7 @@ export class SandboxManager {
             return;
         }
 
+        entry.stopping = true;
         entry.closing ??= (async () => {
             clearTimeout(entry.idleTimer);
             entry.idleTimer = undefined;
@@ -641,12 +750,21 @@ export class SandboxManager {
                 vm = await entry.starting.catch(() => undefined);
             }
 
+            // Block new work (via `entry.stopping`), cancel interruptible commands, and wait for all active file writes
+            // and commands to settle before snapshotting so no successful write is ever discarded on close.
+            for (const ctrl of [...entry.activeAborts]) {
+                ctrl.abort();
+            }
+
+            await this.#waitForIdle(entry, options.force === true ? 5_000 : undefined);
+
             if (vm !== undefined) {
                 if (options.saveSnapshot !== false) {
                     try {
                         await this.#saveWorkspaceSnapshot(id, vm);
                     } catch (error) {
                         if (options.force !== true) {
+                            entry.stopping = false;
                             this.#scheduleIdle(id, entry);
 
                             throw error;
@@ -662,11 +780,13 @@ export class SandboxManager {
             }
 
             entry.vm = undefined;
+            entry.stopping = false;
             this.#pids.delete(id);
             this.#saveRunLedger();
             this.#onChange();
         })().finally(() => {
             entry.closing = undefined;
+            entry.stopping = false;
         });
 
         await entry.closing;
@@ -714,20 +834,30 @@ export class SandboxManager {
             return undefined;
         }
 
-        const vm = this.#running.get(id)?.vm;
+        const entry = this.#running.get(id);
 
-        if (vm === undefined) {
+        if (entry?.vm === undefined || entry.stopping) {
+            return undefined;
+        }
+
+        let lease: GuestLease;
+
+        try {
+            lease = await this.#acquire(id, "fs");
+        } catch {
             return undefined;
         }
 
         try {
-            const bytes = await vm.fs.readFile("/workspace/AGENTS.md");
+            const bytes = await lease.vm.fs.readFile("/workspace/AGENTS.md");
             const sliced = bytes.subarray(0, MAX_AGENTS_MD_BYTES);
             const text = Buffer.from(sliced).toString("utf8").trim();
 
             return text === "" ? undefined : text;
         } catch {
             return undefined;
+        } finally {
+            lease.release();
         }
     }
 
@@ -736,34 +866,51 @@ export class SandboxManager {
      * `/workspace` inside the VM and runs security inspection.
      */
     async diff(id: string, signal?: AbortSignal): Promise<PatchInspection> {
-        const vm = await this.ensureRunning(id, signal);
-        const record = this.#records.get(id);
-        const base =
-            record?.baseCommit !== undefined && /^[0-9a-f]{40,64}$/i.test(record.baseCommit)
-                ? record.baseCommit
-                : "HEAD";
-        const out = await execCapture(
-            vm,
-            [
-                "/bin/sh",
-                "-c",
-                'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false add -N -A >/dev/null 2>&1; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color "$1"',
-                "sh",
-                base,
-            ],
-            "/workspace",
-            signal,
-        );
+        const lease = await this.#acquire(id, "exec", signal);
+        const controller = new AbortController();
+        const onAbort = () => controller.abort();
 
-        if (out.exitCode !== 0) {
-            throw new Error(
-                out.stderr.includes("NO_GIT")
-                    ? "This sandbox does not have a git repository in /workspace."
-                    : `Could not read diff from sandbox: ${out.stderr.trim() || out.stdout.trim()}`,
-            );
+        if (signal?.aborted || lease.stopSignal.aborted) {
+            controller.abort();
+        } else {
+            signal?.addEventListener("abort", onAbort, { once: true });
+            lease.stopSignal.addEventListener("abort", onAbort, { once: true });
         }
 
-        return inspectPatch(out.stdout);
+        try {
+            const record = this.#records.get(id);
+            const base =
+                record?.baseCommit !== undefined && /^[0-9a-f]{40,64}$/i.test(record.baseCommit)
+                    ? record.baseCommit
+                    : "HEAD";
+            const out = await execCapture(
+                lease.vm,
+                [
+                    "/bin/sh",
+                    "-c",
+                    'if ! command -v git >/dev/null 2>&1 || [ ! -d /workspace/.git ]; then echo "NO_GIT" >&2; exit 2; fi; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false add -N -A >/dev/null 2>&1; git -C /workspace -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.quotepath=false -c diff.external= -c diff.mnemonicPrefix=false -c diff.noprefix=false diff --no-ext-diff --no-color "$1"',
+                    "sh",
+                    base,
+                ],
+                "/workspace",
+                controller.signal,
+                MAX_PATCH_BYTES + 1,
+            );
+
+            if (out.exitCode !== 0) {
+                throw new Error(
+                    out.stderr.includes("NO_GIT")
+                        ? "This sandbox does not have a git repository in /workspace."
+                        : `Could not read diff from sandbox: ${out.stderr.trim() || out.stdout.trim()}`,
+                );
+            }
+
+            return inspectPatch(out.stdout);
+        } finally {
+            signal?.removeEventListener("abort", onAbort);
+            lease.stopSignal.removeEventListener("abort", onAbort);
+            lease.release();
+        }
     }
 
     async closeAll(): Promise<void> {
