@@ -79,8 +79,15 @@ export function setAuthCookie(
     request: IncomingMessage,
     response: ServerResponse,
     token: string,
+    { clearPush = false }: { clearPush?: boolean } = {},
 ): void {
-    response.setHeader("set-cookie", cookie(request, COOKIE, token));
+    const cookies = [cookie(request, COOKIE, token)];
+
+    if (clearPush) {
+        cookies.push(`${PUSH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    }
+
+    response.setHeader("set-cookie", cookies.length === 1 ? cookies[0]! : cookies);
 }
 
 function cookie(request: IncomingMessage, name: string, value: string): string {
@@ -148,25 +155,46 @@ export class Auth {
         }
     }
 
-    switchBrowser(request: IncomingMessage, next: User): void {
+    switchBrowser(request: IncomingMessage, next?: { id: string }): boolean {
         const current = this.user(request);
 
-        if (current !== undefined && current.id !== next.id) {
+        if (current !== undefined && current.id !== next?.id) {
             this.endBrowserPush(current, request);
-        } else if (current === undefined) {
+
+            return true;
+        }
+
+        if (current === undefined) {
             // The sign-in cookie may already have expired while the push cookie remains.
             const device = pushDevice(request);
 
             if (!device) {
-                return;
+                return false;
             }
 
             const previous = this.#deviceUser(device);
 
-            if (previous !== undefined && previous !== next.id) {
+            if (previous !== undefined && previous !== next?.id) {
                 this.#endDevice(previous, device);
+
+                return true;
             }
         }
+
+        return false;
+    }
+
+    /** End a previous account's browser push binding before redeeming a one-time invite. */
+    switchBrowserForInvite(request: IncomingMessage, code: string): boolean {
+        const invite = this.#config.invite(code);
+
+        if (invite === undefined) {
+            return false;
+        }
+
+        const next = invite.role === "owner" ? this.#config.userById(invite.createdBy) : undefined;
+
+        return this.switchBrowser(request, next);
     }
 
     #deviceUser(device: string): string | undefined {

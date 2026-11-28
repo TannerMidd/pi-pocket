@@ -71,7 +71,9 @@ function usageWords(view, now) {
         ? "no usage yet"
         : view.state === "not-reported"
           ? "does not report usage"
-          : "reset, waiting for new numbers";
+          : view.state === "ok"
+            ? "limits open"
+            : "reset, waiting for new numbers";
 }
 
 /** One row over the models: the session's provider and how much of its limits is left, opening every provider's. */
@@ -84,7 +86,7 @@ function UsageRow() {
     }
 
     const { state, window } = view;
-    const numbers = state === "ok" || state === "low";
+    const numbers = (state === "ok" || state === "low") && window?.left !== undefined;
 
     return html`<button
         class="model-usage"

@@ -81,7 +81,7 @@ export async function publishFetchedFile(
         checkCurrent();
         renameSync(temporary, path);
     } catch (error) {
-        await unlink(temporary);
+        await unlink(temporary).catch(() => {});
 
         throw error;
     }

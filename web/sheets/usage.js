@@ -190,7 +190,7 @@ function Row({ view, now, open, onToggle }) {
                         ? ""
                         : view.state === "limited"
                           ? (words?.text ?? "").replace("Limited ", "")
-                          : view.state === "reset"
+                          : view.state === "reset" || window?.left === undefined
                             ? "— used"
                             : `${percent(window)} used`
                 }

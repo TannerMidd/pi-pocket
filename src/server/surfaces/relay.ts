@@ -406,13 +406,13 @@ export async function fromRelay(
     const { surface, view } = matched;
     const generation = surface.relay!.generation!;
 
-    if (surface.status !== "open") {
-        return { handled: false, refusal: ENDED };
-    }
-
     // Permission first: a sender who may use no control learns nothing of the card, and Pi hears the message.
     if (!Object.values(controlsFor(surface, actor)).some(Boolean)) {
         return { handled: false };
+    }
+
+    if (surface.status !== "open") {
+        return { handled: false, refusal: ENDED };
     }
 
     // Only the owner's own accounts hear why: others get the same short refusal whatever went wrong.

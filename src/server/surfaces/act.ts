@@ -275,20 +275,9 @@ export async function actAs(
             if (!mayAct(actor, whoOf(surface as Surface, body.event), surface.by)) {
                 throw new HttpError(403, "You may not press this button");
             }
-
-            if (button.disabled !== undefined) {
-                const off = evaluate(button.disabled, {
-                    data: surface.data,
-                    computed: evaluateComputed(surface.computed, surface.data),
-                });
-
-                if (off) {
-                    throw new HttpError(409, "That button is off now");
-                }
-            }
         }
 
-        // The data as it will be: the context an action carries is worked out from it, here, never from the browser.
+        // The data as it will be: disabled checks and action context both read the post-set values, never the browser's.
         const next = JSON.parse(JSON.stringify(surface.data)) as JsonObject;
 
         for (const { path, value } of sets) {
@@ -304,6 +293,7 @@ export async function actAs(
                 components: surface.components,
                 data: next,
                 computed: surface.computed,
+                ...(surface.a2uiRaw === undefined ? {} : { a2uiRaw: surface.a2uiRaw }),
             }).length > LIMITS.bytes
         ) {
             throw new HttpError(413, "That would make the card too large: shorten the values");
@@ -313,6 +303,11 @@ export async function actAs(
 
         if (event !== undefined) {
             const scope = { data: next, computed: evaluateComputed(surface.computed, next) };
+
+            if (button?.disabled !== undefined && evaluate(button.disabled, scope)) {
+                throw new HttpError(409, "That button is off now");
+            }
+
             const values: JsonObject = {};
 
             for (const [name, expr] of Object.entries(event.context ?? {})) {

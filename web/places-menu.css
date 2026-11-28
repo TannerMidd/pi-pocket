@@ -135,7 +135,7 @@
     align-items: center;
     justify-content: flex-start;
     gap: 0 12px;
-    width: calc(100% + 16px);
+    width: calc(100% + 16px * var(--space-x));
     min-height: calc(32px + 12px * var(--space-y));
     padding: calc(8px * var(--space-y)) calc(8px * var(--space-x));
     margin: 0 calc(-8px * var(--space-x));

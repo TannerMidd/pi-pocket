@@ -75,8 +75,9 @@ export async function login(
         );
     }
 
-    auth.switchBrowser(request, signingIn);
-    setAuthCookie(request, response, token);
+    const switched = auth.switchBrowser(request, signingIn);
+
+    setAuthCookie(request, response, token, { clearPush: switched });
     response.writeHead(303, { location: next });
     response.end();
 
@@ -97,6 +98,7 @@ export async function join(
         }
 
         const form = new URLSearchParams((await readBody(request, 10_000)).toString("utf8"));
+        const switched = auth.switchBrowserForInvite(request, code);
         const redeemed = auth.redeem(code, form.get("name") ?? "");
 
         if (redeemed === undefined) {
@@ -115,8 +117,7 @@ export async function join(
             app.config.updateUser(redeemed.user.id, { tunnel });
         }
 
-        auth.switchBrowser(request, redeemed.user);
-        setAuthCookie(request, response, redeemed.token);
+        setAuthCookie(request, response, redeemed.token, { clearPush: switched });
         response.writeHead(303, { location: "/" });
         response.end();
 

@@ -384,7 +384,7 @@ async function filteredFiles(cwd: string, max: number, filter: FileFilter) {
                 return { files, truncated: true };
             }
         } catch (error) {
-            if (Date.now() >= deadline) {
+            if (Date.now() >= deadline || (error as { killed?: boolean }).killed === true) {
                 return { files, truncated: true };
             }
 

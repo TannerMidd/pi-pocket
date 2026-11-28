@@ -268,6 +268,10 @@ export default function createGondolin(
                         wantedImage,
                     )
                     .catch((error: unknown) => {
+                        if (abort.signal.aborted) {
+                            return;
+                        }
+
                         state.error = error instanceof Error ? error.message : String(error);
                         host.notice("error", `Gondolin setup failed: ${state.error}`);
                     })
@@ -276,7 +280,9 @@ export default function createGondolin(
                             setupRunning = null;
                         }
 
-                        web.send("changed");
+                        if (!abort.signal.aborted) {
+                            web.send("changed");
+                        }
                     });
 
                 return { running: true, lines: state.lines };

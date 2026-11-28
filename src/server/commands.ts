@@ -2329,6 +2329,20 @@ export class Commands {
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
         const currentCwd = current?.cwd ?? app.cwdOf(id);
+
+        if (
+            request.cwd !== undefined &&
+            request.cwd !== currentCwd &&
+            (app.isIsolatedWorkspace(currentCwd) ||
+                app.isIsolatedWorkspace(request.cwd) ||
+                app.isIsolatedConversation(id))
+        ) {
+            throw new HttpError(
+                400,
+                "Isolated sandbox sessions cannot be moved to another folder or workspace.",
+            );
+        }
+
         const cwd = request.cwd === undefined ? undefined : await app.resolveCwd(request.cwd);
 
         if (

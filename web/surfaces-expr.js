@@ -251,7 +251,7 @@ export function evaluate(value, scope, depth = 0) {
 
 /** The computed values of a surface, in order: each may read the ones before it as `/$/name`. */
 export function evaluateComputed(computed, data) {
-    const scope = { data, computed: {} };
+    const scope = { data, computed: Object.create(null) };
 
     for (const [name, expr] of Object.entries(computed ?? {})) {
         scope.computed[name] = evaluate(expr, scope);

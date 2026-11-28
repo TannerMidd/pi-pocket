@@ -378,12 +378,12 @@ export function parseAgentMessage({ text, written, named, author, authored }) {
                 .filter(Boolean)
                 .map(backgroundCard);
         }
-    }
 
-    const check = GOAL_CHECK.exec(text);
+        const check = GOAL_CHECK.exec(text);
 
-    if (check) {
-        return [goalCard(check)];
+        if (check) {
+            return [goalCard(check)];
+        }
     }
 
     const via = authored ? null : VIA.exec(written);

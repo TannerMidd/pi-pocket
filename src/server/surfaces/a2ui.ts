@@ -10,7 +10,7 @@
  */
 import type { JsonValue } from "@earendil-works/chord/json";
 import { FUNCTIONS } from "../../../web/surfaces-expr.js";
-import type { Acted, Component, JsonObject } from "./types.ts";
+import { type Acted, type Component, type JsonObject, LIMITS } from "./types.ts";
 import { cleanString, isObject } from "./validate.ts";
 
 /** A change to the data model, in order. */
@@ -574,10 +574,24 @@ export function dataFromSteps(base: JsonObject, steps: readonly DataStep[]): Jso
         const last = parts.at(-1)!;
 
         if (Array.isArray(at)) {
+            if (!/^(0|[1-9]\d*)$/.test(last)) {
+                throw new Error(`invalid array index ${JSON.stringify(last)} at ${step.path}`);
+            }
+
+            const index = Number(last);
+
             if (step.kind === "remove") {
-                at.splice(Number(last), 1);
+                if (index >= at.length) {
+                    throw new Error(`nothing at ${step.path}`);
+                }
+
+                at.splice(index, 1);
             } else {
-                at[Number(last)] = step.value;
+                if (index > at.length || index >= LIMITS.items) {
+                    throw new Error(`array index out of range at ${step.path}`);
+                }
+
+                at[index] = step.value;
             }
         } else if (step.kind === "remove") {
             delete (at as JsonObject)[last];

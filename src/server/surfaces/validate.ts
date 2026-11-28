@@ -760,7 +760,11 @@ export function flatten(
 }
 
 /** The whole surface, checked as it is stored: the tree, every component, the data, the expressions, the size. */
-export function checkSurface(parts: Parts, known: ReadonlySet<string> = new Set()): void {
+export function checkSurface(
+    parts: Parts,
+    known: ReadonlySet<string> = new Set(),
+    a2uiRaw?: Record<string, JsonObject>,
+): void {
     const { root, components, data, computed } = parts;
     const ids = Object.keys(components);
 
@@ -854,7 +858,14 @@ export function checkSurface(parts: Parts, known: ReadonlySet<string> = new Set(
         }
     }
 
-    if (JSON.stringify({ components, data, computed }).length > LIMITS.bytes) {
+    if (
+        JSON.stringify({
+            components,
+            data,
+            computed,
+            ...(a2uiRaw === undefined ? {} : { a2uiRaw }),
+        }).length > LIMITS.bytes
+    ) {
         fail("surface", `is larger than ${LIMITS.bytes / 1024} KB`);
     }
 }

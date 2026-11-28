@@ -222,7 +222,14 @@ function layoutOp(state: Parts, op: Record<string, unknown>, where: string): voi
         };
     }
 
+    const seen = new Set<string>();
+
     const drop = (each: string) => {
+        if (seen.has(each) || !Object.hasOwn(components, each)) {
+            return;
+        }
+
+        seen.add(each);
         childrenOf(components[each]!).forEach(drop);
         delete components[each];
     };

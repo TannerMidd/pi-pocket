@@ -31,6 +31,7 @@ import {
     checkSurface,
     checkTitle,
     checkWhoInput,
+    clean,
     flatten,
     SurfaceError,
     TYPES,
@@ -326,7 +327,7 @@ export default function createSurfaces(host: PocketHost) {
                         }
 
                         a2ui = plan.surface;
-                        a2uiRaw = plan.raws as Record<string, JsonObject>;
+                        a2uiRaw = clean(plan.raws, "a2ui") as Record<string, JsonObject>;
                         args = {
                             ...args,
                             action: "show",
@@ -357,7 +358,7 @@ export default function createSurfaces(host: PocketHost) {
                             data: checkData(args.data),
                             computed: checkComputed(args.computed),
                         };
-                        checkSurface(parts);
+                        checkSurface(parts, new Set(), a2uiRaw);
                     }
 
                     const title = prior === undefined ? checkTitle(args.title) : prior.title;

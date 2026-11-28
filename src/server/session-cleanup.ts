@@ -957,13 +957,19 @@ export class SessionCleanup {
             const gone: number[] = [];
 
             for (const each of record.keepUploads ?? []) {
-                if (record.done === undefined || !record.conversations.includes(each)) {
+                const proof = record.folders?.uploads?.[String(each)];
+
+                if (
+                    record.done === undefined ||
+                    !record.conversations.includes(each) ||
+                    proof === undefined
+                ) {
                     continue;
                 }
 
                 try {
                     const uploads = await this.#flatFiles("uploads", each, retention(each), {
-                        proof: record.folders?.uploads?.[String(each)],
+                        proof,
                         removed: () => {},
                     });
 

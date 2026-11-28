@@ -1944,6 +1944,7 @@ export default function createSubagents(host: PocketHost, web?: ExtensionWeb) {
                 record.asked = message.trim().slice(0, 300);
                 record.askedAt = api.now();
                 delete record.stoppedBy;
+                delete record.hiddenAt;
 
                 if (!watched) {
                     state.stallWatch = await tx.createTask(StallWatch, null, BACKGROUND);
