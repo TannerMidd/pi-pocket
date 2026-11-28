@@ -512,6 +512,10 @@ export type ModelRequestShaper = (payload: unknown, model: Model<Api>) => unknow
 export interface WorkspaceProvider {
     env(cwd: string): ExecutionEnv;
     resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>;
+    /** Marks workspaces of this scheme as untrusted sandboxes enforced by core. @experimental @since 0.31.0 */
+    readonly isolated?: boolean;
+    /** Optional cleanup when a session is archived, removed, or the server closes. @experimental @since 0.31.0 */
+    disposeWorkspace?(cwd: string): Promise<void> | void;
 }
 
 /** What the app gives its extensions. Extensions are reloaded on edit; the host is not. */

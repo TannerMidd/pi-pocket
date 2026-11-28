@@ -828,10 +828,12 @@ export class LinkedSessions implements LinkedSessionsApi {
         agent: AgentState,
         cwd?: string,
     ): Promise<string> {
+        const inherited = agent.cwd ?? this.#app.cwdOf(source);
+        const sourceIsolated =
+            this.#app.isIsolatedWorkspace(inherited) || this.#app.isIsolatedConversation(source);
+
         // A blank field (an empty form input) is no folder, not the home folder.
         if (cwd === undefined || (typeof cwd === "string" && cwd.trim() === "")) {
-            const inherited = agent.cwd ?? this.#app.cwdOf(source);
-
             this.#app.requireWorkspaceOwner(user, inherited);
 
             return inherited;
@@ -842,8 +844,16 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         this.#app.requireWorkspaceOwner(user, cwd);
+        const resolved = await this.#app.resolveCwd(cwd);
 
-        return await this.#app.resolveCwd(cwd);
+        if (sourceIsolated && resolved !== inherited) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot start linked sessions in another folder.",
+            );
+        }
+
+        return resolved;
     }
 
     /** Refuse a model the owner does not allow: with a list, the asker's fix is to choose from it. */
@@ -1073,6 +1083,14 @@ export class LinkedSessions implements LinkedSessionsApi {
         }
 
         const id = target as unknown as ConversationId;
+
+        if (app.isIsolatedConversation(source) && !app.isIsolatedConversation(id)) {
+            throw new HttpError(
+                403,
+                "Isolated sandbox sessions cannot message non-isolated sessions.",
+            );
+        }
+
         const listed = app.config.subagentModels;
         const runs = (await app.agentState(id))?.model;
 

@@ -2256,7 +2256,21 @@ export class Commands {
             current?.thinkingLevel ??
             "off") as ModelThinkingLevel;
         const thinkingLevel = model === undefined ? wanted : clampThinkingLevel(model, wanted);
+        const currentCwd = current?.cwd ?? app.cwdOf(id);
         const cwd = request.cwd === undefined ? undefined : await app.resolveCwd(request.cwd);
+
+        if (
+            cwd !== undefined &&
+            cwd !== currentCwd &&
+            (app.isIsolatedWorkspace(currentCwd) ||
+                app.isIsolatedWorkspace(cwd) ||
+                app.isIsolatedConversation(id))
+        ) {
+            throw new HttpError(
+                400,
+                "Isolated sandbox sessions cannot be moved to another folder or workspace.",
+            );
+        }
 
         const change = {
             ...(request.model === undefined
@@ -3058,7 +3072,13 @@ export class Commands {
         const sourceTitle = meta.title ?? "New session";
         const title = `${sourceTitle} · ${branch.label}`.slice(0, MAX_TITLE);
 
-        return this.#inPlace(source?.cwd ?? meta.cwd, branch.worktree, title, (place) =>
+        const sourceCwd = source?.cwd ?? meta.cwd;
+
+        if (branch.worktree && app.workspaceScheme(sourceCwd) !== undefined) {
+            throw new HttpError(400, "Remote workspaces do not support worktrees.");
+        }
+
+        return this.#inPlace(sourceCwd, branch.worktree, title, (place) =>
             this.#fork(id, user, { ...branch, title, sourceTitle, place }),
         );
     }

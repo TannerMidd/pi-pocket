@@ -220,6 +220,8 @@ Registers the execution environment for a URI scheme such as `ssh`. `resolveCwd`
 
 `WorkspaceProvider` has `env(cwd: string): ExecutionEnv` and `resolveCwd(cwd: string, signal?: AbortSignal): Promise<string>`. `env` returns promptly. It receives the canonical workspace address. `resolveCwd` can check and canonicalize the address. `signal` is optional: in 0.28, session creation and settings do not pass one yet.
 
+Since 0.31.0 · Experimental: `WorkspaceProvider` also accepts `isolated?: boolean` and `disposeWorkspace?(cwd: string): Promise<void> | void`. Setting `isolated: true` tells core to enforce sandbox boundaries on sessions using that scheme: host-reaching tools (host browser, MCP, host-only extension tools, project/global memory writes, and cross-boundary linked sessions) are blocked, host `commandEnv` variables are not injected, and sessions cannot be moved across the isolation boundary. An unregistered URI scheme fails closed as isolated. `disposeWorkspace` is called when no active session remains on `cwd` (after archive or removal).
+
 ### `requesterOf`
 
 ```ts
