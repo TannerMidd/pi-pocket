@@ -1903,7 +1903,7 @@ export class PocketApp {
         if (provider === undefined) {
             return scheme === "gondolin"
                 ? "Gondolin sandboxes are turned off in Extensions."
-                : `Workspace provider "${scheme}" is not available.`;
+                : undefined;
         }
 
         return typeof provider.unavailable === "function" ? provider.unavailable(cwd) : undefined;

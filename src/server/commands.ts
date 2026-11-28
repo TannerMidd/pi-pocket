@@ -929,7 +929,10 @@ export class Commands {
             throw new HttpError(409, "PiP is turned off in Extensions.");
         }
 
-        const workspaceUnavailable = app.workspaceUnavailable(app.cwdOf(id));
+        const workspaceUnavailable =
+            typeof app.workspaceUnavailable === "function" && typeof app.cwdOf === "function"
+                ? app.workspaceUnavailable(app.cwdOf(id))
+                : undefined;
 
         if (workspaceUnavailable !== undefined) {
             throw new HttpError(409, workspaceUnavailable);
